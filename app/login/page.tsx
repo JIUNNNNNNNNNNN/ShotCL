@@ -80,9 +80,12 @@ export default function LoginPage() {
   if (!hasSupabaseEnv()) {
     return (
       <>
-        <PageHeader title="로그인" description="현재는 Supabase 환경변수가 없어 개발 모드로 실행 중입니다." />
-        <div className="rounded-md border border-field-border bg-white p-5 text-field-muted">
-          `.env.local`에 Supabase URL과 anon key를 넣으면 이메일 로그인을 사용할 수 있습니다.
+        <PageHeader
+          title="로그인"
+          description="현재 배포본은 테스트 모드이며 실제 계정 로그인과 프로젝트 공유가 비활성화되어 있습니다."
+        />
+        <div className="rounded-md border border-field-border bg-white p-5 font-bold leading-6 text-field-muted">
+          Supabase URL과 anon key가 연결되지 않았습니다. 환경변수를 연결한 뒤 실제 계정 로그인과 협업 공유를 사용할 수 있습니다.
         </div>
       </>
     );

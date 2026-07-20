@@ -1,26 +1,28 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getRuntimeModeStatus, isLocalDev, isSupabaseConfigured } from "@/lib/runtimeMode";
 
 let browserClient: SupabaseClient | null = null;
 
 /** 브라우저에 키 값을 노출하지 않고, 설정 여부만 화면에서 점검할 때 씁니다. */
 export function getSupabaseEnvStatus() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? "";
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? "";
-  const forceLocalData = process.env.NEXT_PUBLIC_USE_LOCAL_DATA === "true";
-  const enableDevAnonAuth = process.env.NEXT_PUBLIC_ENABLE_DEV_ANON_AUTH === "true";
+  const runtime = getRuntimeModeStatus();
 
   return {
-    hasUrl: Boolean(url),
-    hasAnonKey: Boolean(anonKey),
-    forceLocalData,
-    enableDevAnonAuth,
-    canUseSupabase: Boolean(url && anonKey && !forceLocalData)
+    hasUrl: runtime.hasSupabaseUrl,
+    hasAnonKey: runtime.hasSupabaseAnonKey,
+    forceLocalData: runtime.forceLocalData,
+    enableDevAnonAuth: runtime.isDevAnonymousAuthEnabled,
+    devAnonymousAuthRequested: runtime.devAnonymousAuthRequested,
+    isProduction: runtime.isProduction,
+    isLocalDev: runtime.isLocalDev,
+    isDemoStorageMode: runtime.isDemoStorageMode,
+    canUseSupabase: runtime.isSupabaseConfigured
   };
 }
 
 /** Supabase 환경변수가 모두 있을 때만 실제 Supabase 모드로 전환합니다. */
 export function hasSupabaseEnv() {
-  return getSupabaseEnvStatus().canUseSupabase;
+  return isSupabaseConfigured();
 }
 
 /** 브라우저에서 재사용할 Supabase 클라이언트를 하나만 만듭니다. */
@@ -44,7 +46,7 @@ export async function ensureSupabaseDevSession() {
   const env = getSupabaseEnvStatus();
   const supabase = getSupabaseBrowserClient();
 
-  if (!supabase || !env.enableDevAnonAuth) {
+  if (!supabase || !env.enableDevAnonAuth || !isLocalDev()) {
     return;
   }
 

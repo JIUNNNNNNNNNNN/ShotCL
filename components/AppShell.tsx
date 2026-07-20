@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clapperboard, LogIn, Plus } from "lucide-react";
+import { Clapperboard, LogIn, Plus, TriangleAlert } from "lucide-react";
+import { isDemoStorageMode } from "@/lib/runtimeMode";
 import { hasSupabaseEnv } from "@/lib/supabase/client";
 
 type AppShellProps = {
@@ -12,7 +13,8 @@ type AppShellProps = {
 
 /** 모든 페이지가 공유하는 반응형 웹앱 프레임입니다. */
 export function AppShell({ children }: AppShellProps) {
-  const modeLabel = hasSupabaseEnv() ? "Supabase" : "DEV";
+  const demoStorageMode = isDemoStorageMode();
+  const modeLabel = hasSupabaseEnv() ? "Supabase" : "TEST";
 
   return (
     <div className="min-h-screen bg-field-soft text-field-text">
@@ -52,9 +54,33 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       </header>
 
-      <main className="safe-bottom mx-auto w-full max-w-6xl px-4 py-6 md:px-8 lg:px-12">{children}</main>
+      <main className="safe-bottom mx-auto w-full max-w-6xl px-4 py-6 md:px-8 lg:px-12">
+        {demoStorageMode ? <TestModeWarning /> : null}
+        {children}
+      </main>
       <DevRuntimeInfo />
     </div>
+  );
+}
+
+/** localStorage 테스트 흐름을 실사용 저장소로 오인하지 않도록 모든 화면에 표시합니다. */
+function TestModeWarning() {
+  return (
+    <aside
+      role="alert"
+      className="mb-5 rounded-md border border-amber-500 bg-amber-50 p-4 text-amber-950 shadow-sm"
+    >
+      <div className="flex items-start gap-3">
+        <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+        <div className="min-w-0">
+          <p className="font-black">현재 앱은 테스트 모드입니다.</p>
+          <p className="mt-1 text-sm font-bold leading-6">
+            Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않으며, 데이터는 이 브라우저에만 임시 저장될 수 있습니다.
+            실제 작품 정보, 배우 연락처, 촬영 장소, PDF·콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
+          </p>
+        </div>
+      </div>
+    </aside>
   );
 }
 
