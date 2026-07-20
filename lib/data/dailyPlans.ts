@@ -29,7 +29,7 @@ export type SaveDailyPlanInput = {
 /** 새 일촬표 기본값을 프로젝트 정보로 채웁니다. */
 export function createBlankDailyPlanDraft(project: Project | null, sourceType: DailyPlanSourceType = "web_editor", sourceFileName = ""): DailyPlanDraft {
   return {
-    title: project?.name ? `${project.name} 일촬표` : "새 일촬표",
+    title: project?.name || "새 일촬표",
     sourceType,
     sourceFileName,
     shootingDate: project?.shootDate ?? "",

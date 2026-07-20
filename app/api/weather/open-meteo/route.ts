@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
-const DAILY_FIELDS = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunset";
+const DAILY_FIELDS = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset";
 const REGION_ENGLISH_ALIASES: Record<string, string> = {
   서울: "Seoul",
   부산: "Busan",
@@ -49,6 +49,7 @@ type ForecastPayload = {
     temperature_2m_max?: number[];
     temperature_2m_min?: number[];
     precipitation_probability_max?: number[];
+    sunrise?: string[];
     sunset?: string[];
   };
 };
@@ -113,6 +114,7 @@ export async function GET(request: Request) {
       minTemp: normalizeNumber(forecast.daily?.temperature_2m_min?.[index]),
       maxTemp: normalizeNumber(forecast.daily?.temperature_2m_max?.[index]),
       rainProbability: normalizeNumber(forecast.daily?.precipitation_probability_max?.[index]),
+      sunrise: formatForecastTime(forecast.daily?.sunrise?.[index]),
       sunset: formatForecastTime(forecast.daily?.sunset?.[index]),
       sourceDate: date
     });

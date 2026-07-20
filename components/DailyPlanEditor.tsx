@@ -29,6 +29,7 @@ import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
+import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { Button } from "@/components/ui/Button";
 
 type DailyPlanEditorProps = {
@@ -156,6 +157,7 @@ type OpenMeteoResponse = {
   minTemp?: number;
   maxTemp?: number;
   rainProbability?: number;
+  sunrise?: string;
   sunset?: string;
   sourceDate?: string;
   error?: string;
@@ -165,10 +167,10 @@ type OpenMeteoResponse = {
 const dayNightOptions = ["D", "N"];
 
 const inputClass =
-  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
 const compactInputClass =
-  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
 const timetableCellClass = "border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
@@ -686,6 +688,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         minTemperature: payload.minTemp == null ? current.minTemperature : String(payload.minTemp),
         maxTemperature: payload.maxTemp == null ? current.maxTemperature : String(payload.maxTemp),
         rainProbability: payload.rainProbability == null ? current.rainProbability : `${payload.rainProbability}%`,
+        sunrise: payload.sunrise ?? current.sunrise,
         sunset: payload.sunset ?? current.sunset
       }));
       setWeatherStatus("날씨 자동 입력 완료");
@@ -879,6 +882,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <CompactField label="최저 기온" value={printMeta.minTemperature} onChange={(value) => updatePrintMetaField("minTemperature", value)} />
               <CompactField label="최고 기온" value={printMeta.maxTemperature} onChange={(value) => updatePrintMetaField("maxTemperature", value)} />
               <CompactField label="강수 확률" value={printMeta.rainProbability} onChange={(value) => updatePrintMetaField("rainProbability", value)} />
+              <TimeWheelPicker label="일출 시간" value={printMeta.sunrise} onChange={(value) => updatePrintMetaField("sunrise", value)} compact inline />
               <TimeWheelPicker label="일몰 시간" value={printMeta.sunset} onChange={(value) => updatePrintMetaField("sunset", value)} compact inline />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -945,7 +949,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                         <span className="text-xs font-black text-field-primary">주소</span>
                         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                           <input
-                            className={inputClass}
+                            className={`${inputClass} !text-left`}
                             value={getLocationAddress(location)}
                             onChange={(event) => updateLocation(index, { roadAddress: event.target.value, address: "", naverMapUrl: "" })}
                             placeholder="주소를 입력하거나 검색하세요"
@@ -959,7 +963,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     </div>
                     <label className="grid gap-1">
                       <span className="text-xs font-black text-field-primary">상세 메모</span>
-                      <input className={inputClass} value={location.detail} onChange={(event) => updateLocation(index, { detail: event.target.value })} placeholder="상세 위치 / 메모" />
+                      <input className={`${inputClass} !text-left`} value={location.detail} onChange={(event) => updateLocation(index, { detail: event.target.value })} placeholder="상세 위치 / 메모" />
                     </label>
                     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-field-border pt-3">
                       <p className="text-xs font-bold text-field-muted">
@@ -1049,7 +1053,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>내용</span><input className={compactInputClass} value={meal.memo} onChange={(event) => updateMealTime(mealIndex, { memo: event.target.value })} placeholder="점심 식사 & 세팅 / 이동 / 정리" /></td>
+                        <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>내용</span><input className={`${compactInputClass} !text-left`} value={meal.memo} onChange={(event) => updateMealTime(mealIndex, { memo: event.target.value })} placeholder="점심 식사 & 세팅 / 이동 / 정리" /></td>
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                       </tr>
@@ -1068,9 +1072,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>Total CUT</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>등장 배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
-                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Description</span><input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Description</span><input className={`${compactInputClass} !text-left`} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Shooting order</span><input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" /></td>
-                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Notes</span><input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Notes</span><input className={`${compactInputClass} !text-left`} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
                     </tr>
                   );
                 })}
@@ -1126,7 +1130,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       locations={locations}
                       onChange={(value) => updateStarring(index, { callLocation: value })}
                     />
-                    <input className={compactInputClass} value={person.notes} onChange={(event) => updateStarring(index, { notes: event.target.value })} placeholder="주의사항" />
+                    <input className={`${compactInputClass} !text-left`} value={person.notes} onChange={(event) => updateStarring(index, { notes: event.target.value })} placeholder="주의사항" />
                     <div className="self-end"><CircularDeleteButton label={`배우 ${index + 1} 삭제`} onClick={() => deleteStarring(index)} /></div>
                   </div>
                 ))}
@@ -1162,7 +1166,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       locations={locations}
                       onChange={(value) => updateTeam(index, { callLocation: value })}
                     />
-                    <input className={compactInputClass} value={team.notes} onChange={(event) => updateTeam(index, { notes: event.target.value })} placeholder="주의사항" />
+                    <input className={`${compactInputClass} !text-left`} value={team.notes} onChange={(event) => updateTeam(index, { notes: event.target.value })} placeholder="주의사항" />
                     <div className="self-end"><CircularDeleteButton label={`부서 ${index + 1} 삭제`} onClick={() => deleteTeam(index)} /></div>
                   </div>
                 ))}
@@ -1280,7 +1284,7 @@ function WeatherRegionPicker({
       <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
       <button
         type="button"
-        className={`${compactInputClass} flex items-center text-left`}
+        className={`${compactInputClass} flex items-center justify-center`}
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
       >
@@ -1361,7 +1365,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       {showLabel ? <span className="text-xs font-black text-field-primary">소요시간</span> : null}
       <button
         type="button"
-        className={`${compactInputClass} flex h-9 min-h-9 items-center text-left`}
+        className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center`}
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
         aria-label={`소요시간 ${selectedLabel || "미입력"}`}
@@ -1504,44 +1508,75 @@ function SceneCastSelector({
   onChange: (value: string) => void;
   ariaLabel: string;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const selectorRef = useRef<HTMLDivElement | null>(null);
   const options = getCastOptions(people);
   const selectedValues = parseSceneCastValues(value);
   const optionValues = new Set(options.map((option) => option.value));
   const legacyValues = selectedValues.filter((selected) => !optionValues.has(selected));
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!selectorRef.current?.contains(event.target as Node)) setIsOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
 
   function toggleValue(nextValue: string, checked: boolean) {
     const next = checked
       ? [...selectedValues.filter((selected) => selected !== nextValue), nextValue]
       : selectedValues.filter((selected) => selected !== nextValue);
     onChange(formatSceneCastValues(next));
+    setIsOpen(false);
   }
 
   return (
-    <details className="relative">
-      <summary
-        className="flex min-h-9 cursor-pointer list-none items-center rounded-md border border-field-border bg-white px-2 py-1.5 text-left text-[12px] font-bold text-field-text"
+    <div ref={selectorRef} className="relative">
+      <button
+        type="button"
+        className="flex min-h-9 w-full items-center justify-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[12px] font-bold text-field-text"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
         aria-label={ariaLabel}
         title={ariaLabel}
       >
         <span className="line-clamp-2">{selectedValues.join(", ") || "배우 선택"}</span>
-      </summary>
-      <div className="absolute left-0 z-30 mt-1 grid max-h-64 min-w-60 gap-1 overflow-y-auto rounded-md border border-field-border bg-white p-2 text-left shadow-lg max-lg:fixed max-lg:inset-x-6 max-lg:top-1/2 max-lg:mt-0 max-lg:-translate-y-1/2">
-        {options.length > 0 ? options.map((option) => (
-          <label key={option.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-field-soft">
-            <input
-              type="checkbox"
-              checked={selectedValues.includes(option.value)}
-              onChange={(event) => toggleValue(option.value, event.target.checked)}
-              className="h-4 w-4 accent-field-primary"
-            />
-            <span className="text-sm font-bold text-field-text">{option.label}</span>
-          </label>
-        )) : <p className="px-2 py-2 text-sm font-bold text-field-muted">배우 정보에서 배역 또는 이름을 먼저 입력해주세요.</p>}
-        {legacyValues.length > 0 ? (
-          <p className="border-t border-field-border px-2 pt-2 text-xs font-bold text-field-muted">기존 입력: {legacyValues.join(", ")}</p>
-        ) : null}
-      </div>
-    </details>
+      </button>
+      {isOpen ? (
+        <>
+          <button type="button" tabIndex={-1} aria-label="배우 선택 닫기" className="fixed inset-0 z-20 cursor-default bg-transparent" onClick={() => setIsOpen(false)} />
+          <div role="listbox" aria-multiselectable="true" className="absolute left-0 z-30 mt-1 grid max-h-64 min-w-60 gap-1 overflow-y-auto rounded-md border border-field-border bg-white p-2 text-left shadow-lg max-lg:fixed max-lg:inset-x-6 max-lg:top-1/2 max-lg:mt-0 max-lg:-translate-y-1/2">
+            {options.length > 0 ? options.map((option) => (
+              <label key={option.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-field-soft">
+                <input
+                  type="checkbox"
+                  checked={selectedValues.includes(option.value)}
+                  onChange={(event) => toggleValue(option.value, event.target.checked)}
+                  className="h-4 w-4 accent-field-primary"
+                />
+                <span className="text-sm font-bold text-field-text">{option.label}</span>
+              </label>
+            )) : <p className="px-2 py-2 text-sm font-bold text-field-muted">배우 정보에서 배역 또는 이름을 먼저 입력해주세요.</p>}
+            {legacyValues.length > 0 ? (
+              <p className="border-t border-field-border px-2 pt-2 text-xs font-bold text-field-muted">기존 입력: {legacyValues.join(", ")}</p>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -1590,7 +1625,7 @@ function TimeWheelPicker({
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
       <button
         type="button"
-        className={`${compactInputClass} flex h-9 min-h-9 items-center text-left`}
+        className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center`}
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
         aria-label={`${label} ${value || "미입력"}`}
@@ -1725,7 +1760,7 @@ function TextAreaField({ label, value, onChange, className = "" }: { label: stri
   return (
     <label className={`grid gap-2 ${className}`}>
       <span className="text-sm font-black text-field-primary">{label}</span>
-      <textarea className={`${inputClass} min-h-20 resize-y leading-6`} value={value} onChange={(event) => onChange(event.target.value)} />
+      <textarea className={`${inputClass} min-h-20 resize-y !text-left leading-6`} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -1857,7 +1892,12 @@ function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
     <div ref={containerRef} className="mt-4 hidden w-full overflow-hidden rounded-md bg-white md:block">
       <div className="relative w-full" style={{ height: scaledHeight || undefined }}>
         <div ref={documentRef} className="absolute left-0 top-0 w-[1120px] origin-top-left" style={{ transform: `scale(${scale})` }}>
-          <DailyPlanPrintDocument data={data} className="daily-plan-template text-[11px] leading-tight text-black" />
+          <DailyPlanDesktopLandscapePreview
+            plan={data.plan}
+            locations={data.locations}
+            meta={data.meta}
+            timetableRows={getPrintTimetableRows(data)}
+          />
         </div>
       </div>
     </div>

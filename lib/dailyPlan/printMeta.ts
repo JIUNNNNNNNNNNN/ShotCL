@@ -31,6 +31,7 @@ export type DailyPlanPrintMeta = {
   weatherRegion: string;
   weatherProvince: string;
   weatherDistrict: string;
+  sunrise: string;
   sunset: string;
   weather: string;
   minTemperature: string;
@@ -55,6 +56,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     weatherRegion: "",
     weatherProvince: "",
     weatherDistrict: "",
+    sunrise: "",
     sunset: "",
     weather: "",
     minTemperature: "",
@@ -132,6 +134,7 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     weatherRegion: meta.weatherRegion ?? "",
     weatherProvince: meta.weatherProvince ?? "",
     weatherDistrict: meta.weatherDistrict ?? "",
+    sunrise: meta.sunrise ?? "",
     sunset: meta.sunset ?? "",
     weather: meta.weather ?? "",
     minTemperature: meta.minTemperature ?? "",
