@@ -162,7 +162,7 @@ type OpenMeteoResponse = {
   code?: string;
 };
 
-const dayNightOptions = ["D", "N", "E", "기타"];
+const dayNightOptions = ["D", "N"];
 
 const inputClass =
   "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
@@ -196,7 +196,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const [locations, setLocations] = useState<DailyPlanLocation[]>(initialLocations);
   const [mealTimes, setMealTimes] = useState<DailyPlanMealTime[]>(initialMeals);
   const [scenes, setScenes] = useState<SceneBlockInput[]>(() => shotsToScenes(initialSourceShots, initialLocations));
-  const [isAdvancedCutEditorOpen, setIsAdvancedCutEditorOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
@@ -327,10 +326,18 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   }
 
   function updateStarring(index: number, patch: Partial<CallSheetPerson>) {
+    const previousPerson = printMeta.starring[index];
+    const previousValue = previousPerson ? getCastMemberValue(previousPerson) : "";
+    const nextValue = previousPerson ? getCastMemberValue({ ...previousPerson, ...patch }) : "";
+
     setPrintMeta((current) => ({
       ...current,
       starring: current.starring.map((person, personIndex) => (personIndex === index ? { ...person, ...patch } : person))
     }));
+
+    if (previousValue && previousValue !== nextValue) {
+      setScenes((current) => current.map((scene) => ({ ...scene, subject: replaceSceneCastValue(scene.subject, previousValue, nextValue) })));
+    }
   }
 
   function addStarring() {
@@ -338,7 +345,11 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   }
 
   function deleteStarring(index: number) {
+    const removedValue = printMeta.starring[index] ? getCastMemberValue(printMeta.starring[index]) : "";
     setPrintMeta((current) => ({ ...current, starring: current.starring.filter((_, personIndex) => personIndex !== index) }));
+    if (removedValue) {
+      setScenes((current) => current.map((scene) => ({ ...scene, subject: replaceSceneCastValue(scene.subject, removedValue, "") })));
+    }
   }
 
   function updateTeam(index: number, patch: Partial<TeamCallSheetRow>) {
@@ -523,6 +534,15 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     if (collection === "teams") {
       setPrintMeta((current) => ({ ...current, teams: moveArrayItemToIndex(current.teams, sourceIndex, targetIndex) }));
     }
+  }
+
+  function moveTimetableRow(rowIndex: number, direction: "up" | "down") {
+    const targetIndex = direction === "up" ? rowIndex - 1 : rowIndex + 1;
+    if (targetIndex < 0 || targetIndex >= timetableRows.length) return;
+    const nextRows = moveArrayItemToIndex(timetableRows, rowIndex, targetIndex);
+    setScenes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene").map((row) => row.item));
+    setMealTimes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event").map((row) => row.item));
+    setPrintMeta((current) => ({ ...current, timetableRowOrder: nextRows.map((row) => row.type) }));
   }
 
   function updateSceneLocation(sceneIndex: number, locationId: string) {
@@ -844,7 +864,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
 
           <div className="flex flex-col">
-          <details className="order-2 mt-5 rounded-md border border-field-border bg-field-soft p-3">
+          <details className="order-1 mt-5 rounded-md border border-field-border bg-field-soft p-3">
             <summary className="cursor-pointer text-sm font-black text-field-primary">날씨 정보 입력</summary>
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               <WeatherRegionPicker
@@ -870,7 +890,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </div>
           </details>
 
-          <div className="order-1 mt-6 grid gap-5">
+          <div className="order-2 mt-6 grid gap-5">
             <section className="rounded-md border border-field-border bg-field-soft p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
@@ -986,7 +1006,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
-              <p className="mt-1 text-sm font-bold text-field-muted">START / END / 소요시간 / LOCATION / D/N/S / SCENE / Total CUT / Description / Shooting order / Notes 순서로 입력합니다.</p>
+              <p className="mt-1 text-sm font-bold text-field-muted">순서 / START / 소요시간 / LOCATION / D/N / SCENE / Total CUT / 등장 배우 / Description / Shooting order / Notes 순서로 입력합니다. END는 START와 소요시간으로 자동 계산됩니다.</p>
             </div>
             <Button variant="secondary" onClick={addScene}>
               <Plus className="h-4 w-4" aria-hidden />
@@ -997,11 +1017,11 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           <div className="mt-5 w-full">
             <table className="w-full table-fixed border-collapse text-xs max-lg:block">
               <colgroup className="max-lg:hidden">
-                {[7, 7, 8, 10, 6, 7, 7, 16, 11, 13, 8].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+                {[8, 7, 8, 10, 6, 7, 7, 13, 14, 10, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
               </colgroup>
               <thead className="max-lg:hidden">
                 <tr className="bg-field-soft text-field-primary">
-                  {["START", "END", "소요시간", "LOCATION", "D/N/S", "SCENE", "Total CUT", "Description", "Shooting order", "Notes", "순서 / 삭제"].map((header) => (
+                  {["순서 / 삭제", "START", "소요시간", "LOCATION", "D/N", "SCENE", "Total CUT", "등장 배우", "Description", "Shooting order", "Notes"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
                       {header}
                     </th>
@@ -1015,8 +1035,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     const mealIndex = row.sourceIndex;
                     return (
                       <tr key={meal.id} className="bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                        <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
                         <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>기타 일정 · START</span><TimeWheelPicker label="START" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
-                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>END</span><TimeWheelPicker label="END" value={meal.endTime} onChange={(value) => updateMealTimeField(mealIndex, "endTime", value)} compact showLabel={false} /></td>
                         <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={timetableCellClass}>
                           <span className={mobileTimetableLabelClass}>장소</span>
@@ -1028,10 +1048,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>내용</span><input className={compactInputClass} value={meal.memo} onChange={(event) => updateMealTime(mealIndex, { memo: event.target.value })} placeholder="점심 식사 & 세팅 / 이동 / 정리" /></td>
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>순서 / 삭제</span><div className="flex gap-1"><DragHandle label={`기타 일정 ${mealIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} /><CircularDeleteButton label={`기타 일정 ${mealIndex + 1} 삭제`} onClick={() => deleteMealTime(mealIndex)} /></div></td>
                       </tr>
                     );
                   }
@@ -1040,17 +1060,17 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   const sceneIndex = row.sourceIndex;
                   return (
                     <tr key={scene.id} className="align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                      <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · START</span><TimeWheelPicker label="START" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>END</span><TimeWheelPicker label="END" value={scene.endTime} onChange={(value) => updateSceneTimeField(sceneIndex, "endTime", value)} compact showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>장소</span><select className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N/S</span><select className={compactInputClass} value={scene.dayNight} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N</span><select className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>Total CUT</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>등장 배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Description</span><input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Shooting order</span><input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Notes</span><input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>순서 / 삭제</span><div className="flex gap-1"><DragHandle label={`촬영 행 ${sceneIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} /><CircularDeleteButton label={`촬영 행 ${sceneIndex + 1} 삭제`} onClick={() => deleteScene(sceneIndex)} /></div></td>
                     </tr>
                   );
                 })}
@@ -1061,9 +1081,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             <Button variant="secondary" onClick={addMealTime}>
               <Plus className="h-4 w-4" aria-hidden />
               기타 일정 행 추가
-            </Button>
-            <Button variant="ghost" onClick={() => setIsAdvancedCutEditorOpen((current) => !current)}>
-              {isAdvancedCutEditorOpen ? "고급 컷 편집 닫기" : "고급 컷 편집 보기"}
             </Button>
           </div>
         </section>
@@ -1154,143 +1171,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div> : null}
         </section>
 
-        {isAdvancedCutEditorOpen ? (
-        <section className="order-1 mt-5 rounded-md border border-field-border bg-white p-5">
-          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <h2 className="text-lg font-black text-field-primary">고급 컷 편집</h2>
-              <p className="mt-1 text-sm font-bold text-field-muted">기존 카드형 컷 편집은 필요할 때만 사용합니다.</p>
-            </div>
-            <Button variant="secondary" onClick={addScene}>
-              <Plus className="h-4 w-4" aria-hidden />
-              씬 추가
-            </Button>
-          </div>
-
-          <div className="mt-5 grid gap-4">
-            {scenes.map((scene, sceneIndex) => (
-              <section key={scene.id} className="rounded-md border border-field-border bg-white p-4">
-              <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
-                  <Field label="씬 번호" value={scene.sceneNumber} onChange={(value) => updateScene(sceneIndex, { sceneNumber: value })} />
-                  <TimeWheelPicker label="씬 시작" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact />
-                  <TimeWheelPicker label="씬 종료" value={scene.endTime} onChange={(value) => updateSceneTimeField(sceneIndex, "endTime", value)} compact />
-                  <label className="grid gap-2 xl:col-span-2">
-                    <span className="text-sm font-black text-field-primary">촬영 장소</span>
-                    <select className={inputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}>
-                      <option value="">장소 선택</option>
-                      {locations
-                        .filter((location) => location.name.trim())
-                        .map((location) => (
-                          <option key={location.id} value={location.id}>
-                            {location.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-2">
-                    <span className="text-sm font-black text-field-primary">D/N</span>
-                    <select className={inputClass} value={scene.dayNight} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}>
-                      <option value="">선택</option>
-                      {dayNightOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-2">
-                    <span className="text-sm font-black text-field-primary">컷 개수</span>
-                    <input className={inputClass} type="number" min="1" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} />
-                  </label>
-                </div>
-                <div className="flex flex-wrap gap-2 lg:justify-end">
-                  <Button variant="secondary" onClick={() => generateCutsByCount(sceneIndex)}>
-                    컷 개수대로 생성
-                  </Button>
-                  <details className="relative">
-                    <summary className="inline-flex min-h-10 cursor-pointer list-none items-center justify-center gap-1 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary">
-                      <MoreHorizontal className="h-4 w-4" aria-hidden />
-                      씬 관리
-                    </summary>
-                    <div className="absolute right-0 z-20 mt-2 grid min-w-44 gap-1 rounded-md border border-field-border bg-white p-2 shadow-lg">
-                      <MenuButton label="씬 복사" onClick={() => copyScene(sceneIndex)}>
-                        <Copy className="h-4 w-4" aria-hidden />
-                      </MenuButton>
-                      <MenuButton label="씬 삭제" onClick={() => deleteScene(sceneIndex)} danger>
-                        <Trash2 className="h-4 w-4" aria-hidden />
-                      </MenuButton>
-                    </div>
-                  </details>
-                </div>
-              </div>
-
-              <details className="mt-3 rounded-md border border-field-border bg-white p-3">
-                <summary className="cursor-pointer text-sm font-black text-field-primary">상세 정보 열기</summary>
-                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <Field label="씬 제목 또는 요약" value={scene.sceneTitle} onChange={(value) => updateScene(sceneIndex, { sceneTitle: value })} />
-                  <Field label="등장인물" value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} />
-                  <Field label="소품" value={scene.props} onChange={(value) => updateScene(sceneIndex, { props: value })} />
-                  <Field label="의상/분장" value={scene.costumeMakeup} onChange={(value) => updateScene(sceneIndex, { costumeMakeup: value })} />
-                </div>
-                <TextAreaField label="씬 메모" value={scene.sceneMemo} onChange={(value) => updateScene(sceneIndex, { sceneMemo: value })} className="mt-3" />
-              </details>
-
-              <div className="mt-4">
-                <div className="mb-2 hidden grid-cols-[4.5rem_minmax(14rem,1fr)_minmax(10rem,0.8fr)_8rem] gap-2 text-xs font-black text-field-muted md:grid">
-                  <span>컷 번호</span>
-                  <span>촬영 내용</span>
-                  <span>비고</span>
-                  <span>동작</span>
-                </div>
-                <div className="grid gap-2">
-                  {scene.cuts.map((cut, cutIndex) => (
-                    <div key={cut.id} className="grid grid-cols-[4.5rem_1fr] gap-2 rounded-md border border-field-border bg-white p-2 md:grid-cols-[4.5rem_minmax(14rem,1fr)_minmax(10rem,0.8fr)_8rem] md:items-center">
-                      <div className="flex min-h-10 items-center rounded-md bg-field-soft px-2 text-sm font-black text-field-primary">
-                        {scene.sceneNumber || sceneIndex + 1}-{cut.cutNumber || cutIndex + 1}
-                      </div>
-                      <input
-                        className={compactInputClass}
-                        value={cut.description}
-                        onChange={(event) => updateCut(sceneIndex, cutIndex, { description: event.target.value })}
-                        placeholder="촬영 내용 입력"
-                      />
-                      <input
-                        className={`${compactInputClass} col-span-2 md:col-span-1 md:block`}
-                        value={cut.memo}
-                        onChange={(event) => updateCut(sceneIndex, cutIndex, { memo: event.target.value })}
-                        placeholder="비고"
-                      />
-                      <div className="col-span-2 flex gap-1 md:col-span-1 md:justify-end">
-                        <MoveMenu
-                          label="컷 이동"
-                          upDisabled={cutIndex === 0}
-                          downDisabled={cutIndex === scene.cuts.length - 1}
-                          onMoveUp={() => moveCut(sceneIndex, cutIndex, "up")}
-                          onMoveDown={() => moveCut(sceneIndex, cutIndex, "down")}
-                        />
-                        <IconButton label="컷 복사" onClick={() => copyCut(sceneIndex, cutIndex)}>
-                          <Copy className="h-4 w-4" aria-hidden />
-                        </IconButton>
-                        <IconButton label="컷 삭제" onClick={() => deleteCut(sceneIndex, cutIndex)}>
-                          <Trash2 className="h-4 w-4" aria-hidden />
-                        </IconButton>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3">
-                  <Button variant="secondary" onClick={() => addCut(sceneIndex)}>
-                    <Plus className="h-4 w-4" aria-hidden />
-                    컷 추가
-                  </Button>
-                </div>
-              </div>
-            </section>
-          ))}
-          </div>
-        </section>
-        ) : null}
         </div>
 
         <DailyPlanLivePreview data={previewData} />
@@ -1566,6 +1446,102 @@ function DragHandle({ label, onDragStart }: { label: string; onDragStart: (event
     >
       <GripVertical className="h-4 w-4" aria-hidden />
     </button>
+  );
+}
+
+function TimetableOrderControls({
+  label,
+  rowIndex,
+  rowCount,
+  onMove,
+  onDragStart,
+  onDelete
+}: {
+  label: string;
+  rowIndex: number;
+  rowCount: number;
+  onMove: (rowIndex: number, direction: "up" | "down") => void;
+  onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2">
+      <span className="mr-auto text-[11px] font-black text-field-primary lg:hidden">{label} 순서</span>
+      <DragHandle label={`${label} 드래그로 순서 변경`} onDragStart={onDragStart} />
+      <button
+        type="button"
+        onClick={() => onMove(rowIndex, "up")}
+        disabled={rowIndex === 0}
+        className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
+        aria-label={`${label} 위로 이동`}
+        title="위로 이동"
+      >
+        <ArrowUp className="h-4 w-4" aria-hidden />
+      </button>
+      <button
+        type="button"
+        onClick={() => onMove(rowIndex, "down")}
+        disabled={rowIndex === rowCount - 1}
+        className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
+        aria-label={`${label} 아래로 이동`}
+        title="아래로 이동"
+      >
+        <ArrowDown className="h-4 w-4" aria-hidden />
+      </button>
+      <CircularDeleteButton label={`${label} 삭제`} onClick={onDelete} />
+    </div>
+  );
+}
+
+function SceneCastSelector({
+  people,
+  value,
+  onChange,
+  ariaLabel
+}: {
+  people: CallSheetPerson[];
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const options = getCastOptions(people);
+  const selectedValues = parseSceneCastValues(value);
+  const optionValues = new Set(options.map((option) => option.value));
+  const legacyValues = selectedValues.filter((selected) => !optionValues.has(selected));
+
+  function toggleValue(nextValue: string, checked: boolean) {
+    const next = checked
+      ? [...selectedValues.filter((selected) => selected !== nextValue), nextValue]
+      : selectedValues.filter((selected) => selected !== nextValue);
+    onChange(formatSceneCastValues(next));
+  }
+
+  return (
+    <details className="relative">
+      <summary
+        className="flex min-h-9 cursor-pointer list-none items-center rounded-md border border-field-border bg-white px-2 py-1.5 text-left text-[12px] font-bold text-field-text"
+        aria-label={ariaLabel}
+        title={ariaLabel}
+      >
+        <span className="line-clamp-2">{selectedValues.join(", ") || "배우 선택"}</span>
+      </summary>
+      <div className="absolute left-0 z-30 mt-1 grid max-h-64 min-w-60 gap-1 overflow-y-auto rounded-md border border-field-border bg-white p-2 text-left shadow-lg max-lg:fixed max-lg:inset-x-6 max-lg:top-1/2 max-lg:mt-0 max-lg:-translate-y-1/2">
+        {options.length > 0 ? options.map((option) => (
+          <label key={option.id} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-field-soft">
+            <input
+              type="checkbox"
+              checked={selectedValues.includes(option.value)}
+              onChange={(event) => toggleValue(option.value, event.target.checked)}
+              className="h-4 w-4 accent-field-primary"
+            />
+            <span className="text-sm font-bold text-field-text">{option.label}</span>
+          </label>
+        )) : <p className="px-2 py-2 text-sm font-bold text-field-muted">배우 정보에서 배역 또는 이름을 먼저 입력해주세요.</p>}
+        {legacyValues.length > 0 ? (
+          <p className="border-t border-field-border px-2 pt-2 text-xs font-bold text-field-muted">기존 입력: {legacyValues.join(", ")}</p>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -2084,9 +2060,10 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     end: scene.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
     location: scene.locationName || "",
-    dayNight: scene.dayNight || "",
+    dayNight: normalizeDayNight(scene.dayNight),
     sceneNumber: formatSceneNumber(scene.sceneNumber),
     totalCut: getSceneTotalCutForPreview(scene),
+    cast: scene.subject || "",
     description: scene.description || scene.sceneTitle || "",
     shootingOrder: scene.shootingOrder || "",
     notes: scene.notes || ""
@@ -2115,6 +2092,7 @@ function createBlankPrintRows(count: number): PrintTimetableRow[] {
     dayNight: "",
     sceneNumber: "",
     totalCut: "",
+    cast: "",
     description: "",
     shootingOrder: "",
     notes: ""
@@ -2133,6 +2111,43 @@ function formatSceneNumber(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return /^s#/i.test(trimmed) ? trimmed : `S#${trimmed}`;
+}
+
+function normalizeDayNight(value: string) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (normalized === "D" || normalized === "DAY" || normalized === "데이") return "D";
+  if (normalized === "N" || normalized === "NIGHT" || normalized === "나잇") return "N";
+  return "";
+}
+
+function getCastMemberValue(person: Pick<CallSheetPerson, "name" | "role">) {
+  const role = person.role.trim();
+  const name = person.name.trim();
+  if (role && name) return `${role} (${name})`;
+  return role || name;
+}
+
+function getCastOptions(people: CallSheetPerson[]) {
+  const usedValues = new Set<string>();
+  return people.flatMap((person) => {
+    const value = getCastMemberValue(person);
+    if (!value || usedValues.has(value)) return [];
+    usedValues.add(value);
+    return [{ id: person.id, value, label: value }];
+  });
+}
+
+function parseSceneCastValues(value: string) {
+  return Array.from(new Set(String(value ?? "").split(/[,，]/).map((item) => item.trim()).filter(Boolean)));
+}
+
+function formatSceneCastValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join(", ");
+}
+
+function replaceSceneCastValue(value: string, previousValue: string, nextValue: string) {
+  const next = parseSceneCastValues(value).flatMap((item) => item === previousValue ? (nextValue ? [nextValue] : []) : [item]);
+  return formatSceneCastValues(next);
 }
 
 function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
@@ -2597,7 +2612,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
         locationName: scene.locationName,
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
-        dayNight: scene.dayNight,
+        dayNight: normalizeDayNight(scene.dayNight),
         storyDay: scene.storyDay,
         shootingOrder: normalizeShootingOrder(scene.shootingOrder, scene.cutCount),
         notes: scene.notes || cuts[0]?.memo || "",

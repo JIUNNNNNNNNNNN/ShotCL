@@ -11,6 +11,7 @@ export type MobileDailyPlanTimetableRow =
       dayNight: string;
       sceneNumber: string;
       totalCut: string;
+      cast: string;
       description: string;
       shootingOrder: string;
       notes: string;
@@ -173,7 +174,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
           </colgroup>
           <thead>
             <tr>
-              {['START', 'END', 'RT', 'LOCATION', 'D/N/S', 'SCENE', 'CUT'].map((label) => (
+              {['START', 'END', 'RT', 'LOCATION', 'D/N', 'SCENE', 'CUT'].map((label) => (
                 <th key={label} className={headerCellClass}>{label}</th>
               ))}
             </tr>
@@ -220,14 +221,8 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               <tr key={`portrait-detail-${index}`} className="bg-[#fff2cc]">
                 <td colSpan={4} className={`${cellClass} font-bold`}>{row.description || "기타 일정"}</td>
               </tr>
-            ) : (
-              <tr key={`portrait-detail-${index}`}>
-                <td className={cellClass}>{row.sceneNumber}</td>
-                <td className={cellClass}>{row.description}</td>
-                <td className={cellClass}>{row.shootingOrder}</td>
-                <td className={cellClass}>{row.notes}</td>
-              </tr>
-            )) : <tr><td colSpan={4} className={cellClass}>등록된 씬 정보가 없습니다.</td></tr>}
+            ) : <SceneDetailRows key={`portrait-detail-${index}`} row={row} />
+            ) : <tr><td colSpan={4} className={cellClass}>등록된 씬 정보가 없습니다.</td></tr>}
           </tbody>
         </table>
       </section>
@@ -246,6 +241,25 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         rows={teamRows.map((row) => [row.team, row.total, row.callTime, row.callLocation, row.notes])}
       />
     </article>
+  );
+}
+
+function SceneDetailRows({ row }: { row: Extract<MobileDailyPlanTimetableRow, { type: "scene" }> }) {
+  return (
+    <>
+      <tr>
+        <td className={cellClass}>{row.sceneNumber}</td>
+        <td className={cellClass}>{row.description}</td>
+        <td className={cellClass}>{row.shootingOrder}</td>
+        <td className={cellClass}>{row.notes}</td>
+      </tr>
+      {row.cast ? (
+        <tr>
+          <td className={`${headerCellClass} text-center`}>등장 배우</td>
+          <td colSpan={3} className={`${cellClass} text-left`}>{row.cast}</td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
