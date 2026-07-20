@@ -184,8 +184,6 @@ const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field
 const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
 const minuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
 const runtimeOptions = Array.from({ length: 144 }, (_, index) => (index + 1) * 5);
-const crewCountOptions = Array.from({ length: 99 }, (_, index) => String(index + 1));
-
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
@@ -1122,7 +1120,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                             value={meal.memo}
                             placeholder="점심 식사 & 세팅 / 이동 / 정리"
                             ariaLabel={`기타 일정 ${mealIndex + 1} 내용 수정`}
-                            onSave={(value) => updateMealTime(mealIndex, { memo: value })}
+                            onChange={(value) => updateMealTime(mealIndex, { memo: value })}
                           />
                         </td>
                         <td className={`${timetableCellClass} max-lg:hidden`} />
@@ -1149,22 +1147,26 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           value={scene.description}
                           placeholder="촬영 내용"
                           ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 내용 수정`}
-                          onSave={(value) => updateTimetableDescription(sceneIndex, value)}
+                          onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><input className={timetableInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="예: 4-3-2-1" /></td>
-                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onSave={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
+                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={addMealTime}>
+          <div className="mt-3 w-full">
+            <button
+              type="button"
+              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-[#e2c96e] bg-[#fff3c4] px-4 py-3 text-center text-sm font-black text-field-primary transition-colors hover:bg-[#ffedaa]"
+              onClick={addMealTime}
+            >
               <Plus className="h-4 w-4" aria-hidden />
               기타 일정 행 추가
-            </Button>
+            </button>
           </div>
         </section>
 
@@ -1206,7 +1208,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       locations={locations}
                       onChange={(value) => updateStarring(index, { callLocation: value })}
                     />
-                    <MemoField value={person.notes} placeholder="주의사항" ariaLabel={`배우 ${index + 1} 주의사항 수정`} onSave={(value) => updateStarring(index, { notes: value })} />
+                    <MemoField value={person.notes} placeholder="주의사항" ariaLabel={`배우 ${index + 1} 주의사항 수정`} onChange={(value) => updateStarring(index, { notes: value })} />
                     <div className="flex items-center justify-center"><CircularDeleteButton label={`배우 ${index + 1} 삭제`} onClick={() => deleteStarring(index)} /></div>
                   </div>
                 ))}
@@ -1242,7 +1244,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       locations={locations}
                       onChange={(value) => updateTeam(index, { callLocation: value })}
                     />
-                    <MemoField value={team.notes} placeholder="주의사항" ariaLabel={`${team.team || `부서 ${index + 1}`} 주의사항 수정`} onSave={(value) => updateTeam(index, { notes: value })} />
+                    <MemoField value={team.notes} placeholder="주의사항" ariaLabel={`${team.team || `부서 ${index + 1}`} 주의사항 수정`} onChange={(value) => updateTeam(index, { notes: value })} />
                     <div className="flex items-center justify-center"><CircularDeleteButton label={`부서 ${index + 1} 삭제`} onClick={() => deleteTeam(index)} /></div>
                   </div>
                 ))}
@@ -1559,14 +1561,40 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
 
 function CrewCountPicker({ value, onChange, ariaLabel }: { value: string; onChange: (value: string) => void; ariaLabel: string }) {
   const [isOpen, setIsOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState({ left: 12, top: 12 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  function updatePosition() {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = 136;
+    const estimatedHeight = 166;
+    const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12));
+    const top = rect.bottom + estimatedHeight <= window.innerHeight - 12
+      ? rect.bottom + 6
+      : Math.max(12, rect.top - estimatedHeight - 6);
+    setPosition({ left, top });
+  }
+
+  function changeCount(delta: number) {
+    const currentValue = Number.parseInt(value, 10);
+    const nextValue = Number.isFinite(currentValue)
+      ? Math.min(99, Math.max(1, currentValue + delta))
+      : 1;
+    onChange(String(nextValue));
+  }
 
   useEffect(() => {
     if (!isOpen) return;
+    updatePosition();
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
-      if (target instanceof Node && !pickerRef.current?.contains(target)) setIsOpen(false);
+      if (!(target instanceof Node)) return;
+      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setIsOpen(false);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -1575,15 +1603,20 @@ function CrewCountPicker({ value, onChange, ariaLabel }: { value: string; onChan
 
     document.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [isOpen]);
 
   return (
-    <div ref={pickerRef} className="relative min-w-0">
+    <div className="relative min-w-0">
       <button
+        ref={triggerRef}
         type="button"
         className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center px-1`}
         onClick={() => setIsOpen((current) => !current)}
@@ -1592,37 +1625,49 @@ function CrewCountPicker({ value, onChange, ariaLabel }: { value: string; onChan
       >
         <span className={value ? "text-field-text" : "text-field-muted"}>{value || "인원"}</span>
       </button>
-      {isOpen ? (
-        <div className="absolute left-1/2 top-full z-50 mt-1 w-52 -translate-x-1/2 rounded-md border border-field-border bg-white p-2 shadow-xl">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs font-black text-field-primary">인원 선택</span>
+      {isOpen && typeof document !== "undefined" ? createPortal(
+        <div
+          ref={popoverRef}
+          role="dialog"
+          aria-label={`${ariaLabel} 선택`}
+          className="fixed z-[80] w-[136px] rounded-md border border-field-border bg-white p-2 shadow-xl"
+          style={position}
+          onWheel={(event) => {
+            event.preventDefault();
+            changeCount(event.deltaY < 0 ? 1 : -1);
+          }}
+          data-crew-count-popover
+        >
+          <div className="flex items-center justify-between gap-1">
             <button
               type="button"
-              className="text-[11px] font-black text-field-muted"
-              onClick={() => {
-                onChange("");
-                setIsOpen(false);
-              }}
+              className="min-h-7 px-1 text-[11px] font-black text-field-muted"
+              onClick={() => onChange("")}
             >
               비우기
             </button>
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded text-field-muted hover:bg-field-soft"
+              onClick={() => setIsOpen(false)}
+              aria-label={`${ariaLabel} 선택 닫기`}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
           </div>
-          <div className="grid max-h-40 grid-cols-5 gap-1 overflow-y-auto pr-1">
-            {crewCountOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                className={`min-h-8 rounded border text-xs font-black ${value === option ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-text"}`}
-                onClick={() => {
-                  onChange(option);
-                  setIsOpen(false);
-                }}
-              >
-                {option}
-              </button>
-            ))}
+          <div className="mt-1 grid justify-items-center gap-1">
+            <button type="button" className="flex h-8 w-12 items-center justify-center rounded border border-field-border bg-field-soft text-field-primary" onClick={() => changeCount(1)} aria-label={`${ariaLabel} 늘리기`}>
+              <ArrowUp className="h-4 w-4" aria-hidden />
+            </button>
+            <output className="flex h-10 min-w-16 items-center justify-center rounded border border-field-border bg-white text-lg font-black text-field-text" aria-live="polite">
+              {value || "인원"}
+            </output>
+            <button type="button" className="flex h-8 w-12 items-center justify-center rounded border border-field-border bg-field-soft text-field-primary disabled:opacity-40" onClick={() => changeCount(-1)} disabled={value === "1"} aria-label={`${ariaLabel} 줄이기`}>
+              <ArrowDown className="h-4 w-4" aria-hidden />
+            </button>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );
@@ -1659,15 +1704,14 @@ function MemoField({
   value,
   placeholder,
   ariaLabel,
-  onSave
+  onChange
 }: {
   value: string;
   placeholder: string;
   ariaLabel: string;
-  onSave: (value: string) => void;
+  onChange: (value: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [draftValue, setDraftValue] = useState(value);
   const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -1677,17 +1721,12 @@ function MemoField({
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const width = Math.min(320, window.innerWidth - 24);
-    const estimatedHeight = 184;
+    const estimatedHeight = 150;
     const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
     const top = rect.bottom + estimatedHeight <= window.innerHeight - 12
       ? rect.bottom + 6
       : Math.max(12, rect.top - estimatedHeight - 6);
     setPosition({ left, top, width });
-  }
-
-  function openPopover() {
-    setDraftValue(value);
-    setIsOpen(true);
   }
 
   useEffect(() => {
@@ -1723,7 +1762,7 @@ function MemoField({
         ref={triggerRef}
         type="button"
         className={`${compactInputClass} block max-w-full overflow-hidden whitespace-nowrap !text-left`}
-        onClick={() => isOpen ? setIsOpen(false) : openPopover()}
+        onClick={() => setIsOpen((current) => !current)}
         aria-label={ariaLabel}
         aria-expanded={isOpen}
         title={value || placeholder}
@@ -1741,28 +1780,25 @@ function MemoField({
           style={position}
           data-memo-popover
         >
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="flex h-7 w-7 items-center justify-center rounded text-field-muted hover:bg-field-soft"
+              onClick={() => setIsOpen(false)}
+              aria-label={`${ariaLabel} 닫기`}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
           <textarea
             autoFocus
             rows={4}
-            className="w-full resize-y border-0 bg-white p-1.5 text-left text-[13px] font-bold leading-relaxed text-field-text outline-none"
-            value={draftValue}
-            onChange={(event) => setDraftValue(event.target.value)}
+            className="w-full resize-y border-0 bg-white p-1.5 pt-0 text-left text-[13px] font-bold leading-relaxed text-field-text outline-none"
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
             placeholder="여기에 입력"
             aria-label={`${ariaLabel} 입력`}
           />
-          <div className="mt-1 flex justify-end gap-1.5 border-t border-field-border pt-1.5">
-            <button type="button" className="min-h-7 rounded border border-field-border bg-white px-2.5 text-[11px] font-black text-field-text" onClick={() => setIsOpen(false)}>취소</button>
-            <button
-              type="button"
-              className="min-h-7 rounded bg-field-primary px-2.5 text-[11px] font-black text-white"
-              onClick={() => {
-                onSave(draftValue);
-                setIsOpen(false);
-              }}
-            >
-              저장
-            </button>
-          </div>
         </div>,
         document.body
       ) : null}
