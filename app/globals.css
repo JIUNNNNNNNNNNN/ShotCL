@@ -47,6 +47,11 @@ button {
   padding-top: max(0.75rem, env(safe-area-inset-top));
 }
 
+/* 일촬표 편집 화면에만 적용하며 인쇄 문서의 글자 크기는 변경하지 않습니다. */
+.daily-plan-editor :is(button, input, select, textarea) {
+  font-size: 13px;
+}
+
 .print-only {
   display: none;
 }

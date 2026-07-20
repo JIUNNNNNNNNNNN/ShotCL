@@ -19,11 +19,14 @@ import {
   createBlankTeamCallSheetRow,
   decodeDailyPlanMemo,
   encodeDailyPlanMemo,
+  mergeDailyPlanTimetableRows,
   normalizeDailyPlanPrintMeta,
   type CallSheetPerson,
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
+import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
+import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
 import { Button } from "@/components/ui/Button";
 
@@ -136,7 +139,11 @@ type DailyPlanEditorSnapshot = {
   savedAt: string;
 };
 
-type ReorderCollection = "locations" | "meals" | "scenes" | "starring" | "teams";
+type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring" | "teams";
+
+type EditorTimetableRow =
+  | { type: "scene"; sourceIndex: number; item: SceneBlockInput }
+  | { type: "event"; sourceIndex: number; item: DailyPlanMealTime };
 
 type OpenMeteoResponse = {
   provider?: "open-meteo";
@@ -157,10 +164,14 @@ type OpenMeteoResponse = {
 const dayNightOptions = ["D", "N", "E", "기타"];
 
 const inputClass =
-  "min-h-10 w-full rounded-md border border-field-border bg-white px-3 py-2 text-sm font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
 const compactInputClass =
-  "min-h-10 w-full rounded-md border border-field-border bg-white px-3 py-2 text-sm font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+
+const timetableCellClass = "border border-field-border p-1 max-lg:border-0 max-lg:p-0";
+const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
+const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block";
 
 const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
 const minuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
@@ -206,10 +217,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
   const printablePlan = useMemo(() => buildPlanForSave(plan, locations, mealTimes, printMeta), [plan, locations, mealTimes, printMeta]);
   const previewData = useMemo(() => buildDailyPlanPreviewData(printablePlan, scenes, printMeta), [printablePlan, scenes, printMeta]);
+  const timetableRows = useMemo(
+    () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
+    [mealTimes, printMeta.timetableRowOrder, scenes]
+  );
   const canPrint = previewData.scenes.length > 0 && previewData.totalCutCount > 0;
-  const representativeLocation = useMemo(() => getRepresentativeLocation(locations), [locations]);
-  const representativeAddress = getLocationAddress(representativeLocation).trim();
-  const weatherLookupSource = (printMeta.weatherRegion ?? "").trim() || representativeAddress || representativeLocation?.name.trim() || "";
+  const weatherLookupSource = (printMeta.weatherRegion ?? "").trim();
   const draftSnapshot: DailyPlanEditorSnapshot = {
     version: 1,
     dailyPlanId,
@@ -357,7 +370,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     });
   }
 
-  function setPrimaryLocation(index: number) {
+  function setMeetingLocation(index: number) {
     setLocations((current) => current.map((location, locationIndex) => ({ ...location, isPrimary: locationIndex === index })));
   }
 
@@ -366,6 +379,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     setLocations((current) => current.filter((_, locationIndex) => locationIndex !== index));
     if (target) {
       setScenes((current) => current.map((scene) => (scene.locationId === target.id ? { ...scene, locationId: "", locationName: "" } : scene)));
+      setMealTimes((current) => current.map((meal) => (meal.locationId === target.id ? { ...meal, locationId: "" } : meal)));
     }
   }
 
@@ -414,6 +428,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   function addMealTime() {
     setMealTimes((current) => [...current, createBlankOtherSchedule()]);
+    setPrintMeta((current) => ({ ...current, timetableRowOrder: [...timetableRows.map((row) => row.type), "event"] }));
   }
 
   function updateMealTime(index: number, patch: Partial<DailyPlanMealTime>) {
@@ -422,6 +437,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   function deleteMealTime(index: number) {
     setMealTimes((current) => current.filter((_, mealIndex) => mealIndex !== index));
+    setPrintMeta((current) => ({
+      ...current,
+      timetableRowOrder: timetableRows.filter((row) => !(row.type === "event" && row.sourceIndex === index)).map((row) => row.type)
+    }));
   }
 
   function updateMealTimeField(index: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
@@ -430,8 +449,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     );
   }
 
+  function updateMealLocation(index: number, locationId: string) {
+    updateMealTime(index, { locationId });
+  }
+
   function addScene() {
     setScenes((current) => [...current, createBlankScene(current.length + 1, locations[0])]);
+    setPrintMeta((current) => ({ ...current, timetableRowOrder: [...timetableRows.map((row) => row.type), "scene"] }));
   }
 
   function copyScene(sceneIndex: number) {
@@ -441,17 +465,25 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       const copied = cloneScene(source, current.length + 1);
       return [...current.slice(0, sceneIndex + 1), copied, ...current.slice(sceneIndex + 1)];
     });
+    const timetableIndex = timetableRows.findIndex((row) => row.type === "scene" && row.sourceIndex === sceneIndex);
+    if (timetableIndex >= 0) {
+      const nextOrder = timetableRows.map((row) => row.type);
+      nextOrder.splice(timetableIndex + 1, 0, "scene");
+      setPrintMeta((current) => ({ ...current, timetableRowOrder: nextOrder }));
+    }
   }
 
   function deleteScene(sceneIndex: number) {
+    if (scenes.length > 1) {
+      setPrintMeta((current) => ({
+        ...current,
+        timetableRowOrder: timetableRows.filter((row) => !(row.type === "scene" && row.sourceIndex === sceneIndex)).map((row) => row.type)
+      }));
+    }
     setScenes((current) => {
       if (current.length <= 1) return [createBlankScene(1, locations[0])];
       return current.filter((_, index) => index !== sceneIndex);
     });
-  }
-
-  function moveScene(sceneIndex: number, direction: "up" | "down") {
-    setScenes((current) => moveArrayItem(current, sceneIndex, direction));
   }
 
   function updateScene(sceneIndex: number, patch: Partial<SceneBlockInput>) {
@@ -472,6 +504,14 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     const [sourceCollection, sourceIndexValue] = event.dataTransfer.getData("text/plain").split(":");
     const sourceIndex = Number(sourceIndexValue);
     if (sourceCollection !== collection || !Number.isInteger(sourceIndex) || sourceIndex === targetIndex) return;
+
+    if (collection === "timetable") {
+      const nextRows = moveArrayItemToIndex(timetableRows, sourceIndex, targetIndex);
+      setScenes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene").map((row) => row.item));
+      setMealTimes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event").map((row) => row.item));
+      setPrintMeta((current) => ({ ...current, timetableRowOrder: nextRows.map((row) => row.type) }));
+      return;
+    }
 
     if (collection === "locations") setLocations((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "meals") setMealTimes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
@@ -599,7 +639,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     }
 
     if (!weatherLookupSource) {
-      setWeatherStatus("날씨 기준 지역 또는 대표 촬영지 주소를 입력해주세요. 수동 입력해주세요.");
+      setWeatherStatus("날씨 기준 지역을 선택하거나 직접 입력해주세요. 수동 입력은 계속 사용할 수 있습니다.");
       return;
     }
 
@@ -609,9 +649,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     try {
       const searchParams = new URLSearchParams({
         date: plan.shootingDate,
-        region: (printMeta.weatherRegion ?? "").trim(),
-        address: representativeAddress,
-        locationName: representativeLocation?.name ?? ""
+        region: (printMeta.weatherRegion ?? "").trim()
       });
       const response = await fetch(`/api/weather/open-meteo?${searchParams.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as OpenMeteoResponse;
@@ -749,7 +787,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   return (
     <div className="print-daily-plan">
-      <div className="no-print">
+      <div className="daily-plan-editor no-print text-[13px] md:text-sm">
         {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
         {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
@@ -804,10 +842,18 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             <CompactField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
           </div>
 
-          <details className="mt-3 rounded-md border border-field-border bg-field-soft p-3">
+          <div className="flex flex-col">
+          <details className="order-2 mt-5 rounded-md border border-field-border bg-field-soft p-3">
             <summary className="cursor-pointer text-sm font-black text-field-primary">날씨 정보 입력</summary>
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              <CompactField label="날씨 기준 지역" value={printMeta.weatherRegion ?? ""} onChange={(value) => updatePrintMetaField("weatherRegion", value)} />
+              <WeatherRegionPicker
+                value={printMeta.weatherRegion ?? ""}
+                province={printMeta.weatherProvince ?? ""}
+                district={printMeta.weatherDistrict ?? ""}
+                onChange={({ value, province, district }) =>
+                  setPrintMeta((current) => ({ ...current, weatherRegion: value, weatherProvince: province, weatherDistrict: district }))
+                }
+              />
               <CompactField label="날씨" value={printMeta.weather} onChange={(value) => updatePrintMetaField("weather", value)} />
               <CompactField label="최저 기온" value={printMeta.minTemperature} onChange={(value) => updatePrintMetaField("minTemperature", value)} />
               <CompactField label="최고 기온" value={printMeta.maxTemperature} onChange={(value) => updatePrintMetaField("maxTemperature", value)} />
@@ -823,7 +869,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </div>
           </details>
 
-          <div className="mt-6 grid gap-5 lg:grid-cols-2">
+          <div className="order-1 mt-6 grid gap-5">
             <section className="rounded-md border border-field-border bg-field-soft p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
@@ -853,12 +899,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                         <button
                           type="button"
                           aria-pressed={Boolean(location.isPrimary)}
-                          onClick={() => setPrimaryLocation(index)}
+                          onClick={() => setMeetingLocation(index)}
                           className={`inline-flex min-h-8 items-center justify-center rounded-md border px-3 text-xs font-black ${
                             location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
                           }`}
                         >
-                          {location.isPrimary ? "대표 촬영지" : "대표 촬영지로 사용"}
+                          {location.isPrimary ? "집합장소" : "집합장소로 지정"}
                         </button>
                         <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
                       </div>
@@ -926,46 +972,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               </div>
             </section>
 
-            <section className="rounded-md border border-field-border bg-field-soft p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-                <div>
-                  <h3 className="text-base font-black text-field-primary">기타 일정</h3>
-                  <p className="mt-1 text-sm font-bold text-field-muted">식사, 이동, 세팅, 정리 일정을 시간 순서대로 입력합니다.</p>
-                </div>
-                <Button variant="secondary" onClick={addMealTime}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  기타 일정 추가
-                </Button>
-              </div>
-              <div className="mt-4 grid gap-2">
-                {mealTimes.map((meal, index) => (
-                  <div
-                    key={meal.id}
-                    className="relative grid gap-2 rounded-md border border-field-border bg-white p-3 pr-11 md:grid-cols-[auto_0.8fr_0.8fr_0.7fr_1.4fr] md:items-end"
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => finishReorder(event, "meals", index)}
-                  >
-                    <div className="self-end pb-1"><DragHandle label={`기타 일정 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "meals", index)} /></div>
-                    <TimeWheelPicker label="시작 시간" value={meal.startTime} onChange={(value) => updateMealTimeField(index, "startTime", value)} compact />
-                    <TimeWheelPicker label="종료 시간" value={meal.endTime} onChange={(value) => updateMealTimeField(index, "endTime", value)} compact />
-                    <RuntimePicker
-                      value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)}
-                      onChange={(value) => updateMealTimeField(index, "runtimeMinutes", value)}
-                    />
-                    <label className="grid gap-1">
-                      <span className="text-xs font-black text-field-primary">내용</span>
-                      <input className={inputClass} value={meal.memo} onChange={(event) => updateMealTime(index, { memo: event.target.value })} placeholder="점심 식사 / 이동 / 세팅 / 정리" />
-                    </label>
-                    <div className="absolute right-2 top-2"><CircularDeleteButton label={`기타 일정 ${index + 1} 삭제`} onClick={() => deleteMealTime(index)} /></div>
-                  </div>
-                ))}
-              </div>
-            </section>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="order-3 mt-4 grid gap-4 md:grid-cols-2">
             <TextAreaField label="주의사항" value={plan.safetyNotice} onChange={(value) => updatePlanField("safetyNotice", value)} />
             <TextAreaField label="Memo" value={printMeta.memoText} onChange={(value) => updatePrintMetaField("memoText", value)} />
+          </div>
           </div>
         </section>
 
@@ -981,9 +993,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </Button>
           </div>
 
-          <div className="mt-5 overflow-x-auto">
-            <table className="min-w-[1100px] w-full border-collapse text-sm">
-              <thead>
+          <div className="mt-5 w-full">
+            <table className="w-full table-fixed border-collapse text-xs max-lg:block">
+              <colgroup className="max-lg:hidden">
+                {[7, 7, 8, 10, 6, 7, 7, 16, 11, 13, 8].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+              </colgroup>
+              <thead className="max-lg:hidden">
                 <tr className="bg-field-soft text-field-primary">
                   {["START", "END", "소요시간", "LOCATION", "D/N/S", "SCENE", "Total CUT", "Description", "Shooting order", "Notes", "순서 / 삭제"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
@@ -992,93 +1007,52 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   ))}
                 </tr>
               </thead>
-              <tbody>
-                {scenes.map((scene, sceneIndex) => (
-                  <tr key={scene.id} className="align-top" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "scenes", sceneIndex)}>
-                    <td className="border border-field-border p-1">
-                      <TimeWheelPicker label="START" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <TimeWheelPicker label="END" value={scene.endTime} onChange={(value) => updateSceneTimeField(sceneIndex, "endTime", value)} compact showLabel={false} />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <RuntimePicker
-                        value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)}
-                        onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)}
-                        showLabel={false}
-                      />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <select className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}>
-                        <option value="">장소 선택</option>
-                        {locations
-                          .filter((location) => location.name.trim())
-                          .map((location) => (
-                            <option key={location.id} value={location.id}>
-                              {location.name}
-                            </option>
-                          ))}
-                      </select>
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <select className={compactInputClass} value={scene.dayNight} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}>
-                        <option value="">선택</option>
-                        {dayNightOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <div className="flex gap-1">
-                        <DragHandle label={`촬영 행 ${sceneIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "scenes", sceneIndex)} />
-                        <CircularDeleteButton label={`촬영 행 ${sceneIndex + 1} 삭제`} onClick={() => deleteScene(sceneIndex)} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {mealTimes.map((meal, mealIndex) => (
-                  <tr key={meal.id} className="bg-[#fff3c4] align-top" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "meals", mealIndex)}>
-                    <td className="border border-field-border p-1">
-                      <TimeWheelPicker label="START" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <TimeWheelPicker label="END" value={meal.endTime} onChange={(value) => updateMealTimeField(mealIndex, "endTime", value)} compact showLabel={false} />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <RuntimePicker
-                        value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)}
-                        onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)}
-                        showLabel={false}
-                      />
-                    </td>
-                    <td colSpan={7} className="border border-field-border p-1">
-                      <input className={compactInputClass} value={meal.memo} onChange={(event) => updateMealTime(mealIndex, { memo: event.target.value })} placeholder="점심 식사 & 세팅 / 이동 / 정리" />
-                    </td>
-                    <td className="border border-field-border p-1">
-                      <div className="flex gap-1">
-                        <DragHandle label={`기타 일정 ${mealIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "meals", mealIndex)} />
-                        <CircularDeleteButton label={`기타 일정 ${mealIndex + 1} 삭제`} onClick={() => deleteMealTime(mealIndex)} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="max-lg:grid max-lg:gap-3">
+                {timetableRows.map((row, rowIndex) => {
+                  if (row.type === "event") {
+                    const meal = row.item;
+                    const mealIndex = row.sourceIndex;
+                    return (
+                      <tr key={meal.id} className="bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>기타 일정 · START</span><TimeWheelPicker label="START" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
+                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>END</span><TimeWheelPicker label="END" value={meal.endTime} onChange={(value) => updateMealTimeField(mealIndex, "endTime", value)} compact showLabel={false} /></td>
+                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                        <td className={timetableCellClass}>
+                          <span className={mobileTimetableLabelClass}>장소</span>
+                          <select className={compactInputClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
+                            <option value="">빈칸</option>
+                            {locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                          </select>
+                        </td>
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>내용</span><input className={compactInputClass} value={meal.memo} onChange={(event) => updateMealTime(mealIndex, { memo: event.target.value })} placeholder="점심 식사 & 세팅 / 이동 / 정리" /></td>
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={`${timetableCellClass} max-lg:hidden`} />
+                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>순서 / 삭제</span><div className="flex gap-1"><DragHandle label={`기타 일정 ${mealIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} /><CircularDeleteButton label={`기타 일정 ${mealIndex + 1} 삭제`} onClick={() => deleteMealTime(mealIndex)} /></div></td>
+                      </tr>
+                    );
+                  }
+
+                  const scene = row.item;
+                  const sceneIndex = row.sourceIndex;
+                  return (
+                    <tr key={scene.id} className="align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · START</span><TimeWheelPicker label="START" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>END</span><TimeWheelPicker label="END" value={scene.endTime} onChange={(value) => updateSceneTimeField(sceneIndex, "endTime", value)} compact showLabel={false} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>장소</span><select className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N/S</span><select className={compactInputClass} value={scene.dayNight} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>Total CUT</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Description</span><input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Shooting order</span><input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Notes</span><input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>순서 / 삭제</span><div className="flex gap-1"><DragHandle label={`촬영 행 ${sceneIndex + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} /><CircularDeleteButton label={`촬영 행 ${sceneIndex + 1} 삭제`} onClick={() => deleteScene(sceneIndex)} /></div></td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1093,7 +1067,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
 
-        <section className="mt-5 rounded-md border border-field-border bg-white p-5">
+        <div className="flex flex-col">
+        <section className="order-2 mt-5 rounded-md border border-field-border bg-white p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-black text-field-primary">스태프 정보</h2>
@@ -1179,7 +1154,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         </section>
 
         {isAdvancedCutEditorOpen ? (
-        <section className="mt-5 rounded-md border border-field-border bg-white p-5">
+        <section className="order-1 mt-5 rounded-md border border-field-border bg-white p-5">
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <h2 className="text-lg font-black text-field-primary">고급 컷 편집</h2>
@@ -1315,6 +1290,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
         ) : null}
+        </div>
 
         <DailyPlanLivePreview data={previewData} />
 
@@ -1387,6 +1363,79 @@ function CompactField({ label, value, type = "text", onChange }: { label: string
   );
 }
 
+function WeatherRegionPicker({
+  value,
+  province,
+  district,
+  onChange
+}: {
+  value: string;
+  province: string;
+  district: string;
+  onChange: (next: { value: string; province: string; district: string }) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const districts = koreanWeatherRegions[province] ?? [];
+
+  function selectProvince(nextProvince: string) {
+    const nextDistrict = koreanWeatherRegions[nextProvince]?.includes(district) ? district : "";
+    onChange({
+      province: nextProvince,
+      district: nextDistrict,
+      value: [nextProvince, nextDistrict].filter(Boolean).join(" ")
+    });
+  }
+
+  function selectDistrict(nextDistrict: string) {
+    onChange({
+      province,
+      district: nextDistrict,
+      value: [province, nextDistrict].filter(Boolean).join(" ")
+    });
+  }
+
+  return (
+    <div className="relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
+      <button
+        type="button"
+        className={`${compactInputClass} flex items-center text-left`}
+        onClick={() => setIsOpen((current) => !current)}
+        aria-expanded={isOpen}
+      >
+        <span className={value ? "text-field-text" : "text-field-muted"}>{value || "\u00a0"}</span>
+      </button>
+      {isOpen ? (
+        <div className="absolute left-0 top-full z-50 mt-2 grid w-[min(24rem,calc(100vw-2rem))] gap-2 rounded-md border border-field-border bg-white p-3 shadow-xl sm:left-[7rem]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-black text-field-primary">도/광역시 · 시/군/구</span>
+            <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>닫기</button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <select className={compactInputClass} value={province} onChange={(event) => selectProvince(event.target.value)} aria-label="도 또는 광역시">
+              <option value="">도/광역시</option>
+              {koreanWeatherProvinces.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select className={compactInputClass} value={district} onChange={(event) => selectDistrict(event.target.value)} disabled={!province} aria-label="시 군 구">
+              <option value="">시/군/구</option>
+              {districts.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <label className="grid gap-1">
+            <span className="text-xs font-black text-field-muted">직접 입력</span>
+            <input
+              className={compactInputClass}
+              value={value}
+              onChange={(event) => onChange({ value: event.target.value, province: "", district: "" })}
+              placeholder="예: 경기도 광주시"
+            />
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RoleContactGroup({
   role,
   name,
@@ -1413,7 +1462,7 @@ function RoleContactGroup({
       <input
         className={compactInputClass}
         value={contact}
-        onChange={(event) => onContactChange(event.target.value)}
+        onChange={(event) => onContactChange(formatKoreanPhoneNumber(event.target.value))}
         placeholder="연락처"
         aria-label={`${role} 연락처`}
       />
@@ -1431,7 +1480,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       {showLabel ? <span className="text-xs font-black text-field-primary">소요시간</span> : null}
       <button
         type="button"
-        className={`${compactInputClass} flex h-10 min-h-10 items-center text-left`}
+        className={`${compactInputClass} flex h-9 min-h-9 items-center text-left`}
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
         aria-label={`소요시간 ${selectedLabel || "미입력"}`}
@@ -1564,7 +1613,7 @@ function TimeWheelPicker({
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
       <button
         type="button"
-        className={`${compactInputClass} flex h-10 min-h-10 items-center text-left`}
+        className={`${compactInputClass} flex h-9 min-h-9 items-center text-left`}
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
         aria-label={`${label} ${value || "미입력"}`}
@@ -1572,12 +1621,13 @@ function TimeWheelPicker({
         <span className={value ? "text-field-text" : "text-field-muted"}>{value || "\u00a0"}</span>
       </button>
       {isOpen ? (
-        <div className={`absolute top-full z-50 mt-2 w-56 rounded-md border border-field-border bg-white p-3 shadow-xl ${inline ? "left-[7rem]" : "left-0"}`}>
+        <div className={`absolute top-full z-50 mt-2 w-56 rounded-md border border-field-border bg-white p-3 shadow-xl ${inline ? "left-0 sm:left-[7rem]" : "left-0"}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-sm font-black text-field-primary">{label}</span>
-            <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>
-              닫기
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" className="text-xs font-black text-field-muted" onClick={() => { onChange(""); setIsOpen(false); }}>비우기</button>
+              <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>닫기</button>
+            </div>
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
             <WheelColumn ariaLabel={`${label} 시`} options={hourOptions} value={parsed.hour} onChange={updateHour} />
@@ -1873,6 +1923,7 @@ function DailyPlanMobilePreview({ data }: { data: DailyPlanPreviewData }) {
             row.type === "break" ? (
               <div key={`mobile-time-${index}`} className="rounded-md border border-field-border bg-[#fff3c4] p-2 text-sm font-bold text-field-muted">
                 <p className="font-black text-field-primary">{[formatTimeRange(row.start, row.end), row.runtime].filter(Boolean).join(" / ")}</p>
+                {row.location ? <p>장소: {row.location}</p> : null}
                 <p>{row.description || "기타 일정"}</p>
               </div>
             ) : (
@@ -2031,7 +2082,14 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 <td className="border border-black">{row.start}</td>
                 <td className="border border-black">{row.end}</td>
                 <td className="border border-black">{row.runtime}</td>
-                <td colSpan={13} className="border border-black font-black">{row.description || "-"}</td>
+                {row.location ? (
+                  <>
+                    <td colSpan={2} className="border border-black">{row.location}</td>
+                    <td colSpan={11} className="border border-black font-black">{row.description || "-"}</td>
+                  </>
+                ) : (
+                  <td colSpan={13} className="border border-black font-black">{row.description || "-"}</td>
+                )}
               </tr>
             ) : (
               <tr key={`time-row-${index}`}>
@@ -2113,6 +2171,7 @@ type PrintTimetableRow =
       start: string;
       end: string;
       runtime: string;
+      location: string;
       description: string;
     };
 
@@ -2136,12 +2195,12 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     start: meal.startTime || "",
     end: meal.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
+    location: data.locations.find((location) => location.id === meal.locationId)?.name ?? "",
     description: meal.memo || "기타 일정"
   }));
 
-  return [...sceneRows, ...breakRows]
-    .sort((a, b) => (parseTimeMinutes(a.start) ?? 99999) - (parseTimeMinutes(b.start) ?? 99999))
-    .concat(createBlankPrintRows(Math.max(0, 7 - sceneRows.length - breakRows.length)));
+  const orderedRows = mergeDailyPlanTimetableRows(sceneRows, breakRows, data.meta.timetableRowOrder);
+  return orderedRows.concat(createBlankPrintRows(Math.max(0, 7 - orderedRows.length)));
 }
 
 function createBlankPrintRows(count: number): PrintTimetableRow[] {
@@ -2254,7 +2313,7 @@ function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], 
   const nextLocations = locations
     .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
     .map(sanitizeManualLocation);
-  const nextMeals = mealTimes.filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.memo.trim());
+  const nextMeals = mealTimes.filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.locationId?.trim() || meal.memo.trim());
 
   return {
     ...plan,
@@ -2426,6 +2485,7 @@ function createBlankOtherSchedule(): DailyPlanMealTime {
     endTime: "",
     runtimeMinutes: null,
     runtime: "",
+    locationId: "",
     memo: ""
   };
 }
@@ -2464,6 +2524,16 @@ function moveArrayItemToIndex<T>(items: T[], sourceIndex: number, targetIndex: n
   if (!moved) return items;
   next.splice(targetIndex, 0, moved);
   return next;
+}
+
+function buildEditorTimetableRows(
+  scenes: SceneBlockInput[],
+  mealTimes: DailyPlanMealTime[],
+  order: DailyPlanPrintMeta["timetableRowOrder"]
+): EditorTimetableRow[] {
+  const sceneRows: EditorTimetableRow[] = scenes.map((item, sourceIndex) => ({ type: "scene", sourceIndex, item }));
+  const eventRows: EditorTimetableRow[] = mealTimes.map((item, sourceIndex) => ({ type: "event", sourceIndex, item }));
+  return mergeDailyPlanTimetableRows(sceneRows, eventRows, order);
 }
 
 function getNextCutNumber(currentValue: string | undefined, fallback: number) {
@@ -2673,10 +2743,6 @@ function getNaverMapUrl(location: Partial<DailyPlanLocation> | undefined) {
   if (!location) return "";
   const query = getLocationAddress(location).trim() || location.name?.trim() || "";
   return query ? `https://map.naver.com/p/search/${encodeURIComponent(query)}` : "";
-}
-
-function getRepresentativeLocation(locations: DailyPlanLocation[]) {
-  return locations.find((location) => location.isPrimary) ?? locations[0];
 }
 
 function loadDaumPostcodeScript() {
