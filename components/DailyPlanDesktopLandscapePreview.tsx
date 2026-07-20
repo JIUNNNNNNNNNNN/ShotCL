@@ -25,59 +25,55 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
       <table className="w-full table-fixed border-collapse border-2 border-black text-center">
         <tbody>
           <tr>
-            <td rowSpan={5} className={`${cellClass} font-black`}>
+            <td rowSpan={3} className={`${cellClass} font-black`}>
               <span className="text-[9px]">DAY</span>
               <span className="ml-1 text-2xl leading-none">{meta.day || "-"}</span>
             </td>
-            <td rowSpan={5} colSpan={11} className={`${cellClass} text-2xl font-black`}>
+            <td rowSpan={3} colSpan={9} className={`${cellClass} text-2xl font-black`}>
               {plan.title || "작품명"} TIME TABLE
             </td>
-            <td colSpan={2} className={cellClass}>Sunrise</td>
-            <td colSpan={2} className={cellClass}>{meta.sunrise || "-"}</td>
+            <td rowSpan={3} colSpan={2} className={`${cellClass} bg-[#e2efda]`}>
+              <span className="block text-[9px] font-bold">Total Crew</span>
+              <span className="text-lg font-black">{meta.totalCrew || "-"}</span>
+            </td>
+            <td colSpan={2} className={`${cellClass} border-l-2 border-t-2 font-bold`}>Sunrise</td>
+            <td colSpan={2} className={`${cellClass} border-r-2 border-t-2`}>{meta.sunrise || "-"}</td>
           </tr>
           <tr>
-            <td colSpan={2} className={cellClass}>Sunset</td>
-            <td colSpan={2} className={cellClass}>{meta.sunset || "-"}</td>
+            <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>Sunset</td>
+            <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.sunset || "-"}</td>
           </tr>
           <tr>
-            <td colSpan={2} className={cellClass}>Weather</td>
-            <td colSpan={2} className={cellClass}>{meta.weather || "-"}</td>
-          </tr>
-          <tr>
-            <td colSpan={2} className={cellClass}>강수 확률</td>
-            <td colSpan={2} className={cellClass}>{meta.rainProbability || "-"}</td>
-          </tr>
-          <tr>
-            <td className={cellClass}>최저 기온</td>
-            <td className={cellClass}>{meta.minTemperature || "-"}</td>
-            <td className={cellClass}>최고 기온</td>
-            <td className={cellClass}>{meta.maxTemperature || "-"}</td>
+            <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>Weather</td>
+            <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.weather || "-"}</td>
           </tr>
           <tr>
             <td rowSpan={3} className={`${cellClass} font-black`}>CALL TIME</td>
-            <td rowSpan={3} colSpan={7} className={`${cellClass} bg-[#ead1d1]`}>
+            <td rowSpan={3} colSpan={6} className={`${cellClass} bg-[#ead1d1]`}>
               <span className="mr-1 text-[9px] font-bold">Day</span>
               <span className="text-lg font-black">{formatDate(plan.shootingDate) || "-"}</span>
               <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
               <span className="text-lg font-black">{plan.callTime || "-"}</span>
             </td>
             <td className={cellClass}>Director</td>
-            <td className={cellClass}>{plan.director || "-"}</td>
+            <td colSpan={2} className={cellClass}>{plan.director || "-"}</td>
             <td colSpan={2} className={cellClass}>{meta.directorContact || "-"}</td>
-            <td rowSpan={3} colSpan={4} className={`${cellClass} bg-[#e2efda]`}>
-              <span className="mr-2 text-[9px] font-bold">Total Crew</span>
-              <span className="text-lg font-black">{meta.totalCrew || "-"}</span>
-            </td>
+            <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>강수 확률</td>
+            <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.rainProbability || "-"}</td>
           </tr>
           <tr>
             <td className={cellClass}>A.D</td>
-            <td className={cellClass}>{plan.assistantDirector || "-"}</td>
+            <td colSpan={2} className={cellClass}>{plan.assistantDirector || "-"}</td>
             <td colSpan={2} className={cellClass}>{meta.assistantDirectorContact || "-"}</td>
+            <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>최저 기온</td>
+            <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.minTemperature || "-"}</td>
           </tr>
           <tr>
             <td className={cellClass}>Producer</td>
-            <td className={cellClass}>{plan.production || "-"}</td>
+            <td colSpan={2} className={cellClass}>{plan.production || "-"}</td>
             <td colSpan={2} className={cellClass}>{meta.producerContact || "-"}</td>
+            <td colSpan={2} className={`${cellClass} border-b-2 border-l-2 font-bold`}>최고 기온</td>
+            <td colSpan={2} className={`${cellClass} border-b-2 border-r-2`}>{meta.maxTemperature || "-"}</td>
           </tr>
         </tbody>
       </table>
@@ -87,9 +83,11 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           {printableLocations.length > 0 ? printableLocations.map((location, index) => (
             <tr key={location.id || `landscape-location-${index}`}>
               <td colSpan={2} className={`${cellClass} whitespace-nowrap font-black`}>LOCATION {index + 1}</td>
-              <td colSpan={6} className={`${cellClass} break-words font-bold`}>{location.name || "-"}</td>
-              <td colSpan={8} className={`${cellClass} break-words !text-left leading-tight [overflow-wrap:anywhere]`}>
-                {getLocationAddress(location) || location.detail || "-"}
+              <td colSpan={6} className={`${cellClass} break-words font-bold`}>
+                <span className="line-clamp-2">{location.name || "-"}</span>
+              </td>
+              <td colSpan={8} className={`${cellClass} break-words leading-tight [overflow-wrap:anywhere]`}>
+                <span className="line-clamp-2">{getLocationAddress(location) || location.detail || "-"}</span>
               </td>
             </tr>
           )) : (
@@ -123,10 +121,10 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               {row.location ? (
                 <>
                   <td colSpan={3} className={`${cellClass} break-words`}>{row.location}</td>
-                  <td colSpan={10} className={`${cellClass} !text-left font-black`}>{row.description || "-"}</td>
+                  <td colSpan={10} className={`${cellClass} font-black`}>{row.description || "-"}</td>
                 </>
               ) : (
-                <td colSpan={13} className={`${cellClass} !text-left font-black`}>{row.description || "-"}</td>
+                <td colSpan={13} className={`${cellClass} font-black`}>{row.description || "-"}</td>
               )}
             </tr>
           ) : (
@@ -138,7 +136,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               <td className={cellClass}>{row.dayNight}</td>
               <td className={cellClass}>{row.sceneNumber}</td>
               <td className={cellClass}>{row.totalCut}</td>
-              <td colSpan={3} className={`${cellClass} !text-left`}>{row.description}</td>
+              <td colSpan={3} className={cellClass}>{row.description}</td>
               <td className={`${cellClass} break-words`}>{formatCast(row.cast)}</td>
               <td colSpan={2} className={cellClass}>{row.shootingOrder}</td>
               <td className={cellClass}>{row.notes}</td>
@@ -151,13 +149,13 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
         <table className={halfTableClass}>
           <tbody>
             <tr><td className={`${cellClass} font-black`}>Notice</td></tr>
-            <tr><td className={`${cellClass} h-20 whitespace-pre-wrap !text-left align-top`}>{plan.safetyNotice || ""}</td></tr>
+            <tr><td className={`${cellClass} h-20 whitespace-pre-wrap align-top`}>{plan.safetyNotice || ""}</td></tr>
           </tbody>
         </table>
         <table className={halfTableClass}>
           <tbody>
             <tr><td className={`${cellClass} font-black`}>Memo</td></tr>
-            <tr><td className={`${cellClass} h-20 whitespace-pre-wrap !text-left align-top`}>{meta.memoText || ""}</td></tr>
+            <tr><td className={`${cellClass} h-20 whitespace-pre-wrap align-top`}>{meta.memoText || ""}</td></tr>
           </tbody>
         </table>
       </div>
