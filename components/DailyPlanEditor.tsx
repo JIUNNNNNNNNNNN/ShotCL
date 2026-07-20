@@ -213,7 +213,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const [expandedLocationDetailId, setExpandedLocationDetailId] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
-  const [weatherStatus, setWeatherStatus] = useState("수동 입력 가능");
+  const [weatherStatus, setWeatherStatus] = useState("");
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const autoSaveRequestRef = useRef(0);
@@ -822,9 +822,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         <section className="rounded-md border border-field-border bg-white p-5">
           <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
             <div>
-              <p className="text-xs font-black text-field-muted">웹 일촬표 편집기</p>
-              <h1 className="mt-1 text-2xl font-black text-field-primary">{plan.title || "새 일촬표"}</h1>
-              <p className="mt-2 text-sm font-bold leading-6 text-field-muted">장소와 일정을 한 번만 등록하고, 씬마다 컷 개수를 넣어 빠르게 생성합니다.</p>
+              <h1 className="text-2xl font-black text-field-primary">{plan.title || "새 일촬표"}</h1>
               <p className="mt-2 text-xs font-black text-field-muted" aria-live="polite">저장 상태: {autoSaveStatus}</p>
             </div>
             <Link
@@ -958,9 +956,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               />
             </div>
 
-            <p className="mt-3 text-xs font-bold text-field-muted" aria-live="polite">{weatherStatus}</p>
-
-            <p className="mt-3 text-xs font-bold text-field-muted">카드를 누르면 해당 값을 바로 수정할 수 있습니다. API 키 없이 Open-Meteo 예보를 사용합니다.</p>
+            {weatherStatus ? <p className="mt-3 text-xs font-bold text-field-muted" aria-live="polite">{weatherStatus}</p> : null}
           </section>
 
           <div className="order-2 mt-6 grid gap-5">
@@ -968,7 +964,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
                   <h3 className="text-base font-black text-field-primary">촬영 장소</h3>
-                  <p className="mt-1 text-sm font-bold text-field-muted">장소명과 주소를 한 줄에서 빠르게 입력할 수 있습니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addLocation}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -1073,7 +1068,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
-              <p className="mt-1 text-sm font-bold text-field-muted">순서 / START / 소요시간 / LOCATION / D/N / SCENE / Total CUT / 등장 배우 / Description / Shooting order / Notes 순서로 입력합니다. END는 START와 소요시간으로 자동 계산됩니다.</p>
             </div>
             <Button variant="secondary" onClick={addScene}>
               <Plus className="h-4 w-4" aria-hidden />
@@ -1088,7 +1082,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               </colgroup>
               <thead className="max-lg:hidden">
                 <tr className="bg-field-soft text-field-primary">
-                  {["순서 / 삭제", "START", "소요시간", "LOCATION", "D/N", "SCENE", "Total CUT", "등장 배우", "Description", "Shooting order", "Notes"].map((header) => (
+                  {["순서 / 삭제", "시작시간", "소요시간", "장소", "D/N", "SCENE", "컷 수", "등장 배우", "내용", "촬영 순서", "비고"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
                       {header}
                     </th>
@@ -1103,7 +1097,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     return (
                       <tr key={meal.id} className="bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                         <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
-                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>기타 일정 · START</span><TimeWheelPicker label="START" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
+                        <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>기타 일정 · 시작시간</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={timetableCellClass}>
                           <span className={mobileTimetableLabelClass}>장소</span>
@@ -1128,16 +1122,16 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   return (
                     <tr key={scene.id} className="align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · START</span><TimeWheelPicker label="START" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · 시작시간</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>장소</span><select className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N</span><select className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>Total CUT</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>컷 수</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>등장 배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
-                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Description</span><input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
-                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Shooting order</span><input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" /></td>
-                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>Notes</span><input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>내용</span><input className={compactInputClass} value={scene.description} onChange={(event) => updateTimetableDescription(sceneIndex, event.target.value)} placeholder="촬영 내용" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><input className={compactInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} placeholder="예: 4-3-2-1" /></td>
+                      <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>비고</span><input className={compactInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} placeholder="비고" /></td>
                     </tr>
                   );
                 })}
@@ -1153,22 +1147,19 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         </section>
 
         <div className="flex flex-col">
-        <section className="order-2 mt-5 rounded-md border border-field-border bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-black text-field-primary">스태프 정보</h2>
-              <p className="mt-1 text-sm font-bold text-field-muted">배우와 부서별 콜 정보를 입력합니다.</p>
-            </div>
+        <section className="order-2 mt-5 rounded-md border border-field-border bg-white p-5 text-center">
+          <div className="flex flex-col items-center justify-center gap-3 text-center">
+            <h2 className="text-center text-lg font-black text-field-primary">스태프 정보</h2>
             <Button variant="secondary" onClick={() => setIsStaffOpen((current) => !current)} aria-expanded={isStaffOpen}>
               {isStaffOpen ? "스태프 정보 접기" : "스태프 정보 열기"}
             </Button>
           </div>
-          {isStaffOpen ? <div className="mt-5 grid gap-5 lg:grid-cols-2">
-            <section className="rounded-md border border-field-border bg-field-soft p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+          {isStaffOpen ? <div className="mt-5 grid gap-5 text-center lg:grid-cols-2">
+            <section className="rounded-md border border-field-border bg-field-soft p-4 text-center">
+              <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
-                  <h3 className="text-base font-black text-field-primary">배우</h3>
-                  <p className="mt-1 text-sm font-bold text-field-muted">배우별 콜 시간, 집합 장소, 주의사항을 입력합니다.</p>
+                  <h3 className="text-center text-base font-black text-field-primary">배우</h3>
+                  <p className="mt-1 text-center text-sm font-bold text-field-muted">배우별 콜 시간, 집합 장소, 주의사항을 입력합니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addStarring}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -1179,7 +1170,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 {printMeta.starring.map((person, index) => (
                   <div
                     key={person.id}
-                    className="grid gap-2 rounded-md border border-field-border bg-white p-3 md:grid-cols-[auto_1fr_1fr_0.8fr_1.2fr_1.2fr_auto] md:items-end"
+                    className="grid gap-2 rounded-md border border-field-border bg-white p-3 text-center md:grid-cols-[auto_1fr_1fr_0.8fr_1.2fr_1.2fr_auto] md:items-end"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "starring", index)}
                   >
@@ -1200,11 +1191,11 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               </div>
             </section>
 
-            <section className="rounded-md border border-field-border bg-field-soft p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+            <section className="rounded-md border border-field-border bg-field-soft p-4 text-center">
+              <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
-                  <h3 className="text-base font-black text-field-primary">스태프 / 부서</h3>
-                  <p className="mt-1 text-sm font-bold text-field-muted">부서별 인원, 콜 시간, 집합 장소를 입력합니다.</p>
+                  <h3 className="text-center text-base font-black text-field-primary">스태프 / 부서</h3>
+                  <p className="mt-1 text-center text-sm font-bold text-field-muted">부서별 인원, 콜 시간, 집합 장소를 입력합니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addTeam}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -1215,7 +1206,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 {printMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid gap-2 rounded-md border border-field-border bg-white p-3 md:grid-cols-[auto_1fr_0.6fr_0.8fr_1.2fr_1.2fr_auto] md:items-end"
+                    className="grid gap-2 rounded-md border border-field-border bg-white p-3 text-center md:grid-cols-[auto_1fr_0.6fr_0.8fr_1.2fr_1.2fr_auto] md:items-end"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "teams", index)}
                   >
@@ -1977,7 +1968,6 @@ function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
     <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-field-primary">실시간 일촬표 미리보기</h2>
-        <p className="text-sm font-bold text-field-muted">데스크탑은 TEST.pdf 같은 A4 가로 표로, 모바일은 세로 읽기 모드로 표시됩니다.</p>
       </div>
       <ScaledDailyPlanPreview data={data} />
       <DailyPlanMobilePortraitPreview

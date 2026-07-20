@@ -23,6 +23,13 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
   return (
     <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-tight text-black">
       <table className="w-full table-fixed border-collapse border-2 border-black text-center">
+        <colgroup>
+          <col style={{ width: "8%" }} />
+          {Array.from({ length: 9 }, (_, index) => <col key={`title-column-${index}`} style={{ width: "5.78%" }} />)}
+          {Array.from({ length: 2 }, (_, index) => <col key={`crew-column-${index}`} style={{ width: "6%" }} />)}
+          <col style={{ width: "1%" }} />
+          {Array.from({ length: 4 }, (_, index) => <col key={`weather-column-${index}`} style={{ width: "6.745%" }} />)}
+        </colgroup>
         <tbody>
           <tr>
             <td rowSpan={3} className={`${cellClass} font-black`}>
@@ -36,6 +43,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               <span className="block text-[9px] font-bold">Total Crew</span>
               <span className="text-lg font-black">{meta.totalCrew || "-"}</span>
             </td>
+            <td rowSpan={6} className="border-x-2 border-y-0 border-black bg-white p-0" aria-hidden="true" />
             <td colSpan={2} className={`${cellClass} border-l-2 border-t-2 font-bold`}>Sunrise</td>
             <td colSpan={2} className={`${cellClass} border-r-2 border-t-2`}>{meta.sunrise || "-"}</td>
           </tr>
@@ -49,29 +57,29 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           </tr>
           <tr>
             <td rowSpan={3} className={`${cellClass} font-black`}>CALL TIME</td>
-            <td rowSpan={3} colSpan={6} className={`${cellClass} bg-[#ead1d1]`}>
+            <td rowSpan={3} colSpan={8} className={`${cellClass} bg-[#ead1d1]`}>
               <span className="mr-1 text-[9px] font-bold">Day</span>
               <span className="text-lg font-black">{formatDate(plan.shootingDate) || "-"}</span>
               <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
               <span className="text-lg font-black">{plan.callTime || "-"}</span>
             </td>
             <td className={cellClass}>Director</td>
-            <td colSpan={2} className={cellClass}>{plan.director || "-"}</td>
-            <td colSpan={2} className={cellClass}>{meta.directorContact || "-"}</td>
+            <td className={cellClass}>{plan.director || "-"}</td>
+            <td className={cellClass}>{meta.directorContact || "-"}</td>
             <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>강수 확률</td>
             <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.rainProbability || "-"}</td>
           </tr>
           <tr>
             <td className={cellClass}>A.D</td>
-            <td colSpan={2} className={cellClass}>{plan.assistantDirector || "-"}</td>
-            <td colSpan={2} className={cellClass}>{meta.assistantDirectorContact || "-"}</td>
+            <td className={cellClass}>{plan.assistantDirector || "-"}</td>
+            <td className={cellClass}>{meta.assistantDirectorContact || "-"}</td>
             <td colSpan={2} className={`${cellClass} border-l-2 font-bold`}>최저 기온</td>
             <td colSpan={2} className={`${cellClass} border-r-2`}>{meta.minTemperature || "-"}</td>
           </tr>
           <tr>
             <td className={cellClass}>Producer</td>
-            <td colSpan={2} className={cellClass}>{plan.production || "-"}</td>
-            <td colSpan={2} className={cellClass}>{meta.producerContact || "-"}</td>
+            <td className={cellClass}>{plan.production || "-"}</td>
+            <td className={cellClass}>{meta.producerContact || "-"}</td>
             <td colSpan={2} className={`${cellClass} border-b-2 border-l-2 font-bold`}>최고 기온</td>
             <td colSpan={2} className={`${cellClass} border-b-2 border-r-2`}>{meta.maxTemperature || "-"}</td>
           </tr>
