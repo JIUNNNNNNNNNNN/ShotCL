@@ -36,14 +36,15 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               <span className="text-[9px]">DAY</span>
               <span className="ml-1 text-2xl leading-none">{meta.day || "-"}</span>
             </td>
-            <td rowSpan={3} colSpan={9} className={`${cellClass} text-2xl font-black`}>
-              {plan.title || "작품명"} TIME TABLE
+            <td rowSpan={3} colSpan={9} className={cellClass}>
+              <span className="text-2xl font-black">&lt;{plan.title || "작품명"}&gt;</span>
+              <span className="ml-2 text-lg font-normal">TIME TABLE</span>
             </td>
             <td rowSpan={3} colSpan={2} className={`${cellClass} bg-[#e2efda]`}>
               <span className="block text-[9px] font-bold">Total Crew</span>
               <span className="text-lg font-black">{meta.totalCrew || "-"}</span>
             </td>
-            <td rowSpan={6} className="border-x-2 border-y-0 border-black bg-white p-0" aria-hidden="true" />
+            <td rowSpan={6} className="border-0 bg-white p-0" aria-hidden="true" />
             <td colSpan={2} className={`${cellClass} border-l-2 border-t-2 font-bold`}>Sunrise</td>
             <td colSpan={2} className={`${cellClass} border-r-2 border-t-2`}>{meta.sunrise || "-"}</td>
           </tr>
