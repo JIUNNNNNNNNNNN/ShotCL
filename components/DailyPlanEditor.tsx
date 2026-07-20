@@ -73,6 +73,8 @@ type SceneBlockInput = {
 
 type PlanTextField = Exclude<keyof DailyPlanDraft, "shootingLocations" | "mealTimes">;
 
+type EditableWeatherField = "weather" | "sunrise" | "sunset" | "minTemperature" | "maxTemperature" | "rainProbability";
+
 type DailyPlanPreviewCut = {
   id: string;
   cutNumber: string;
@@ -209,7 +211,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
-  const [isWeatherManualOpen, setIsWeatherManualOpen] = useState(false);
+  const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("수동 입력 가능");
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -319,17 +321,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       window.removeEventListener("beforeunload", savePendingDraft);
     };
   }, [project.id]);
-
-  useEffect(() => {
-    if (!isWeatherManualOpen) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsWeatherManualOpen(false);
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isWeatherManualOpen]);
 
   function updatePlanField(field: PlanTextField, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
@@ -896,47 +887,79 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
-              <WeatherSummaryValue label="날씨" value={printMeta.weather} onClick={() => setIsWeatherManualOpen(true)} />
-              <WeatherSummaryValue label="일출" value={printMeta.sunrise} onClick={() => setIsWeatherManualOpen(true)} />
-              <WeatherSummaryValue label="일몰" value={printMeta.sunset} onClick={() => setIsWeatherManualOpen(true)} />
-              <WeatherSummaryValue label="최저 기온" value={printMeta.minTemperature} onClick={() => setIsWeatherManualOpen(true)} />
-              <WeatherSummaryValue label="최고 기온" value={printMeta.maxTemperature} onClick={() => setIsWeatherManualOpen(true)} />
-              <WeatherSummaryValue label="강수 확률" value={printMeta.rainProbability} onClick={() => setIsWeatherManualOpen(true)} />
+              <EditableWeatherCard
+                label="날씨"
+                value={printMeta.weather}
+                isEditing={editingWeatherField === "weather"}
+                onEdit={() => setEditingWeatherField("weather")}
+                onSave={(value) => {
+                  updatePrintMetaField("weather", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
+              <EditableWeatherCard
+                label="일출"
+                value={printMeta.sunrise}
+                placeholder="HH:mm"
+                isEditing={editingWeatherField === "sunrise"}
+                onEdit={() => setEditingWeatherField("sunrise")}
+                onSave={(value) => {
+                  updatePrintMetaField("sunrise", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
+              <EditableWeatherCard
+                label="일몰"
+                value={printMeta.sunset}
+                placeholder="HH:mm"
+                isEditing={editingWeatherField === "sunset"}
+                onEdit={() => setEditingWeatherField("sunset")}
+                onSave={(value) => {
+                  updatePrintMetaField("sunset", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
+              <EditableWeatherCard
+                label="최저 기온"
+                value={printMeta.minTemperature}
+                isEditing={editingWeatherField === "minTemperature"}
+                onEdit={() => setEditingWeatherField("minTemperature")}
+                onSave={(value) => {
+                  updatePrintMetaField("minTemperature", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
+              <EditableWeatherCard
+                label="최고 기온"
+                value={printMeta.maxTemperature}
+                isEditing={editingWeatherField === "maxTemperature"}
+                onEdit={() => setEditingWeatherField("maxTemperature")}
+                onSave={(value) => {
+                  updatePrintMetaField("maxTemperature", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
+              <EditableWeatherCard
+                label="강수 확률"
+                value={printMeta.rainProbability}
+                isEditing={editingWeatherField === "rainProbability"}
+                onEdit={() => setEditingWeatherField("rainProbability")}
+                onSave={(value) => {
+                  updatePrintMetaField("rainProbability", value);
+                  setEditingWeatherField(null);
+                }}
+                onCancel={() => setEditingWeatherField(null)}
+              />
             </div>
 
             <p className="mt-3 text-xs font-bold text-field-muted" aria-live="polite">{weatherStatus}</p>
 
-            <p className="mt-3 text-xs font-bold text-field-muted">카드를 누르면 상세값을 직접 수정할 수 있습니다. API 키 없이 Open-Meteo 예보를 사용합니다.</p>
-
-            {isWeatherManualOpen ? (
-              <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/50 p-4" onPointerDown={() => setIsWeatherManualOpen(false)}>
-                <div
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="weather-manual-title"
-                  className="w-full max-w-3xl rounded-md border border-field-border bg-white p-4 shadow-2xl"
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <div className="flex items-center justify-between gap-2 border-b border-field-border pb-3">
-                    <h4 id="weather-manual-title" className="flex-1 text-center text-base font-black text-field-primary">날씨 상세값 수정</h4>
-                    <IconButton label="날씨 상세값 닫기" onClick={() => setIsWeatherManualOpen(false)}>
-                      <X className="h-4 w-4" aria-hidden />
-                    </IconButton>
-                  </div>
-                  <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                    <CompactField label="날씨" value={printMeta.weather} onChange={(value) => updatePrintMetaField("weather", value)} />
-                    <CompactField label="최저 기온" value={printMeta.minTemperature} onChange={(value) => updatePrintMetaField("minTemperature", value)} />
-                    <CompactField label="최고 기온" value={printMeta.maxTemperature} onChange={(value) => updatePrintMetaField("maxTemperature", value)} />
-                    <CompactField label="강수 확률" value={printMeta.rainProbability} onChange={(value) => updatePrintMetaField("rainProbability", value)} />
-                    <TimeWheelPicker label="일출 시간" value={printMeta.sunrise} onChange={(value) => updatePrintMetaField("sunrise", value)} compact inline />
-                    <TimeWheelPicker label="일몰 시간" value={printMeta.sunset} onChange={(value) => updatePrintMetaField("sunset", value)} compact inline />
-                  </div>
-                  <div className="mt-4 flex justify-center">
-                    <Button onClick={() => setIsWeatherManualOpen(false)}>저장하고 닫기</Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+            <p className="mt-3 text-xs font-bold text-field-muted">카드를 누르면 해당 값을 바로 수정할 수 있습니다. API 키 없이 Open-Meteo 예보를 사용합니다.</p>
           </section>
 
           <div className="order-2 mt-6 grid gap-5">
@@ -1293,9 +1316,70 @@ function CompactField({ label, value, type = "text", onChange }: { label: string
   );
 }
 
-function WeatherSummaryValue({ label, value, onClick }: { label: string; value: string; onClick: () => void }) {
+function EditableWeatherCard({
+  label,
+  value,
+  placeholder,
+  isEditing,
+  onEdit,
+  onSave,
+  onCancel
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  isEditing: boolean;
+  onEdit: () => void;
+  onSave: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [draftValue, setDraftValue] = useState(value);
+  const cancelBlurRef = useRef(false);
+
+  function startEditing() {
+    setDraftValue(value);
+    cancelBlurRef.current = false;
+    onEdit();
+  }
+
+  if (isEditing) {
+    return (
+      <label className="grid min-h-14 content-center rounded-md border border-field-primary bg-white px-2 py-1.5 text-center ring-1 ring-field-primary/20">
+        <span className="text-[11px] font-black text-field-muted">{label}</span>
+        <input
+          autoFocus
+          aria-label={`${label} 수정`}
+          className="mt-0.5 min-w-0 rounded border border-field-border bg-white px-1.5 py-1 text-center text-[13px] font-black text-field-text outline-none focus:border-field-primary"
+          type="text"
+          inputMode={placeholder ? "numeric" : undefined}
+          placeholder={placeholder}
+          value={draftValue}
+          onChange={(event) => setDraftValue(event.target.value)}
+          onBlur={(event) => {
+            if (cancelBlurRef.current) {
+              cancelBlurRef.current = false;
+              return;
+            }
+            onSave(event.currentTarget.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSave(event.currentTarget.value);
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              cancelBlurRef.current = true;
+              onCancel();
+            }
+          }}
+        />
+      </label>
+    );
+  }
+
   return (
-    <button type="button" onClick={onClick} className="grid min-h-14 content-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center hover:border-field-primary hover:bg-field-light">
+    <button type="button" onClick={startEditing} className="grid min-h-14 content-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center hover:border-field-primary hover:bg-field-light">
       <span className="text-[11px] font-black text-field-muted">{label}</span>
       <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{value || "-"}</span>
     </button>
