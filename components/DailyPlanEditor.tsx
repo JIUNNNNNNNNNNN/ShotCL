@@ -28,6 +28,7 @@ import {
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
+import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { Button } from "@/components/ui/Button";
 
 type DailyPlanEditorProps = {
@@ -1832,13 +1833,18 @@ function MoveMenu({
 
 function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
   return (
-    <section className="mt-5 rounded-md border border-field-border bg-white p-5">
+    <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-field-primary">실시간 일촬표 미리보기</h2>
         <p className="text-sm font-bold text-field-muted">데스크탑은 TEST.pdf 같은 A4 가로 표로, 모바일은 세로 읽기 모드로 표시됩니다.</p>
       </div>
       <ScaledDailyPlanPreview data={data} />
-      <DailyPlanMobilePreview data={data} />
+      <DailyPlanMobilePortraitPreview
+        plan={data.plan}
+        locations={data.locations}
+        meta={data.meta}
+        timetableRows={getPrintTimetableRows(data)}
+      />
     </section>
   );
 }
@@ -1878,89 +1884,6 @@ function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
           <DailyPlanPrintDocument data={data} className="daily-plan-template text-[11px] leading-tight text-black" />
         </div>
       </div>
-    </div>
-  );
-}
-
-function DailyPlanMobilePreview({ data }: { data: DailyPlanPreviewData }) {
-  const timetableRows = getPrintTimetableRows(data).filter((row) => row.start || row.end || row.description || ("sceneNumber" in row && row.sceneNumber));
-
-  return (
-    <div className="mt-4 grid gap-3 md:hidden">
-      <section className="rounded-md border border-field-border bg-field-soft p-3">
-        <p className="text-xs font-black text-field-muted">DAY {data.meta.day || "-"}</p>
-        <h3 className="mt-1 text-lg font-black text-field-primary">{data.plan.title || "작품명"} TIME TABLE</h3>
-        <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-bold text-field-muted">
-          <span>촬영일: {formatDateForPreview(data.plan.shootingDate) || "-"}</span>
-          <span>콜타임: {data.plan.callTime || ""}</span>
-          <span>감독: {data.plan.director || "-"}</span>
-          <span>조감독: {data.plan.assistantDirector || "-"}</span>
-          <span>제작: {data.plan.production || "-"}</span>
-          <span>총 스태프: {data.meta.totalCrew || "-"}</span>
-        </div>
-      </section>
-
-      <section className="rounded-md border border-field-border bg-white p-3">
-        <h3 className="font-black text-field-primary">LOCATION</h3>
-        <div className="mt-2 grid gap-2">
-          {data.locations.length > 0 ? (
-            data.locations.map((location, index) => (
-              <div key={location.id || `mobile-location-${index}`} className="rounded-md border border-field-border p-2 text-sm font-bold text-field-muted">
-                <p className="font-black text-field-primary">LOCATION {index + 1}: {location.name || "-"}</p>
-                <p>{getLocationAddress(location) || location.detail || "-"}</p>
-              </div>
-            ))
-          ) : (
-            <p className="text-sm font-bold text-field-muted">등록된 장소가 없습니다.</p>
-          )}
-        </div>
-      </section>
-
-      <section className="rounded-md border border-field-border bg-white p-3">
-        <h3 className="font-black text-field-primary">TIME TABLE</h3>
-        <div className="mt-2 grid gap-2">
-          {timetableRows.map((row, index) =>
-            row.type === "break" ? (
-              <div key={`mobile-time-${index}`} className="rounded-md border border-field-border bg-[#fff3c4] p-2 text-sm font-bold text-field-muted">
-                <p className="font-black text-field-primary">{[formatTimeRange(row.start, row.end), row.runtime].filter(Boolean).join(" / ")}</p>
-                {row.location ? <p>장소: {row.location}</p> : null}
-                <p>{row.description || "기타 일정"}</p>
-              </div>
-            ) : (
-              <div key={`mobile-time-${index}`} className="rounded-md border border-field-border p-2 text-sm font-bold text-field-muted">
-                <p className="font-black text-field-primary">
-                  {[formatTimeRange(row.start, row.end), row.sceneNumber || "SCENE"].filter(Boolean).join(" / ")}
-                </p>
-                <p>{row.location || "-"} / {row.dayNight || "-"} / Total CUT {row.totalCut || "-"}</p>
-                <p>{row.description || "-"}</p>
-                <p>Shooting order: {row.shootingOrder || "-"}</p>
-                {row.notes ? <p>Notes: {row.notes}</p> : null}
-              </div>
-            )
-          )}
-        </div>
-      </section>
-
-      <div className="grid gap-3">
-        <MemoBlock title="Notice" value={data.plan.safetyNotice} />
-        <MemoBlock title="Memo" value={data.meta.memoText} />
-      </div>
-
-      <section className="rounded-md border border-field-border bg-white p-3">
-        <h3 className="font-black text-field-primary">배우 / 스태프 콜</h3>
-        <div className="mt-2 grid gap-2">
-          {data.meta.starring.map((person) => (
-            <p key={person.id} className="text-sm font-bold text-field-muted">
-              배우: {person.name || "-"} / {person.role || "-"} / {person.callTime || ""} / {person.callLocation || "-"}
-            </p>
-          ))}
-          {data.meta.teams.map((team) => (
-            <p key={team.id} className="text-sm font-bold text-field-muted">
-              부서: {team.team || "-"} / {team.total || "-"}명 / {team.callTime || ""} / {team.callLocation || "-"}
-            </p>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
@@ -2152,28 +2075,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
   );
 }
 
-type PrintTimetableRow =
-  | {
-      type: "scene";
-      start: string;
-      end: string;
-      runtime: string;
-      location: string;
-      dayNight: string;
-      sceneNumber: string;
-      totalCut: string;
-      description: string;
-      shootingOrder: string;
-      notes: string;
-    }
-  | {
-      type: "break";
-      start: string;
-      end: string;
-      runtime: string;
-      location: string;
-      description: string;
-    };
+type PrintTimetableRow = MobileDailyPlanTimetableRow;
 
 function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] {
   const sceneRows: PrintTimetableRow[] = data.scenes.map((scene) => ({
@@ -2260,15 +2162,6 @@ function SceneMeta({ scene, print = false }: { scene: DailyPlanPreviewScene; pri
       {scene.costumeMakeup ? <span>의상/분장: {scene.costumeMakeup}</span> : null}
       {scene.sceneMemo ? <span className={print ? "col-span-4" : "md:col-span-2"}>씬 메모: {scene.sceneMemo}</span> : null}
     </div>
-  );
-}
-
-function MemoBlock({ title, value }: { title: string; value: string }) {
-  return (
-    <section className="rounded-md border border-field-border bg-white p-3">
-      <h3 className="font-black text-field-primary">{title}</h3>
-      <p className="mt-1 whitespace-pre-wrap text-field-muted">{value || "-"}</p>
-    </section>
   );
 }
 
