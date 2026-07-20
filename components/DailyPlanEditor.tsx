@@ -867,9 +867,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
 
           <div className="flex flex-col">
-          <details className="order-1 mt-5 rounded-md border border-field-border bg-field-soft p-3">
-            <summary className="cursor-pointer text-sm font-black text-field-primary">날씨 정보 입력</summary>
-            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <section className="order-1 mt-5 rounded-md border border-field-border bg-field-soft p-3">
+            <h3 className="text-sm font-black text-field-primary">날씨 정보</h3>
+            <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <WeatherRegionPicker
                 value={printMeta.weatherRegion ?? ""}
                 province={printMeta.weatherProvince ?? ""}
@@ -878,21 +878,36 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   setPrintMeta((current) => ({ ...current, weatherRegion: value, weatherProvince: province, weatherDistrict: district }))
                 }
               />
-              <CompactField label="날씨" value={printMeta.weather} onChange={(value) => updatePrintMetaField("weather", value)} />
-              <CompactField label="최저 기온" value={printMeta.minTemperature} onChange={(value) => updatePrintMetaField("minTemperature", value)} />
-              <CompactField label="최고 기온" value={printMeta.maxTemperature} onChange={(value) => updatePrintMetaField("maxTemperature", value)} />
-              <CompactField label="강수 확률" value={printMeta.rainProbability} onChange={(value) => updatePrintMetaField("rainProbability", value)} />
-              <TimeWheelPicker label="일출 시간" value={printMeta.sunrise} onChange={(value) => updatePrintMetaField("sunrise", value)} compact inline />
-              <TimeWheelPicker label="일몰 시간" value={printMeta.sunset} onChange={(value) => updatePrintMetaField("sunset", value)} compact inline />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
               <Button variant="secondary" onClick={handleLoadOpenMeteo} disabled={isWeatherLoading || !plan.shootingDate || !weatherLookupSource}>
                 {isWeatherLoading ? "날씨 불러오는 중…" : "날씨 자동 입력"}
               </Button>
-              <p className="w-full text-xs font-bold text-field-muted" aria-live="polite">{weatherStatus}</p>
-              <p className="w-full text-xs font-bold text-field-muted">API 키 없이 Open-Meteo 예보를 사용합니다. 자동 입력 후에도 위 필드를 직접 수정할 수 있습니다.</p>
             </div>
-          </details>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+              <WeatherSummaryValue label="날씨" value={printMeta.weather} />
+              <WeatherSummaryValue label="일출" value={printMeta.sunrise} />
+              <WeatherSummaryValue label="일몰" value={printMeta.sunset} />
+              <WeatherSummaryValue label="최저 기온" value={printMeta.minTemperature} />
+              <WeatherSummaryValue label="최고 기온" value={printMeta.maxTemperature} />
+              <WeatherSummaryValue label="강수 확률" value={printMeta.rainProbability} />
+            </div>
+
+            <p className="mt-3 text-xs font-bold text-field-muted" aria-live="polite">{weatherStatus}</p>
+
+            <details className="mt-3 rounded-md border border-field-border bg-white p-3">
+              <summary className="cursor-pointer text-xs font-black text-field-primary">날씨 상세값 직접 입력</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                <CompactField label="날씨" value={printMeta.weather} onChange={(value) => updatePrintMetaField("weather", value)} />
+                <CompactField label="최저 기온" value={printMeta.minTemperature} onChange={(value) => updatePrintMetaField("minTemperature", value)} />
+                <CompactField label="최고 기온" value={printMeta.maxTemperature} onChange={(value) => updatePrintMetaField("maxTemperature", value)} />
+                <CompactField label="강수 확률" value={printMeta.rainProbability} onChange={(value) => updatePrintMetaField("rainProbability", value)} />
+                <TimeWheelPicker label="일출 시간" value={printMeta.sunrise} onChange={(value) => updatePrintMetaField("sunrise", value)} compact inline />
+                <TimeWheelPicker label="일몰 시간" value={printMeta.sunset} onChange={(value) => updatePrintMetaField("sunset", value)} compact inline />
+              </div>
+            </details>
+
+            <p className="mt-3 text-xs font-bold text-field-muted">API 키 없이 Open-Meteo 예보를 사용합니다. 자동 입력 후에도 상세값을 직접 수정할 수 있습니다.</p>
+          </section>
 
           <div className="order-2 mt-6 grid gap-5">
             <section className="rounded-md border border-field-border bg-field-soft p-4">
@@ -1245,6 +1260,15 @@ function CompactField({ label, value, type = "text", onChange }: { label: string
       <span className="text-xs font-black text-field-primary">{label}</span>
       <input className={compactInputClass} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
+  );
+}
+
+function WeatherSummaryValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-h-14 content-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center">
+      <span className="text-[11px] font-black text-field-muted">{label}</span>
+      <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{value || "-"}</span>
+    </div>
   );
 }
 
