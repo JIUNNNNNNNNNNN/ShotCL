@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  background: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #ffffff;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #ffffff;
+  color: #1c1c1a;
+  font-family:
+    Arial,
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.print-only {
+  display: none;
+}
+
+.screen-only {
+  display: block;
+}
+
+.daily-plan-template {
+  width: 1120px;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #000000;
+  font-family: Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+.daily-plan-template table,
+.daily-plan-template .daily-plan-grid {
+  table-layout: fixed;
+}
+
+.daily-plan-template td,
+.daily-plan-template th {
+  height: 20px;
+  padding: 3px 5px;
+  vertical-align: middle;
+  word-break: keep-all;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  header,
+  footer,
+  .no-print,
+  .screen-only {
+    display: none !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .print-daily-plan {
+    color: #111111;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .daily-plan-print-document {
+    break-after: auto;
+  }
+
+  .daily-plan-template {
+    width: 100% !important;
+    margin: 0 !important;
+    font-size: 8.5px !important;
+  }
+
+  .daily-plan-template td,
+  .daily-plan-template th {
+    height: 16px;
+    padding: 2px 4px;
+  }
+
+  .daily-plan-print-scene {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-daily-plan table {
+    min-width: 0 !important;
+    width: 100% !important;
+    font-size: 9px;
+  }
+
+  .print-daily-plan input,
+  .print-daily-plan textarea,
+  .print-daily-plan select {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #111111 !important;
+    resize: none !important;
+  }
+}

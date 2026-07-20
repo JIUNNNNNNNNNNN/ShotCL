@@ -1,0 +1,18 @@
+{
+  "name": "오늘의 스토리보드 진행 관리",
+  "short_name": "오늘의 보드",
+  "description": "촬영 현장에서 오늘의 컷 진행 상태를 공유하는 모바일 PWA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070707",
+  "theme_color": "#070707",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
