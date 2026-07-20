@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Copy, Eye, FileSpreadsheet, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
@@ -847,9 +847,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <CompactField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
               <CompactField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
             </div>
-            <div className="grid items-center gap-3 md:grid-cols-2">
+            <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]">
               <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
               <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
+              <CompactField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
             </div>
             <div className="grid items-stretch gap-3 lg:grid-cols-3">
               <RoleContactGroup
@@ -873,9 +874,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 onNameChange={(value) => updatePlanField("production", value)}
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
-            </div>
-            <div className="flex items-center justify-center md:justify-start">
-              <CompactField className="w-full md:w-64" label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
             </div>
           </div>
 
@@ -1105,8 +1103,11 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   if (row.type === "event") {
                     const meal = row.item;
                     const mealIndex = row.sourceIndex;
+                    const editorKey = `event-${meal.id}`;
+                    const isDescriptionOpen = timetableDescriptionTarget?.type === "event" && timetableDescriptionTarget.index === mealIndex;
                     return (
-                      <tr key={meal.id} className="bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                      <Fragment key={meal.id}>
+                      <tr className="bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                         <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
                         <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>기타 일정 · 시작시간</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -1127,19 +1128,40 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                             value={meal.memo}
                             placeholder="점심 식사 & 세팅 / 이동 / 정리"
                             ariaLabel={`기타 일정 ${mealIndex + 1} 내용 수정`}
-                            onClick={() => setTimetableDescriptionTarget({ type: "event", index: mealIndex, label: `기타 일정 ${mealIndex + 1}`, value: meal.memo })}
+                            editorKey={editorKey}
+                            onClick={() => setTimetableDescriptionTarget((current) => current?.type === "event" && current.index === mealIndex ? null : { type: "event", index: mealIndex, label: `기타 일정 ${mealIndex + 1}`, value: meal.memo })}
                           />
                         </td>
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                         <td className={`${timetableCellClass} max-lg:hidden`} />
                       </tr>
+                      {isDescriptionOpen ? (
+                        <tr className="bg-[#fff3c4] max-lg:block">
+                          <td colSpan={11} className="border border-field-border p-2 max-lg:block max-lg:border-0 max-lg:p-0">
+                            <TimetableDescriptionInlineEditor
+                              editorKey={editorKey}
+                              label={`기타 일정 ${mealIndex + 1}`}
+                              value={meal.memo}
+                              onClose={() => setTimetableDescriptionTarget(null)}
+                              onSave={(value) => {
+                                updateMealTime(mealIndex, { memo: value });
+                                setTimetableDescriptionTarget(null);
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                      </Fragment>
                     );
                   }
 
                   const scene = row.item;
                   const sceneIndex = row.sourceIndex;
+                  const editorKey = `scene-${scene.id}`;
+                  const isDescriptionOpen = timetableDescriptionTarget?.type === "scene" && timetableDescriptionTarget.index === sceneIndex;
                   return (
-                    <tr key={scene.id} className="align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                    <Fragment key={scene.id}>
+                    <tr className="align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3" onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · 시작시간</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -1154,12 +1176,30 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           value={scene.description}
                           placeholder="촬영 내용"
                           ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 내용 수정`}
-                          onClick={() => setTimetableDescriptionTarget({ type: "scene", index: sceneIndex, label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`, value: scene.description })}
+                          editorKey={editorKey}
+                          onClick={() => setTimetableDescriptionTarget((current) => current?.type === "scene" && current.index === sceneIndex ? null : { type: "scene", index: sceneIndex, label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`, value: scene.description })}
                         />
                       </td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><input className={timetableInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="예: 4-3-2-1" /></td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><input className={timetableInputClass} value={scene.notes} onChange={(event) => updateTimetableNotes(sceneIndex, event.target.value)} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="비고" /></td>
                     </tr>
+                    {isDescriptionOpen ? (
+                      <tr className="max-lg:block">
+                        <td colSpan={11} className="border border-field-border p-2 max-lg:block max-lg:border-0 max-lg:p-0">
+                          <TimetableDescriptionInlineEditor
+                            editorKey={editorKey}
+                            label={formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`}
+                            value={scene.description}
+                            onClose={() => setTimetableDescriptionTarget(null)}
+                            onSave={(value) => {
+                              updateTimetableDescription(sceneIndex, value);
+                              setTimetableDescriptionTarget(null);
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -1233,13 +1273,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 {printMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_1fr_0.6fr_0.8fr_1.2fr_1.2fr_auto]"
+                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_1fr_minmax(4.5rem,0.7fr)_0.8fr_1.2fr_1.2fr_auto]"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "teams", index)}
                   >
                     <div className="flex items-center justify-center"><DragHandle label={`부서 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "teams", index)} /></div>
                     <input className={compactInputClass} value={team.team} onChange={(event) => updateTeam(index, { team: event.target.value })} placeholder="부서" />
-                    <input className={compactInputClass} type="number" inputMode="numeric" min="1" max="99" step="1" value={team.total} onChange={(event) => updateTeam(index, { total: event.target.value })} placeholder="인원" aria-label={`${team.team || `부서 ${index + 1}`} 인원`} />
+                    <input className={`${compactInputClass} [appearance:textfield] placeholder:text-field-muted [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none`} type="number" inputMode="numeric" min="1" max="99" step="1" value={team.total} onChange={(event) => updateTeam(index, { total: event.target.value })} placeholder="인원" aria-label={`${team.team || `부서 ${index + 1}`} 인원`} />
                     <TimeWheelPicker label="콜 시간" value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
                     <CallLocationSelect
                       ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
@@ -1305,21 +1345,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       </section>
       </div>
 
-      {timetableDescriptionTarget ? (
-        <TimetableDescriptionModal
-          label={timetableDescriptionTarget.label}
-          value={timetableDescriptionTarget.value}
-          onClose={() => setTimetableDescriptionTarget(null)}
-          onSave={(value) => {
-            if (timetableDescriptionTarget.type === "scene") {
-              updateTimetableDescription(timetableDescriptionTarget.index, value);
-            } else {
-              updateMealTime(timetableDescriptionTarget.index, { memo: value });
-            }
-            setTimetableDescriptionTarget(null);
-          }}
-        />
-      ) : null}
       {isPrintPreviewOpen ? <PrintPreviewModal data={previewData} onClose={() => setIsPrintPreviewOpen(false)} onPrint={handlePrint} /> : null}
       <PrintDailyPlanView data={previewData} />
     </div>
@@ -1608,11 +1633,13 @@ function TimetableDescriptionButton({
   value,
   placeholder,
   ariaLabel,
+  editorKey,
   onClick
 }: {
   value: string;
   placeholder: string;
   ariaLabel: string;
+  editorKey: string;
   onClick: () => void;
 }) {
   return (
@@ -1622,6 +1649,7 @@ function TimetableDescriptionButton({
       onClick={onClick}
       aria-label={ariaLabel}
       title={value || placeholder}
+      data-description-trigger={editorKey}
     >
       <span className={`block overflow-hidden text-ellipsis whitespace-nowrap ${value ? "text-field-text" : "text-center text-field-muted"}`}>
         {value || placeholder}
@@ -1630,57 +1658,68 @@ function TimetableDescriptionButton({
   );
 }
 
-function TimetableDescriptionModal({
+function TimetableDescriptionInlineEditor({
+  editorKey,
   label,
   value,
   onClose,
   onSave
 }: {
+  editorKey: string;
   label: string;
   value: string;
   onClose: () => void;
   onSave: (value: string) => void;
 }) {
   const [draftValue, setDraftValue] = useState(value);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
 
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (panelRef.current?.contains(target)) return;
+      if (target.closest("[data-description-trigger]")?.getAttribute("data-description-trigger") === editorKey) return;
+      onClose();
+    }
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [editorKey, onClose]);
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={onClose}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="timetable-description-dialog-title"
-        className="w-full max-w-2xl rounded-md border border-field-border bg-white p-5 text-left shadow-2xl"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+      <div ref={panelRef} className="mx-auto my-1 w-full max-w-xl rounded-md border border-field-border bg-white p-3 text-left shadow-lg" data-description-editor={editorKey}>
         <div className="flex items-center justify-between gap-3">
-          <h2 id="timetable-description-dialog-title" className="text-lg font-black text-field-primary">{label} 내용 수정</h2>
-          <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-field-border text-field-muted" onClick={onClose} aria-label="내용 수정 닫기">
+          <div>
+            <h2 className="text-sm font-black text-field-primary">내용 수정</h2>
+            <p className="mt-0.5 text-[11px] font-bold text-field-muted">{label}</p>
+          </div>
+          <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-field-border text-field-muted" onClick={onClose} aria-label="내용 수정 닫기">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
         <textarea
           autoFocus
-          className="mt-4 min-h-48 w-full resize-y rounded-md border border-field-border bg-white p-3 text-left text-sm font-bold leading-relaxed text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light"
+          rows={4}
+          className="mt-2 w-full resize-y rounded-md border border-field-border bg-white p-2.5 text-left text-[13px] font-bold leading-relaxed text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light"
           value={draftValue}
           onChange={(event) => setDraftValue(event.target.value)}
           placeholder="촬영 내용을 입력하세요."
           aria-label={`${label} 전체 내용`}
         />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>취소</Button>
-          <Button onClick={() => onSave(draftValue)}>저장</Button>
+        <div className="mt-2 flex justify-end gap-2">
+          <button type="button" className="min-h-8 rounded-md border border-field-border bg-white px-3 text-xs font-black text-field-text" onClick={onClose}>취소</button>
+          <button type="button" className="min-h-8 rounded-md bg-field-primary px-3 text-xs font-black text-white" onClick={() => onSave(draftValue)}>저장</button>
         </div>
-      </section>
-    </div>
+      </div>
   );
 }
 

@@ -26,8 +26,10 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
         <table className="w-full table-fixed border-collapse border-2 border-black text-center">
           <colgroup>
             <col style={{ width: "11%" }} />
-            {Array.from({ length: 9 }, (_, index) => <col key={`title-column-${index}`} style={{ width: "8%" }} />)}
-            {Array.from({ length: 2 }, (_, index) => <col key={`crew-column-${index}`} style={{ width: "8.5%" }} />)}
+            {Array.from({ length: 8 }, (_, index) => <col key={`call-column-${index}`} style={{ width: "7.5%" }} />)}
+            <col style={{ width: "7%" }} />
+            <col style={{ width: "8%" }} />
+            <col style={{ width: "14%" }} />
           </colgroup>
           <tbody>
             <tr>
@@ -56,17 +58,17 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               </td>
               <td className={cellClass}>Director</td>
               <td className={cellClass}>{plan.director || "-"}</td>
-              <td className={cellClass}>{meta.directorContact || "-"}</td>
+              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.directorContact || "-"}</td>
             </tr>
             <tr>
               <td className={cellClass}>A.D</td>
               <td className={cellClass}>{plan.assistantDirector || "-"}</td>
-              <td className={cellClass}>{meta.assistantDirectorContact || "-"}</td>
+              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.assistantDirectorContact || "-"}</td>
             </tr>
             <tr>
               <td className={cellClass}>Producer</td>
               <td className={cellClass}>{plan.production || "-"}</td>
-              <td className={cellClass}>{meta.producerContact || "-"}</td>
+              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.producerContact || "-"}</td>
             </tr>
           </tbody>
         </table>
