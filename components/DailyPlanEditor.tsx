@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, ExternalLink, Eye, FileSpreadsheet, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eye, FileSpreadsheet, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -210,6 +210,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const [autoSaveStatus, setAutoSaveStatus] = useState("저장 준비 중");
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
+  const [expandedLocationDetailId, setExpandedLocationDetailId] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("수동 입력 가능");
@@ -967,7 +968,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
                   <h3 className="text-base font-black text-field-primary">촬영 장소</h3>
-                  <p className="mt-1 text-sm font-bold text-field-muted">수동 장소명/주소 입력이 기본입니다. 주소가 있으면 네이버 지도 검색 링크가 자동으로 만들어집니다.</p>
+                  <p className="mt-1 text-sm font-bold text-field-muted">장소명과 주소를 한 줄에서 빠르게 입력할 수 있습니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addLocation}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -975,91 +976,85 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 </Button>
               </div>
 
-              <div className="mt-4 grid gap-3">
+              <div className="mt-3 grid gap-2">
                 {locations.map((location, index) => (
                   <div
                     key={location.id}
-                    className="grid gap-3 rounded-md border border-field-border bg-white p-4"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-field-border bg-white p-2 md:grid-cols-[6.5rem_minmax(0,1fr)_auto]"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "locations", index)}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <DragHandle label={`LOCATION ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
-                        <h4 className="text-sm font-black text-field-primary">LOCATION {index + 1}</h4>
-                      </div>
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          aria-pressed={Boolean(location.isPrimary)}
-                          onClick={() => setMeetingLocation(index)}
-                          className={`inline-flex min-h-8 items-center justify-center rounded-md border px-3 text-xs font-black ${
-                            location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
-                          }`}
-                        >
-                          {location.isPrimary ? "집합장소" : "집합장소로 지정"}
-                        </button>
-                        <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
-                      </div>
+                    <div className="col-start-1 row-start-1 flex min-w-[6.5rem] items-center justify-center gap-1.5 whitespace-nowrap">
+                      <DragHandle label={`LOCATION ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
+                      <h4 className="min-w-0 whitespace-nowrap text-center text-xs font-black text-field-primary">LOCATION {index + 1}</h4>
                     </div>
 
-                    <div className="grid gap-3">
-                      <label className="grid gap-1">
-                        <span className="text-xs font-black text-field-primary">장소명</span>
+                    <div className="col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_2.5rem] items-center gap-2 md:col-span-1 md:col-start-2 md:row-start-1">
+                      <label className="min-w-0">
+                        <span className="sr-only">LOCATION {index + 1} 장소명</span>
                         <input
-                          className={inputClass}
+                          className={`${inputClass} truncate whitespace-nowrap`}
                           value={location.name}
                           onChange={(event) => updateLocation(index, { name: event.target.value, naverMapUrl: "" })}
                           placeholder="장소명"
+                          title={location.name}
                         />
                       </label>
-                      <div className="grid gap-1">
-                        <span className="text-xs font-black text-field-primary">주소</span>
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <input
-                            className={inputClass}
-                            value={getLocationAddress(location)}
-                            onChange={(event) => updateLocation(index, { roadAddress: event.target.value, address: "", naverMapUrl: "" })}
-                            placeholder="주소를 입력하거나 검색하세요"
-                          />
-                          <Button variant="secondary" onClick={() => openDaumAddressSearch(index)}>
-                            <Search className="h-4 w-4" aria-hidden />
-                            주소 검색
-                          </Button>
-                        </div>
-                      </div>
+                      <label className="min-w-0">
+                        <span className="sr-only">LOCATION {index + 1} 주소</span>
+                        <input
+                          className={`${inputClass} truncate whitespace-nowrap`}
+                          value={getLocationAddress(location)}
+                          onChange={(event) => updateLocation(index, { roadAddress: event.target.value, address: "", naverMapUrl: "" })}
+                          placeholder="주소"
+                          title={getLocationAddress(location)}
+                        />
+                      </label>
+                      <IconButton label={`LOCATION ${index + 1} 주소 검색`} onClick={() => openDaumAddressSearch(index)}>
+                        <Search className="h-4 w-4" aria-hidden />
+                      </IconButton>
                     </div>
-                    <label className="grid gap-1">
-                      <span className="text-xs font-black text-field-primary">상세 메모</span>
-                      <input className={inputClass} value={location.detail} onChange={(event) => updateLocation(index, { detail: event.target.value })} placeholder="상세 위치 / 메모" />
-                    </label>
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-field-border pt-3">
-                      <p className="text-xs font-bold text-field-muted">
-                        {addressSearchLocationId === location.id && addressSearchMessage
-                          ? addressSearchMessage
-                          : "주소 검색이 열리지 않아도 주소 칸에 직접 입력할 수 있습니다."}
-                      </p>
-                      {getNaverMapUrl(location) ? (
-                        <a
-                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary hover:border-field-primary"
-                          href={getNaverMapUrl(location)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <ExternalLink className="h-4 w-4" aria-hidden />
-                          네이버 지도에서 열기
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled
-                          className="inline-flex min-h-10 cursor-not-allowed items-center justify-center gap-2 rounded-md border border-field-border bg-field-soft px-3 text-sm font-black text-field-muted opacity-60"
-                        >
-                          <ExternalLink className="h-4 w-4" aria-hidden />
-                          네이버 지도에서 열기
-                        </button>
-                      )}
+
+                    <div className="col-start-2 row-start-1 flex items-center justify-end gap-1 md:col-start-3">
+                      <button
+                        type="button"
+                        aria-pressed={Boolean(location.isPrimary)}
+                        onClick={() => setMeetingLocation(index)}
+                        className={`inline-flex min-h-8 items-center justify-center whitespace-nowrap rounded-md border px-2 text-[11px] font-black ${
+                          location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
+                        }`}
+                      >
+                        {location.isPrimary ? "집합장소" : "집합장소 지정"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedLocationDetailId((current) => (current === location.id ? null : location.id))}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+                        aria-expanded={expandedLocationDetailId === location.id}
+                        aria-label={`LOCATION ${index + 1} 상세 메모 ${expandedLocationDetailId === location.id ? "닫기" : "열기"}`}
+                        title="상세 메모"
+                      >
+                        <MoreHorizontal className="h-4 w-4" aria-hidden />
+                      </button>
+                      <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
                     </div>
+
+                    {expandedLocationDetailId === location.id ? (
+                      <label className="col-span-2 grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 border-t border-field-border pt-2 md:col-span-3">
+                        <span className="text-xs font-black text-field-primary">상세 메모</span>
+                        <input
+                          className={`${inputClass} truncate whitespace-nowrap`}
+                          value={location.detail}
+                          onChange={(event) => updateLocation(index, { detail: event.target.value })}
+                          placeholder="상세 위치 / 메모"
+                          title={location.detail}
+                        />
+                      </label>
+                    ) : null}
+
+                    {addressSearchLocationId === location.id && addressSearchMessage ? (
+                      <span className="sr-only" aria-live="polite">{addressSearchMessage}</span>
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -2825,12 +2820,6 @@ function parseTimeValue(value: string) {
 function getLocationAddress(location: Partial<DailyPlanLocation> | undefined) {
   if (!location) return "";
   return [location.roadAddress, location.address].find((value) => value?.trim()) ?? "";
-}
-
-function getNaverMapUrl(location: Partial<DailyPlanLocation> | undefined) {
-  if (!location) return "";
-  const query = getLocationAddress(location).trim() || location.name?.trim() || "";
-  return query ? `https://map.naver.com/p/search/${encodeURIComponent(query)}` : "";
 }
 
 function loadDaumPostcodeScript() {
