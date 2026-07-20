@@ -774,7 +774,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             <CompactField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
             <CompactField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
-            <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+            <div className="grid gap-2 md:col-span-2 md:grid-cols-2 xl:col-span-3">
+              <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+              <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
+            </div>
             <div className="grid gap-2 md:col-span-2 xl:col-span-3 lg:grid-cols-3">
               <RoleContactGroup
                 role="감독"
@@ -799,7 +802,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               />
             </div>
             <CompactField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
-            <TimeWheelPicker label="현장 집합" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
           </div>
 
           <details className="mt-3 rounded-md border border-field-border bg-field-soft p-3">
