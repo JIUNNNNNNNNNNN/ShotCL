@@ -407,6 +407,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     const target = locations[index];
     if (!target) return;
 
+    if (typeof window === "undefined") {
+      setAddressSearchMessage("주소 검색을 열 수 없어 직접 입력해주세요.");
+      setAddressSearchLocationId(target.id);
+      return;
+    }
+
     setAddressSearchLocationId(target.id);
     setAddressSearchMessage("주소 검색창을 불러오는 중입니다.");
 
@@ -419,7 +425,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       }
 
       let addressSelected = false;
-      new Postcode({
+      const postcode = new Postcode({
         oncomplete: (data) => {
           addressSelected = true;
           const selectedAddress = data.userSelectedType === "J" ? data.jibunAddress : data.roadAddress;
@@ -439,9 +445,15 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             setAddressSearchLocationId(target.id);
           }
         }
-      }).open();
+      });
+
+      if (!postcode || typeof postcode.open !== "function") {
+        throw new Error("주소 검색을 열 수 없어 직접 입력해주세요.");
+      }
+      postcode.open();
     } catch (error) {
-      setAddressSearchMessage(error instanceof Error ? error.message : "주소 검색을 열지 못했습니다. 주소를 직접 입력해주세요.");
+      console.error("Daum postcode search failed", error);
+      setAddressSearchMessage("주소 검색을 열 수 없어 직접 입력해주세요.");
       setAddressSearchLocationId(target.id);
     }
   }
@@ -991,20 +1003,20 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     <div className="col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_2.5rem] items-center gap-3 md:col-span-1 md:col-start-2 md:row-start-1">
                       <label className="min-w-0">
                         <span className="sr-only">LOCATION {index + 1} 장소명</span>
-                        <input
+                        <DraftInput
                           className={`${inputClass} truncate whitespace-nowrap`}
                           value={location.name}
-                          onChange={(event) => updateLocation(index, { name: event.target.value, naverMapUrl: "" })}
+                          onCommit={(value) => updateLocation(index, { name: value, naverMapUrl: "" })}
                           placeholder="장소명"
                           title={location.name}
                         />
                       </label>
                       <label className="min-w-0">
                         <span className="sr-only">LOCATION {index + 1} 주소</span>
-                        <input
+                        <DraftInput
                           className={`${inputClass} truncate whitespace-nowrap`}
                           value={getLocationAddress(location)}
-                          onChange={(event) => updateLocation(index, { roadAddress: event.target.value, address: "", naverMapUrl: "" })}
+                          onCommit={(value) => updateLocation(index, { roadAddress: value, address: "", naverMapUrl: "" })}
                           placeholder="주소"
                           title={getLocationAddress(location)}
                         />
@@ -1041,10 +1053,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     {expandedLocationDetailId === location.id ? (
                       <label className="col-span-2 grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 border-t border-field-border pt-2 md:col-span-3">
                         <span className="text-xs font-black text-field-primary">상세 메모</span>
-                        <input
+                        <DraftInput
                           className={`${inputClass} truncate whitespace-nowrap`}
                           value={location.detail}
-                          onChange={(event) => updateLocation(index, { detail: event.target.value })}
+                          onCommit={(value) => updateLocation(index, { detail: value })}
                           placeholder="상세 위치 / 메모"
                           title={location.detail}
                         />
@@ -1052,7 +1064,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     ) : null}
 
                     {addressSearchLocationId === location.id && addressSearchMessage ? (
-                      <span className="sr-only" aria-live="polite">{addressSearchMessage}</span>
+                      <span className="col-span-2 text-center text-[11px] font-bold text-field-muted md:col-span-3" aria-live="polite">{addressSearchMessage}</span>
                     ) : null}
                   </div>
                 ))}
@@ -1136,10 +1148,10 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       <td className={`${timetableCellClass} max-lg:col-span-2`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>{formatSceneNumber(scene.sceneNumber) || "SCENE"} 촬영 · 시작시간</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>소요시간</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>장소</span><select className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N</span><select className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><input className={compactInputClass} value={scene.sceneNumber} onChange={(event) => updateScene(sceneIndex, { sceneNumber: event.target.value })} placeholder="S#1" /></td>
-                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>컷 수</span><input className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onChange={(event) => updateScene(sceneIndex, { cutCount: event.target.value })} /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>SCENE</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
+                      <td className={timetableCellClass}><span className={mobileTimetableLabelClass}>컷 수</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onCommit={(value) => updateScene(sceneIndex, { cutCount: value })} /></td>
                       <td className={timetableWideCellClass}><span className={mobileTimetableLabelClass}>등장 배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
                       <td className={timetableTextCellClass}>
                         <span className={mobileTimetableLabelClass}>내용</span>
@@ -1150,7 +1162,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
-                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><input className={timetableInputClass} value={scene.shootingOrder} onChange={(event) => updateScene(sceneIndex, { shootingOrder: event.target.value })} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="예: 4-3-2-1" /></td>
+                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={scene.shootingOrder} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="예: 4-3-2-1" /></td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
@@ -1199,8 +1211,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     onDrop={(event) => finishReorder(event, "starring", index)}
                   >
                     <div className="flex items-center justify-center"><DragHandle label={`배우 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "starring", index)} /></div>
-                    <input className={compactInputClass} value={person.name} onChange={(event) => updateStarring(index, { name: event.target.value })} placeholder="배우" />
-                    <input className={compactInputClass} value={person.role} onChange={(event) => updateStarring(index, { role: event.target.value })} placeholder="역할" />
+                    <DraftInput className={compactInputClass} value={person.name} onCommit={(value) => updateStarring(index, { name: value })} placeholder="배우" />
+                    <DraftInput className={compactInputClass} value={person.role} onCommit={(value) => updateStarring(index, { role: value })} placeholder="역할" />
                     <TimeWheelPicker label="콜 시간" value={person.callTime} onChange={(value) => updateStarring(index, { callTime: value })} compact showLabel={false} />
                     <CallLocationSelect
                       ariaLabel={`배우 ${index + 1} 집합장소`}
@@ -1235,7 +1247,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     onDrop={(event) => finishReorder(event, "teams", index)}
                   >
                     <div className="flex items-center justify-center"><DragHandle label={`부서 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "teams", index)} /></div>
-                    <input className={compactInputClass} value={team.team} onChange={(event) => updateTeam(index, { team: event.target.value })} placeholder="부서" />
+                    <DraftInput className={compactInputClass} value={team.team} onCommit={(value) => updateTeam(index, { team: value })} placeholder="부서" />
                     <CrewCountPicker value={team.total} onChange={(value) => updateTeam(index, { total: value })} ariaLabel={`${team.team || `부서 ${index + 1}`} 인원`} />
                     <TimeWheelPicker label="콜 시간" value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
                     <CallLocationSelect
@@ -1308,11 +1320,90 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   );
 }
 
+type DraftInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange"> & {
+  value: string;
+  onCommit: (value: string) => void;
+  transform?: (value: string) => string;
+};
+
+function DraftInput({ value, onCommit, transform, onBlur, onFocus, onKeyDown, ...props }: DraftInputProps) {
+  const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
+  const composingRef = useRef(false);
+
+  useEffect(() => {
+    if (!isFocused) setDraft(value);
+  }, [isFocused, value]);
+
+  function commit(nextValue = draft) {
+    const normalized = transform ? transform(nextValue) : nextValue;
+    setDraft(normalized);
+    if (normalized !== value) onCommit(normalized);
+  }
+
+  return (
+    <input
+      {...props}
+      value={draft}
+      onCompositionStart={() => { composingRef.current = true; }}
+      onCompositionEnd={(event) => {
+        composingRef.current = false;
+        setDraft(event.currentTarget.value);
+      }}
+      onChange={(event) => setDraft(event.currentTarget.value)}
+      onFocus={(event) => {
+        setIsFocused(true);
+        onFocus?.(event);
+      }}
+      onBlur={(event) => {
+        setIsFocused(false);
+        commit(event.currentTarget.value);
+        onBlur?.(event);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !composingRef.current) {
+          event.preventDefault();
+          commit(event.currentTarget.value);
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setDraft(value);
+          event.currentTarget.blur();
+        }
+        onKeyDown?.(event);
+      }}
+    />
+  );
+}
+
+function DraftTextarea({ value, onCommit, ...props }: Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "value" | "onChange"> & { value: string; onCommit: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) setDraft(value);
+  }, [isFocused, value]);
+
+  return (
+    <textarea
+      {...props}
+      value={draft}
+      onChange={(event) => setDraft(event.currentTarget.value)}
+      onFocus={() => setIsFocused(true)}
+      onBlur={(event) => {
+        setIsFocused(false);
+        if (event.currentTarget.value !== value) onCommit(event.currentTarget.value);
+      }}
+    />
+  );
+}
+
 function Field({ label, value, type = "text", onChange }: { label: string; value: string; type?: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-2">
       <span className="text-sm font-black text-field-primary">{label}</span>
-      <input className={inputClass} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <DraftInput className={inputClass} type={type} value={value} onCommit={onChange} />
     </label>
   );
 }
@@ -1321,7 +1412,7 @@ function CompactField({ label, value, type = "text", className = "", onChange }:
   return (
     <label className={`grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 ${className}`}>
       <span className="text-xs font-black text-field-primary">{label}</span>
-      <input className={compactInputClass} type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <DraftInput className={compactInputClass} type={type} value={value} onCommit={onChange} />
     </label>
   );
 }
@@ -1344,17 +1435,37 @@ function EditableWeatherCard({
   onCancel: () => void;
 }) {
   const [draftValue, setDraftValue] = useState(value);
-  const cancelBlurRef = useRef(false);
+  const draftValueRef = useRef(value);
+  const cardRef = useRef<HTMLLabelElement | null>(null);
+
+  useEffect(() => {
+    draftValueRef.current = draftValue;
+  }, [draftValue]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+
+    function saveOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && !cardRef.current?.contains(target)) {
+        onSave(draftValueRef.current);
+        onCancel();
+      }
+    }
+
+    document.addEventListener("pointerdown", saveOnOutsideClick);
+    return () => document.removeEventListener("pointerdown", saveOnOutsideClick);
+  }, [isEditing, onCancel, onSave]);
 
   function startEditing() {
     setDraftValue(value);
-    cancelBlurRef.current = false;
+    draftValueRef.current = value;
     onEdit();
   }
 
   if (isEditing) {
     return (
-      <label className="grid min-h-14 content-center rounded-md border border-field-primary bg-white px-2 py-1.5 text-center ring-1 ring-field-primary/20">
+      <label ref={cardRef} className="grid min-h-14 content-center rounded-md border border-field-primary bg-white px-2 py-1.5 text-center ring-1 ring-field-primary/20">
         <span className="text-[11px] font-black text-field-muted">{label}</span>
         <input
           autoFocus
@@ -1364,14 +1475,11 @@ function EditableWeatherCard({
           inputMode={placeholder ? "numeric" : undefined}
           placeholder={placeholder}
           value={draftValue}
-          onChange={(event) => setDraftValue(event.target.value)}
-          onBlur={(event) => {
-            if (cancelBlurRef.current) {
-              cancelBlurRef.current = false;
-              return;
-            }
-            onSave(event.currentTarget.value);
+          onChange={(event) => {
+            draftValueRef.current = event.currentTarget.value;
+            setDraftValue(event.currentTarget.value);
           }}
+          onBlur={(event) => onSave(event.currentTarget.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -1379,7 +1487,7 @@ function EditableWeatherCard({
             }
             if (event.key === "Escape") {
               event.preventDefault();
-              cancelBlurRef.current = true;
+              onSave(event.currentTarget.value);
               onCancel();
             }
           }}
@@ -1408,7 +1516,36 @@ function WeatherRegionPicker({
   onChange: (next: { value: string; province: string; district: string }) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
   const districts = koreanWeatherRegions[province] ?? [];
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function closeOnOutsideClick(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && !pickerRef.current?.contains(target)) {
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement && pickerRef.current?.contains(activeElement)) activeElement.blur();
+        setIsOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement && pickerRef.current?.contains(activeElement)) activeElement.blur();
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
 
   function selectProvince(nextProvince: string) {
     const nextDistrict = koreanWeatherRegions[nextProvince]?.includes(district) ? district : "";
@@ -1428,7 +1565,7 @@ function WeatherRegionPicker({
   }
 
   return (
-    <div className="relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+    <div ref={pickerRef} className="relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
       <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
       <button
         type="button"
@@ -1456,10 +1593,10 @@ function WeatherRegionPicker({
           </div>
           <label className="grid gap-1">
             <span className="text-xs font-black text-field-muted">직접 입력</span>
-            <input
+            <DraftInput
               className={compactInputClass}
               value={value}
-              onChange={(event) => onChange({ value: event.target.value, province: "", district: "" })}
+              onCommit={(nextValue) => onChange({ value: nextValue, province: "", district: "" })}
               placeholder="예: 경기도 광주시"
             />
           </label>
@@ -1485,17 +1622,18 @@ function RoleContactGroup({
   return (
     <div className="grid gap-2 rounded-md border border-field-border bg-field-soft p-2 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
       <span className="text-xs font-black text-field-primary">{role}</span>
-      <input
+      <DraftInput
         className={compactInputClass}
         value={name}
-        onChange={(event) => onNameChange(event.target.value)}
+        onCommit={onNameChange}
         placeholder="이름"
         aria-label={`${role} 이름`}
       />
-      <input
+      <DraftInput
         className={compactInputClass}
         value={contact}
-        onChange={(event) => onContactChange(formatKoreanPhoneNumber(event.target.value))}
+        onCommit={onContactChange}
+        transform={formatKoreanPhoneNumber}
         placeholder="연락처"
         aria-label={`${role} 연락처`}
       />
@@ -1506,20 +1644,59 @@ function RoleContactGroup({
 function RuntimePicker({ value, onChange, showLabel = true }: { value: number | null; onChange: (value: number | null) => void; showLabel?: boolean }) {
   const [isOpen, setIsOpen] = useState(false);
   const selectedLabel = formatRuntimeMinutes(value);
+  const [draftValue, setDraftValue] = useState(selectedLabel);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const options = runtimeOptions.map(formatRuntimeMinutes);
+
+  useEffect(() => setDraftValue(selectedLabel), [selectedLabel]);
+
+  function commitDraft(nextDraft = draftValue) {
+    const nextValue = parseDurationInput(nextDraft);
+    if (nextValue == null && nextDraft.trim()) {
+      setDraftValue(selectedLabel);
+      return;
+    }
+    onChange(nextValue);
+    setDraftValue(formatRuntimeMinutes(nextValue));
+  }
 
   return (
     <div className="relative grid gap-1">
       {showLabel ? <span className="text-xs font-black text-field-primary">소요시간</span> : null}
-      <button
-        type="button"
-        className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center`}
-        onClick={() => setIsOpen((current) => !current)}
+      <input
+        ref={inputRef}
+        className={`${compactInputClass} h-9 min-h-9`}
+        value={draftValue}
+        inputMode="numeric"
+        placeholder="예: 90"
+        onChange={(event) => setDraftValue(event.currentTarget.value)}
+        onClick={(event) => {
+          event.currentTarget.select();
+          setIsOpen(true);
+        }}
+        onBlur={(event) => commitDraft(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft(event.currentTarget.value);
+            setIsOpen(false);
+            event.currentTarget.blur();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setDraftValue(selectedLabel);
+            setIsOpen(false);
+          }
+          if (event.key === "Tab") {
+            event.preventDefault();
+            commitDraft(event.currentTarget.value);
+            setIsOpen(false);
+            window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
+          }
+        }}
         aria-expanded={isOpen}
         aria-label={`소요시간 ${selectedLabel || "미입력"}`}
-      >
-        <span className={selectedLabel ? "text-field-text" : "text-field-muted"}>{selectedLabel || "\u00a0"}</span>
-      </button>
+      />
       {isOpen ? (
         <div className="absolute left-0 top-full z-50 mt-2 w-52 rounded-md border border-field-border bg-white p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -1530,6 +1707,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
                 className="text-xs font-black text-field-muted"
                 onClick={() => {
                   onChange(null);
+                  setDraftValue("");
                   setIsOpen(false);
                 }}
               >
@@ -1544,7 +1722,11 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
             ariaLabel="소요시간"
             options={options}
             value={selectedLabel}
-            onChange={(nextLabel) => onChange(parseRuntimeMinutes(nextLabel))}
+            onChange={(nextLabel) => {
+              const nextValue = parseRuntimeMinutes(nextLabel);
+              onChange(nextValue);
+              setDraftValue(nextLabel);
+            }}
           />
           <button
             type="button"
@@ -1712,9 +1894,34 @@ function MemoField({
   onChange: (value: string) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
   const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
+  const changeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftValueRef = useRef(value);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setDraftValue(value);
+      draftValueRef.current = value;
+    }
+  }, [isOpen, value]);
+
+  useEffect(() => () => {
+    if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
+  }, []);
+
+  function flushDraft(nextDraft = draftValueRef.current) {
+    if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
+    changeTimerRef.current = null;
+    if (nextDraft !== value) onChange(nextDraft);
+  }
+
+  function closePopover() {
+    flushDraft();
+    setIsOpen(false);
+  }
 
   function updatePosition() {
     const trigger = triggerRef.current;
@@ -1734,14 +1941,14 @@ function MemoField({
     updatePosition();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
+      if (event.key === "Escape") closePopover();
     }
 
     function handlePointerDown(event: PointerEvent) {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      setIsOpen(false);
+      closePopover();
     }
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1762,7 +1969,11 @@ function MemoField({
         ref={triggerRef}
         type="button"
         className={`${compactInputClass} block max-w-full overflow-hidden whitespace-nowrap !text-left`}
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => {
+          setDraftValue(value);
+          draftValueRef.current = value;
+          setIsOpen((current) => !current);
+        }}
         aria-label={ariaLabel}
         aria-expanded={isOpen}
         title={value || placeholder}
@@ -1784,7 +1995,7 @@ function MemoField({
             <button
               type="button"
               className="flex h-7 w-7 items-center justify-center rounded text-field-muted hover:bg-field-soft"
-              onClick={() => setIsOpen(false)}
+              onClick={closePopover}
               aria-label={`${ariaLabel} 닫기`}
             >
               <X className="h-4 w-4" aria-hidden />
@@ -1794,8 +2005,24 @@ function MemoField({
             autoFocus
             rows={4}
             className="w-full resize-y border-0 bg-white p-1.5 pt-0 text-left text-[13px] font-bold leading-relaxed text-field-text outline-none"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
+            value={draftValue}
+            onChange={(event) => {
+              const nextValue = event.currentTarget.value;
+              draftValueRef.current = nextValue;
+              setDraftValue(nextValue);
+              if (changeTimerRef.current) clearTimeout(changeTimerRef.current);
+              changeTimerRef.current = setTimeout(() => onChange(nextValue), 180);
+            }}
+            onBlur={(event) => flushDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Tab") {
+                event.preventDefault();
+                const trigger = triggerRef.current;
+                flushDraft(event.currentTarget.value);
+                setIsOpen(false);
+                window.setTimeout(() => focusAdjacentElement(trigger, event.shiftKey ? -1 : 1));
+              }
+            }}
             placeholder="여기에 입력"
             aria-label={`${ariaLabel} 입력`}
           />
@@ -1810,7 +2037,16 @@ function resetInputScroll(event: React.FocusEvent<HTMLInputElement>) {
   event.currentTarget.scrollLeft = 0;
 }
 
-function DragHandle({ label, onDragStart }: { label: string; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void }) {
+function focusAdjacentElement(source: HTMLElement | null, direction: -1 | 1) {
+  if (!source) return;
+  const focusable = Array.from(document.querySelectorAll<HTMLElement>(
+    'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]):not([tabindex="-1"]), a[href]:not([tabindex="-1"])'
+  )).filter((element) => element.offsetParent !== null && !element.closest("[data-memo-popover]"));
+  const currentIndex = focusable.indexOf(source);
+  focusable[currentIndex + direction]?.focus();
+}
+
+function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void; tabIndex?: number }) {
   return (
     <button
       type="button"
@@ -1819,6 +2055,7 @@ function DragHandle({ label, onDragStart }: { label: string; onDragStart: (event
       className="inline-flex h-9 w-9 cursor-grab items-center justify-center rounded-md border border-field-border bg-white text-field-muted active:cursor-grabbing"
       aria-label={label}
       title={label}
+      tabIndex={tabIndex}
     >
       <GripVertical className="h-4 w-4" aria-hidden />
     </button>
@@ -1843,7 +2080,7 @@ function TimetableOrderControls({
   return (
     <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2">
       <span className="mr-auto text-[11px] font-black text-field-primary lg:hidden">{label} 순서</span>
-      <DragHandle label={`${label} 드래그로 순서 변경`} onDragStart={onDragStart} />
+      <DragHandle label={`${label} 드래그로 순서 변경`} onDragStart={onDragStart} tabIndex={-1} />
       <button
         type="button"
         onClick={() => onMove(rowIndex, "up")}
@@ -1851,6 +2088,7 @@ function TimetableOrderControls({
         className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
         aria-label={`${label} 위로 이동`}
         title="위로 이동"
+        tabIndex={-1}
       >
         <ArrowUp className="h-4 w-4" aria-hidden />
       </button>
@@ -1861,10 +2099,11 @@ function TimetableOrderControls({
         className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
         aria-label={`${label} 아래로 이동`}
         title="아래로 이동"
+        tabIndex={-1}
       >
         <ArrowDown className="h-4 w-4" aria-hidden />
       </button>
-      <CircularDeleteButton label={`${label} 삭제`} onClick={onDelete} />
+      <CircularDeleteButton label={`${label} 삭제`} onClick={onDelete} tabIndex={-1} />
     </div>
   );
 }
@@ -1949,7 +2188,7 @@ function SceneCastSelector({
   );
 }
 
-function CircularDeleteButton({ label, onClick }: { label: string; onClick: () => void }) {
+function CircularDeleteButton({ label, onClick, tabIndex }: { label: string; onClick: () => void; tabIndex?: number }) {
   return (
     <button
       type="button"
@@ -1957,6 +2196,7 @@ function CircularDeleteButton({ label, onClick }: { label: string; onClick: () =
       className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-field-danger bg-white text-field-danger hover:bg-field-danger hover:text-white"
       aria-label={label}
       title={label}
+      tabIndex={tabIndex}
     >
       <X className="h-4 w-4" aria-hidden />
     </button>
@@ -1979,34 +2219,78 @@ function TimeWheelPicker({
   showLabel?: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const parsed = parseTimeValue(value);
 
+  useEffect(() => setDraftValue(value), [value]);
+
+  function commitDraft(nextDraft = draftValue) {
+    const nextValue = parseTimeInput(nextDraft);
+    if (nextValue == null && nextDraft.trim()) {
+      setDraftValue(value);
+      return;
+    }
+    const committedValue = nextValue ?? "";
+    setDraftValue(committedValue);
+    if (committedValue !== value) onChange(committedValue);
+  }
+
   function updateHour(hour: string) {
-    onChange(`${hour}:${parsed.minute}`);
+    const nextValue = `${hour}:${parsed.minute}`;
+    setDraftValue(nextValue);
+    onChange(nextValue);
   }
 
   function updateMinute(minute: string) {
-    onChange(`${parsed.hour}:${minute}`);
+    const nextValue = `${parsed.hour}:${minute}`;
+    setDraftValue(nextValue);
+    onChange(nextValue);
   }
 
   return (
     <div className={inline ? "relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "relative grid gap-1"}>
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
-      <button
-        type="button"
-        className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center`}
-        onClick={() => setIsOpen((current) => !current)}
+      <input
+        ref={inputRef}
+        className={`${compactInputClass} h-9 min-h-9`}
+        value={draftValue}
+        inputMode="numeric"
+        placeholder="예: 930"
+        onChange={(event) => setDraftValue(event.currentTarget.value)}
+        onClick={(event) => {
+          event.currentTarget.select();
+          setIsOpen(true);
+        }}
+        onBlur={(event) => commitDraft(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitDraft(event.currentTarget.value);
+            setIsOpen(false);
+            event.currentTarget.blur();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setDraftValue(value);
+            setIsOpen(false);
+          }
+          if (event.key === "Tab") {
+            event.preventDefault();
+            commitDraft(event.currentTarget.value);
+            setIsOpen(false);
+            window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
+          }
+        }}
         aria-expanded={isOpen}
         aria-label={`${label} ${value || "미입력"}`}
-      >
-        <span className={value ? "text-field-text" : "text-field-muted"}>{value || "\u00a0"}</span>
-      </button>
+      />
       {isOpen ? (
         <div className={`absolute top-full z-50 mt-2 w-56 rounded-md border border-field-border bg-white p-3 shadow-xl ${inline ? "left-0 sm:left-[7rem]" : "left-0"}`}>
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-sm font-black text-field-primary">{label}</span>
             <div className="flex items-center gap-2">
-              <button type="button" className="text-xs font-black text-field-muted" onClick={() => { onChange(""); setIsOpen(false); }}>비우기</button>
+              <button type="button" className="text-xs font-black text-field-muted" onClick={() => { setDraftValue(""); onChange(""); setIsOpen(false); }}>비우기</button>
               <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>닫기</button>
             </div>
           </div>
@@ -2129,7 +2413,7 @@ function TextAreaField({ label, value, onChange, className = "" }: { label: stri
   return (
     <label className={`grid gap-2 ${className}`}>
       <span className="text-sm font-black text-field-primary">{label}</span>
-      <textarea className={`${inputClass} min-h-20 resize-y leading-6`} value={value} onChange={(event) => onChange(event.target.value)} />
+      <DraftTextarea className={`${inputClass} min-h-20 resize-y leading-6`} value={value} onCommit={onChange} />
     </label>
   );
 }
@@ -3053,6 +3337,57 @@ function parseTimeValue(value: string) {
   const hour = hourOptions.includes(rawHour) ? rawHour : "00";
   const minute = minuteOptions.includes(rawMinute) ? rawMinute : "00";
   return { hour, minute };
+}
+
+function parseTimeInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const existingTime = trimmed.match(/^(\d{1,2}):(\d{1,2})$/);
+  const digits = trimmed.replace(/\D/g, "");
+  if (!existingTime && !digits) return null;
+  let hour: number;
+  let minute: number;
+
+  if (existingTime) {
+    hour = Number(existingTime[1]);
+    minute = Number(existingTime[2]);
+  } else if (digits.length <= 2) {
+    hour = Number(digits);
+    minute = 0;
+  } else if (digits.length === 3) {
+    hour = Number(digits.slice(0, 1));
+    minute = Number(digits.slice(1));
+  } else if (digits.length === 4) {
+    hour = Number(digits.slice(0, 2));
+    minute = Number(digits.slice(2));
+  } else {
+    return null;
+  }
+
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const nearestTotal = Math.min(23 * 60 + 55, Math.round((hour * 60 + minute) / 5) * 5);
+  return `${String(Math.floor(nearestTotal / 60)).padStart(2, "0")}:${String(nearestTotal % 60).padStart(2, "0")}`;
+}
+
+function parseDurationInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const formattedMinutes = parseRuntimeMinutes(trimmed.toUpperCase());
+  if (formattedMinutes != null) return findNearestRuntimeOption(formattedMinutes);
+
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits || digits.length > 3) return null;
+  const numericValue = Number(digits);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) return null;
+  const minutes = digits === "1" ? 60 : numericValue;
+  return findNearestRuntimeOption(minutes);
+}
+
+function findNearestRuntimeOption(minutes: number) {
+  return runtimeOptions.reduce((nearest, option) =>
+    Math.abs(option - minutes) < Math.abs(nearest - minutes) ? option : nearest
+  , runtimeOptions[0] ?? 5);
 }
 
 function getLocationAddress(location: Partial<DailyPlanLocation> | undefined) {
