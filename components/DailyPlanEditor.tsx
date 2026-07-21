@@ -181,9 +181,7 @@ const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block";
 
-const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
-const minuteOptions = Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
-const runtimeOptions = Array.from({ length: 144 }, (_, index) => (index + 1) * 5);
+const maxRuntimeMinutes = 1440;
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
@@ -1642,101 +1640,56 @@ function RoleContactGroup({
 }
 
 function RuntimePicker({ value, onChange, showLabel = true }: { value: number | null; onChange: (value: number | null) => void; showLabel?: boolean }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const selectedLabel = formatRuntimeMinutes(value);
-  const [draftValue, setDraftValue] = useState(selectedLabel);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const options = runtimeOptions.map(formatRuntimeMinutes);
+  const savedValue = value == null ? "" : String(value);
+  const [draftValue, setDraftValue] = useState(savedValue);
+  const isInvalid = draftValue !== "" && parseDurationMinutes(draftValue) == null;
 
-  useEffect(() => setDraftValue(selectedLabel), [selectedLabel]);
+  useEffect(() => setDraftValue(savedValue), [savedValue]);
 
-  function commitDraft(nextDraft = draftValue) {
-    const nextValue = parseDurationInput(nextDraft);
-    if (nextValue == null && nextDraft.trim()) {
-      setDraftValue(selectedLabel);
-      return;
-    }
-    onChange(nextValue);
-    setDraftValue(formatRuntimeMinutes(nextValue));
+  function applyDraft(nextDraft: string) {
+    const sanitized = sanitizeNumericInput(nextDraft, 4);
+    setDraftValue(sanitized);
+    const nextValue = parseDurationMinutes(sanitized);
+    if (nextValue != null && nextValue !== value) onChange(nextValue);
+  }
+
+  function finishEditing() {
+    const nextValue = parseDurationMinutes(draftValue);
+    if (nextValue == null) setDraftValue(savedValue);
   }
 
   return (
-    <div className="relative grid gap-1">
+    <div className="grid gap-1">
       {showLabel ? <span className="text-xs font-black text-field-primary">소요시간</span> : null}
-      <input
-        ref={inputRef}
-        className={`${compactInputClass} h-9 min-h-9`}
-        value={draftValue}
-        inputMode="numeric"
-        placeholder="예: 90"
-        onChange={(event) => setDraftValue(event.currentTarget.value)}
-        onClick={(event) => {
-          event.currentTarget.select();
-          setIsOpen(true);
-        }}
-        onBlur={(event) => commitDraft(event.currentTarget.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commitDraft(event.currentTarget.value);
-            setIsOpen(false);
-            event.currentTarget.blur();
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            setDraftValue(selectedLabel);
-            setIsOpen(false);
-          }
-          if (event.key === "Tab") {
-            event.preventDefault();
-            commitDraft(event.currentTarget.value);
-            setIsOpen(false);
-            window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
-          }
-        }}
-        aria-expanded={isOpen}
-        aria-label={`소요시간 ${selectedLabel || "미입력"}`}
-      />
-      {isOpen ? (
-        <div className="absolute left-0 top-full z-50 mt-2 w-52 rounded-md border border-field-border bg-white p-3 shadow-xl">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-sm font-black text-field-primary">소요시간</span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="text-xs font-black text-field-muted"
-                onClick={() => {
-                  onChange(null);
-                  setDraftValue("");
-                  setIsOpen(false);
-                }}
-              >
-                비우기
-              </button>
-              <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>
-                닫기
-              </button>
-            </div>
-          </div>
-          <WheelColumn
-            ariaLabel="소요시간"
-            options={options}
-            value={selectedLabel}
-            onChange={(nextLabel) => {
-              const nextValue = parseRuntimeMinutes(nextLabel);
-              onChange(nextValue);
-              setDraftValue(nextLabel);
-            }}
-          />
-          <button
-            type="button"
-            className="mt-3 flex min-h-9 w-full items-center justify-center rounded-md bg-field-primary px-3 text-sm font-black text-white"
-            onClick={() => setIsOpen(false)}
-          >
-            적용
-          </button>
-        </div>
-      ) : null}
+      <div className="relative">
+        <input
+          className={`${compactInputClass} h-9 min-h-9 pr-7 ${isInvalid ? "!border-field-danger" : ""}`}
+          type="text"
+          value={draftValue}
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={4}
+          placeholder="90"
+          onChange={(event) => applyDraft(event.currentTarget.value)}
+          onBlur={finishEditing}
+          onKeyDown={(event) => {
+            if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) event.preventDefault();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              finishEditing();
+              event.currentTarget.blur();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setDraftValue(savedValue);
+            }
+          }}
+          aria-invalid={isInvalid}
+          aria-label={`소요시간 ${savedValue || "미입력"}분`}
+          title={isInvalid ? `1~${maxRuntimeMinutes}분 사이의 숫자를 입력해주세요.` : undefined}
+        />
+        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs font-black text-field-muted" aria-hidden>M</span>
+      </div>
     </div>
   );
 }
@@ -2218,193 +2171,61 @@ function TimeWheelPicker({
   inline?: boolean;
   showLabel?: boolean;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [draftValue, setDraftValue] = useState(value);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const parsed = parseTimeValue(value);
+  const savedDigits = formatTimeToHHMM(value);
+  const [draftValue, setDraftValue] = useState(savedDigits);
+  const isInvalid = draftValue.length === 4 && !isValidHHMM(draftValue);
 
-  useEffect(() => setDraftValue(value), [value]);
+  useEffect(() => setDraftValue(savedDigits), [savedDigits]);
 
-  function commitDraft(nextDraft = draftValue) {
-    const nextValue = parseTimeInput(nextDraft);
-    if (nextValue == null && nextDraft.trim()) {
-      setDraftValue(value);
+  function applyDraft(nextDraft: string) {
+    const sanitized = sanitizeNumericInput(nextDraft, 4);
+    setDraftValue(sanitized);
+    const nextValue = parseHHMMToTime(sanitized);
+    if (nextValue && nextValue !== value) onChange(nextValue);
+    if (!sanitized && value) onChange("");
+  }
+
+  function finishEditing() {
+    if (!draftValue) return;
+    const normalizedDraft = draftValue.length === 3 ? `0${draftValue}` : draftValue;
+    const nextValue = parseHHMMToTime(normalizedDraft);
+    if (nextValue) {
+      setDraftValue(normalizedDraft);
+      if (nextValue !== value) onChange(nextValue);
       return;
     }
-    const committedValue = nextValue ?? "";
-    setDraftValue(committedValue);
-    if (committedValue !== value) onChange(committedValue);
-  }
-
-  function updateHour(hour: string) {
-    const nextValue = `${hour}:${parsed.minute}`;
-    setDraftValue(nextValue);
-    onChange(nextValue);
-  }
-
-  function updateMinute(minute: string) {
-    const nextValue = `${parsed.hour}:${minute}`;
-    setDraftValue(nextValue);
-    onChange(nextValue);
+    setDraftValue(savedDigits);
   }
 
   return (
-    <div className={inline ? "relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "relative grid gap-1"}>
+    <div className={inline ? "grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "grid gap-1"}>
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
       <input
-        ref={inputRef}
-        className={`${compactInputClass} h-9 min-h-9`}
+        className={`${compactInputClass} h-9 min-h-9 ${isInvalid ? "!border-field-danger" : ""}`}
+        type="text"
         value={draftValue}
         inputMode="numeric"
-        placeholder="예: 930"
-        onChange={(event) => setDraftValue(event.currentTarget.value)}
-        onClick={(event) => {
-          event.currentTarget.select();
-          setIsOpen(true);
-        }}
-        onBlur={(event) => commitDraft(event.currentTarget.value)}
+        pattern="[0-9]*"
+        maxLength={4}
+        placeholder="HHMM"
+        onChange={(event) => applyDraft(event.currentTarget.value)}
+        onBlur={finishEditing}
         onKeyDown={(event) => {
+          if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) event.preventDefault();
           if (event.key === "Enter") {
             event.preventDefault();
-            commitDraft(event.currentTarget.value);
-            setIsOpen(false);
+            finishEditing();
             event.currentTarget.blur();
           }
           if (event.key === "Escape") {
             event.preventDefault();
-            setDraftValue(value);
-            setIsOpen(false);
-          }
-          if (event.key === "Tab") {
-            event.preventDefault();
-            commitDraft(event.currentTarget.value);
-            setIsOpen(false);
-            window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
+            setDraftValue(savedDigits);
           }
         }}
-        aria-expanded={isOpen}
+        aria-invalid={isInvalid}
         aria-label={`${label} ${value || "미입력"}`}
+        title={isInvalid ? "0000~2359 사이의 유효한 24시간 형식으로 입력해주세요." : undefined}
       />
-      {isOpen ? (
-        <div className={`absolute top-full z-50 mt-2 w-56 rounded-md border border-field-border bg-white p-3 shadow-xl ${inline ? "left-0 sm:left-[7rem]" : "left-0"}`}>
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <span className="text-sm font-black text-field-primary">{label}</span>
-            <div className="flex items-center gap-2">
-              <button type="button" className="text-xs font-black text-field-muted" onClick={() => { setDraftValue(""); onChange(""); setIsOpen(false); }}>비우기</button>
-              <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>닫기</button>
-            </div>
-          </div>
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-            <WheelColumn ariaLabel={`${label} 시`} options={hourOptions} value={parsed.hour} onChange={updateHour} />
-            <span className="text-lg font-black text-field-primary">:</span>
-            <WheelColumn ariaLabel={`${label} 분`} options={minuteOptions} value={parsed.minute} onChange={updateMinute} />
-          </div>
-          <button
-            type="button"
-            className="mt-3 flex min-h-9 w-full items-center justify-center rounded-md bg-field-primary px-3 text-sm font-black text-white"
-            onClick={() => setIsOpen(false)}
-          >
-            적용
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function WheelColumn({ ariaLabel, options, value, onChange }: { ariaLabel: string; options: string[]; value: string; onChange: (value: string) => void }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
-  const itemHeight = 36;
-
-  useEffect(() => {
-    const selectedIndex = Math.max(0, options.indexOf(value));
-    const container = containerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: selectedIndex * itemHeight });
-  }, [options, value]);
-
-  function snapToNearestValue() {
-    const container = containerRef.current;
-    if (!container) return;
-    const nextIndex = Math.max(0, Math.min(options.length - 1, Math.round(container.scrollTop / itemHeight)));
-    const nextValue = options[nextIndex];
-    container.scrollTo({ top: nextIndex * itemHeight, behavior: "smooth" });
-    if (nextValue && nextValue !== value) {
-      onChange(nextValue);
-    }
-  }
-
-  function handleScroll() {
-    const container = containerRef.current;
-    if (!container || dragRef.current) return;
-    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
-    scrollTimerRef.current = setTimeout(() => {
-      snapToNearestValue();
-    }, 80);
-  }
-
-  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    const container = containerRef.current;
-    if (!container) return;
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startY: event.clientY,
-      startScrollTop: container.scrollTop
-    };
-    container.setPointerCapture(event.pointerId);
-  }
-
-  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const container = containerRef.current;
-    const drag = dragRef.current;
-    if (!container || !drag || drag.pointerId !== event.pointerId) return;
-    event.preventDefault();
-    container.scrollTop = drag.startScrollTop - (event.clientY - drag.startY);
-  }
-
-  function handlePointerEnd(event: React.PointerEvent<HTMLDivElement>) {
-    const container = containerRef.current;
-    const drag = dragRef.current;
-    if (!container || !drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    if (container.hasPointerCapture(event.pointerId)) {
-      container.releasePointerCapture(event.pointerId);
-    }
-    snapToNearestValue();
-  }
-
-  return (
-    <div className="relative">
-      <div className="pointer-events-none absolute inset-x-1 top-1/2 z-10 h-9 -translate-y-1/2 rounded-md border border-field-primary bg-field-light/70" />
-      <div
-        ref={containerRef}
-        role="listbox"
-        aria-label={ariaLabel}
-        tabIndex={0}
-        onScroll={handleScroll}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
-        className="relative z-20 h-[108px] snap-y snap-mandatory overflow-y-auto overscroll-contain py-9 [touch-action:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {options.map((option) => (
-          <button
-            key={option}
-            type="button"
-            role="option"
-            aria-selected={option === value}
-            onClick={() => onChange(option)}
-            className={`flex h-9 w-full snap-center items-center justify-center rounded-md text-base font-black transition ${
-              option === value ? "text-field-primary" : "text-field-muted opacity-45"
-            }`}
-          >
-            {option}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
@@ -3332,62 +3153,33 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
   };
 }
 
-function parseTimeValue(value: string) {
-  const [rawHour, rawMinute] = value.split(":");
-  const hour = hourOptions.includes(rawHour) ? rawHour : "00";
-  const minute = minuteOptions.includes(rawMinute) ? rawMinute : "00";
-  return { hour, minute };
+function sanitizeNumericInput(value: string, maxLength: number) {
+  return value.replace(/\D/g, "").slice(0, maxLength);
 }
 
-function parseTimeInput(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  const existingTime = trimmed.match(/^(\d{1,2}):(\d{1,2})$/);
-  const digits = trimmed.replace(/\D/g, "");
-  if (!existingTime && !digits) return null;
-  let hour: number;
-  let minute: number;
-
-  if (existingTime) {
-    hour = Number(existingTime[1]);
-    minute = Number(existingTime[2]);
-  } else if (digits.length <= 2) {
-    hour = Number(digits);
-    minute = 0;
-  } else if (digits.length === 3) {
-    hour = Number(digits.slice(0, 1));
-    minute = Number(digits.slice(1));
-  } else if (digits.length === 4) {
-    hour = Number(digits.slice(0, 2));
-    minute = Number(digits.slice(2));
-  } else {
-    return null;
-  }
-
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
-  const nearestTotal = Math.min(23 * 60 + 55, Math.round((hour * 60 + minute) / 5) * 5);
-  return `${String(Math.floor(nearestTotal / 60)).padStart(2, "0")}:${String(nearestTotal % 60).padStart(2, "0")}`;
+function isValidHHMM(value: string) {
+  if (!/^\d{4}$/.test(value)) return false;
+  const hour = Number(value.slice(0, 2));
+  const minute = Number(value.slice(2));
+  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
 }
 
-function parseDurationInput(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const formattedMinutes = parseRuntimeMinutes(trimmed.toUpperCase());
-  if (formattedMinutes != null) return findNearestRuntimeOption(formattedMinutes);
-
-  const digits = trimmed.replace(/\D/g, "");
-  if (!digits || digits.length > 3) return null;
-  const numericValue = Number(digits);
-  if (!Number.isFinite(numericValue) || numericValue <= 0) return null;
-  const minutes = digits === "1" ? 60 : numericValue;
-  return findNearestRuntimeOption(minutes);
+function parseHHMMToTime(value: string) {
+  if (!isValidHHMM(value)) return null;
+  return `${value.slice(0, 2)}:${value.slice(2)}`;
 }
 
-function findNearestRuntimeOption(minutes: number) {
-  return runtimeOptions.reduce((nearest, option) =>
-    Math.abs(option - minutes) < Math.abs(nearest - minutes) ? option : nearest
-  , runtimeOptions[0] ?? 5);
+function formatTimeToHHMM(value: string) {
+  const match = value.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return "";
+  const digits = `${match[1]}${match[2]}`;
+  return isValidHHMM(digits) ? digits : "";
+}
+
+function parseDurationMinutes(value: string) {
+  if (!/^\d{1,4}$/.test(value)) return null;
+  const minutes = Number(value);
+  return Number.isInteger(minutes) && minutes >= 1 && minutes <= maxRuntimeMinutes ? minutes : null;
 }
 
 function getLocationAddress(location: Partial<DailyPlanLocation> | undefined) {
