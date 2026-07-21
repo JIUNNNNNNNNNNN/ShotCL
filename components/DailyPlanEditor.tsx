@@ -855,7 +855,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]">
               <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
               <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
-              <CompactField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
+              <CompactNumericField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
             </div>
             <div className="grid items-stretch gap-3 lg:grid-cols-3">
               <RoleContactGroup
@@ -914,7 +914,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <EditableWeatherCard
                 label="일출"
                 value={printMeta.sunrise}
-                placeholder="HH:mm"
+                placeholder="HHMM"
+                timeValue
                 isEditing={editingWeatherField === "sunrise"}
                 onEdit={() => setEditingWeatherField("sunrise")}
                 onSave={(value) => {
@@ -926,7 +927,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               <EditableWeatherCard
                 label="일몰"
                 value={printMeta.sunset}
-                placeholder="HH:mm"
+                placeholder="HHMM"
+                timeValue
                 isEditing={editingWeatherField === "sunset"}
                 onEdit={() => setEditingWeatherField("sunset")}
                 onSave={(value) => {
@@ -1160,7 +1162,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
-                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={scene.shootingOrder} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} onFocus={resetInputScroll} onBlur={resetInputScroll} placeholder="예: 4-3-2-1" /></td>
+                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={formatShootingOrder(scene.shootingOrder)} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} sanitize={formatShootingOrder} numericOnly inputMode="numeric" pattern="[0-9]*" onFocus={resetInputScroll} onBlur={resetInputScroll} onKeyDown={(event) => { if (event.key === "Tab") { event.preventDefault(); const input = event.currentTarget; window.setTimeout(() => focusAdjacentElement(input, event.shiftKey ? -1 : 1)); } }} placeholder="예: 4-3-2-1" /></td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
@@ -1322,9 +1324,11 @@ type DraftInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, "value"
   value: string;
   onCommit: (value: string) => void;
   transform?: (value: string) => string;
+  sanitize?: (value: string) => string;
+  numericOnly?: boolean;
 };
 
-function DraftInput({ value, onCommit, transform, onBlur, onFocus, onKeyDown, ...props }: DraftInputProps) {
+function DraftInput({ value, onCommit, transform, sanitize, numericOnly = false, onBlur, onFocus, onKeyDown, ...props }: DraftInputProps) {
   const [draft, setDraft] = useState(value);
   const [isFocused, setIsFocused] = useState(false);
   const composingRef = useRef(false);
@@ -1346,9 +1350,9 @@ function DraftInput({ value, onCommit, transform, onBlur, onFocus, onKeyDown, ..
       onCompositionStart={() => { composingRef.current = true; }}
       onCompositionEnd={(event) => {
         composingRef.current = false;
-        setDraft(event.currentTarget.value);
+        setDraft(sanitize ? sanitize(event.currentTarget.value) : event.currentTarget.value);
       }}
-      onChange={(event) => setDraft(event.currentTarget.value)}
+      onChange={(event) => setDraft(sanitize ? sanitize(event.currentTarget.value) : event.currentTarget.value)}
       onFocus={(event) => {
         setIsFocused(true);
         onFocus?.(event);
@@ -1359,6 +1363,9 @@ function DraftInput({ value, onCommit, transform, onBlur, onFocus, onKeyDown, ..
         onBlur?.(event);
       }}
       onKeyDown={(event) => {
+        if (numericOnly && !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) {
+          event.preventDefault();
+        }
         if (event.key === "Enter" && !composingRef.current) {
           event.preventDefault();
           commit(event.currentTarget.value);
@@ -1415,10 +1422,29 @@ function CompactField({ label, value, type = "text", className = "", onChange }:
   );
 }
 
+function CompactNumericField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-xs font-black text-field-primary">{label}</span>
+      <DraftInput
+        className={compactInputClass}
+        value={sanitizeNumericInput(value, 4)}
+        onCommit={onChange}
+        sanitize={(nextValue) => sanitizeNumericInput(nextValue, 4)}
+        numericOnly
+        inputMode="numeric"
+        pattern="[0-9]*"
+        aria-label={label}
+      />
+    </label>
+  );
+}
+
 function EditableWeatherCard({
   label,
   value,
   placeholder,
+  timeValue = false,
   isEditing,
   onEdit,
   onSave,
@@ -1427,6 +1453,7 @@ function EditableWeatherCard({
   label: string;
   value: string;
   placeholder?: string;
+  timeValue?: boolean;
   isEditing: boolean;
   onEdit: () => void;
   onSave: (value: string) => void;
@@ -1435,6 +1462,22 @@ function EditableWeatherCard({
   const [draftValue, setDraftValue] = useState(value);
   const draftValueRef = useRef(value);
   const cardRef = useRef<HTMLLabelElement | null>(null);
+  const isInvalidTime = timeValue && draftValue.length === 4 && !isValidHHMM(draftValue);
+
+  function saveDraft(rawValue: string) {
+    if (!timeValue) {
+      onSave(rawValue);
+      return;
+    }
+    const digits = sanitizeNumericInput(rawValue, 4);
+    if (!digits) {
+      onSave("");
+      return;
+    }
+    const normalizedDigits = digits.length === 3 ? `0${digits}` : digits;
+    const nextValue = parseHHMMToTime(normalizedDigits);
+    if (nextValue) onSave(nextValue);
+  }
 
   useEffect(() => {
     draftValueRef.current = draftValue;
@@ -1446,7 +1489,7 @@ function EditableWeatherCard({
     function saveOnOutsideClick(event: PointerEvent) {
       const target = event.target;
       if (target instanceof Node && !cardRef.current?.contains(target)) {
-        onSave(draftValueRef.current);
+        saveDraft(draftValueRef.current);
         onCancel();
       }
     }
@@ -1456,8 +1499,9 @@ function EditableWeatherCard({
   }, [isEditing, onCancel, onSave]);
 
   function startEditing() {
-    setDraftValue(value);
-    draftValueRef.current = value;
+    const nextDraft = timeValue ? formatTimeToHHMM(value) : value;
+    setDraftValue(nextDraft);
+    draftValueRef.current = nextDraft;
     onEdit();
   }
 
@@ -1468,27 +1512,38 @@ function EditableWeatherCard({
         <input
           autoFocus
           aria-label={`${label} 수정`}
-          className="mt-0.5 min-w-0 rounded border border-field-border bg-white px-1.5 py-1 text-center text-[13px] font-black text-field-text outline-none focus:border-field-primary"
+          className={`mt-0.5 min-w-0 rounded border bg-white px-1.5 py-1 text-center text-[13px] font-black text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
           type="text"
-          inputMode={placeholder ? "numeric" : undefined}
+          inputMode={timeValue ? "numeric" : undefined}
+          pattern={timeValue ? "[0-9]*" : undefined}
+          maxLength={timeValue ? 4 : undefined}
           placeholder={placeholder}
           value={draftValue}
           onChange={(event) => {
-            draftValueRef.current = event.currentTarget.value;
-            setDraftValue(event.currentTarget.value);
+            const nextValue = timeValue ? sanitizeNumericInput(event.currentTarget.value, 4) : event.currentTarget.value;
+            draftValueRef.current = nextValue;
+            setDraftValue(nextValue);
+            if (timeValue) {
+              const parsedValue = parseHHMMToTime(nextValue);
+              if (parsedValue) onSave(parsedValue);
+            }
           }}
-          onBlur={(event) => onSave(event.currentTarget.value)}
+          onBlur={(event) => saveDraft(event.currentTarget.value)}
           onKeyDown={(event) => {
+            if (timeValue && !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) {
+              event.preventDefault();
+            }
             if (event.key === "Enter") {
               event.preventDefault();
-              onSave(event.currentTarget.value);
+              saveDraft(event.currentTarget.value);
             }
             if (event.key === "Escape") {
               event.preventDefault();
-              onSave(event.currentTarget.value);
+              saveDraft(event.currentTarget.value);
               onCancel();
             }
           }}
+          aria-invalid={isInvalidTime}
         />
       </label>
     );
@@ -1497,7 +1552,7 @@ function EditableWeatherCard({
   return (
     <button type="button" onClick={startEditing} className="grid min-h-14 content-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center hover:border-field-primary hover:bg-field-light">
       <span className="text-[11px] font-black text-field-muted">{label}</span>
-      <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{value || "-"}</span>
+      <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
   );
 }
@@ -1632,6 +1687,10 @@ function RoleContactGroup({
         value={contact}
         onCommit={onContactChange}
         transform={formatKoreanPhoneNumber}
+        sanitize={formatKoreanPhoneNumber}
+        numericOnly
+        inputMode="numeric"
+        pattern="[0-9]*"
         placeholder="연락처"
         aria-label={`${role} 연락처`}
       />
@@ -1642,6 +1701,7 @@ function RoleContactGroup({
 function RuntimePicker({ value, onChange, showLabel = true }: { value: number | null; onChange: (value: number | null) => void; showLabel?: boolean }) {
   const savedValue = value == null ? "" : String(value);
   const [draftValue, setDraftValue] = useState(savedValue);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const isInvalid = draftValue !== "" && parseDurationMinutes(draftValue) == null;
 
   useEffect(() => setDraftValue(savedValue), [savedValue]);
@@ -1663,6 +1723,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       {showLabel ? <span className="text-xs font-black text-field-primary">소요시간</span> : null}
       <div className="relative">
         <input
+          ref={inputRef}
           className={`${compactInputClass} h-9 min-h-9 pr-7 ${isInvalid ? "!border-field-danger" : ""}`}
           type="text"
           value={draftValue}
@@ -1682,6 +1743,11 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
             if (event.key === "Escape") {
               event.preventDefault();
               setDraftValue(savedValue);
+            }
+            if (event.key === "Tab") {
+              event.preventDefault();
+              finishEditing();
+              window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
             }
           }}
           aria-invalid={isInvalid}
@@ -2173,6 +2239,8 @@ function TimeWheelPicker({
 }) {
   const savedDigits = formatTimeToHHMM(value);
   const [draftValue, setDraftValue] = useState(savedDigits);
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const isInvalid = draftValue.length === 4 && !isValidHHMM(draftValue);
 
   useEffect(() => setDraftValue(savedDigits), [savedDigits]);
@@ -2201,15 +2269,24 @@ function TimeWheelPicker({
     <div className={inline ? "grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "grid gap-1"}>
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
       <input
+        ref={inputRef}
         className={`${compactInputClass} h-9 min-h-9 ${isInvalid ? "!border-field-danger" : ""}`}
         type="text"
-        value={draftValue}
+        value={isFocused ? draftValue : formatTimeDisplay(value)}
         inputMode="numeric"
         pattern="[0-9]*"
         maxLength={4}
         placeholder="HHMM"
         onChange={(event) => applyDraft(event.currentTarget.value)}
-        onBlur={finishEditing}
+        onFocus={(event) => {
+          setDraftValue(savedDigits);
+          setIsFocused(true);
+          event.currentTarget.select();
+        }}
+        onBlur={() => {
+          finishEditing();
+          setIsFocused(false);
+        }}
         onKeyDown={(event) => {
           if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) event.preventDefault();
           if (event.key === "Enter") {
@@ -2220,6 +2297,12 @@ function TimeWheelPicker({
           if (event.key === "Escape") {
             event.preventDefault();
             setDraftValue(savedDigits);
+          }
+          if (event.key === "Tab") {
+            event.preventDefault();
+            finishEditing();
+            setIsFocused(false);
+            window.setTimeout(() => focusAdjacentElement(inputRef.current, event.shiftKey ? -1 : 1));
           }
         }}
         aria-invalid={isInvalid}
@@ -2997,7 +3080,7 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
 
 function normalizeShootingOrder(value: string, totalCut: string) {
   const trimmed = String(value ?? "").trim();
-  if (trimmed) return trimmed;
+  if (trimmed) return formatShootingOrder(trimmed);
   const count = clampCutCount(totalCut);
   return Array.from({ length: count }, (_, index) => String(index + 1)).join("-");
 }
@@ -3086,7 +3169,7 @@ function shiftTime(value: string, offsetMinutes: number) {
 }
 
 function parseTimeMinutes(value: string) {
-  const match = String(value ?? "").match(/^(\d{2}):(\d{2})$/);
+  const match = formatTimeDisplay(String(value ?? "")).match(/^(\d{2}):(\d{2})$/);
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -3101,12 +3184,20 @@ function syncFirstCut(cuts: SceneCutInput[], patch: Partial<SceneCutInput>) {
 
 function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput[], meta: DailyPlanPrintMeta): DailyPlanPreviewData {
   const locations = (plan.shootingLocations ?? []).filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim());
-  const mealTimes = (plan.mealTimes ?? []).filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.memo.trim());
+  const mealTimes = (plan.mealTimes ?? [])
+    .filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.memo.trim())
+    .map((meal) => ({
+      ...meal,
+      startTime: formatTimeDisplay(meal.startTime),
+      endTime: formatTimeDisplay(meal.endTime)
+    }));
   let totalCutCount = 0;
 
   const previewScenes = scenes
     .map((scene, sceneIndex) => {
       const sceneNumber = scene.sceneNumber.trim() || String(sceneIndex + 1);
+      const startTime = formatTimeDisplay(scene.startTime);
+      const endTime = formatTimeDisplay(scene.endTime);
       const cuts = scene.cuts.map((cut, cutIndex) => {
         const cutNumber = cut.cutNumber.trim() || String(cutIndex + 1);
         return {
@@ -3124,10 +3215,10 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         sceneNumber,
         sceneTitle: scene.sceneTitle,
         description: scene.description || cuts[0]?.description || "",
-        startTime: scene.startTime,
-        endTime: scene.endTime,
-        runtimeMinutes: getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime),
-        runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
+        startTime,
+        endTime,
+        runtimeMinutes: getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime),
+        runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime)),
         locationName: scene.locationName,
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDayNight(scene.dayNight),
@@ -3144,17 +3235,33 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
     .filter((scene) => scene.sceneNumber || scene.locationName || scene.cuts.length > 0);
 
   return {
-    plan,
+    plan: {
+      ...plan,
+      callTime: formatTimeDisplay(plan.callTime)
+    },
     locations,
     mealTimes,
     scenes: previewScenes,
     totalCutCount,
-    meta
+    meta: {
+      ...meta,
+      directorContact: formatKoreanPhoneNumber(meta.directorContact),
+      assistantDirectorContact: formatKoreanPhoneNumber(meta.assistantDirectorContact),
+      producerContact: formatKoreanPhoneNumber(meta.producerContact),
+      sunrise: formatTimeDisplay(meta.sunrise),
+      sunset: formatTimeDisplay(meta.sunset),
+      starring: meta.starring.map((person) => ({ ...person, callTime: formatTimeDisplay(person.callTime) })),
+      teams: meta.teams.map((team) => ({ ...team, callTime: formatTimeDisplay(team.callTime) }))
+    }
   };
 }
 
 function sanitizeNumericInput(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
+}
+
+function formatShootingOrder(value: string) {
+  return value.replace(/\D/g, "").split("").join("-");
 }
 
 function isValidHHMM(value: string) {
@@ -3170,10 +3277,13 @@ function parseHHMMToTime(value: string) {
 }
 
 function formatTimeToHHMM(value: string) {
-  const match = value.match(/^(\d{2}):(\d{2})$/);
-  if (!match) return "";
-  const digits = `${match[1]}${match[2]}`;
+  const digits = sanitizeNumericInput(value, 4);
   return isValidHHMM(digits) ? digits : "";
+}
+
+function formatTimeDisplay(value: string) {
+  const digits = formatTimeToHHMM(value);
+  return digits ? `${digits.slice(0, 2)}:${digits.slice(2)}` : "";
 }
 
 function parseDurationMinutes(value: string) {
