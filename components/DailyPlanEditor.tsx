@@ -1122,11 +1122,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                             {locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                           </select>
                         </td>
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={timetableTextCellClass}>
+                        <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2`}>
                           <span className={mobileTimetableLabelClass}>내용</span>
                           <MemoField
                             value={meal.memo}
@@ -1135,8 +1131,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                             onChange={(value) => updateMealTime(mealIndex, { memo: value })}
                           />
                         </td>
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
-                        <td className={`${timetableCellClass} max-lg:hidden`} />
                       </tr>
                     );
                   }
@@ -1185,9 +1179,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         <div className="flex flex-col">
         <section className="order-2 mt-5 rounded-md border border-field-border bg-white p-5 text-center">
           <div className="flex flex-col items-center justify-center gap-3 text-center">
-            <h2 className="text-center text-lg font-black text-field-primary">스태프 정보</h2>
+            <h2 className="text-center text-lg font-black text-field-primary">스태프&amp;배우</h2>
             <Button variant="secondary" onClick={() => setIsStaffOpen((current) => !current)} aria-expanded={isStaffOpen}>
-              {isStaffOpen ? "스태프 정보 접기" : "스태프 정보 열기"}
+              {isStaffOpen ? "스태프&배우 접기" : "스태프&배우 열기"}
             </Button>
           </div>
           {isStaffOpen ? <div className="mt-5 grid gap-5 text-center lg:grid-cols-2">
@@ -1248,7 +1242,18 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   >
                     <div className="flex items-center justify-center"><DragHandle label={`부서 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "teams", index)} /></div>
                     <DraftInput className={compactInputClass} value={team.team} onCommit={(value) => updateTeam(index, { team: value })} placeholder="부서" />
-                    <CrewCountPicker value={team.total} onChange={(value) => updateTeam(index, { total: value })} ariaLabel={`${team.team || `부서 ${index + 1}`} 인원`} />
+                    <DraftInput
+                      className={`${compactInputClass} px-1 text-center`}
+                      value={sanitizeNumericInput(team.total, 4)}
+                      onCommit={(value) => updateTeam(index, { total: value })}
+                      sanitize={(value) => sanitizeNumericInput(value, 4)}
+                      numericOnly
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={4}
+                      placeholder="인원"
+                      aria-label={`${team.team || `부서 ${index + 1}`} 인원`}
+                    />
                     <TimeWheelPicker label="콜 시간" value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
                     <CallLocationSelect
                       ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
@@ -1756,120 +1761,6 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
         />
         <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs font-black text-field-muted" aria-hidden>M</span>
       </div>
-    </div>
-  );
-}
-
-function CrewCountPicker({ value, onChange, ariaLabel }: { value: string; onChange: (value: string) => void; ariaLabel: string }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState({ left: 12, top: 12 });
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-
-  function updatePosition() {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const width = 136;
-    const estimatedHeight = 166;
-    const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12));
-    const top = rect.bottom + estimatedHeight <= window.innerHeight - 12
-      ? rect.bottom + 6
-      : Math.max(12, rect.top - estimatedHeight - 6);
-    setPosition({ left, top });
-  }
-
-  function changeCount(delta: number) {
-    const currentValue = Number.parseInt(value, 10);
-    const nextValue = Number.isFinite(currentValue)
-      ? Math.min(99, Math.max(1, currentValue + delta))
-      : 1;
-    onChange(String(nextValue));
-  }
-
-  useEffect(() => {
-    if (!isOpen) return;
-    updatePosition();
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      setIsOpen(false);
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
-    }
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [isOpen]);
-
-  return (
-    <div className="relative min-w-0">
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`${compactInputClass} flex h-9 min-h-9 items-center justify-center px-1`}
-        onClick={() => setIsOpen((current) => !current)}
-        aria-label={ariaLabel}
-        aria-expanded={isOpen}
-      >
-        <span className={value ? "text-field-text" : "text-field-muted"}>{value || "인원"}</span>
-      </button>
-      {isOpen && typeof document !== "undefined" ? createPortal(
-        <div
-          ref={popoverRef}
-          role="dialog"
-          aria-label={`${ariaLabel} 선택`}
-          className="fixed z-[80] w-[136px] rounded-md border border-field-border bg-white p-2 shadow-xl"
-          style={position}
-          onWheel={(event) => {
-            event.preventDefault();
-            changeCount(event.deltaY < 0 ? 1 : -1);
-          }}
-          data-crew-count-popover
-        >
-          <div className="flex items-center justify-between gap-1">
-            <button
-              type="button"
-              className="min-h-7 px-1 text-[11px] font-black text-field-muted"
-              onClick={() => onChange("")}
-            >
-              비우기
-            </button>
-            <button
-              type="button"
-              className="flex h-7 w-7 items-center justify-center rounded text-field-muted hover:bg-field-soft"
-              onClick={() => setIsOpen(false)}
-              aria-label={`${ariaLabel} 선택 닫기`}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          <div className="mt-1 grid justify-items-center gap-1">
-            <button type="button" className="flex h-8 w-12 items-center justify-center rounded border border-field-border bg-field-soft text-field-primary" onClick={() => changeCount(1)} aria-label={`${ariaLabel} 늘리기`}>
-              <ArrowUp className="h-4 w-4" aria-hidden />
-            </button>
-            <output className="flex h-10 min-w-16 items-center justify-center rounded border border-field-border bg-white text-lg font-black text-field-text" aria-live="polite">
-              {value || "인원"}
-            </output>
-            <button type="button" className="flex h-8 w-12 items-center justify-center rounded border border-field-border bg-field-soft text-field-primary disabled:opacity-40" onClick={() => changeCount(-1)} disabled={value === "1"} aria-label={`${ariaLabel} 줄이기`}>
-              <ArrowDown className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-        </div>,
-        document.body
-      ) : null}
     </div>
   );
 }
