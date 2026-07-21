@@ -15,6 +15,8 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const demoStorageMode = isDemoStorageMode();
   const modeLabel = hasSupabaseEnv() ? "Supabase" : "TEST";
+  const pathname = usePathname();
+  const isProjectDashboard = /^\/projects\/[^/]+$/.test(pathname);
 
   return (
     <div className="min-h-screen bg-field-soft text-field-text">
@@ -55,7 +57,7 @@ export function AppShell({ children }: AppShellProps) {
       </header>
 
       <main className="safe-bottom mx-auto w-full max-w-6xl px-4 py-6 md:px-8 lg:px-12">
-        {demoStorageMode ? <TestModeWarning /> : null}
+        {demoStorageMode ? <TestModeWarning compact={isProjectDashboard} /> : null}
         {children}
       </main>
       <DevRuntimeInfo />
@@ -64,7 +66,24 @@ export function AppShell({ children }: AppShellProps) {
 }
 
 /** localStorage 테스트 흐름을 실사용 저장소로 오인하지 않도록 모든 화면에 표시합니다. */
-function TestModeWarning() {
+function TestModeWarning({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <aside role="alert" className="mb-4 rounded-2xl border border-amber-400 bg-amber-50/80 px-4 py-3 text-amber-950">
+        <details>
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-black marker:content-none">
+            <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+            테스트 모드 · 이 브라우저에만 저장됩니다.
+            <span className="ml-auto text-xs font-bold text-amber-800">안내 보기</span>
+          </summary>
+          <p className="mt-2 pl-6 text-xs font-bold leading-5 text-amber-900">
+            Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않습니다. 실제 작품 정보, 배우 연락처, 촬영 장소, PDF·콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
+          </p>
+        </details>
+      </aside>
+    );
+  }
+
   return (
     <aside
       role="alert"

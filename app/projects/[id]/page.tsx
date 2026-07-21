@@ -240,118 +240,103 @@ export default function ProjectDetailPage() {
 
   return (
     <>
-      <section className="mb-5 rounded-md border border-field-border bg-white p-5 md:p-6">
-        <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-start">
+      <section className="mb-5 rounded-3xl border border-field-border bg-white p-4 shadow-sm md:p-6">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 px-1">
           <div className="min-w-0">
-            <p className="text-xs font-black text-field-muted">오늘의 진행표</p>
-            <h1 className="mt-1 break-words text-2xl font-black text-field-primary">{project.name}</h1>
-            <p className="mt-1 text-sm font-bold text-field-muted">
-              {project.shootDate || "촬영일 미정"}
-              {project.description ? ` · ${project.description}` : ""}
-            </p>
+            <p className="text-xs font-black text-field-muted">오늘 진행 중인 프로젝트</p>
+            <h1 className="mt-1 break-words text-xl font-black text-field-primary md:text-2xl">{project.name}</h1>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 md:min-w-[36rem] lg:grid-cols-3">
-            <Link
-              href={`/projects/${project.id}/daily-plans/new`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-primary bg-field-primary px-3 text-sm font-black text-white"
-              title="새 일촬표 만들기"
-            >
-              <CalendarPlus className="h-4 w-4" aria-hidden />
-              새 일촬표 만들기
-            </Link>
-            <Link
-              href={`/projects/${project.id}/daily-plan/import`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary"
-              title="Excel 일촬표 업로드"
-            >
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              Excel 일촬표 업로드
-            </Link>
-            <Link
-              href={`/projects/${project.id}/daily-plans`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary"
-              title="저장된 일촬표 목록"
-            >
-              <FolderOpen className="h-4 w-4" aria-hidden />
-              저장된 일촬표 목록
-            </Link>
-            <Link
-              href={`/projects/${project.id}`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-border bg-field-light px-3 text-sm font-black text-field-primary"
-              title="컷 진행표 보기"
-            >
-              <ListChecks className="h-4 w-4" aria-hidden />
-              컷 진행표 보기
-            </Link>
-            <Button variant="secondary" onClick={() => downloadStandardDailyPlanTemplate(project)} className="min-h-11">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden />
-              표준 Excel 양식 다운로드
-            </Button>
-            <Link
-              href={`/projects/${project.id}/upload`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-muted"
-              title="PDF 업로드 분석"
-            >
-              <Upload className="h-4 w-4" aria-hidden />
-              PDF 업로드 분석
-            </Link>
-            <Link
-              href={`/projects/${project.id}/analysis-runs`}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary"
-              title="분석 기록"
-            >
-              <History className="h-4 w-4" aria-hidden />
-              분석 기록
-            </Link>
-            <Button onClick={() => setIsAddOpen(true)} className="hidden md:inline-flex min-h-11">
-              <Plus className="h-5 w-5" aria-hidden />
-              새 컷 추가
-            </Button>
-          </div>
+          <p className="text-sm font-bold text-field-muted">
+            {project.shootDate || "촬영일 미정"}
+            {project.description ? ` · ${project.description}` : ""}
+          </p>
         </div>
 
-        <div className="mt-4">
-          <ProgressSummary shots={shots} />
-        </div>
-        <div className="mt-3">
-          <FilterTabs value={filter} onChange={setFilter} />
-        </div>
-        <div className="mt-4 rounded-md border border-field-border bg-field-soft p-3 text-sm font-bold leading-6 text-field-muted">
-          가장 안정적인 방식은 Excel 일촬표를 업로드하거나 웹 일촬표 편집기에서 수정하는 것입니다. PDF 분석은 외부에서 PDF만 받은 경우에만 보조 기능으로 사용하세요.
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+          <div className="min-w-0">
+            <ProgressSummary shots={shots} />
+            <div className="mt-3">
+              <FilterTabs value={filter} onChange={setFilter} />
+            </div>
+          </div>
+
+          <aside className="rounded-3xl border border-field-border bg-field-soft p-3" aria-label="빠른 메뉴">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <div>
+                <p className="text-xs font-black text-field-muted">바로가기</p>
+                <h2 className="text-base font-black text-field-primary">오늘의 퀵 메뉴</h2>
+              </div>
+              <ListChecks className="h-5 w-5 text-field-primary" aria-hidden />
+            </div>
+
+            <nav className="grid gap-2" aria-label="핵심 작업">
+              <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-10 items-center gap-3 rounded-2xl bg-field-primary px-3 text-sm font-black text-white">
+                <CalendarPlus className="h-4 w-4" aria-hidden />
+                새 일촬표 만들기
+              </Link>
+              <Link href="#cut-board" className="flex min-h-10 items-center gap-3 rounded-2xl border border-field-border bg-white px-3 text-sm font-black text-field-primary">
+                <ListChecks className="h-4 w-4" aria-hidden />
+                컷 진행표 보기
+              </Link>
+              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-10 items-center gap-3 rounded-2xl border border-field-border bg-white px-3 text-sm font-black text-field-primary">
+                <FolderOpen className="h-4 w-4" aria-hidden />
+                저장된 일촬표 목록
+              </Link>
+              <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-10 items-center gap-3 rounded-2xl bg-field-primary px-3 text-left text-sm font-black text-white">
+                <Plus className="h-4 w-4" aria-hidden />
+                새 컷 추가
+              </button>
+            </nav>
+
+            <details className="mt-3 rounded-2xl border border-field-border bg-white">
+              <summary className="cursor-pointer px-3 py-2.5 text-sm font-black text-field-muted">기타 도구</summary>
+              <div className="grid gap-1 border-t border-field-border p-2">
+                <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+                  <History className="h-4 w-4" aria-hidden /> 분석 기록
+                </Link>
+                <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+                  <FileSpreadsheet className="h-4 w-4" aria-hidden /> Excel 일촬표 업로드
+                </Link>
+                <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-left text-xs font-black text-field-muted hover:bg-field-soft">
+                  <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
+                </button>
+                <Link href={`/projects/${project.id}/upload`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+                  <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
+                </Link>
+              </div>
+            </details>
+          </aside>
         </div>
       </section>
 
       {errorMessage ? (
-        <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">
+        <div className="mb-4 rounded-2xl border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">
           {errorMessage}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">
+        <div className="mb-4 rounded-2xl border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">
           {successMessage}
         </div>
       ) : null}
 
+      <div id="cut-board" className="scroll-mt-28">
       {shots.length === 0 ? (
-        <Card>
+        <Card className="rounded-3xl">
           <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
           <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 md:max-w-lg">
+          <div className="mt-5 max-w-xs">
             <Button onClick={() => setIsAddOpen(true)}>
               <Plus className="h-5 w-5" aria-hidden />
               새 컷 추가
             </Button>
-            <ButtonLink href={`/projects/${project.id}/upload`} variant="secondary">
-              <Upload className="h-5 w-5" aria-hidden />
-              PDF 업로드 분석
-            </ButtonLink>
           </div>
         </Card>
       ) : filteredShots.length === 0 ? (
-        <Card className="text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
+        <Card className="rounded-3xl text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
       ) : (
-        <div className="grid gap-4 pb-24 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-2 pb-24">
           {filteredShots.map((shot) => (
             <ShotCard
               key={shot.id}
@@ -363,9 +348,10 @@ export default function ProjectDetailPage() {
           ))}
         </div>
       )}
+      </div>
 
       {process.env.NODE_ENV !== "production" ? (
-        <section className="mt-6 rounded-md border border-field-border bg-white p-5">
+        <section className="mt-6 rounded-3xl border border-field-border bg-white p-5">
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
               <h2 className="text-base font-black text-field-primary">개발용 초기화</h2>
@@ -383,7 +369,7 @@ export default function ProjectDetailPage() {
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-field-border bg-white/95 p-4 backdrop-blur md:hidden">
         <div className="mx-auto max-w-6xl">
-          <Button onClick={() => setIsAddOpen(true)} className="w-full">
+          <Button onClick={() => setIsAddOpen(true)} className="w-full rounded-2xl">
             <Plus className="h-5 w-5" aria-hidden />
             새 컷 추가
           </Button>
