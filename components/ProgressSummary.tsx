@@ -17,7 +17,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-xs font-black text-field-muted">오늘 컷 진행률</p>
-          <h2 id="today-progress-title" className="mt-1 text-lg font-black text-field-primary">집에 가기까지</h2>
+          <h2 id="today-progress-title" className="mt-1 text-xl font-black text-field-primary md:text-2xl">집에 가기까지</h2>
           <p className="mt-1 text-4xl font-black leading-none text-field-primary">{progress}%</p>
         </div>
         <p className="text-right text-sm font-bold text-field-muted">{ok}/{total} OK</p>
@@ -29,7 +29,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="전체" value={total} />
-        <Stat label="OK" value={ok} />
+        <Stat label="완료 컷" value={ok} />
         <Stat label="omit" value={omit} danger />
         <Stat label="남은 컷" value={remaining} />
       </div>

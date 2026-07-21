@@ -240,72 +240,60 @@ export default function ProjectDetailPage() {
 
   return (
     <>
-      <section className="mb-5 rounded-3xl border border-field-border bg-white p-4 shadow-sm md:p-6">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3 px-1">
-          <div className="min-w-0">
-            <p className="text-xs font-black text-field-muted">오늘 진행 중인 프로젝트</p>
-            <h1 className="mt-1 break-words text-xl font-black text-field-primary md:text-2xl">{project.name}</h1>
-          </div>
-          <p className="text-sm font-bold text-field-muted">
-            {project.shootDate || "촬영일 미정"}
-            {project.description ? ` · ${project.description}` : ""}
-          </p>
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-          <div className="min-w-0">
-            <ProgressSummary shots={shots} />
-            <div className="mt-3">
-              <FilterTabs value={filter} onChange={setFilter} />
-            </div>
+      <section className="relative z-20 mb-3 rounded-2xl border border-field-border bg-white p-2 shadow-sm" aria-label="상단 퀵 메뉴">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 px-2 py-1 sm:w-44 sm:shrink-0">
+            <h1 className="truncate text-sm font-black text-field-primary">{project.name}</h1>
+            <p className="truncate text-[11px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</p>
           </div>
 
-          <aside className="rounded-3xl border border-field-border bg-field-soft p-3" aria-label="빠른 메뉴">
-            <div className="flex items-center justify-between px-1 pb-2">
-              <div>
-                <p className="text-xs font-black text-field-muted">바로가기</p>
-                <h2 className="text-base font-black text-field-primary">오늘의 퀵 메뉴</h2>
-              </div>
-              <ListChecks className="h-5 w-5 text-field-primary" aria-hidden />
-            </div>
-
-            <nav className="grid gap-2" aria-label="핵심 작업">
-              <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-10 items-center gap-3 rounded-2xl bg-field-primary px-3 text-sm font-black text-white">
-                <CalendarPlus className="h-4 w-4" aria-hidden />
-                새 일촬표 만들기
-              </Link>
-              <Link href="#cut-board" className="flex min-h-10 items-center gap-3 rounded-2xl border border-field-border bg-white px-3 text-sm font-black text-field-primary">
-                <ListChecks className="h-4 w-4" aria-hidden />
-                컷 진행표 보기
-              </Link>
-              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-10 items-center gap-3 rounded-2xl border border-field-border bg-white px-3 text-sm font-black text-field-primary">
-                <FolderOpen className="h-4 w-4" aria-hidden />
-                저장된 일촬표 목록
-              </Link>
-              <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-10 items-center gap-3 rounded-2xl bg-field-primary px-3 text-left text-sm font-black text-white">
-                <Plus className="h-4 w-4" aria-hidden />
-                새 컷 추가
-              </button>
-            </nav>
-
-            <details className="mt-3 rounded-2xl border border-field-border bg-white">
-              <summary className="cursor-pointer px-3 py-2.5 text-sm font-black text-field-muted">기타 도구</summary>
-              <div className="grid gap-1 border-t border-field-border p-2">
-                <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
-                  <History className="h-4 w-4" aria-hidden /> 분석 기록
-                </Link>
+          <nav className="grid min-w-0 flex-1 grid-cols-3 gap-1.5 sm:grid-cols-6" aria-label="홈 기능 목차">
+            <Link href="#cut-board" className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-field-light px-2 text-center text-xs font-black text-field-primary">
+              <ListChecks className="h-3.5 w-3.5" aria-hidden /> 컷 진행표
+            </Link>
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-field-primary px-2 text-center text-xs font-black text-white">
+              <Plus className="h-3.5 w-3.5" aria-hidden /> 새 컷 추가
+            </button>
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-primary">
+              <CalendarPlus className="h-3.5 w-3.5" aria-hidden /> 새 일촬표
+            </Link>
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-primary">
+              <FolderOpen className="h-3.5 w-3.5" aria-hidden /> 일촬표 목록
+            </Link>
+            <details className="group relative">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-muted">
+                <Upload className="h-3.5 w-3.5" aria-hidden /> 업로드 / 분석
+              </summary>
+              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 grid w-60 gap-1 rounded-2xl border border-field-border bg-white p-2 shadow-xl">
                 <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
                   <FileSpreadsheet className="h-4 w-4" aria-hidden /> Excel 일촬표 업로드
                 </Link>
-                <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-left text-xs font-black text-field-muted hover:bg-field-soft">
-                  <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
-                </button>
                 <Link href={`/projects/${project.id}/upload`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
                   <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
                 </Link>
               </div>
             </details>
-          </aside>
+            <details className="group relative">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-muted">
+                <History className="h-3.5 w-3.5" aria-hidden /> 기타
+              </summary>
+              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 grid w-60 gap-1 rounded-2xl border border-field-border bg-white p-2 shadow-xl">
+                <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+                  <History className="h-4 w-4" aria-hidden /> 분석 기록
+                </Link>
+                <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-left text-xs font-black text-field-muted hover:bg-field-soft">
+                  <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
+                </button>
+              </div>
+            </details>
+          </nav>
+        </div>
+      </section>
+
+      <section className="mb-3">
+        <ProgressSummary shots={shots} />
+        <div className="mt-2">
+          <FilterTabs value={filter} onChange={setFilter} />
         </div>
       </section>
 
@@ -322,6 +310,10 @@ export default function ProjectDetailPage() {
       ) : null}
 
       <div id="cut-board" className="scroll-mt-28">
+      <div className="mb-2 flex items-center justify-between px-1">
+        <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
+        <p className="text-xs font-bold text-field-muted">{filteredShots.length}개 표시</p>
+      </div>
       {shots.length === 0 ? (
         <Card className="rounded-3xl">
           <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
@@ -351,20 +343,15 @@ export default function ProjectDetailPage() {
       </div>
 
       {process.env.NODE_ENV !== "production" ? (
-        <section className="mt-6 rounded-3xl border border-field-border bg-white p-5">
-          <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <h2 className="text-base font-black text-field-primary">개발용 초기화</h2>
-              <p className="mt-1 text-sm font-bold leading-6 text-field-muted">
-                테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.
-              </p>
-            </div>
+        <details className="mt-4 rounded-2xl border border-field-border bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-xs font-black text-field-muted">개발용 도구</summary>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-field-border p-4">
+            <p className="text-xs font-bold leading-5 text-field-muted">테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.</p>
             <Button variant="danger" onClick={handleResetCurrentProjectShots} disabled={isSaving || shots.length === 0}>
-              <RotateCcw className="h-5 w-5" aria-hidden />
-              현재 프로젝트 컷 목록 초기화
+              <RotateCcw className="h-5 w-5" aria-hidden /> 현재 프로젝트 컷 목록 초기화
             </Button>
           </div>
-        </section>
+        </details>
       ) : null}
 
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-field-border bg-white/95 p-4 backdrop-blur md:hidden">
