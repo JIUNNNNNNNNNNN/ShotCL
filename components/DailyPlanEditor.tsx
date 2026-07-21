@@ -179,8 +179,8 @@ const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden !te
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
-const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-sm:mb-0.5 max-sm:text-[9px] max-sm:leading-none";
-const mobileTimetableRowClass = "max-sm:grid-cols-4 max-sm:gap-1 max-sm:p-1.5 max-sm:[&_button]:min-h-8 max-sm:[&_input]:h-8 max-sm:[&_input]:min-h-8 max-sm:[&_select]:h-8 max-sm:[&_select]:min-h-8";
+const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-none";
+const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-1 max-md:[&_button]:h-7 max-md:[&_button]:min-h-7 max-md:[&_button]:px-0.5 max-md:[&_button]:text-[10px] max-md:[&_input]:h-7 max-md:[&_input]:min-h-7 max-md:[&_input]:px-0.5 max-md:[&_input]:text-[10px] max-md:[&_select]:h-7 max-md:[&_select]:min-h-7 max-md:[&_select]:px-0.5 max-md:[&_select]:text-[10px]";
 
 const maxRuntimeMinutes = 1440;
 let daumPostcodeScriptPromise: Promise<void> | null = null;
@@ -847,20 +847,20 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
 
-        <section className="mt-5 rounded-md border border-field-border bg-white p-5">
+        <section className="mt-5 overflow-hidden rounded-md border border-field-border bg-white p-3 md:p-5">
           <div className="grid gap-3">
-            <div className="grid gap-1.5 sm:hidden">
+            <div className="grid min-w-0 gap-1.5 md:hidden">
               <div className="grid grid-cols-[0.72fr_1.56fr_0.72fr] gap-1.5">
                 <MobileInfoField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
                 <MobileInfoField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
                 <MobileInfoField label="총 인원" value={printMeta.totalCrew} numeric onChange={(value) => updatePrintMetaField("totalCrew", value)} />
               </div>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 overflow-hidden">
                 <MobileInfoField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
                 <MobileInfoTimeField label="집합시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} />
               </div>
             </div>
-            <div className="hidden gap-3 sm:grid">
+            <div className="hidden gap-3 md:grid">
               <div className="grid items-center gap-3 md:grid-cols-2">
                 <CompactField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
                 <CompactField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
@@ -913,7 +913,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               </Button>
             </div>
 
-            <div className="mt-3 hidden grid-cols-2 gap-2 sm:grid md:grid-cols-3 xl:grid-cols-6">
+            <div className="mt-3 hidden grid-cols-3 gap-2 md:grid xl:grid-cols-6">
               <EditableWeatherCard
                 label="날씨"
                 value={printMeta.weather}
@@ -986,7 +986,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
               />
             </div>
 
-            {weatherStatus ? <p className="mt-3 hidden text-xs font-bold text-field-muted sm:block" aria-live="polite">{weatherStatus}</p> : null}
+            {weatherStatus ? <p className="mt-3 hidden text-xs font-bold text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
           </section>
 
           <div className="order-2 mt-6 grid gap-5">
@@ -1005,16 +1005,19 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 {locations.map((location, index) => (
                   <div
                     key={location.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border border-field-border bg-white p-2.5 md:grid-cols-[7.5rem_minmax(0,1fr)_auto]"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 rounded-md border border-field-border bg-white p-1.5 md:grid-cols-[7.5rem_minmax(0,1fr)_auto] md:gap-3 md:p-2.5"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "locations", index)}
                   >
-                    <div className="col-start-1 row-start-1 flex min-w-[7.5rem] items-center justify-center gap-2.5 whitespace-nowrap">
+                    <div className="col-start-1 row-start-1 flex min-w-0 items-center justify-center gap-1 whitespace-nowrap md:min-w-[7.5rem] md:gap-2.5">
                       <DragHandle label={`LOCATION ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
-                      <h4 className="min-w-0 whitespace-nowrap text-center text-xs font-black text-field-primary">LOCATION {index + 1}</h4>
+                      <h4 className="min-w-0 whitespace-nowrap text-center text-xs font-black text-field-primary">
+                        <span className="md:hidden">L{index + 1}</span>
+                        <span className="hidden md:inline">LOCATION {index + 1}</span>
+                      </h4>
                     </div>
 
-                    <div className="col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_2.5rem] items-center gap-3 md:col-span-1 md:col-start-2 md:row-start-1">
+                    <div className="col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_2.5rem] items-center gap-1 md:col-span-1 md:col-start-2 md:row-start-1 md:gap-3">
                       <label className="min-w-0">
                         <span className="sr-only">LOCATION {index + 1} 장소명</span>
                         <DraftInput
@@ -1094,7 +1097,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
 
-        <section className="mt-5 rounded-md border border-field-border bg-white p-2 sm:p-5">
+        <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
           <div className="flex items-center justify-between gap-2 md:grid md:grid-cols-[1fr_auto] md:gap-4 md:items-center">
             <div>
               <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
@@ -1105,7 +1108,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </Button>
           </div>
 
-          <div className="mt-2 w-full sm:mt-5">
+          <div className="mt-2 w-full md:mt-5">
             <table className="w-full table-fixed border-collapse text-xs max-lg:block">
               <colgroup className="max-lg:hidden">
                 {[8, 7, 8, 10, 6, 7, 7, 13, 14, 10, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
@@ -1119,24 +1122,24 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   ))}
                 </tr>
               </thead>
-              <tbody className="max-lg:grid max-lg:gap-3 max-sm:gap-1.5">
+              <tbody className="max-lg:grid max-lg:gap-3 max-md:gap-1.5">
                 {timetableRows.map((row, rowIndex) => {
                   if (row.type === "event") {
                     const meal = row.item;
                     const mealIndex = row.sourceIndex;
                     return (
                       <tr key={meal.id} className={`bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                        <td className={`${timetableCellClass} max-lg:col-span-2 max-sm:order-1 max-sm:col-span-4`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
-                        <td className={`${timetableCellClass} max-sm:order-2`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
-                        <td className={`${timetableCellClass} max-sm:order-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
-                        <td className={`${timetableCellClass} max-sm:order-4 max-sm:col-span-2`}>
+                        <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
+                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
+                        <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                        <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-3`}>
                           <span className={mobileTimetableLabelClass}>장소</span>
                           <select className={compactInputClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
                             <option value="">빈칸</option>
                             {locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                           </select>
                         </td>
-                        <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-sm:order-5 max-sm:col-span-4`}>
+                        <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-3`}>
                           <span className={mobileTimetableLabelClass}>내용</span>
                           <MemoField
                             value={meal.memo}
@@ -1153,15 +1156,15 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   const sceneIndex = row.sourceIndex;
                   return (
                     <tr key={scene.id} className={`align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                      <td className={`${timetableCellClass} max-lg:col-span-2 max-sm:order-1 max-sm:col-span-4`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
-                      <td className={`${timetableCellClass} max-sm:order-2`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
-                      <td className={`${timetableCellClass} max-sm:order-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
-                      <td className={`${timetableCellClass} max-sm:order-4 max-sm:col-span-2`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
-                      <td className={`${timetableCellClass} max-sm:order-5`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
-                      <td className={`${timetableCellClass} max-sm:order-6`}><span className={mobileTimetableLabelClass}>SCENE</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
-                      <td className={`${timetableCellClass} max-sm:order-7`}><span className={mobileTimetableLabelClass}>컷 수</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onCommit={(value) => updateScene(sceneIndex, { cutCount: value })} /></td>
-                      <td className={`${timetableWideCellClass} max-sm:order-9 max-sm:col-span-2`}><span className={mobileTimetableLabelClass}>등장 배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
-                      <td className={`${timetableTextCellClass} max-sm:order-10 max-sm:col-span-2`}>
+                      <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
+                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
+                      <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                      <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-2`}><span className={mobileTimetableLabelClass}>SCENE</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
+                      <td className={`${timetableCellClass} max-md:order-7 max-md:col-span-2`}><span className={mobileTimetableLabelClass}>컷 수</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onCommit={(value) => updateScene(sceneIndex, { cutCount: value })} /></td>
+                      <td className={`${timetableWideCellClass} max-md:order-9 max-md:!col-span-2`}><span className={mobileTimetableLabelClass}>배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
+                      <td className={`${timetableTextCellClass} max-md:order-10 max-md:!col-span-2`}>
                         <span className={mobileTimetableLabelClass}>내용</span>
                         <MemoField
                           value={scene.description}
@@ -1170,7 +1173,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-sm:order-8 max-sm:!col-span-1`}>
+                      <td className={`${timetableTextCellClass} max-md:order-8 max-md:!col-span-2`}>
                         <span className={mobileTimetableLabelClass}>촬영 순서</span>
                         <ShootingOrderField
                           value={scene.shootingOrder}
@@ -1179,7 +1182,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           ariaLabel={`촬영 행 ${sceneIndex + 1} 촬영 순서`}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-sm:order-11 max-sm:col-span-4`}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
+                      <td className={`${timetableTextCellClass} max-md:order-11 max-md:!col-span-2`}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
                 })}
@@ -1482,10 +1485,10 @@ function MobileInfoField({
 }) {
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
-    <label className="grid min-w-0 gap-0.5 rounded-md border border-field-border bg-field-soft p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
       <span className="truncate text-center text-[9px] font-black leading-tight text-field-primary">{label}</span>
       <DraftInput
-        className={`${compactInputClass} h-8 min-h-8 truncate px-1 py-1 text-[11px]`}
+        className={`${compactInputClass} h-8 min-h-8 max-w-full min-w-0 truncate px-1 py-1 text-[11px] ${type === "date" ? "appearance-none" : ""}`}
         type={type}
         value={numeric ? sanitizeNumericInput(value, 4) : value}
         onCommit={(nextValue) => onChange(sanitize ? sanitize(nextValue) : nextValue)}
@@ -1502,7 +1505,7 @@ function MobileInfoField({
 
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="grid min-w-0 gap-0.5 rounded-md border border-field-border bg-field-soft p-1 max-sm:[&_input]:h-8 max-sm:[&_input]:min-h-8 max-sm:[&_input]:px-1 max-sm:[&_input]:py-1 max-sm:[&_input]:text-[11px]">
+    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1 max-md:[&_input]:h-8 max-md:[&_input]:min-h-8 max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[11px]">
       <span className="truncate text-center text-[9px] font-black leading-tight text-field-primary">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
@@ -1742,17 +1745,17 @@ function RoleContactGroup({
   onContactChange: (value: string) => void;
 }) {
   return (
-    <div className="grid gap-2 rounded-md border border-field-border bg-field-soft p-2 sm:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
-      <span className="text-xs font-black text-field-primary">{role}</span>
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-md border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-8 max-md:[&_input]:min-h-8 max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[11px]">
+      <span className="whitespace-nowrap text-xs font-black text-field-primary">{role}</span>
       <DraftInput
-        className={compactInputClass}
+        className={`${compactInputClass} min-w-0`}
         value={name}
         onCommit={onNameChange}
         placeholder="이름"
         aria-label={`${role} 이름`}
       />
       <DraftInput
-        className={compactInputClass}
+        className={`${compactInputClass} min-w-0 whitespace-nowrap`}
         value={contact}
         onCommit={onContactChange}
         transform={formatKoreanPhoneNumber}
@@ -2233,8 +2236,8 @@ function TimetableOrderControls({
   onDelete: () => void;
 }) {
   return (
-    <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2 max-sm:gap-0.5 max-sm:border-b-0 max-sm:pb-0 max-sm:[&_button]:h-8 max-sm:[&_button]:w-8">
-      <span className="mr-auto text-[11px] font-black text-field-primary lg:hidden max-sm:text-[9px]">{label} 순서</span>
+    <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2 max-md:gap-0.5 max-md:border-b-0 max-md:pb-0 max-md:[&_button]:h-7 max-md:[&_button]:w-7">
+      <span className="mr-auto text-[11px] font-black text-field-primary lg:hidden max-md:text-[9px]">{label} 순서</span>
       <DragHandle label={`${label} 드래그로 순서 변경`} onDragStart={onDragStart} tabIndex={-1} />
       <button
         type="button"
