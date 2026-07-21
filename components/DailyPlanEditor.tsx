@@ -1156,7 +1156,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
-                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={formatShootingOrder(scene.shootingOrder)} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} sanitize={formatShootingOrder} numericOnly inputMode="numeric" pattern="[0-9]*" onFocus={resetInputScroll} onBlur={resetInputScroll} onKeyDown={(event) => { if (event.key === "Tab") { event.preventDefault(); const input = event.currentTarget; window.setTimeout(() => focusAdjacentElement(input, event.shiftKey ? -1 : 1)); } }} placeholder="예: 4-3-2-1" /></td>
+                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={onlyDigits(scene.shootingOrder)} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} sanitize={onlyDigits} numericOnly inputMode="numeric" pattern="[0-9]*" onFocus={resetInputScroll} onBlur={resetInputScroll} onKeyDown={(event) => { if (event.key === "Tab") { event.preventDefault(); const input = event.currentTarget; window.setTimeout(() => focusAdjacentElement(input, event.shiftKey ? -1 : 1)); } }} placeholder="예: 4321" /></td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
@@ -2971,9 +2971,9 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
 
 function normalizeShootingOrder(value: string, totalCut: string) {
   const trimmed = String(value ?? "").trim();
-  if (trimmed) return formatShootingOrder(trimmed);
+  if (trimmed) return onlyDigits(trimmed);
   const count = clampCutCount(totalCut);
-  return Array.from({ length: count }, (_, index) => String(index + 1)).join("-");
+  return Array.from({ length: count }, (_, index) => String(index + 1)).join("");
 }
 
 function calculateRuntime(startTime: string, endTime: string) {
@@ -3151,8 +3151,8 @@ function sanitizeNumericInput(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
 }
 
-function formatShootingOrder(value: string) {
-  return value.replace(/\D/g, "").split("").join("-");
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
 }
 
 function isValidHHMM(value: string) {
