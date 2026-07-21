@@ -1156,7 +1156,15 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                           onChange={(value) => updateTimetableDescription(sceneIndex, value)}
                         />
                       </td>
-                      <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>촬영 순서</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 촬영 순서`} className={timetableInputClass} value={onlyDigits(scene.shootingOrder)} onCommit={(value) => updateScene(sceneIndex, { shootingOrder: value })} sanitize={onlyDigits} numericOnly inputMode="numeric" pattern="[0-9]*" onFocus={resetInputScroll} onBlur={resetInputScroll} onKeyDown={(event) => { if (event.key === "Tab") { event.preventDefault(); const input = event.currentTarget; window.setTimeout(() => focusAdjacentElement(input, event.shiftKey ? -1 : 1)); } }} placeholder="예: 4321" /></td>
+                      <td className={timetableTextCellClass}>
+                        <span className={mobileTimetableLabelClass}>촬영 순서</span>
+                        <ShootingOrderField
+                          value={scene.shootingOrder}
+                          totalCut={scene.cutCount}
+                          onChange={(value) => updateScene(sceneIndex, { shootingOrder: value })}
+                          ariaLabel={`촬영 행 ${sceneIndex + 1} 촬영 순서`}
+                        />
+                      </td>
                       <td className={timetableTextCellClass}><span className={mobileTimetableLabelClass}>비고</span><MemoField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
@@ -1936,6 +1944,187 @@ function MemoField({
             placeholder="여기에 입력"
             aria-label={`${ariaLabel} 입력`}
           />
+        </div>,
+        document.body
+      ) : null}
+    </>
+  );
+}
+
+function ShootingOrderField({
+  value,
+  totalCut,
+  onChange,
+  ariaLabel
+}: {
+  value: string;
+  totalCut: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState(value);
+  const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const draftValueRef = useRef(value);
+  const displayValue = normalizeShootingOrder(value, totalCut);
+
+  function updateDraft(nextValue: string) {
+    const sanitized = sanitizeShootingOrderInput(nextValue);
+    draftValueRef.current = sanitized;
+    setDraftValue(sanitized);
+    const normalized = normalizeShootingOrder(sanitized, totalCut);
+    if (normalized !== value) onChange(normalized);
+  }
+
+  function commitAndClose() {
+    const normalized = normalizeShootingOrder(draftValueRef.current, totalCut);
+    if (normalized !== value) onChange(normalized);
+    setIsOpen(false);
+  }
+
+  function updatePosition() {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 24);
+    const estimatedHeight = 126;
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    const top = rect.bottom + estimatedHeight <= window.innerHeight - 12
+      ? rect.bottom + 6
+      : Math.max(12, rect.top - estimatedHeight - 6);
+    setPosition({ left, top, width });
+  }
+
+  function insertAtCursor(text: string) {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? draftValueRef.current.length;
+    const end = input?.selectionEnd ?? start;
+    const nextValue = `${draftValueRef.current.slice(0, start)}${text}${draftValueRef.current.slice(end)}`;
+    updateDraft(nextValue);
+    window.setTimeout(() => {
+      input?.focus();
+      input?.setSelectionRange(start + text.length, start + text.length);
+    });
+  }
+
+  function deleteAtCursor() {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? draftValueRef.current.length;
+    const end = input?.selectionEnd ?? start;
+    if (start === 0 && end === 0) return;
+    const deleteStart = start === end ? start - 1 : start;
+    const nextValue = `${draftValueRef.current.slice(0, deleteStart)}${draftValueRef.current.slice(end)}`;
+    updateDraft(nextValue);
+    window.setTimeout(() => {
+      input?.focus();
+      input?.setSelectionRange(deleteStart, deleteStart);
+    });
+  }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      commitAndClose();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") commitAndClose();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`${timetableInputClass} block max-w-full overflow-hidden whitespace-nowrap !text-left`}
+        onClick={() => {
+          draftValueRef.current = value;
+          setDraftValue(value);
+          setIsOpen((current) => !current);
+        }}
+        aria-label={ariaLabel}
+        aria-expanded={isOpen}
+        title={displayValue}
+      >
+        <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-center text-field-text">
+          {displayValue}
+        </span>
+      </button>
+      {isOpen && typeof document !== "undefined" ? createPortal(
+        <div
+          ref={popoverRef}
+          role="dialog"
+          aria-label={`${ariaLabel} 입력`}
+          className="fixed z-[80] rounded-md border border-field-border bg-white p-2 shadow-xl"
+          style={position}
+          data-shooting-order-popover
+        >
+          <div className="flex items-center gap-1.5">
+            <input
+              ref={inputRef}
+              autoFocus
+              type="text"
+              inputMode="tel"
+              maxLength={240}
+              className={`${compactInputClass} min-w-0 flex-1 text-center`}
+              value={draftValue}
+              onChange={(event) => updateDraft(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/[0-9,\-\/ ]/.test(event.key)) {
+                  event.preventDefault();
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitAndClose();
+                  triggerRef.current?.focus();
+                }
+                if (event.key === "Tab") {
+                  event.preventDefault();
+                  const trigger = triggerRef.current;
+                  commitAndClose();
+                  window.setTimeout(() => focusAdjacentElement(trigger, event.shiftKey ? -1 : 1));
+                }
+              }}
+              placeholder="예: 11,10,9"
+              aria-label={`${ariaLabel} 값`}
+            />
+            <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-field-border text-field-muted" onClick={commitAndClose} aria-label={`${ariaLabel} 닫기`}>
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-5 gap-1.5">
+            {["-", ",", "/"].map((separator) => (
+              <button key={separator} type="button" className="min-h-9 rounded border border-field-border bg-field-soft text-sm font-black text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor(separator)}>
+                {separator}
+              </button>
+            ))}
+            <button type="button" className="min-h-9 rounded border border-field-border bg-white px-1 text-[11px] font-black text-field-text" onPointerDown={(event) => event.preventDefault()} onClick={deleteAtCursor}>
+              지우기
+            </button>
+            <button type="button" className="min-h-9 rounded border border-field-border bg-white px-1 text-[11px] font-black text-field-danger" onPointerDown={(event) => event.preventDefault()} onClick={() => updateDraft("")}>
+              전체삭제
+            </button>
+          </div>
         </div>,
         document.body
       ) : null}
@@ -2970,10 +3159,16 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
 }
 
 function normalizeShootingOrder(value: string, totalCut: string) {
-  const trimmed = String(value ?? "").trim();
-  if (trimmed) return onlyDigits(trimmed);
   const count = clampCutCount(totalCut);
-  return Array.from({ length: count }, (_, index) => String(index + 1)).join("");
+  const sanitized = sanitizeShootingOrderInput(String(value ?? "")).trim();
+  if (!sanitized) return Array.from({ length: count }, (_, index) => String(count - index)).join("-");
+
+  const hasSeparator = /[-,/ ]/.test(sanitized);
+  const cutNumbers = hasSeparator
+    ? sanitized.split(/[-,/ ]+/).filter(Boolean).map(Number).filter((cutNumber) => cutNumber >= 1 && cutNumber <= count)
+    : parseCompactShootingOrder(sanitized, count);
+
+  return cutNumbers.join("-");
 }
 
 function calculateRuntime(startTime: string, endTime: string) {
@@ -3151,8 +3346,36 @@ function sanitizeNumericInput(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
 }
 
-function onlyDigits(value: string) {
-  return value.replace(/\D/g, "");
+function sanitizeShootingOrderInput(value: string) {
+  return value.replace(/[^0-9,\-\/ ]/g, "");
+}
+
+function parseCompactShootingOrder(value: string, totalCut: number) {
+  const memo = new Map<number, number[] | null>();
+  const maxTokenLength = String(totalCut).length;
+
+  function parseFrom(index: number): number[] | null {
+    if (index === value.length) return [];
+    if (memo.has(index)) return memo.get(index) ?? null;
+
+    for (let length = Math.min(maxTokenLength, value.length - index); length >= 1; length -= 1) {
+      const token = value.slice(index, index + length);
+      if (token.startsWith("0")) continue;
+      const cutNumber = Number(token);
+      if (cutNumber < 1 || cutNumber > totalCut) continue;
+      const remainder = parseFrom(index + length);
+      if (remainder) {
+        const result = [cutNumber, ...remainder];
+        memo.set(index, result);
+        return result;
+      }
+    }
+
+    memo.set(index, null);
+    return null;
+  }
+
+  return parseFrom(0) ?? [];
 }
 
 function isValidHHMM(value: string) {
