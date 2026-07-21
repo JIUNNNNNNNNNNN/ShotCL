@@ -19,7 +19,9 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-xs font-black text-field-muted">오늘 컷 진행률</p>
-          <h2 id="today-progress-title" className="mt-1 text-xl font-black text-field-primary md:text-2xl">집에 가기까지</h2>
+          <h2 id="today-progress-title" className="mt-1 text-xl font-black text-field-primary md:text-2xl">
+            {isComplete ? "즐거운 바라시" : "집에 가기까지"}
+          </h2>
           <p className="mt-1 text-4xl font-black leading-none text-field-primary">{progress}%</p>
         </div>
         <p className="text-right text-sm font-bold text-field-muted">{completed}/{total} 처리 완료</p>
@@ -28,12 +30,6 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
       <div className="mt-4 h-3 overflow-hidden rounded-full bg-white shadow-inner">
         <div className="h-full bg-field-primary transition-all" style={{ width: `${progress}%` }} />
       </div>
-
-      {isComplete ? (
-        <p className="mt-3 rounded-2xl border border-field-primary/20 bg-white px-4 py-2 text-center text-sm font-black text-field-primary">
-          즐거운 바라시
-        </p>
-      ) : null}
 
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="전체" value={total} />

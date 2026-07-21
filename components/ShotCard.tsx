@@ -15,6 +15,7 @@ type ShotCardProps = {
 export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
+  const isProcessed = isOk || isOmit;
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
 
   function shouldIgnoreCardOpen(target: EventTarget | null) {
@@ -44,7 +45,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
       onPointerUp={handleCardOpen}
       aria-label={`${shot.title} 컷 수정`}
       className={cn(
-        "grid cursor-pointer grid-cols-[64px_minmax(0,1fr)] items-center gap-2 rounded-2xl border bg-white p-2 shadow-sm transition sm:grid-cols-[64px_minmax(0,1fr)_6.5rem]",
+        "grid cursor-pointer grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-2xl border bg-white p-2 shadow-sm transition sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
         isOk && "border-field-primary bg-field-light",
         isOmit && "border-field-danger bg-white opacity-75",
         !isOk && !isOmit && "border-field-border hover:border-field-secondary"
@@ -54,14 +55,14 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
         <button
           type="button"
           onClick={handleImageClick}
-          className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-field-border bg-field-soft text-xs font-black"
+          className="flex h-[72px] w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-field-border bg-field-soft text-xs font-black"
           title="콘티 크게 보기"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={shot.storyboardImageUrl} alt={`${shot.title} 콘티`} className="h-full w-full object-cover" />
+          <img src={shot.storyboardImageUrl} alt={`${shot.title} 콘티`} className="h-full w-full object-contain" />
         </button>
       ) : (
-        <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-xl border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
+        <div className="flex h-[72px] w-24 shrink-0 items-center justify-center rounded-xl border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
           <span className="grid place-items-center gap-1">
             <ImageIcon className="mx-auto h-4 w-4" aria-hidden />
             콘티 없음
@@ -78,7 +79,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
         </div>
 
-        <h2 className={cn("mt-1 truncate text-sm font-black leading-5 text-field-text", isOmit && "line-through")}>
+        <h2 className={cn("mt-1 truncate text-sm font-black leading-5 text-field-text", isProcessed && "underline decoration-2 underline-offset-4")}>
           {shot.description || shot.title}
         </h2>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted">
