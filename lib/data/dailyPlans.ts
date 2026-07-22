@@ -115,6 +115,18 @@ export function normalizeDailyPlanShotDrafts(shots: DailyPlanShotDraft[]) {
 
 /** 프로젝트의 저장된 일촬표 목록을 최신순으로 가져옵니다. */
 export async function listDailyPlans(projectId: string): Promise<Array<DailyPlan & { shotCount: number }>> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans`, { cache: "no-store" });
+    if (response.ok) {
+      const payload = (await response.json()) as { plans: Record<string, unknown>[]; shotPlanIds: string[] };
+      const counts = new Map<string, number>();
+      payload.shotPlanIds.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));
+      return payload.plans.map(dailyPlanFromRow).map((plan) => ({ ...plan, shotCount: counts.get(plan.id) ?? 0 }));
+    }
+    if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
+  } catch (error) {
+    if (error instanceof Error && error.message === "관리자 권한이 필요합니다.") throw error;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -151,6 +163,16 @@ export async function listDailyPlans(projectId: string): Promise<Array<DailyPlan
 
 /** 일촬표와 컷 행을 함께 가져옵니다. */
 export async function getDailyPlanWithShots(projectId: string, dailyPlanId: string): Promise<DailyPlanWithShots | null> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, { cache: "no-store" });
+    if (response.ok) {
+      const payload = (await response.json()) as { plan: Record<string, unknown>; shots: Record<string, unknown>[] };
+      return { plan: dailyPlanFromRow(payload.plan), shots: payload.shots.map(dailyPlanShotFromRow) };
+    }
+    if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
+  } catch (error) {
+    if (error instanceof Error && error.message === "관리자 권한이 필요합니다.") throw error;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -187,6 +209,20 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
 /** 새 일촬표를 만들거나 기존 일촬표를 저장합니다. */
 export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise<DailyPlanWithShots> {
   const normalizedShots = normalizeDailyPlanShotDrafts(input.shots);
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(input.projectId)}/daily-plans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dailyPlanId: input.dailyPlanId, plan: input.plan, shots: normalizedShots })
+    });
+    if (response.ok) {
+      const payload = (await response.json()) as { plan: Record<string, unknown>; shots: Record<string, unknown>[] };
+      return { plan: dailyPlanFromRow(payload.plan), shots: payload.shots.map(dailyPlanShotFromRow) };
+    }
+    if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
+  } catch (error) {
+    if (error instanceof Error && error.message === "관리자 권한이 필요합니다.") throw error;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -295,6 +331,13 @@ export async function duplicateDailyPlan(projectId: string, dailyPlanId: string)
 
 /** 저장된 일촬표와 연결 컷 행을 삭제합니다. */
 export async function deleteDailyPlan(projectId: string, dailyPlanId: string): Promise<void> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, { method: "DELETE" });
+    if (response.ok) return;
+    if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
+  } catch (error) {
+    if (error instanceof Error && error.message === "관리자 권한이 필요합니다.") throw error;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {

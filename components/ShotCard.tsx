@@ -9,10 +9,11 @@ type ShotCardProps = {
   onOpen: (shot: Shot) => void;
   onImagePreview: (url: string, title: string) => void;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
+  progressOnly?: boolean;
 };
 
 /** 컷 중심 현장 진행표 카드입니다. 버튼 클릭은 카드 수정 모달과 분리합니다. */
-export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotCardProps) {
+export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progressOnly = false }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
   const isProcessed = isOk || isOmit;
@@ -23,7 +24,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
   }
 
   function handleCardOpen(event: React.MouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) {
-    if (shouldIgnoreCardOpen(event.target)) return;
+    if (progressOnly || shouldIgnoreCardOpen(event.target)) return;
     onOpen(shot);
   }
 
@@ -43,9 +44,10 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
     <article
       onClick={handleCardOpen}
       onPointerUp={handleCardOpen}
-      aria-label={`${shot.title} 컷 수정`}
+      aria-label={progressOnly ? `${shot.title} 컷 진행 상태` : `${shot.title} 컷 수정`}
       className={cn(
-        "grid cursor-pointer grid-cols-[96px_minmax(0,1fr)] items-center gap-2 rounded-[1.5rem] border bg-white p-1.5 transition-[background-color,border-color,transform] active:scale-[0.995] sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
+        "grid grid-cols-[96px_minmax(0,1fr)] items-center gap-2 rounded-[1.5rem] border bg-white p-1.5 transition-[background-color,border-color,transform] active:scale-[0.995] sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
+        !progressOnly && "cursor-pointer",
         isOk && "border-field-primary bg-field-light",
         isOmit && "border-field-danger bg-white opacity-75",
         !isOk && !isOmit && "border-field-border hover:border-field-secondary"
@@ -89,18 +91,21 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
         </div>
       </div>
 
-        <div className="col-span-2 grid grid-cols-2 gap-2 sm:col-span-1">
+        <div className={cn("col-span-2 grid gap-2 sm:col-span-1", progressOnly ? "grid-cols-1" : "grid-cols-2")}>
           <button
             type="button"
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
+            disabled={progressOnly && shot.status !== "pending"}
             className={cn(
               "min-h-8 rounded-full border text-xs font-black transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
-              isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
+              isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary",
+              progressOnly && shot.status !== "pending" && "cursor-not-allowed opacity-60"
             )}
           >
             OK
           </button>
+          {!progressOnly ? (
           <button
             type="button"
             onClick={(event) => handleStatusClick(event, "omit")}
@@ -112,6 +117,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
           >
             omit
           </button>
+          ) : null}
         </div>
     </article>
   );

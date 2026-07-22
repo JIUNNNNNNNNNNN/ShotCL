@@ -24,3 +24,16 @@ export function getSupabaseServerClient(accessToken?: string | null) {
     }
   });
 }
+
+/** 비밀번호 hash와 접근 세션처럼 브라우저에 노출하면 안 되는 테이블 전용입니다. */
+export function getSupabaseAdminClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const forceLocalData = process.env.NEXT_PUBLIC_USE_LOCAL_DATA === "true";
+
+  if (!url || !serviceRoleKey || forceLocalData) return null;
+
+  return createClient(url, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+}

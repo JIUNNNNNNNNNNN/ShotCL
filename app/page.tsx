@@ -3,36 +3,46 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
-import { createProject, listProjects } from "@/lib/data/projects";
+import { listProjects } from "@/lib/data/projects";
+import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
+import { projectFromRow } from "@/lib/data/mappers";
 import type { Project } from "@/lib/types";
 
-type ProjectPickerMode = "new" | "load" | "progress";
+type ProjectPickerMode = "new" | "load" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
 
 const wheelItems = [
   {
     id: "new",
     label: ["새 프로젝트", "만들기"],
-    path: "M180 180 L180 24 A156 156 0 0 1 315.1 258 Z",
-    textX: 246,
-    textY: 134,
+    path: "M180 180 L69.7 69.7 A156 156 0 0 1 290.3 69.7 Z",
+    textX: 180,
+    textY: 92,
     fillClass: "fill-field-primary group-hover:fill-[#174d3b]"
   },
   {
     id: "load",
     label: ["프로젝트", "불러오기"],
-    path: "M180 180 L315.1 258 A156 156 0 0 1 44.9 258 Z",
-    textX: 180,
-    textY: 246,
+    path: "M180 180 L290.3 69.7 A156 156 0 0 1 290.3 290.3 Z",
+    textX: 266,
+    textY: 170,
     fillClass: "fill-[#285d49] group-hover:fill-[#326b55]"
   },
   {
     id: "progress",
     label: ["진행", "보기"],
-    path: "M180 180 L44.9 258 A156 156 0 0 1 180 24 Z",
-    textX: 114,
-    textY: 134,
+    path: "M180 180 L290.3 290.3 A156 156 0 0 1 69.7 290.3 Z",
+    textX: 180,
+    textY: 252,
     fillClass: "fill-[#416f5d] group-hover:fill-[#4c7b68]"
+  },
+  {
+    id: "join",
+    label: ["프로젝트", "참여"],
+    path: "M180 180 L69.7 290.3 A156 156 0 0 1 69.7 69.7 Z",
+    textX: 94,
+    textY: 170,
+    fillClass: "fill-[#557d6d] group-hover:fill-[#628b7a]"
   }
 ] as const;
 
@@ -44,6 +54,10 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [pickerMode, setPickerMode] = useState<ProjectPickerMode | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [progressPassword, setProgressPassword] = useState("");
+  const [joinProjectName, setJoinProjectName] = useState("");
+  const [joinPassword, setJoinPassword] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
@@ -121,9 +135,10 @@ export default function HomePage() {
   function activateWheelItem(id: WheelItemId) {
     setFeedback(null);
     setNewProjectError("");
+    setIsCreatingProject(false);
 
-    if (id === "new") {
-      setPickerMode("new");
+    if (id === "new" || id === "join") {
+      setPickerMode(id);
       return;
     }
 
@@ -137,11 +152,6 @@ export default function HomePage() {
       return;
     }
 
-    if (projects.length === 0) {
-      showFeedback(id, id === "load" ? "불러올 프로젝트 없음" : "진행 볼 프로젝트 없음");
-      return;
-    }
-
     setPickerMode(id);
   }
 
@@ -151,19 +161,28 @@ export default function HomePage() {
     activateWheelItem(id);
   }
 
-  function openProject(projectId: string) {
-    if (pickerMode === "load") {
-      router.push(`/projects/${projectId}/daily-plans`);
+  function openProject(project: Project) {
+    if (pickerMode === "load" && project.accessRole !== "progress") {
+      router.push(`/projects/${project.id}/daily-plans`);
       return;
     }
-    router.push(`/projects/${projectId}`);
+    router.push(`/projects/${project.id}`);
   }
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = newProjectName.trim();
+    const name = cleanProjectName(newProjectName);
     if (!name) {
       setNewProjectError("프로젝트 이름을 입력하세요.");
+      return;
+    }
+
+    if (!/^\d{4}$/.test(adminPassword) || !/^\d{4}$/.test(progressPassword)) {
+      setNewProjectError("관리자와 진행도 비밀번호를 각각 4자리 숫자로 입력하세요.");
+      return;
+    }
+    if (adminPassword === progressPassword) {
+      setNewProjectError("관리자 비밀번호와 진행도 비밀번호는 서로 달라야 합니다.");
       return;
     }
 
@@ -172,7 +191,14 @@ export default function HomePage() {
     try {
       const now = new Date();
       const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-      const project = await createProject({ name, shootDate: localToday, description: "" });
+      const response = await fetch("/api/projects/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectName: name, adminPassword, progressPassword, shootDate: localToday })
+      });
+      const payload = (await response.json()) as { project?: Record<string, unknown>; error?: string };
+      if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
+      const project = projectFromRow(payload.project);
       router.push(`/projects/${project.id}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
@@ -180,7 +206,31 @@ export default function HomePage() {
     }
   }
 
-  const pickerTitle = pickerMode === "new" ? "새 프로젝트" : pickerMode === "load" ? "프로젝트 불러오기" : "진행보기";
+  async function handleJoinProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const projectName = cleanProjectName(joinProjectName);
+    if (!projectName || !/^\d{4}$/.test(joinPassword)) {
+      setNewProjectError("프로젝트 이름과 4자리 비밀번호를 입력하세요");
+      return;
+    }
+    setNewProjectError("");
+    setIsCreatingProject(true);
+    try {
+      const response = await fetch("/api/projects/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectName, password: joinPassword })
+      });
+      const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
+      if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
+      router.push(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
+    } catch (error) {
+      setNewProjectError(error instanceof Error ? error.message : "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
+      setIsCreatingProject(false);
+    }
+  }
+
+  const pickerTitle = pickerMode === "new" ? "새 프로젝트" : pickerMode === "join" ? "프로젝트 참여" : pickerMode === "load" ? "프로젝트 불러오기" : "진행보기";
 
   function renderProjectFruits() {
     if (isLoading || errorMessage || projects.length === 0) return null;
@@ -189,7 +239,7 @@ export default function HomePage() {
       <button
         key={project.id}
         type="button"
-        onClick={() => openProject(project.id)}
+        onClick={() => openProject(project)}
         className="group/fruit relative z-10 flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:h-[5.5rem] md:w-[5.5rem]"
         aria-label={`${project.name} ${pickerTitle}`}
       >
@@ -197,13 +247,13 @@ export default function HomePage() {
           {project.name}
         </span>
         <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
-          {project.shootDate || "촬영일 미정"}
+          {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
         </span>
       </button>
     ));
   }
 
-  function renderFruitBranches(mode: Exclude<ProjectPickerMode, "new">) {
+  function renderFruitBranches(mode: "load" | "progress") {
     const columnCount = mode === "load" ? 3 : 2;
     const rowCount = Math.max(1, Math.ceil(projects.length / columnCount));
 
@@ -275,8 +325,13 @@ export default function HomePage() {
                 <path d="M526 244 C560 228 562 178 604 150" fill="none" stroke="#8ca99d" strokeWidth="2" />
                 <path d="M604 150 C626 136 644 132 666 134" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
               </>
+            ) : pickerMode === "join" ? (
+              <>
+                <path d="M274 244 C236 224 226 180 190 150" fill="none" stroke="#8ca99d" strokeWidth="2" />
+                <path d="M190 150 C168 136 150 132 128 134" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
+              </>
             ) : pickerMode === "progress" ? (
-              <path d="M245 302 C228 294 224 230 208 212" fill="none" stroke="#8ca99d" strokeWidth="2" />
+              <path d="M292 470 C254 500 226 528 208 558" fill="none" stroke="#8ca99d" strokeWidth="2" />
             ) : (
               <path d="M400 500 C400 516 390 528 400 536" fill="none" stroke="#8ca99d" strokeWidth="2" />
             )}
@@ -288,8 +343,10 @@ export default function HomePage() {
             className={`absolute z-10 motion-safe:animate-[branch-reveal_180ms_ease-out] ${
               pickerMode === "new"
                 ? "left-[36.5rem] top-[4.5rem] w-[12.5rem]"
-                : pickerMode === "progress"
+                : pickerMode === "join"
                   ? "left-2 top-[4.5rem] w-[12.5rem]"
+                : pickerMode === "progress"
+                  ? "left-2 top-[31rem] w-[12.5rem]"
                   : "left-[14rem] top-[31rem] w-[22rem]"
             }`}
           >
@@ -320,6 +377,26 @@ export default function HomePage() {
                   aria-label="새 프로젝트 이름"
                   className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(sanitizePasscode(event.target.value))}
+                  placeholder="관리자 비밀번호 4자리"
+                  aria-label="관리자 비밀번호"
+                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                />
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={progressPassword}
+                  onChange={(event) => setProgressPassword(sanitizePasscode(event.target.value))}
+                  placeholder="진행도 비밀번호 4자리"
+                  aria-label="진행도 비밀번호"
+                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
@@ -329,16 +406,55 @@ export default function HomePage() {
                   {isCreatingProject ? "만드는 중" : "만들기"}
                 </button>
               </form>
+            ) : pickerMode === "join" ? (
+              <form
+                onSubmit={handleJoinProject}
+                className="grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
+              >
+                <input
+                  autoFocus
+                  value={joinProjectName}
+                  onChange={(event) => {
+                    setJoinProjectName(event.target.value);
+                    if (newProjectError) setNewProjectError("");
+                  }}
+                  placeholder="프로젝트 이름"
+                  aria-label="참여할 프로젝트 이름"
+                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                />
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={joinPassword}
+                  onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
+                  placeholder="비밀번호 4자리"
+                  aria-label="프로젝트 참여 비밀번호"
+                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                />
+                {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
+                <button
+                  type="submit"
+                  disabled={isCreatingProject}
+                  className="h-9 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                >
+                  {isCreatingProject ? "확인 중" : "참여"}
+                </button>
+              </form>
             ) : (
               <div className="py-1">
-                <div className={`relative grid auto-rows-[5rem] gap-2 md:auto-rows-[5.5rem] ${
+                {projects.length === 0 ? (
+                  <p className="rounded-full border border-field-border bg-white px-4 py-2 text-center text-[11px] font-black text-field-muted">
+                    {pickerMode === "load" ? "불러올 프로젝트가 없습니다" : "진행 볼 프로젝트가 없습니다"}
+                  </p>
+                ) : <div className={`relative grid auto-rows-[5rem] gap-2 md:auto-rows-[5.5rem] ${
                   pickerMode === "progress" ? "grid-cols-2 justify-items-center" : "grid-cols-3 justify-items-center"
                 }`}>
                   <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
                     {renderFruitBranches(pickerMode)}
                   </svg>
                   {renderProjectFruits()}
-                </div>
+                </div>}
               </div>
             )}
           </div>

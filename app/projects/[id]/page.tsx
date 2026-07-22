@@ -16,6 +16,7 @@ import { getProject } from "@/lib/data/projects";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { downloadStandardDailyPlanTemplate } from "@/lib/dailyPlan/excel";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
+import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
 /** URL 파라미터에서 프로젝트 ID를 안전하게 읽습니다. */
@@ -43,6 +44,8 @@ function filterShots(shots: Shot[], filter: ShotFilter) {
 
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
 export default function ProjectDetailPage() {
+  const { role } = useProjectAccess();
+  const progressOnly = role === "progress";
   const projectId = useProjectId();
   const [project, setProject] = useState<Project | null>(null);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -83,6 +86,10 @@ export default function ProjectDetailPage() {
   const nextOrderIndex = shots.length + 1;
 
   async function handleStatusChange(targetShot: Shot, status: ShotStatus) {
+    if (progressOnly && !(targetShot.status === "pending" && status === "ok")) {
+      setErrorMessage("진행도 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다.");
+      return;
+    }
     const previousShots = shots;
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
 
@@ -120,7 +127,7 @@ export default function ProjectDetailPage() {
       const [createdShot] = await createShotsFromDrafts(projectId, drafts);
       if (createdShot && values.imageFile) {
         const imageUrl = await saveShotStoryboardImage(projectId, createdShot.id, values.imageFile);
-        await updateShot(createdShot.id, { storyboardImageUrl: imageUrl });
+        await updateShot(createdShot.id, { storyboardImageUrl: imageUrl }, projectId);
       }
 
       setIsAddOpen(false);
@@ -157,7 +164,7 @@ export default function ProjectDetailPage() {
         orderIndex: values.orderIndex,
         status: values.status,
         storyboardImageUrl: imageUrl
-      });
+      }, projectId);
 
       setEditingShot(null);
       setSuccessMessage("컷 정보를 저장했습니다.");
@@ -250,7 +257,7 @@ export default function ProjectDetailPage() {
           <House className="h-5 w-5" aria-hidden />
         </Link>
 
-        <details className="group relative">
+        {!progressOnly ? <details className="group relative">
           <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-full border border-field-border bg-white text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
             <Ellipsis className="h-5 w-5" aria-hidden />
             <span className="sr-only">프로젝트 보조 기능</span>
@@ -282,7 +289,7 @@ export default function ProjectDetailPage() {
               <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
             </button>
           </nav>
-        </details>
+        </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도 권한</span>}
       </div>
 
       <section className="mb-3">
@@ -314,10 +321,10 @@ export default function ProjectDetailPage() {
           <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
           <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
           <div className="mt-5 max-w-xs">
-            <Button onClick={() => setIsAddOpen(true)} className="rounded-full">
+            {!progressOnly ? <Button onClick={() => setIsAddOpen(true)} className="rounded-full">
               <Plus className="h-5 w-5" aria-hidden />
               새 컷 추가
-            </Button>
+            </Button> : null}
           </div>
         </Card>
       ) : filteredShots.length === 0 ? (
@@ -331,13 +338,14 @@ export default function ProjectDetailPage() {
               onOpen={setEditingShot}
               onImagePreview={(url, title) => setPreview({ url, title })}
               onStatusChange={handleStatusChange}
+              progressOnly={progressOnly}
             />
           ))}
         </div>
       )}
       </div>
 
-      {process.env.NODE_ENV !== "production" ? (
+      {process.env.NODE_ENV !== "production" && !progressOnly ? (
         <details className="mt-4 rounded-[1.25rem] border border-field-border bg-white">
           <summary className="cursor-pointer px-4 py-3 text-xs font-black text-field-muted">개발용 도구</summary>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-field-border p-4">
@@ -349,7 +357,7 @@ export default function ProjectDetailPage() {
         </details>
       ) : null}
 
-      <button
+      {!progressOnly ? <button
         type="button"
         onClick={() => setIsAddOpen(true)}
         className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full border border-field-primary bg-field-primary text-white shadow-[0_6px_16px_rgba(15,61,46,0.18)] transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:right-8"
@@ -357,9 +365,9 @@ export default function ProjectDetailPage() {
         title="새 컷 추가"
       >
         <Plus className="h-6 w-6" aria-hidden />
-      </button>
+      </button> : null}
 
-      <ShotEditorModal
+      {!progressOnly ? <ShotEditorModal
         mode="add"
         open={isAddOpen}
         shot={null}
@@ -367,9 +375,9 @@ export default function ProjectDetailPage() {
         isSaving={isSaving}
         onClose={() => setIsAddOpen(false)}
         onSave={handleSaveNewShot}
-      />
+      /> : null}
 
-      <ShotEditorModal
+      {!progressOnly ? <ShotEditorModal
         mode="edit"
         open={Boolean(editingShot)}
         shot={editingShot}
@@ -379,7 +387,7 @@ export default function ProjectDetailPage() {
         onSave={handleSaveExistingShot}
         onDelete={handleDeleteShot}
         onMove={handleMoveShot}
-      />
+      /> : null}
 
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? ""} onClose={() => setPreview(null)} />
     </>

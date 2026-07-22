@@ -166,7 +166,7 @@ export type StoryboardAnalysisResult = {
   debug: AnalysisDebugInfo;
 };
 
-export type ProjectRole = "admin" | "crew";
+export type ProjectRole = "admin" | "progress" | "crew";
 
 export type Project = {
   id: string;
@@ -174,6 +174,8 @@ export type Project = {
   shootDate: string;
   description: string;
   createdAt: string;
+  shareConfigured?: boolean;
+  accessRole?: "admin" | "progress";
 };
 
 export type ProjectInput = {

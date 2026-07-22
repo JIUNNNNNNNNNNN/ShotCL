@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { analyzeShotCandidates } from "@/lib/ai/analyzeShotCandidates";
 import { extractExcel } from "@/lib/analyzers/extractExcel";
 import { extractPdf } from "@/lib/analyzers/extractPdf";
@@ -9,13 +9,22 @@ import { renderPdfPages } from "@/lib/analyzers/renderPdfPages";
 import { createAnalysisRunOnServer } from "@/lib/data/analysisRunServer";
 import type { ExtractedDocument } from "@/lib/analyzers/types";
 import type { ExtractionPreview } from "@/lib/types";
+import { canAdministerProject, ProjectAccessUnavailableError } from "@/lib/projectAccess/server";
 
 export const runtime = "nodejs";
 
 /** 업로드된 원본 파일을 분석해 컷 후보와 미리보기용 shots를 반환합니다. 저장은 하지 않습니다. */
-export async function POST(request: Request, { params }: { params: Promise<{ projectId: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId } = await params;
+    try {
+      if (!(await canAdministerProject(request, projectId))) {
+        return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
+      }
+    } catch (error) {
+      if (!(error instanceof ProjectAccessUnavailableError)) throw error;
+      // Supabase가 없는 로컬 개발 모드에서는 기존 분석 흐름을 유지합니다.
+    }
     const formData = await request.formData();
     const file = formData.get("file");
 

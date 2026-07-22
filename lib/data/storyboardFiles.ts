@@ -5,6 +5,14 @@ import type { StoryboardFile } from "@/lib/types";
 
 const STORAGE_BUCKET = "storyboards";
 
+async function hasSharedAccess(projectId: string) {
+  try {
+    return (await fetch(`/api/projects/${encodeURIComponent(projectId)}/access`, { cache: "no-store" })).ok;
+  } catch {
+    return false;
+  }
+}
+
 /** 파일명을 Supabase Storage path에 안전하게 넣을 수 있도록 단순화합니다. */
 function sanitizeFileName(fileName: string) {
   return fileName
@@ -17,6 +25,12 @@ function sanitizeFileName(fileName: string) {
 
 /** 프로젝트에 업로드된 스토리보드 파일 목록을 가져옵니다. */
 export async function listStoryboardFiles(projectId: string): Promise<StoryboardFile[]> {
+  if (await hasSharedAccess(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/storyboard-files`, { cache: "no-store" });
+    const payload = (await response.json()) as { files?: Record<string, unknown>[]; error?: string };
+    if (!response.ok || !payload.files) throw new Error(payload.error || "업로드 파일을 불러오지 못했습니다.");
+    return payload.files.map(storyboardFileFromRow);
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -36,6 +50,14 @@ export async function listStoryboardFiles(projectId: string): Promise<Storyboard
 
 /** 브라우저에서 선택한 파일을 Supabase Storage 또는 로컬 개발 목록에 저장합니다. */
 export async function saveStoryboardFile(projectId: string, file: File): Promise<StoryboardFile> {
+  if (await hasSharedAccess(projectId)) {
+    const formData = new FormData();
+    formData.set("file", file);
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/storyboard-files`, { method: "POST", body: formData });
+    const payload = (await response.json()) as { file?: Record<string, unknown>; error?: string };
+    if (!response.ok || !payload.file) throw new Error(payload.error || "파일을 업로드하지 못했습니다.");
+    return storyboardFileFromRow(payload.file);
+  }
   const supabase = getSupabaseBrowserClient();
   const now = new Date().toISOString();
 
@@ -81,6 +103,18 @@ export async function saveStoryboardFile(projectId: string, file: File): Promise
 
 /** 업로드 파일 목록에서 파일 기록을 삭제합니다. Supabase에서는 Storage 원본도 함께 삭제합니다. */
 export async function deleteStoryboardFile(file: StoryboardFile): Promise<void> {
+  if (await hasSharedAccess(file.projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(file.projectId)}/storyboard-files`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: file.id, storagePath: file.storagePath })
+    });
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      throw new Error(payload.error || "파일을 삭제하지 못했습니다.");
+    }
+    return;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -108,6 +142,15 @@ function readFileAsDataUrl(file: File) {
 
 /** 컷 수정 모달에서 선택한 콘티 이미지를 저장하고 카드에서 표시할 URL을 반환합니다. */
 export async function saveShotStoryboardImage(projectId: string, shotId: string, file: File): Promise<string> {
+  if (await hasSharedAccess(projectId)) {
+    const formData = new FormData();
+    formData.set("file", file);
+    formData.set("shotId", shotId);
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/storyboard-files`, { method: "POST", body: formData });
+    const payload = (await response.json()) as { imageUrl?: string; error?: string };
+    if (!response.ok || !payload.imageUrl) throw new Error(payload.error || "콘티 이미지를 업로드하지 못했습니다.");
+    return payload.imageUrl;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {

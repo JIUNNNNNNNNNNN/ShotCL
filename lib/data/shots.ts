@@ -3,8 +3,28 @@ import { normalizeShotStatus, shotDraftToInsertRow, shotFromRow, shotPatchToRow 
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import type { Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
+async function getSharedRole(projectId: string): Promise<"admin" | "progress" | null> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/access`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { role?: "admin" | "progress" };
+    return payload.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** 프로젝트의 컷 리스트를 촬영 순서대로 가져옵니다. */
 export async function listShots(projectId: string): Promise<Shot[]> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, { cache: "no-store" });
+    if (response.ok) {
+      const payload = (await response.json()) as { shots: Record<string, unknown>[] };
+      return payload.shots.map(shotFromRow);
+    }
+  } catch {
+    // 공유 세션이 없는 레거시 프로젝트는 기존 저장소 조회로 이어집니다.
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -40,6 +60,16 @@ export async function listShots(projectId: string): Promise<Shot[]> {
 export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft[]): Promise<Shot[]> {
   const existingShots = await listShots(projectId);
   const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
+  if (await getSharedRole(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drafts })
+    });
+    const payload = (await response.json()) as { shots?: Record<string, unknown>[]; error?: string };
+    if (!response.ok || !payload.shots) throw new Error(payload.error || "컷을 추가하지 못했습니다.");
+    return payload.shots.map(shotFromRow);
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -77,7 +107,17 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
 }
 
 /** 컷 하나의 제목, 설명, 상태 같은 일부 필드를 수정합니다. */
-export async function updateShot(shotId: string, patch: Partial<Shot>): Promise<Shot> {
+export async function updateShot(shotId: string, patch: Partial<Shot>, projectId?: string): Promise<Shot> {
+  if (projectId && await getSharedRole(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patch })
+    });
+    const payload = (await response.json()) as { shot?: Record<string, unknown>; error?: string };
+    if (!response.ok || !payload.shot) throw new Error(payload.error || "컷을 수정하지 못했습니다.");
+    return shotFromRow(payload.shot);
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -127,6 +167,22 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
     return shot;
   }
 
+  try {
+    const accessResponse = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/access`, { cache: "no-store" });
+    if (accessResponse.ok) {
+      const response = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/shots/${encodeURIComponent(shot.id)}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const payload = (await response.json()) as { shot?: Record<string, unknown>; error?: string };
+      if (!response.ok || !payload.shot) throw new Error(payload.error || "상태를 변경하지 못했습니다.");
+      return shotFromRow(payload.shot);
+    }
+  } catch (error) {
+    if (error instanceof Error && !error.message.includes("fetch")) throw error;
+  }
+
   const supabase = getSupabaseBrowserClient();
   const updatedShot = await updateShot(shot.id, { status: newStatus });
 
@@ -155,6 +211,14 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
 
 /** 분석 결과로 기존 컷 리스트를 교체할 때 사용합니다. */
 export async function deleteAllShots(projectId: string): Promise<void> {
+  if (await getSharedRole(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, { method: "DELETE" });
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      throw new Error(payload.error || "컷 목록을 삭제하지 못했습니다.");
+    }
+    return;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -169,6 +233,14 @@ export async function deleteAllShots(projectId: string): Promise<void> {
 
 /** 컷을 삭제합니다. */
 export async function deleteShot(shot: Shot): Promise<void> {
+  if (await getSharedRole(shot.projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/shots/${encodeURIComponent(shot.id)}`, { method: "DELETE" });
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      throw new Error(payload.error || "컷을 삭제하지 못했습니다.");
+    }
+    return;
+  }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
@@ -183,6 +255,18 @@ export async function deleteShot(shot: Shot): Promise<void> {
 
 /** 드래그 앤 드롭 대신 위/아래 버튼으로 촬영 순서를 바꿉니다. */
 export async function moveShot(projectId: string, shotId: string, direction: "up" | "down") {
+  if (await getSharedRole(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ direction })
+    });
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      throw new Error(payload.error || "컷 순서를 변경하지 못했습니다.");
+    }
+    return listShots(projectId);
+  }
   const shots = await listShots(projectId);
   const currentIndex = shots.findIndex((shot) => shot.id === shotId);
   const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;

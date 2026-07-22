@@ -83,7 +83,9 @@ export function projectFromRow(row: AnyRow): Project {
     name: row.name,
     shootDate: row.shoot_date ?? "",
     description: row.description ?? "",
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    shareConfigured: Boolean(row.share_enabled),
+    accessRole: row.access_role === "admin" || row.access_role === "progress" ? row.access_role : undefined
   };
 }
 
