@@ -61,7 +61,7 @@ export default function HomePage() {
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
-  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const wheelRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,7 +94,10 @@ export default function HomePage() {
     if (!pickerMode) return;
 
     function closeOnOutsideClick(event: PointerEvent) {
-      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setPickerMode(null);
+      if (!(event.target instanceof Node)) return;
+      const clickedWheel = wheelRef.current?.contains(event.target);
+      const clickedSubmenu = clusterRef.current?.contains(event.target);
+      if (!clickedWheel && !clickedSubmenu) setPickerMode(null);
     }
 
     function closeOnEscape(event: KeyboardEvent) {
@@ -111,19 +114,20 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!pickerMode || !window.matchMedia("(max-width: 767px)").matches) return;
-    const animationFrame = window.requestAnimationFrame(() => {
-      const canvas = canvasRef.current;
-      const cluster = clusterRef.current;
-      if (!canvas || !cluster) return;
-      const clusterCenterX = cluster.offsetLeft + cluster.offsetWidth / 2;
-      const clusterCenterY = cluster.offsetTop + cluster.offsetHeight / 2;
-      canvas.scrollTo({
-        left: Math.max(0, clusterCenterX - canvas.clientWidth / 2),
-        top: Math.max(0, clusterCenterY - canvas.clientHeight / 2),
-        behavior: "smooth"
+    let secondAnimationFrame = 0;
+    const firstAnimationFrame = window.requestAnimationFrame(() => {
+      secondAnimationFrame = window.requestAnimationFrame(() => {
+        clusterRef.current?.scrollIntoView({
+          block: "center",
+          inline: "center",
+          behavior: "smooth"
+        });
       });
     });
-    return () => window.cancelAnimationFrame(animationFrame);
+    return () => {
+      window.cancelAnimationFrame(firstAnimationFrame);
+      if (secondAnimationFrame) window.cancelAnimationFrame(secondAnimationFrame);
+    };
   }, [pickerMode]);
 
   function showFeedback(target: WheelItemId, message: string) {
@@ -136,6 +140,11 @@ export default function HomePage() {
     setFeedback(null);
     setNewProjectError("");
     setIsCreatingProject(false);
+
+    if (pickerMode === id) {
+      setPickerMode(null);
+      return;
+    }
 
     if (id === "new" || id === "join") {
       setPickerMode(id);
@@ -153,6 +162,26 @@ export default function HomePage() {
     }
 
     setPickerMode(id);
+  }
+
+  function closeInputSubmenu(mode: "new" | "join") {
+    if (mode === "new") {
+      setNewProjectName("");
+      setAdminPassword("");
+      setProgressPassword("");
+    } else {
+      setJoinProjectName("");
+      setJoinPassword("");
+    }
+    setNewProjectError("");
+    setIsCreatingProject(false);
+    setPickerMode(null);
+  }
+
+  function hideProjectFromCurrentList(project: Project) {
+    if (!window.confirm("이 프로젝트를 목록에서 삭제할까요?")) return;
+    setProjects((currentProjects) => currentProjects.filter((item) => item.id !== project.id));
+    if (projects.length === 1) setPickerMode(null);
   }
 
   function handleWheelKeyDown(event: React.KeyboardEvent<SVGGElement>, id: (typeof wheelItems)[number]["id"]) {
@@ -236,20 +265,34 @@ export default function HomePage() {
     if (isLoading || errorMessage || projects.length === 0) return null;
 
     return projects.map((project) => (
-      <button
-        key={project.id}
-        type="button"
-        onClick={() => openProject(project)}
-        className="group/fruit relative z-10 flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:h-[5.5rem] md:w-[5.5rem]"
-        aria-label={`${project.name} ${pickerTitle}`}
-      >
-        <span className="overflow-hidden text-[11px] font-black leading-[1.25] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
-          {project.name}
-        </span>
-        <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
-          {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
-        </span>
-      </button>
+      <div key={project.id} className="relative z-10 h-20 w-20 shrink-0 md:h-[5.5rem] md:w-[5.5rem]">
+        <button
+          type="button"
+          onClick={() => openProject(project)}
+          className="group/fruit flex h-full w-full flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+          aria-label={`${project.name} ${pickerTitle}`}
+        >
+          <span className="overflow-hidden text-[11px] font-black leading-[1.25] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+            {project.name}
+          </span>
+          <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
+            {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            hideProjectFromCurrentList(project);
+          }}
+          className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+          aria-label={`${project.name} 목록에서 숨기기`}
+        >
+          <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+            <X className="h-3 w-3" aria-hidden />
+          </span>
+        </button>
+      </div>
     ));
   }
 
@@ -271,15 +314,14 @@ export default function HomePage() {
   }
 
   return (
-    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg">
-      <div ref={canvasRef} className="w-full max-h-[100svh] overflow-auto overscroll-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+    <div className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <div ref={canvasRef} className="h-full w-full overflow-auto overscroll-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
         <div
-          ref={pickerRef}
           className={`relative mx-auto transition-[width,height] duration-200 ${
             pickerMode ? "h-[48rem] w-[50rem]" : "h-[min(82vw,21rem)] w-[min(82vw,21rem)]"
           }`}
         >
-        <div className={`absolute z-20 ${pickerMode ? "left-[14.5rem] top-[11rem] w-[21rem]" : "inset-0 w-full"}`}>
+        <div ref={wheelRef} className={`absolute z-20 ${pickerMode ? "left-[14.5rem] top-[11rem] w-[21rem]" : "inset-0 w-full"}`}>
         <svg viewBox="0 0 360 360" className="block h-auto w-full drop-shadow-[0_12px_24px_rgba(15,61,46,0.12)]" role="group" aria-label="첫 화면 기능 메뉴">
           <circle cx="180" cy="180" r="160" className="fill-white stroke-field-border" strokeWidth="2" />
           {wheelItems.map((item) => {
@@ -352,22 +394,26 @@ export default function HomePage() {
           >
             <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "load" ? "justify-center" : pickerMode === "new" ? "justify-start" : "justify-end"}`}>
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">{pickerTitle}</h1>
-              <button
-                type="button"
-                onClick={() => setPickerMode(null)}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-field-border bg-white text-field-muted transition-colors hover:border-field-secondary hover:bg-field-soft active:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
-                aria-label="프로젝트 선택창 닫기"
-              >
-                <X className="h-3.5 w-3.5" aria-hidden />
-              </button>
             </div>
             {pickerMode === "new" ? (
               <form
                 onSubmit={handleCreateProject}
-                className="grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
+                className="relative grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
               >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeInputSubmenu("new");
+                  }}
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  aria-label="새 프로젝트 입력 닫기"
+                >
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                    <X className="h-3 w-3" aria-hidden />
+                  </span>
+                </button>
                 <input
-                  autoFocus
                   value={newProjectName}
                   onChange={(event) => {
                     setNewProjectName(event.target.value);
@@ -409,10 +455,22 @@ export default function HomePage() {
             ) : pickerMode === "join" ? (
               <form
                 onSubmit={handleJoinProject}
-                className="grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
+                className="relative grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
               >
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    closeInputSubmenu("join");
+                  }}
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  aria-label="프로젝트 참여 입력 닫기"
+                >
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                    <X className="h-3 w-3" aria-hidden />
+                  </span>
+                </button>
                 <input
-                  autoFocus
                   value={joinProjectName}
                   onChange={(event) => {
                     setJoinProjectName(event.target.value);
