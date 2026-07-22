@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, Plus, RotateCcw, Upload } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
-import { CorgiLoader } from "@/components/CorgiLoader";
+import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import { ShotCard } from "@/components/ShotCard";
@@ -248,7 +248,7 @@ export default function ProjectDetailPage() {
   }
 
   if (isLoading) {
-    return <CorgiLoader size="lg" />;
+    return <PixelDogLoader size="lg" />;
   }
 
   if (!project) {

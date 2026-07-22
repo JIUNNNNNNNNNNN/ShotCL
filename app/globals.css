@@ -2,60 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
-@keyframes corgi-run-bounce {
+@keyframes pixel-dog-bounce {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  50% { transform: translateY(-2px); }
 }
 
-@keyframes corgi-run-step-a {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(4px, -2px); }
+@keyframes pixel-dog-legs-a {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
 }
 
-@keyframes corgi-run-step-b {
-  0%, 100% { transform: translate(4px, -2px); }
-  50% { transform: translate(0, 0); }
+@keyframes pixel-dog-legs-b {
+  0%, 49% { opacity: 0; }
+  50%, 100% { opacity: 1; }
 }
 
-@keyframes corgi-tail-wag {
-  0%, 100% { transform: rotate(-8deg); }
-  50% { transform: rotate(12deg); }
+@keyframes pixel-dog-tail {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
 }
 
-@keyframes corgi-ground-scroll {
-  to { stroke-dashoffset: -56; }
+@keyframes pixel-dog-ground {
+  to { stroke-dashoffset: -26; }
 }
 
-.corgi-loader__dog {
-  animation: corgi-run-bounce 500ms steps(2, end) infinite;
+.pixel-dog-loader__dog {
+  animation: pixel-dog-bounce 440ms steps(2, end) infinite;
   transform-origin: center bottom;
 }
 
-.corgi-loader__tail {
-  animation: corgi-tail-wag 300ms steps(2, end) infinite;
-  transform-box: fill-box;
-  transform-origin: right center;
+.pixel-dog-loader__legs--a {
+  animation: pixel-dog-legs-a 320ms steps(1, end) infinite;
 }
 
-.corgi-loader__legs--front,
-.corgi-loader__legs--back-alt {
-  animation: corgi-run-step-a 300ms steps(2, end) infinite;
+.pixel-dog-loader__legs--b {
+  animation: pixel-dog-legs-b 320ms steps(1, end) infinite;
 }
 
-.corgi-loader__legs--back,
-.corgi-loader__legs--front-alt {
-  animation: corgi-run-step-b 300ms steps(2, end) infinite;
+.pixel-dog-loader__tail {
+  animation: pixel-dog-tail 320ms steps(2, end) infinite;
 }
 
-.corgi-loader__ground {
-  animation: corgi-ground-scroll 700ms linear infinite;
+.pixel-dog-loader__ground {
+  animation: pixel-dog-ground 620ms linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .corgi-loader__dog,
-  .corgi-loader__tail,
-  .corgi-loader__legs,
-  .corgi-loader__ground {
+  .pixel-dog-loader__dog,
+  .pixel-dog-loader__legs,
+  .pixel-dog-loader__tail,
+  .pixel-dog-loader__ground {
     animation: none;
   }
 }

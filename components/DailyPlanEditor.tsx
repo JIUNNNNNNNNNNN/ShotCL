@@ -32,7 +32,10 @@ import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeathe
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
+import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Button } from "@/components/ui/Button";
+
+const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 
 type DailyPlanEditorProps = {
   project: Project;
@@ -428,7 +431,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     }
 
     setAddressSearchLocationId(target.id);
-    setAddressSearchMessage("주소 검색창을 불러오는 중입니다.");
+    setAddressSearchMessage(ADDRESS_SEARCH_LOADING);
 
     try {
       await loadDaumPostcodeScript();
@@ -738,7 +741,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     }
 
     setIsWeatherLoading(true);
-    setWeatherStatus("날씨 불러오는 중…");
+    setWeatherStatus("");
 
     try {
       const searchParams = new URLSearchParams({
@@ -934,7 +937,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 }
               />
               <Button variant="secondary" onClick={handleLoadOpenMeteo} disabled={isWeatherLoading || !plan.shootingDate || !weatherLookupSource}>
-                {isWeatherLoading ? "날씨 불러오는 중…" : "날씨 자동 입력"}
+                {isWeatherLoading ? <PixelDogLoader size="xs" compact /> : "날씨 자동 입력"}
               </Button>
             </div>
 
@@ -1106,7 +1109,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                     ) : null}
 
                     {addressSearchLocationId === location.id && addressSearchMessage ? (
-                      <span className="col-span-2 text-center text-[11px] font-bold text-field-muted md:col-span-3" aria-live="polite">{addressSearchMessage}</span>
+                      addressSearchMessage === ADDRESS_SEARCH_LOADING ? (
+                        <div className="col-span-2 flex justify-center md:col-span-3">
+                          <PixelDogLoader size="xs" compact />
+                        </div>
+                      ) : (
+                        <span className="col-span-2 text-center text-[11px] font-bold text-field-muted md:col-span-3" aria-live="polite">{addressSearchMessage}</span>
+                      )
                     ) : null}
                   </div>
                 ))}

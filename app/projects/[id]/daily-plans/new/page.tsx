@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { CorgiLoader } from "@/components/CorgiLoader";
+import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { Card } from "@/components/ui/Card";
 import { getProject } from "@/lib/data/projects";
@@ -33,7 +33,7 @@ export default function NewDailyPlanPage() {
   }, [projectId]);
 
   if (isLoading) {
-    return <CorgiLoader size="lg" />;
+    return <PixelDogLoader size="lg" />;
   }
 
   if (!project) {

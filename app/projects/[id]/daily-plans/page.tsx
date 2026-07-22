@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Copy, Plus, Trash2 } from "lucide-react";
-import { CorgiLoader } from "@/components/CorgiLoader";
+import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { PageHeader } from "@/components/PageHeader";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -93,7 +93,7 @@ export default function DailyPlansPage() {
   }
 
   if (isLoading) {
-    return <CorgiLoader />;
+    return <PixelDogLoader />;
   }
 
   if (!project) {
