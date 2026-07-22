@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, Plus, RotateCcw, Upload } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { CorgiLoader } from "@/components/CorgiLoader";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -277,16 +277,7 @@ export default function ProjectDetailPage() {
   return (
     <>
       <div className="relative z-30 mb-3 flex items-center justify-between" aria-label="진행 페이지 이동 메뉴">
-        <Link
-          href="/"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-field-secondary bg-white text-field-primary transition-[background-color,transform,border-color] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-          aria-label="홈으로 이동"
-          title="홈"
-        >
-          <House className="h-5 w-5" aria-hidden />
-        </Link>
-
-        <div className="min-w-0 flex-1 px-3 text-center">
+        <div className="min-w-0 flex-1 pr-3 text-left md:text-center">
           <p className="truncate text-sm font-black text-field-primary">{project.name} / {formatEpisodeLabel(selectedPlan, 0)}</p>
           <p className="truncate text-[11px] font-bold text-field-muted">{selectedPlan.shootingDate || "촬영일 미정"}</p>
         </div>
@@ -441,13 +432,6 @@ function EpisodeSelection({
   return (
     <main className="mx-auto w-full max-w-3xl pb-12">
       <div className="mb-4 flex items-center gap-2">
-        <Link
-          href="/"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-field-secondary bg-white text-field-primary transition-[background-color,transform,border-color] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-          aria-label="홈으로 이동"
-        >
-          <House className="h-5 w-5" aria-hidden />
-        </Link>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <p className="max-w-[45vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-primary">{project.name}</p>
           <p className="truncate text-xs font-bold text-field-muted">진행할 회차 선택</p>
