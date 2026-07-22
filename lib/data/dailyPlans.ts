@@ -8,6 +8,7 @@ import {
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import type {
   DailyPlan,
   DailyPlanDraft,
@@ -24,6 +25,29 @@ export type SaveDailyPlanInput = {
   dailyPlanId?: string | null;
   plan: DailyPlanDraft;
   shots: DailyPlanShotDraft[];
+  allowDuplicate?: boolean;
+};
+
+export type SaveDailyPlanResult = DailyPlanWithShots & {
+  saveStatus: "saved" | "duplicate";
+  message: string;
+};
+
+export class DailyPlanDuplicateError extends Error {
+  constructor(message = "이미 저장된 일촬표입니다.") {
+    super(message);
+    this.name = "DailyPlanDuplicateError";
+  }
+}
+
+type SaveDailyPlanApiPayload = {
+  ok?: boolean;
+  status?: "saved" | "duplicate";
+  message?: string;
+  dailyPlan?: Record<string, unknown>;
+  plan?: Record<string, unknown>;
+  shots?: Record<string, unknown>[];
+  error?: string;
 };
 
 /** 새 일촬표 기본값을 프로젝트 정보로 채웁니다. */
@@ -207,41 +231,84 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
 }
 
 /** 새 일촬표를 만들거나 기존 일촬표를 저장합니다. */
-export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise<DailyPlanWithShots> {
+export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise<SaveDailyPlanResult> {
   const normalizedShots = normalizeDailyPlanShotDrafts(input.shots);
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(input.projectId)}/daily-plans`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dailyPlanId: input.dailyPlanId, plan: input.plan, shots: normalizedShots })
+      body: JSON.stringify({ dailyPlanId: input.dailyPlanId, plan: input.plan, shots: normalizedShots, allowDuplicate: input.allowDuplicate })
     });
-    if (response.ok) {
-      const payload = (await response.json()) as { plan: Record<string, unknown>; shots: Record<string, unknown>[] };
-      return { plan: dailyPlanFromRow(payload.plan), shots: payload.shots.map(dailyPlanShotFromRow) };
+    const payload = (await response.json().catch(() => ({}))) as SaveDailyPlanApiPayload;
+    const planRow = payload.dailyPlan ?? payload.plan;
+    if ((response.ok || response.status === 409) && planRow && payload.shots) {
+      return {
+        plan: dailyPlanFromRow(planRow),
+        shots: payload.shots.map(dailyPlanShotFromRow),
+        saveStatus: payload.status === "duplicate" ? "duplicate" : "saved",
+        message: payload.message ?? (payload.status === "duplicate" ? "이미 저장된 일촬표입니다." : "일촬표가 저장되었습니다.")
+      };
+    }
+    if (response.status === 409 || payload.status === "duplicate") {
+      throw new DailyPlanDuplicateError(payload.message);
     }
     if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
+    if (response.status !== 401 && response.status !== 503) {
+      throw new Error(payload.error || payload.message || "일촬표를 저장하지 못했습니다.");
+    }
   } catch (error) {
-    if (error instanceof Error && error.message === "관리자 권한이 필요합니다.") throw error;
+    if (!(error instanceof TypeError)) throw error;
   }
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
     if (input.dailyPlanId) {
-      const { data: planRow, error: planError } = await supabase
-        .from("daily_plans")
-        .update(dailyPlanDraftToRow(input.projectId, input.plan))
-        .eq("id", input.dailyPlanId)
-        .eq("project_id", input.projectId)
+      const { data: oldShots, error: oldShotsError } = await supabase
+        .from("daily_plan_shots")
         .select("*")
-        .single();
+        .eq("project_id", input.projectId)
+        .eq("daily_plan_id", input.dailyPlanId);
+      if (oldShotsError) throw oldShotsError;
 
-      if (planError) throw planError;
+      const newRows = normalizedShots.map((shot, index) => dailyPlanShotDraftToRow(input.projectId, input.dailyPlanId!, shot, index + 1));
+      let insertedRows: Record<string, unknown>[] = [];
+      try {
+        if (newRows.length) {
+          const { data, error } = await supabase.from("daily_plan_shots").insert(newRows).select("*").order("order_index", { ascending: true });
+          if (error) throw error;
+          insertedRows = data;
+        }
+        if (oldShots.length) {
+          const { error } = await supabase.from("daily_plan_shots").delete().in("id", oldShots.map((row) => row.id));
+          if (error) throw error;
+        }
+        const { data: planRow, error: planError } = await supabase
+          .from("daily_plans")
+          .update(dailyPlanDraftToRow(input.projectId, input.plan))
+          .eq("id", input.dailyPlanId)
+          .eq("project_id", input.projectId)
+          .select("*")
+          .single();
+        if (planError) throw planError;
+        return {
+          plan: dailyPlanFromRow(planRow),
+          shots: insertedRows.map(dailyPlanShotFromRow),
+          saveStatus: "saved",
+          message: "일촬표가 저장되었습니다."
+        };
+      } catch (error) {
+        if (insertedRows.length) await supabase.from("daily_plan_shots").delete().in("id", insertedRows.map((row) => row.id));
+        if (oldShots.length) {
+          const { data: remaining } = await supabase.from("daily_plan_shots").select("id").in("id", oldShots.map((row) => row.id));
+          if ((remaining?.length ?? 0) < oldShots.length) await supabase.from("daily_plan_shots").insert(oldShots);
+        }
+        throw error;
+      }
+    }
 
-      const { error: deleteError } = await supabase.from("daily_plan_shots").delete().eq("daily_plan_id", input.dailyPlanId);
-      if (deleteError) throw deleteError;
-
-      const insertedShots = await insertDailyPlanShots(input.projectId, input.dailyPlanId, normalizedShots);
-      return { plan: dailyPlanFromRow(planRow), shots: insertedShots };
+    if (!input.allowDuplicate) {
+      const duplicate = await findSupabaseDuplicateDailyPlan(input.projectId, input.plan);
+      if (duplicate) return { ...duplicate, saveStatus: "duplicate", message: "이미 저장된 일촬표입니다." };
     }
 
     const { data: planRow, error: planError } = await supabase
@@ -253,11 +320,27 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
     if (planError) throw planError;
 
     const plan = dailyPlanFromRow(planRow);
-    const insertedShots = await insertDailyPlanShots(input.projectId, plan.id, normalizedShots);
-    return { plan, shots: insertedShots };
+    try {
+      const insertedShots = await insertDailyPlanShots(input.projectId, plan.id, normalizedShots);
+      return { plan, shots: insertedShots, saveStatus: "saved", message: "일촬표가 저장되었습니다." };
+    } catch (error) {
+      await supabase.from("daily_plans").delete().eq("id", plan.id).eq("project_id", input.projectId);
+      throw error;
+    }
   }
 
   const buckets = readLocalBuckets();
+  if (!input.dailyPlanId && !input.allowDuplicate) {
+    const duplicatePlan = buckets.dailyPlans.find((plan) => plan.projectId === input.projectId && isSameDailyPlanIdentity(plan, input.plan));
+    if (duplicatePlan) {
+      return {
+        plan: duplicatePlan,
+        shots: buckets.dailyPlanShots.filter((shot) => shot.dailyPlanId === duplicatePlan.id).sort((left, right) => left.orderIndex - right.orderIndex),
+        saveStatus: "duplicate",
+        message: "이미 저장된 일촬표입니다."
+      };
+    }
+  }
   const now = new Date().toISOString();
   const planId = input.dailyPlanId ?? createLocalId("daily_plan");
   const existingPlan = buckets.dailyPlans.find((plan) => plan.id === planId);
@@ -286,7 +369,27 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
     input.projectId
   );
 
-  return { plan, shots };
+  return { plan, shots, saveStatus: "saved", message: "일촬표가 저장되었습니다." };
+}
+
+async function findSupabaseDuplicateDailyPlan(projectId: string, draft: DailyPlanDraft): Promise<DailyPlanWithShots | null> {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase.from("daily_plans").select("*").eq("project_id", projectId);
+  if (error) throw error;
+  const duplicateRow = data.find((row) => isSameDailyPlanIdentity(dailyPlanFromRow(row), draft));
+  if (!duplicateRow) return null;
+
+  const duplicatePlan = dailyPlanFromRow(duplicateRow);
+  const { data: shotRows, error: shotError } = await supabase
+    .from("daily_plan_shots")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("daily_plan_id", duplicatePlan.id)
+    .order("order_index", { ascending: true });
+  if (shotError) throw shotError;
+  return { plan: duplicatePlan, shots: shotRows.map(dailyPlanShotFromRow) };
 }
 
 async function insertDailyPlanShots(projectId: string, dailyPlanId: string, shots: DailyPlanShotDraft[]) {
@@ -326,7 +429,7 @@ export async function duplicateDailyPlan(projectId: string, dailyPlanId: string)
     memo: existing.plan.memo
   };
   const shotDrafts = existing.shots.map(dailyPlanShotToDraft);
-  return saveDailyPlanWithShots({ projectId, plan: draft, shots: shotDrafts });
+  return saveDailyPlanWithShots({ projectId, plan: draft, shots: shotDrafts, allowDuplicate: true });
 }
 
 /** 저장된 일촬표와 연결 컷 행을 삭제합니다. */

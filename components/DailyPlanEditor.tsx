@@ -8,6 +8,7 @@ import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
+  DailyPlanDuplicateError,
   dailyPlanShotToDraft,
   dailyPlanShotsToShotDrafts,
   normalizeDailyPlanShotDrafts,
@@ -300,13 +301,23 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             plan: buildPlanForSave(snapshot.plan, snapshot.locations, snapshot.mealTimes, snapshot.printMeta),
             shots: scenesToShotDrafts(snapshot.scenes)
           });
-          await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
+          if (saved.saveStatus === "duplicate") {
+            hasPendingChangesRef.current = true;
+            if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("이미 저장된 일촬표");
+            return;
+          }
+          let didSyncShots = true;
+          try {
+            await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
+          } catch {
+            didSyncShots = false;
+          }
           window.localStorage.removeItem(storageKey);
           hasPendingChangesRef.current = false;
-          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("자동 저장됨");
-        } catch {
+          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(didSyncShots ? "자동 저장됨" : "일촬표 저장됨 · 진행표 동기화 실패");
+        } catch (error) {
           hasPendingChangesRef.current = true;
-          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("저장 실패");
+          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(error instanceof DailyPlanDuplicateError ? "이미 저장된 일촬표" : "저장 실패");
         }
       });
     }, 1500);
@@ -747,6 +758,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   async function saveCurrentPlan(showMessage = true) {
     setIsSaving(true);
     setErrorMessage("");
+    setMessage("");
 
     try {
       const planForSave = buildPlanForSave(plan, locations, mealTimes, printMeta);
@@ -756,7 +768,17 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         plan: planForSave,
         shots: scenesToShotDrafts(scenes)
       });
-      await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
+      if (saved.saveStatus === "duplicate") {
+        setMessage(saved.message);
+        return null;
+      }
+
+      let didSyncShots = true;
+      try {
+        await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
+      } catch {
+        didSyncShots = false;
+      }
       const savedDraft = planToDraft(saved.plan);
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
@@ -777,12 +799,16 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       }
 
       if (showMessage) {
-        setMessage("일촬표를 저장했습니다.");
+        setMessage(didSyncShots ? saved.message : "일촬표는 저장됐지만 컷 진행 동기화에 실패했습니다.");
       }
 
-      return saved;
+      return { saved, didSyncShots };
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "일촬표를 저장하지 못했습니다.");
+      if (error instanceof DailyPlanDuplicateError) {
+        setMessage(error.message);
+      } else {
+        setErrorMessage("일촬표를 저장하지 못했습니다.");
+      }
       return null;
     } finally {
       setIsSaving(false);
@@ -790,10 +816,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   }
 
   async function startApplyToShotBoard() {
-    const saved = await saveCurrentPlan(false);
-    if (saved) {
-      const count = dailyPlanShotsToShotDrafts(saved.plan, saved.shots.map(dailyPlanShotToDraft)).length;
+    const result = await saveCurrentPlan(false);
+    if (result?.didSyncShots) {
+      const count = dailyPlanShotsToShotDrafts(result.saved.plan, result.saved.shots.map(dailyPlanShotToDraft)).length;
       setMessage(`${count}개 컷을 진행표와 동기화했습니다.`);
+    } else if (result) {
+      setMessage("일촬표는 저장됐지만 컷 진행 동기화에 실패했습니다.");
     }
   }
 
