@@ -44,7 +44,15 @@ export default function AnalysisRunsPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, runData] = await Promise.all([getProject(projectId), listAnalysisRuns(projectId)]);
+      const projectData = await getProject(projectId);
+      setProject(projectData);
+      if (!projectData) {
+        setRuns([]);
+        setItemsByRunId({});
+        setErrorMessage("");
+        return;
+      }
+      const runData = await listAnalysisRuns(projectData.id);
       const itemPairs = await Promise.all(
         runData.map(async (run) => {
           const items = await listAnalysisRunItems(run.id).catch(() => []);
@@ -52,7 +60,6 @@ export default function AnalysisRunsPage() {
         })
       );
 
-      setProject(projectData);
       setRuns(runData);
       setItemsByRunId(Object.fromEntries(itemPairs));
       setErrorMessage("");
@@ -72,7 +79,7 @@ export default function AnalysisRunsPage() {
   }
 
   if (!project) {
-    return <Card className="border-field-danger font-bold text-field-danger">프로젝트를 찾을 수 없습니다.</Card>;
+    return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
   return (

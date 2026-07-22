@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { shotPatchToRow } from "@/lib/data/mappers";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
+import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { Shot } from "@/lib/types";
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ projectId: string; shotId: string }> }) {
   try {
-    const { projectId, shotId } = await context.params;
+    const { projectId: routeProjectId, shotId } = await context.params;
+    const projectId = normalizeProjectId(routeProjectId);
+    if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const body = (await request.json()) as { patch?: Partial<Shot> };
@@ -20,7 +23,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ projectId: string; shotId: string }> }) {
   try {
-    const { projectId, shotId } = await context.params;
+    const { projectId: routeProjectId, shotId } = await context.params;
+    const projectId = normalizeProjectId(routeProjectId);
+    if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const supabase = requireProjectAccessDb();

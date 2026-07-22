@@ -63,10 +63,17 @@ export default function UploadStoryboardPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, fileData, planData] = await Promise.all([getProject(projectId), listStoryboardFiles(projectId), listDailyPlans(projectId)]);
-      const nextDailyPlanId = planData.some((plan) => plan.id === selectedDailyPlanId) ? selectedDailyPlanId : planData[0]?.id ?? "";
-      const shotData = nextDailyPlanId ? await listShots(projectId, nextDailyPlanId) : [];
+      const projectData = await getProject(projectId);
       setProject(projectData);
+      if (!projectData) {
+        setFiles([]);
+        setDailyPlans([]);
+        setErrorMessage("");
+        return;
+      }
+      const [fileData, planData] = await Promise.all([listStoryboardFiles(projectData.id), listDailyPlans(projectData.id)]);
+      const nextDailyPlanId = planData.some((plan) => plan.id === selectedDailyPlanId) ? selectedDailyPlanId : planData[0]?.id ?? "";
+      const shotData = nextDailyPlanId ? await listShots(projectData.id, nextDailyPlanId) : [];
       setFiles(fileData);
       setDailyPlans(planData);
       setSelectedDailyPlanId(nextDailyPlanId);
@@ -379,7 +386,7 @@ export default function UploadStoryboardPage() {
   }
 
   if (!project) {
-    return <Card className="border-field-danger font-bold text-field-danger">프로젝트를 찾을 수 없습니다.</Card>;
+    return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
   return (

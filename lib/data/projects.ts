@@ -2,7 +2,10 @@ import { ensureSupabaseDevSession, getSupabaseBrowserClient } from "@/lib/supaba
 import { toReadableDataError } from "@/lib/data/errors";
 import { projectFromRow, projectInputToRow } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
+import { getLocalProjectIdCandidates, isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { Project, ProjectInput } from "@/lib/types";
+
+type ProjectApiErrorPayload = { error?: string; code?: string };
 
 /** 프로젝트 목록을 최신 생성순으로 가져옵니다. */
 export async function listProjects(): Promise<Project[]> {
@@ -32,26 +35,49 @@ export async function listProjects(): Promise<Project[]> {
 
 /** 단일 프로젝트를 ID로 조회합니다. */
 export async function getProject(projectId: string): Promise<Project | null> {
+  const localCandidates = getLocalProjectIdCandidates(projectId);
+  const databaseProjectId = normalizeProjectId(projectId);
+  const localProject = () => {
+    const { projects } = readLocalBuckets();
+    return projects.find((project) => localCandidates.includes(project.id)) ?? null;
+  };
+
+  if (!projectId.trim()) throw new Error("프로젝트를 먼저 선택하세요.");
+  let serverFallbackError = "";
+
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { cache: "no-store" });
+    const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}`, { cache: "no-store" });
     if (response.ok) {
       const payload = (await response.json()) as { project: Record<string, unknown> };
       return projectFromRow(payload.project);
     }
-  } catch {
-    // 공유 세션이 없는 레거시 프로젝트는 기존 저장소 조회로 이어집니다.
+    const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload;
+    if (response.status === 400) {
+      const project = localProject();
+      if (project) return project;
+      throw new Error(payload.error || "프로젝트를 먼저 선택하세요.");
+    }
+    if (response.status === 401 || response.status === 403) throw new Error(payload.error || "이 프로젝트에 접근할 권한이 없습니다.");
+    if (response.status === 404) return localProject();
+    if (response.status !== 503) throw new Error(payload.error || "프로젝트 정보를 불러오지 못했습니다.");
+    serverFallbackError = payload.error || "프로젝트 정보를 불러오지 못했습니다.";
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    // 서버에 연결할 수 없는 로컬 개발 모드만 기존 저장소 조회로 이어집니다.
   }
   const supabase = getSupabaseBrowserClient();
 
-  if (supabase) {
+  if (supabase && isValidDatabaseProjectId(databaseProjectId)) {
     await ensureSupabaseDevSession();
-    const { data, error } = await supabase.from("projects").select("*").eq("id", projectId).maybeSingle();
+    const { data, error } = await supabase.from("projects").select("*").eq("id", databaseProjectId).maybeSingle();
     if (error) throw toReadableDataError(error, "프로젝트 상세 정보를 불러오지 못했습니다.");
-    return data ? projectFromRow(data) : null;
+    if (data) return projectFromRow(data);
   }
 
-  const { projects } = readLocalBuckets();
-  return projects.find((project) => project.id === projectId) ?? null;
+  const storedProject = localProject();
+  if (storedProject) return storedProject;
+  if (serverFallbackError) throw new Error(serverFallbackError);
+  return null;
 }
 
 /** 새 촬영 프로젝트를 만듭니다. */

@@ -34,8 +34,14 @@ export default function DailyPlansPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, planData] = await Promise.all([getProject(projectId), listDailyPlans(projectId)]);
+      const projectData = await getProject(projectId);
       setProject(projectData);
+      if (!projectData) {
+        setPlans([]);
+        setErrorMessage("");
+        return;
+      }
+      const planData = await listDailyPlans(projectData.id);
       setPlans(planData);
       setErrorMessage("");
     } catch (error) {

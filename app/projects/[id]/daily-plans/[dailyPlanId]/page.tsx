@@ -27,14 +27,26 @@ export default function DailyPlanDetailPage() {
   useEffect(() => {
     if (!projectId || !dailyPlanId) return;
 
-    Promise.all([getProject(projectId), getDailyPlanWithShots(projectId, dailyPlanId)])
-      .then(([projectData, planData]) => {
+    async function loadDailyPlan() {
+      try {
+        const projectData = await getProject(projectId);
         setProject(projectData);
+        if (!projectData) {
+          setDailyPlan(null);
+          setErrorMessage("");
+          return;
+        }
+        const planData = await getDailyPlanWithShots(projectData.id, dailyPlanId);
         setDailyPlan(planData);
         setErrorMessage("");
-      })
-      .catch((error) => setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다."))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadDailyPlan();
   }, [projectId, dailyPlanId]);
 
   if (isLoading) {

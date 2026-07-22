@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
+import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { DailyPlanDraft, DailyPlanShotDraft } from "@/lib/types";
 
 type DailyPlanSaveBody = {
@@ -16,7 +17,9 @@ const DUPLICATE_MESSAGE = "이미 저장된 일촬표입니다.";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
-    const { projectId } = await context.params;
+    const { projectId: routeProjectId } = await context.params;
+    const projectId = normalizeProjectId(routeProjectId);
+    if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
     const supabase = requireProjectAccessDb();
@@ -37,7 +40,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
 
 export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
-    const { projectId } = await context.params;
+    const { projectId: routeProjectId } = await context.params;
+    const projectId = normalizeProjectId(routeProjectId);
+    if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ ok: false, status: "failed", error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
     if (grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });

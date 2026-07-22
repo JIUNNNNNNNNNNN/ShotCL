@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { listProjects } from "@/lib/data/projects";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
 import { projectFromRow } from "@/lib/data/mappers";
+import { getLocalProjectIdCandidates } from "@/lib/projectId";
 import type { Project } from "@/lib/types";
 
 type ProjectPickerMode = "new" | "progress" | "join";
@@ -34,7 +35,11 @@ function writeHiddenProjectIds(projectIds: Set<string>) {
 
 function unhideProject(projectId: string) {
   const hiddenProjectIds = readHiddenProjectIds();
-  if (!hiddenProjectIds.delete(projectId)) return;
+  let didDelete = false;
+  getLocalProjectIdCandidates(projectId).forEach((candidate) => {
+    if (hiddenProjectIds.delete(candidate)) didDelete = true;
+  });
+  if (!didDelete) return;
   writeHiddenProjectIds(hiddenProjectIds);
 }
 
@@ -92,7 +97,7 @@ export default function HomePage() {
       try {
         const data = await listProjects();
         const hiddenProjectIds = readHiddenProjectIds();
-        if (isMounted) setProjects(data.filter((project) => !hiddenProjectIds.has(project.id)));
+        if (isMounted) setProjects(data.filter((project) => !getLocalProjectIdCandidates(project.id).some((candidate) => hiddenProjectIds.has(candidate))));
       } catch (error) {
         if (isMounted) setErrorMessage(error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다.");
       } finally {
@@ -241,6 +246,7 @@ export default function HomePage() {
       const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
       const response = await fetch("/api/projects/create", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectName: name, adminPassword, progressPassword, shootDate: localToday })
       });
@@ -248,7 +254,7 @@ export default function HomePage() {
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
       unhideProject(project.id);
-      router.push(`/projects/${project.id}`);
+      window.location.assign(`/projects/${project.id}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
       setIsCreatingProject(false);
@@ -267,13 +273,14 @@ export default function HomePage() {
     try {
       const response = await fetch("/api/projects/join", {
         method: "POST",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectName, password: joinPassword })
       });
       const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
       if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       unhideProject(payload.projectId);
-      router.push(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
+      window.location.assign(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       setIsCreatingProject(false);

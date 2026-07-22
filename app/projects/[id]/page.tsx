@@ -66,10 +66,18 @@ export default function ProjectDetailPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, planData] = await Promise.all([getProject(projectId), listDailyPlans(projectId)]);
-      const shotEntries = await Promise.all(planData.map(async (plan) => [plan.id, await listShots(projectId, plan.id)] as const));
-      const shotsByPlan = Object.fromEntries(shotEntries);
+      const projectData = await getProject(projectId);
       setProject(projectData);
+      if (!projectData) {
+        setDailyPlans([]);
+        setEpisodeShots({});
+        setShots([]);
+        setErrorMessage("");
+        return;
+      }
+      const planData = await listDailyPlans(projectData.id);
+      const shotEntries = await Promise.all(planData.map(async (plan) => [plan.id, await listShots(projectData.id, plan.id)] as const));
+      const shotsByPlan = Object.fromEntries(shotEntries);
       setDailyPlans(planData);
       setEpisodeShots(shotsByPlan);
       setShots(dailyPlanId ? shotsByPlan[dailyPlanId] ?? [] : []);
@@ -245,10 +253,9 @@ export default function ProjectDetailPage() {
   if (!project) {
     return (
       <Card className="border-field-danger text-field-danger">
-        <p className="font-bold">프로젝트를 찾을 수 없습니다.</p>
-        {errorMessage ? <p className="mt-2 break-words text-sm font-medium">{errorMessage}</p> : null}
+        <p className="font-bold">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <ButtonLink href="/" className="mt-4">
-          목록으로
+          프로젝트 선택으로
         </ButtonLink>
       </Card>
     );

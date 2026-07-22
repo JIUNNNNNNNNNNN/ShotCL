@@ -4,6 +4,7 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from "node:util";
 import type { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { normalizeProjectId } from "@/lib/projectId";
 import type { ProjectAccessGrant, SharedProjectRole } from "@/lib/projectAccess/core";
 
 const scrypt = promisify(scryptCallback);
@@ -99,11 +100,12 @@ export function ensureSessionToken(request: NextRequest, response: NextResponse)
 
 export async function saveAccessGrant(token: string, projectId: string, role: SharedProjectRole) {
   const supabase = requireProjectAccessDb();
+  const databaseProjectId = normalizeProjectId(projectId);
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString();
   const { error } = await supabase.from("project_access_sessions").upsert(
     {
       browser_token_hash: hashSessionToken(token),
-      project_id: projectId,
+      project_id: databaseProjectId,
       role,
       joined_at: new Date().toISOString(),
       expires_at: expiresAt
@@ -121,11 +123,12 @@ export async function getAccessGrant(request: NextRequest, projectId: string): P
 export async function getAccessGrantByToken(token: string | null, projectId: string): Promise<ProjectAccessGrant | null> {
   if (!token) return null;
   const supabase = requireProjectAccessDb();
+  const databaseProjectId = normalizeProjectId(projectId);
   const { data, error } = await supabase
     .from("project_access_sessions")
     .select("project_id,role,joined_at,expires_at,projects!inner(name)")
     .eq("browser_token_hash", hashSessionToken(token))
-    .eq("project_id", projectId)
+    .eq("project_id", databaseProjectId)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (error) throw error;
@@ -157,9 +160,10 @@ export async function listAccessGrants(request: NextRequest) {
 /** 레거시 프로젝트는 기존 Auth/RLS 흐름을 유지하고, 공유 프로젝트만 passcode admin 세션을 강제합니다. */
 export async function canAdministerProject(request: NextRequest, projectId: string) {
   const supabase = requireProjectAccessDb();
-  const { data, error } = await supabase.from("projects").select("share_enabled").eq("id", projectId).maybeSingle();
+  const databaseProjectId = normalizeProjectId(projectId);
+  const { data, error } = await supabase.from("projects").select("share_enabled").eq("id", databaseProjectId).maybeSingle();
   if (error) throw error;
   if (!data) return false;
   if (!data.share_enabled) return true;
-  return (await getAccessGrant(request, projectId))?.role === "admin";
+  return (await getAccessGrant(request, databaseProjectId))?.role === "admin";
 }
