@@ -21,7 +21,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="min-h-screen bg-field-bg text-field-text">
-      {!isHome ? <header className="safe-top sticky top-0 z-40 border-b border-field-border bg-white/95 backdrop-blur">
+      {!isHome && !isProjectDashboard ? <header className="safe-top sticky top-0 z-40 border-b border-field-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 pb-2.5 md:px-8 lg:px-12">
           <Link href="/" className="flex min-w-0 items-center gap-3" title="프로젝트 목록">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-field-border bg-field-light">
@@ -57,7 +57,13 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       </header> : null}
 
-      <main className={isHome ? "min-h-screen w-full" : "safe-bottom mx-auto w-full max-w-6xl px-3 py-4 md:px-8 md:py-6 lg:px-12"}>
+      <main className={
+        isHome
+          ? "min-h-screen w-full"
+          : isProjectDashboard
+            ? "safe-bottom mx-auto w-full max-w-5xl px-3 pb-6 pt-[max(0.75rem,env(safe-area-inset-top))] md:px-8 md:pb-8"
+            : "safe-bottom mx-auto w-full max-w-6xl px-3 py-4 md:px-8 md:py-6 lg:px-12"
+      }>
         {demoStorageMode && !isHome ? <TestModeWarning compact={isProjectDashboard} /> : null}
         {children}
       </main>
@@ -70,7 +76,7 @@ export function AppShell({ children }: AppShellProps) {
 function TestModeWarning({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
-      <aside role="alert" className="mb-3 rounded-[7px] border border-amber-400 bg-amber-50/80 px-3 py-2.5 text-amber-950">
+      <aside role="alert" className="mb-3 rounded-[1.25rem] border border-amber-400 bg-amber-50/80 px-3 py-2.5 text-amber-950">
         <details>
           <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-black marker:content-none">
             <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />

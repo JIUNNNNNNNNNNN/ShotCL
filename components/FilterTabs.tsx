@@ -20,15 +20,15 @@ export function FilterTabs({
   const filters: ShotFilter[] = ["all", "remaining", "ok", "omit"];
 
   return (
-    <div className="field-section grid grid-cols-4 gap-0.5 p-0.5">
+    <div className="grid grid-cols-4 gap-1 rounded-full border border-field-border bg-white p-1">
       {filters.map((filter) => (
         <button
           key={filter}
           type="button"
           onClick={() => onChange(filter)}
           className={cn(
-            "min-h-8 rounded-[5px] px-1 text-xs font-black transition-colors md:text-sm",
-            value === filter ? "bg-field-primary text-white" : "bg-white text-field-muted"
+            "min-h-8 rounded-full px-1 text-xs font-black transition-[background-color,transform] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] md:text-sm",
+            value === filter ? "bg-field-primary text-white" : "bg-transparent text-field-muted hover:bg-field-soft"
           )}
         >
           {labels[filter]}
