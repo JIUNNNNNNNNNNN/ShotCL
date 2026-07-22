@@ -23,7 +23,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[6px] border px-3 text-sm font-black transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border px-3 text-sm font-black transition-[background-color,border-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[6px] border px-3 text-sm font-black transition-colors",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border px-3 text-sm font-black transition-[background-color,border-color,transform] active:scale-[0.98]",
         variantClass[variant],
         className
       )}

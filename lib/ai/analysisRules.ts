@@ -45,21 +45,16 @@ const cutPattern = /(S\s*#?\s*\d+\s*[-/]?\s*)?(C\s*#?\s*\d+|Cut\s*\d+|Shot\s*\d+
 /** 파일명과 선택적으로 전달된 텍스트에서 컷 후보 수를 보수적으로 추정합니다. */
 export function estimateAnalysisStats(input: { fileName: string; rawText?: string; shots: ShotDraft[] }): AnalyzeStats {
   const text = `${input.fileName}\n${input.rawText ?? ""}`;
-  const extension = input.fileName.split(".").pop()?.toLowerCase() ?? "";
   const patternMatches = text.match(cutPattern)?.length ?? 0;
-  const looksLikeSpreadsheet = ["xls", "xlsx", "csv", "tsv"].includes(extension);
   const generatedShotCount = input.shots.length;
 
   const detectedRowCount = input.rawText
     ? input.rawText.split(/\r?\n/).filter((line) => line.trim().length > 0).length
-    : looksLikeSpreadsheet
-      ? Math.max(generatedShotCount, 15)
-      : Math.max(patternMatches, generatedShotCount);
+    : Math.max(patternMatches, generatedShotCount);
 
-  const detectedCandidateCount = Math.max(patternMatches, generatedShotCount, looksLikeSpreadsheet ? detectedRowCount : 0);
+  const detectedCandidateCount = Math.max(patternMatches, generatedShotCount);
   const warning =
     (detectedCandidateCount >= 10 && generatedShotCount <= 3) ||
-    (looksLikeSpreadsheet && detectedRowCount >= 10 && generatedShotCount <= 3) ||
     (patternMatches >= 6 && generatedShotCount <= 3)
       ? `문서에서는 약 ${detectedCandidateCount}개의 컷 후보가 감지되었지만 ${generatedShotCount}개의 컷만 생성되었습니다. 분석 결과를 확인해주세요.`
       : undefined;

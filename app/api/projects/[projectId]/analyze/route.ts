@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeShotCandidates } from "@/lib/ai/analyzeShotCandidates";
-import { extractExcel } from "@/lib/analyzers/extractExcel";
 import { extractPdf } from "@/lib/analyzers/extractPdf";
 import { buildShotCandidates } from "@/lib/analyzers/buildShotCandidates";
 import { decodeTextBuffer, detectTextCorruption } from "@/lib/analyzers/detectTextCorruption";
@@ -36,6 +35,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const projectName = String(formData.get("projectName") || "");
     const shootDate = String(formData.get("shootDate") || "");
     const sourceFileUrl = String(formData.get("sourceFileUrl") || formData.get("storagePath") || "") || null;
+    if (isUnsupportedTableFile(fileName, file.type)) {
+      return NextResponse.json({ error: "표 파일 업로드는 지원하지 않습니다. 현재는 웹 일촬표 편집기를 이용해주세요." }, { status: 415 });
+    }
     const buffer = Buffer.from(await file.arrayBuffer());
     const document = extractDocument(buffer, fileName, file.type || "unknown");
     const textQuality = detectTextCorruption(document.rawText);
@@ -253,8 +255,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         {
           error:
             document.kind === "pdf"
-              ? "이 PDF는 한글 텍스트 추출이 제대로 되지 않았습니다. 현재 단계에서는 Excel(.xlsx) 파일로 업로드하면 더 정확하게 분석할 수 있습니다."
-              : "파일의 한글 텍스트가 깨져서 분석할 수 없습니다. Excel 원본 파일(.xlsx)로 다시 업로드해주세요. 깨진 결과는 AI 분석 기록이나 컷 리스트에 저장하지 않았습니다.",
+              ? "이 PDF는 한글 텍스트 추출이 제대로 되지 않았습니다. 더 선명한 PDF 또는 페이지 이미지를 사용해주세요."
+              : "파일의 한글 텍스트가 깨져서 분석할 수 없습니다. 더 선명한 원본을 사용해주세요. 깨진 결과는 AI 분석 기록이나 컷 리스트에 저장하지 않았습니다.",
           analysisRunId,
           extractionPreview,
           textQuality,
@@ -349,7 +351,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 function getAnalyzerType(document: ExtractedDocument, source: string) {
   if (source === "openai") return "openai";
   if (source === "mock" || source === "mock-fallback") return source;
-  if (document.kind === "excel") return "excel-rule";
   if (document.kind === "pdf") return "pdf-rule";
   return "mock";
 }
@@ -503,10 +504,6 @@ function sanitizeDebugPayload(debug: unknown) {
 function extractDocument(buffer: Buffer, fileName: string, fileType: string): ExtractedDocument {
   const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
 
-  if (["xlsx", "xls", "csv", "tsv"].includes(extension) || /spreadsheet|excel|csv/.test(fileType)) {
-    return extractExcel(buffer, fileName, fileType);
-  }
-
   if (extension === "pdf" || fileType === "application/pdf") {
     return extractPdf(buffer, fileName, fileType);
   }
@@ -525,4 +522,9 @@ function extractDocument(buffer: Buffer, fileName: string, fileType: string): Ex
     rawText: decoded.text.slice(0, 8000),
     warnings: ["이미지 OCR은 이번 단계에서 제외되어 텍스트 파일처럼 분석했습니다."]
   };
+}
+
+function isUnsupportedTableFile(fileName: string, fileType: string) {
+  const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return ["xlsx", "xls", "csv", "tsv"].includes(extension) || /spreadsheet|excel|csv/.test(fileType);
 }

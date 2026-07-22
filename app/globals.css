@@ -42,6 +42,14 @@ select {
 
 button {
   -webkit-tap-highlight-color: transparent;
+  border-radius: 9999px !important;
+}
+
+summary,
+label:has(input[type="file"]),
+a[class*="inline-flex"],
+a[class*="min-h-"][class*="items-center"] {
+  border-radius: 9999px !important;
 }
 
 ::selection {

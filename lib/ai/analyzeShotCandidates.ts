@@ -80,7 +80,7 @@ function buildSummary(input: AnalyzeShotCandidateInput, shots: ShotDraft[]): Ana
   }
 
   if (input.detectedRowCount >= 10 && generatedShotCount <= 5) {
-    warnings.push("감지된 행 수에 비해 생성된 컷 수가 적습니다. Excel 행 단위 분석 결과를 기준으로 다시 확인해주세요.");
+    warnings.push("감지된 행 수에 비해 생성된 컷 수가 적습니다. 원본 문서와 분석 결과를 다시 확인해주세요.");
   }
 
   if (generatedShotCount >= 5 && cutNumberCount <= 1) {

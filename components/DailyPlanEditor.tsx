@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, Eye, FileSpreadsheet, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -14,7 +14,6 @@ import {
   saveDailyPlanWithShots
 } from "@/lib/data/dailyPlans";
 import { getShotIdentityKey, syncShotsFromDrafts } from "@/lib/data/shots";
-import { downloadDailyPlanExcel } from "@/lib/dailyPlan/excel";
 import {
   createBlankCallSheetPerson,
   createBlankTeamCallSheetRow,
@@ -798,15 +797,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     }
   }
 
-  async function handleDownloadExcel() {
-    setErrorMessage("");
-    try {
-      await downloadDailyPlanExcel(project.name, printablePlan, flattenedShots);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Excel 파일을 만들지 못했습니다.");
-    }
-  }
-
   function handleOpenPrintPreview() {
     if (!canPrint) {
       setErrorMessage("출력할 씬 또는 컷이 없습니다.");
@@ -831,20 +821,18 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
         {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
-        <section className="field-section p-3 md:p-5">
-          <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
-            <div>
-              <h1 className="text-2xl font-black text-field-primary">{plan.title || "새 일촬표"}</h1>
-              <p className="mt-2 text-xs font-black text-field-muted" aria-live="polite">저장 상태: {autoSaveStatus}</p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 text-xs font-black">
+              <span className="max-w-[55vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
+              <span className="text-field-muted" aria-live="polite">저장 상태: {autoSaveStatus}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
-              className="inline-flex min-h-11 items-center justify-center rounded-md border border-field-border bg-white px-4 text-sm font-black text-field-text"
+              className="inline-flex min-h-10 items-center justify-center rounded-full border border-field-border bg-white px-4 text-sm font-black text-field-text"
             >
               목록으로 돌아가기
             </Link>
-          </div>
-        </section>
+        </div>
 
         <section className="field-section mt-3 overflow-hidden p-2 md:mt-5 md:p-5">
           <div className="grid gap-3">
@@ -1321,7 +1309,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       <section className="field-section mt-5 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
           <p className="text-sm font-bold text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Button onClick={() => saveCurrentPlan()} disabled={isSaving}>
               <Save className="h-5 w-5" aria-hidden />
               임시 저장
@@ -1337,10 +1325,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             <Button variant="secondary" onClick={handlePrint} disabled={!canPrint}>
               <Printer className="h-5 w-5" aria-hidden />
               PDF로 저장 / 인쇄
-            </Button>
-            <Button variant="secondary" onClick={handleDownloadExcel}>
-              <FileSpreadsheet className="h-5 w-5" aria-hidden />
-              Excel로 다운로드
             </Button>
           </div>
         </div>

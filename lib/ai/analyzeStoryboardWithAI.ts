@@ -16,7 +16,7 @@ export async function analyzeStoryboardWithAI(input: AnalyzeInput): Promise<Shot
   /*
    * 실제 연결 위치:
    * 1. Supabase Storage에서 input.projectId/input.fileName에 해당하는 파일을 서버에서 읽습니다.
-   * 2. OpenAI Responses API에 PDF, Excel 텍스트, 이미지 입력과 storyboardAnalysisPrompt를 전달합니다.
+   * 2. OpenAI Responses API에 PDF 텍스트와 이미지 입력, storyboardAnalysisPrompt를 전달합니다.
    * 3. 모델 응답을 ShotDraft[] JSON으로 검증한 뒤 반환합니다.
    * 4. 검증 실패 시 mockAnalyzeStoryboard(input.fileName) 또는 빈 배열로 fallback합니다.
    */

@@ -61,10 +61,6 @@ function buildTableCandidates(document: ExtractedDocument) {
     });
   }
 
-  if (document.kind === "excel" && document.rows.length >= 10 && candidates.length <= 5) {
-    warnings.push("Excel 행 수에 비해 컷 후보가 적습니다. 헤더 추정 또는 병합 셀 처리를 확인해주세요.");
-  }
-
   return {
     candidates,
     detectedHeaderRow: header?.row.rowNumber ?? null,

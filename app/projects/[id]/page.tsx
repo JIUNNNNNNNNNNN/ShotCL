@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FileSpreadsheet, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
@@ -15,7 +15,6 @@ import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot,
 import { listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
-import { downloadStandardDailyPlanTemplate } from "@/lib/dailyPlan/excel";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
@@ -303,18 +302,12 @@ export default function ProjectDetailPage() {
             <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
               <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록
             </Link>
-            <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden /> Excel 일촬표 업로드
-            </Link>
             <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
               <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
             </Link>
             <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
               <History className="h-4 w-4" aria-hidden /> 분석 기록
             </Link>
-            <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-left text-xs font-black text-field-muted hover:bg-field-soft">
-              <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
-            </button>
           </nav>
         </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도 권한</span>}
       </div>
@@ -439,7 +432,7 @@ function EpisodeSelection({
 }) {
   return (
     <main className="mx-auto w-full max-w-3xl pb-12">
-      <div className="mb-8 flex items-center gap-3">
+      <div className="mb-4 flex items-center gap-2">
         <Link
           href="/"
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-field-secondary bg-white text-field-primary transition-[background-color,transform,border-color] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
@@ -447,9 +440,9 @@ function EpisodeSelection({
         >
           <House className="h-5 w-5" aria-hidden />
         </Link>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xl font-black text-field-primary">{project.name}</p>
-          <p className="text-sm font-bold text-field-muted">진행할 회차를 선택하세요</p>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <p className="max-w-[45vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-primary">{project.name}</p>
+          <p className="truncate text-xs font-bold text-field-muted">진행할 회차 선택</p>
         </div>
         {canEdit ? (
           <details className="group relative shrink-0">

@@ -5,7 +5,7 @@ export type ExtractedRow = {
 };
 
 export type ExtractedDocument = {
-  kind: "excel" | "pdf" | "text" | "unknown";
+  kind: "pdf" | "text" | "unknown";
   fileName: string;
   fileType: string;
   extractionMethod: string;

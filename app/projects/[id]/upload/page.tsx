@@ -407,8 +407,8 @@ export default function UploadStoryboardPage() {
         }
       />
 
-      <div className="mb-4 rounded-md border border-field-border bg-white p-4 text-sm font-bold leading-6 text-field-muted">
-        가장 안정적인 방식은 Excel 일촬표를 업로드하거나 웹 일촬표 편집기에서 수정하는 것입니다. PDF 분석은 외부에서 PDF만 받은 경우에만 보조 기능으로 사용하세요.
+      <div className="mb-4 rounded-[1.25rem] border border-field-border bg-white p-3 text-sm font-bold leading-6 text-field-muted">
+        일촬표 데이터는 웹 편집기에서 관리해주세요. PDF·이미지 분석은 외부에서 자료만 받은 경우에 사용하는 보조 기능입니다.
       </div>
 
       <label className="mb-4 grid gap-2 rounded-md border border-field-border bg-white p-4 text-sm font-black text-field-primary">
@@ -426,12 +426,12 @@ export default function UploadStoryboardPage() {
 
       <Card>
         <div className="grid gap-3">
-          <label className="flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-md bg-field-primary px-4 font-black text-white">
+          <label className="flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-full bg-field-primary px-4 font-black text-white">
             <FileUp className="h-5 w-5" aria-hidden />
-            PDF / Excel / 이미지 선택
+            PDF / 이미지 선택
             <input
               type="file"
-              accept="application/pdf,.pdf,.xls,.xlsx,.csv,.tsv,image/jpeg,image/png,image/heic,image/heif,.heic,.heif"
+              accept="application/pdf,.pdf,image/jpeg,image/png,image/heic,image/heif,.heic,.heif"
               className="sr-only"
               onChange={handleFileChange}
               disabled={busyFileId !== null}
@@ -439,13 +439,13 @@ export default function UploadStoryboardPage() {
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary">
+            <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full border border-field-border bg-white px-3 text-sm font-black text-field-primary">
               <Camera className="h-4 w-4" aria-hidden />
               촬영
               <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={handleFileChange} disabled={busyFileId !== null} />
             </label>
 
-            <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary">
+            <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-full border border-field-border bg-white px-3 text-sm font-black text-field-primary">
               <UploadCloud className="h-4 w-4" aria-hidden />
               앨범
               <input type="file" accept="image/*" className="sr-only" onChange={handleFileChange} disabled={busyFileId !== null} />
