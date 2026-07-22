@@ -44,7 +44,7 @@ export default function HomePage() {
   const [pickerMode, setPickerMode] = useState<ProjectPickerMode | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+  const clusterRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -89,10 +89,15 @@ export default function HomePage() {
     if (!pickerMode || !window.matchMedia("(max-width: 767px)").matches) return;
     const animationFrame = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
-      const panel = panelRef.current;
-      if (!canvas || !panel) return;
-      const panelCenter = panel.offsetLeft + panel.offsetWidth / 2;
-      canvas.scrollTo({ left: Math.max(0, panelCenter - canvas.clientWidth / 2 - 39), behavior: "smooth" });
+      const cluster = clusterRef.current;
+      if (!canvas || !cluster) return;
+      const clusterCenterX = cluster.offsetLeft + cluster.offsetWidth / 2;
+      const clusterCenterY = cluster.offsetTop + cluster.offsetHeight / 2;
+      canvas.scrollTo({
+        left: Math.max(0, clusterCenterX - canvas.clientWidth / 2),
+        top: Math.max(0, clusterCenterY - canvas.clientHeight / 2),
+        behavior: "smooth"
+      });
     });
     return () => window.cancelAnimationFrame(animationFrame);
   }, [pickerMode]);
@@ -121,16 +126,47 @@ export default function HomePage() {
 
   const pickerTitle = pickerMode === "load" ? "프로젝트 불러오기" : "진행보기";
 
+  function renderProjectFruits() {
+    if (isLoading) {
+      return <div className="grid h-20 w-20 place-items-center rounded-full border border-field-border bg-white text-center text-[11px] font-bold text-field-muted md:h-24 md:w-24">불러오는 중</div>;
+    }
+
+    if (errorMessage || projects.length === 0) {
+      return (
+        <div className="grid h-20 w-20 place-items-center rounded-full border border-field-border bg-white px-2 text-center text-[11px] font-bold text-field-muted md:h-24 md:w-24">
+          {errorMessage ? "불러오기 실패" : "프로젝트 없음"}
+        </div>
+      );
+    }
+
+    return projects.map((project) => (
+      <button
+        key={project.id}
+        type="button"
+        onClick={() => openProject(project.id)}
+        className="group/fruit flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:h-24 md:w-24"
+        aria-label={`${project.name} ${pickerTitle}`}
+      >
+        <span className="overflow-hidden text-[11px] font-black leading-[1.25] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+          {project.name}
+        </span>
+        <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
+          {project.shootDate || "촬영일 미정"}
+        </span>
+      </button>
+    ));
+  }
+
   return (
-    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg py-8">
-      <div ref={canvasRef} className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg">
+      <div ref={canvasRef} className="w-full max-h-[100svh] overflow-auto overscroll-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
         <div
           ref={pickerRef}
-          className={`relative mx-auto grid min-h-[25rem] items-center transition-[width] duration-150 ${
-            pickerMode ? "w-[45rem] grid-cols-[21rem_2rem_19rem] pr-12" : "w-[min(82vw,21rem)] grid-cols-1"
+          className={`relative mx-auto transition-[width,height] duration-200 ${
+            pickerMode ? "h-[48rem] w-[50rem]" : "h-[min(82vw,21rem)] w-[min(82vw,21rem)]"
           }`}
         >
-        <div className="relative w-full">
+        <div className={`absolute z-20 ${pickerMode ? "left-[14.5rem] top-[11rem] w-[21rem]" : "inset-0 w-full"}`}>
         <svg viewBox="0 0 360 360" className="block h-auto w-full drop-shadow-[0_12px_24px_rgba(15,61,46,0.12)]" role="group" aria-label="첫 화면 기능 메뉴">
           <circle cx="180" cy="180" r="160" className="fill-white stroke-field-border" strokeWidth="2" />
           {wheelItems.map((item) => {
@@ -170,46 +206,43 @@ export default function HomePage() {
 
         {pickerMode ? (
           <>
-          <div className={`relative h-px w-full bg-field-secondary/60 ${pickerMode === "load" ? "-rotate-6" : "rotate-6"}`} aria-hidden>
-            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-field-secondary bg-field-bg" />
-          </div>
+          <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full" viewBox="0 0 800 768" aria-hidden>
+            {pickerMode === "progress" ? (
+              <>
+                <path d="M245 302 H208" fill="none" stroke="#8ca99d" strokeWidth="2" />
+                <path d="M208 156 V386" fill="none" stroke="#b8c9c1" strokeWidth="1.5" />
+                <path d="M58 160 H208 M162 160 H208 M58 264 H208 M162 264 H208 M58 368 H208 M162 368 H208" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
+              </>
+            ) : (
+              <>
+                <path d="M400 500 V580" fill="none" stroke="#8ca99d" strokeWidth="2" />
+                <path d="M280 580 H520 M280 580 V602 M400 580 V602 M520 580 V602" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
+              </>
+            )}
+          </svg>
           <div
-            ref={panelRef}
-            role="dialog"
+            ref={clusterRef}
+            role="region"
             aria-label={pickerTitle}
-            className={`z-20 w-76 rounded-[8px] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.14)] ${pickerMode === "load" ? "-translate-y-10" : "translate-y-10"}`}
+            className={`absolute z-10 ${
+              pickerMode === "progress" ? "left-2 top-[4.5rem] w-[12.5rem]" : "left-[14rem] top-[32.5rem] w-[22rem]"
+            }`}
           >
-            <div className="flex items-center justify-between gap-2 border-b border-field-border px-1 pb-1.5">
-              <h1 className="text-sm font-black text-field-primary">{pickerTitle}</h1>
+            <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "load" ? "justify-center" : "justify-end"}`}>
+              <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">{pickerTitle}</h1>
               <button
                 type="button"
                 onClick={() => setPickerMode(null)}
-                className="flex h-8 w-8 items-center justify-center rounded-[5px] text-field-muted hover:bg-field-soft"
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-field-border bg-white text-field-muted transition-colors hover:border-field-secondary hover:bg-field-soft active:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                 aria-label="프로젝트 선택창 닫기"
               >
-                <X className="h-4 w-4" aria-hidden />
+                <X className="h-3.5 w-3.5" aria-hidden />
               </button>
             </div>
-
-            <div className="mt-1.5 grid max-h-64 gap-1 overflow-y-auto">
-              {isLoading ? <p className="px-2 py-4 text-center text-xs font-bold text-field-muted">프로젝트를 불러오는 중입니다.</p> : null}
-              {!isLoading && errorMessage ? <p className="px-2 py-4 text-center text-xs font-bold text-field-danger">{errorMessage}</p> : null}
-              {!isLoading && !errorMessage && projects.length === 0 ? (
-                <p className="px-2 py-4 text-center text-xs font-bold text-field-muted">
-                  {pickerMode === "load" ? "저장된 프로젝트가 없습니다." : "진행을 볼 프로젝트가 없습니다."}
-                </p>
-              ) : null}
-              {!isLoading && !errorMessage ? projects.map((project) => (
-                <button
-                  key={project.id}
-                  type="button"
-                  onClick={() => openProject(project.id)}
-                  className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[5px] border border-field-border bg-field-bg px-2.5 py-1.5 text-left hover:border-field-secondary hover:bg-field-light"
-                >
-                  <span className="truncate text-sm font-black text-field-text">{project.name}</span>
-                  <span className="whitespace-nowrap text-[10px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</span>
-                </button>
-              )) : null}
+            <div className={`grid gap-2 overflow-y-auto overscroll-contain py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+              pickerMode === "progress" ? "max-h-[13rem] grid-cols-2 justify-items-center" : "max-h-[6.75rem] grid-cols-3 justify-items-center"
+            }`}>
+              {renderProjectFruits()}
             </div>
           </div>
           </>
