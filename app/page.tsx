@@ -43,6 +43,8 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [pickerMode, setPickerMode] = useState<ProjectPickerMode | null>(null);
   const pickerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -83,6 +85,18 @@ export default function HomePage() {
     };
   }, [pickerMode]);
 
+  useEffect(() => {
+    if (!pickerMode || !window.matchMedia("(max-width: 767px)").matches) return;
+    const animationFrame = window.requestAnimationFrame(() => {
+      const canvas = canvasRef.current;
+      const panel = panelRef.current;
+      if (!canvas || !panel) return;
+      const panelCenter = panel.offsetLeft + panel.offsetWidth / 2;
+      canvas.scrollTo({ left: Math.max(0, panelCenter - canvas.clientWidth / 2 - 39), behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [pickerMode]);
+
   function activateWheelItem(id: (typeof wheelItems)[number]["id"]) {
     if (id === "new") {
       router.push("/projects/new");
@@ -105,47 +119,65 @@ export default function HomePage() {
     router.push(`/projects/${projectId}`);
   }
 
-  const pickerTitle = pickerMode === "load" ? "불러올 프로젝트" : "진행을 볼 프로젝트";
+  const pickerTitle = pickerMode === "load" ? "프로젝트 불러오기" : "진행보기";
 
   return (
-    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg px-4 py-8">
-      <div className="relative w-[min(82vw,21rem)] max-w-full" ref={pickerRef}>
+    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg py-8">
+      <div ref={canvasRef} className="w-full overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div
+          ref={pickerRef}
+          className={`relative mx-auto grid min-h-[25rem] items-center transition-[width] duration-150 ${
+            pickerMode ? "w-[45rem] grid-cols-[21rem_2rem_19rem] pr-12" : "w-[min(82vw,21rem)] grid-cols-1"
+          }`}
+        >
+        <div className="relative w-full">
         <svg viewBox="0 0 360 360" className="block h-auto w-full drop-shadow-[0_12px_24px_rgba(15,61,46,0.12)]" role="group" aria-label="첫 화면 기능 메뉴">
           <circle cx="180" cy="180" r="160" className="fill-white stroke-field-border" strokeWidth="2" />
-          {wheelItems.map((item) => (
-            <g
-              key={item.id}
-              role="button"
-              tabIndex={0}
-              aria-label={item.label.join(" ")}
-              className="group cursor-pointer outline-none"
-              onClick={() => activateWheelItem(item.id)}
-              onKeyDown={(event) => handleWheelKeyDown(event, item.id)}
-            >
-              <path
-                d={item.path}
-                className={`${item.fillClass} stroke-field-bg transition-colors duration-150 group-focus-visible:stroke-[#d7b95f]`}
-                strokeWidth="5"
-              />
-              <text
-                x={item.textX}
-                y={item.textY}
-                textAnchor="middle"
-                className="pointer-events-none select-none fill-white text-[14px] font-black"
+          {wheelItems.map((item) => {
+            const isSelected = pickerMode === item.id;
+            return (
+              <g
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                aria-label={item.label.join(" ")}
+                aria-pressed={item.id === "new" ? undefined : isSelected}
+                className="group cursor-pointer outline-none"
+                onClick={() => activateWheelItem(item.id)}
+                onKeyDown={(event) => handleWheelKeyDown(event, item.id)}
               >
-                <tspan x={item.textX} dy="0">{item.label[0]}</tspan>
-                <tspan x={item.textX} dy="20">{item.label[1]}</tspan>
-              </text>
-            </g>
-          ))}
+                <path
+                  d={item.path}
+                  className={`${item.fillClass} stroke-field-bg transition-[filter,transform,fill,stroke] duration-150 [transform-box:fill-box] [transform-origin:center] group-hover:brightness-110 group-active:scale-[0.985] group-active:brightness-90 group-focus-visible:stroke-[#d7b95f] group-focus-visible:drop-shadow-[0_0_5px_rgba(215,185,95,0.8)]`}
+                  style={isSelected ? { fill: "#092f23", stroke: "#d7b95f", filter: "drop-shadow(0 0 5px rgba(15, 61, 46, 0.35))" } : undefined}
+                  strokeWidth={isSelected ? "7" : "5"}
+                />
+                <text
+                  x={item.textX}
+                  y={item.textY}
+                  textAnchor="middle"
+                  className="pointer-events-none select-none fill-white text-[14px] font-black transition-opacity duration-150 group-active:opacity-80"
+                >
+                  <tspan x={item.textX} dy="0">{item.label[0]}</tspan>
+                  <tspan x={item.textX} dy="20">{item.label[1]}</tspan>
+                </text>
+              </g>
+            );
+          })}
           <circle cx="180" cy="180" r="16" className="fill-field-bg stroke-field-border" strokeWidth="2" aria-hidden />
         </svg>
+        </div>
 
         {pickerMode ? (
+          <>
+          <div className={`relative h-px w-full bg-field-secondary/60 ${pickerMode === "load" ? "-rotate-6" : "rotate-6"}`} aria-hidden>
+            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-field-secondary bg-field-bg" />
+          </div>
           <div
+            ref={panelRef}
             role="dialog"
             aria-label={pickerTitle}
-            className="absolute left-1/2 top-1/2 z-20 w-[min(19rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[8px] border border-field-border bg-white p-2 shadow-[0_16px_36px_rgba(28,28,26,0.2)]"
+            className={`z-20 w-76 rounded-[8px] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.14)] ${pickerMode === "load" ? "-translate-y-10" : "translate-y-10"}`}
           >
             <div className="flex items-center justify-between gap-2 border-b border-field-border px-1 pb-1.5">
               <h1 className="text-sm font-black text-field-primary">{pickerTitle}</h1>
@@ -180,7 +212,9 @@ export default function HomePage() {
               )) : null}
             </div>
           </div>
+          </>
         ) : null}
+        </div>
       </div>
     </div>
   );
