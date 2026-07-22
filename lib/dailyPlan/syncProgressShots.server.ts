@@ -1,11 +1,25 @@
 import "server-only";
 
-import { shotDraftToInsertRow } from "@/lib/data/mappers";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import type { DailyPlanDraft, DailyPlanShotDraft, ShotDraft } from "@/lib/types";
 import type { requireProjectAccessDb } from "@/lib/projectAccess/server";
 
 type ProjectAccessDb = ReturnType<typeof requireProjectAccessDb>;
+
+export type ProgressShotsSyncStep = "select_existing_shots" | "update_shots" | "insert_shots" | "delete_stale_shots";
+
+export class ProgressShotsSyncError extends Error {
+  constructor(
+    public readonly step: ProgressShotsSyncStep,
+    public readonly code: string,
+    message: string,
+    public readonly details: string,
+    public readonly hint: string
+  ) {
+    super(message);
+    this.name = "ProgressShotsSyncError";
+  }
+}
 
 /** 저장된 회차의 shots만 scene + cutNumber 기준으로 맞추고 기존 진행 상태는 보존합니다. */
 export async function syncProgressShotsForDailyPlan(
@@ -22,7 +36,7 @@ export async function syncProgressShotsForDailyPlan(
     .eq("project_id", projectId)
     .eq("daily_plan_id", dailyPlanId)
     .order("order_index", { ascending: true });
-  if (existingError) throw existingError;
+  if (existingError) throw toProgressShotsSyncError("select_existing_shots", existingError);
 
   const desiredByKey = new Map(drafts.map((draft) => [getDraftKey(draft), draft]));
   const existingByKey = new Map<string, Record<string, unknown>>();
@@ -59,16 +73,16 @@ export async function syncProgressShotsForDailyPlan(
         .eq("project_id", projectId)
         .eq("daily_plan_id", dailyPlanId)
         .then(({ error }) => {
-          if (error) throw error;
+          if (error) throw toProgressShotsSyncError("update_shots", error);
         })
     );
   });
   await Promise.all(updateTasks);
 
   if (missingDrafts.length > 0) {
-    const rows = missingDrafts.map((draft) => shotDraftToInsertRow(projectId, draft, draft.orderIndex, dailyPlanId));
+    const rows = missingDrafts.map((draft) => progressShotInsertRow(projectId, dailyPlanId, draft));
     const { error } = await supabase.from("shots").insert(rows);
-    if (error) throw error;
+    if (error) throw toProgressShotsSyncError("insert_shots", error);
   }
 
   const staleIds = (existingRows ?? [])
@@ -82,7 +96,7 @@ export async function syncProgressShotsForDailyPlan(
       .eq("project_id", projectId)
       .eq("daily_plan_id", dailyPlanId)
       .in("id", idsToDelete);
-    if (error) throw error;
+    if (error) throw toProgressShotsSyncError("delete_stale_shots", error);
   }
 
   return { count: drafts.length };
@@ -111,7 +125,43 @@ function progressShotUpdateRow(draft: ShotDraft) {
     characters: draft.characters,
     memo: draft.memo,
     notes: draft.memo,
-    order_index: draft.orderIndex,
-    updated_at: new Date().toISOString()
+    order_index: draft.orderIndex
   };
+}
+
+function progressShotInsertRow(projectId: string, dailyPlanId: string, draft: ShotDraft) {
+  return {
+    project_id: projectId,
+    daily_plan_id: dailyPlanId,
+    scene_number: draft.sceneNumber,
+    cut_number: draft.cutNumber,
+    shot_number: draft.cutNumber,
+    title: draft.title,
+    description: draft.description,
+    location: draft.location,
+    characters: draft.characters,
+    memo: draft.memo,
+    notes: draft.memo,
+    order_index: draft.orderIndex,
+    status: "pending"
+  };
+}
+
+function toProgressShotsSyncError(step: ProgressShotsSyncStep, error: unknown) {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const message = safeDiagnosticValue(record.message, "Supabase shots 동기화 요청이 실패했습니다.");
+  const schemaHint = /daily_plan_id|scene_number|cut_number|shot_number|order_index/i.test(message)
+    ? "supabase/migration_fix_daily_plan_shots_sync.sql 적용 여부를 확인하세요."
+    : "";
+  return new ProgressShotsSyncError(
+    step,
+    safeDiagnosticValue(record.code, "UNKNOWN"),
+    message,
+    safeDiagnosticValue(record.details),
+    safeDiagnosticValue(record.hint) || schemaHint
+  );
+}
+
+function safeDiagnosticValue(value: unknown, fallback = "") {
+  return String(value ?? fallback).replace(/[\r\n]+/g, " ").slice(0, 500);
 }

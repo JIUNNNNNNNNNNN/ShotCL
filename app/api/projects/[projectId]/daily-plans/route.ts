@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
-import { syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
+import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
+import { ProgressShotsSyncError, syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
@@ -133,6 +134,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     }
 
     const dailyPlanId = String(planRow.id);
+    const targetShotCount = buildProgressShotDrafts(body.plan, body.shots).length;
     try {
       const progressSync = await syncProgressShotsForDailyPlan(supabase, projectId, dailyPlanId, body.plan, body.shots);
       return NextResponse.json(
@@ -142,20 +144,42 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
           message: SAVED_MESSAGE,
           dailyPlan: planRow,
           shots: shotRows,
-          progressSync: { status: "synced", shotCount: progressSync.count }
+          shotsSync: {
+            ok: true,
+            step: "complete",
+            projectIdPresent: Boolean(projectId),
+            dailyPlanIdPresent: Boolean(dailyPlanId),
+            targetShotCount: progressSync.count
+          }
         },
         { status: body.dailyPlanId ? 200 : 201 }
       );
     } catch (syncError) {
-      const syncMessage = getDatabaseErrorMessage(syncError);
+      const diagnostic = getShotsSyncDiagnostic(syncError);
+      console.error("[daily-plan-shots-sync]", {
+        projectId,
+        dailyPlanId,
+        targetShotCount,
+        ...diagnostic
+      });
       return NextResponse.json(
         {
           ok: true,
-          status: "saved",
-          message: SAVED_MESSAGE,
+          status: "saved_shots_failed",
+          message: "일촬표는 저장됐지만 진행표 동기화에 실패했습니다.",
           dailyPlan: planRow,
           shots: shotRows,
-          progressSync: { status: "failed", shotCount: 0, error: syncMessage }
+          shotsSync: {
+            ok: false,
+            step: diagnostic.step,
+            projectIdPresent: Boolean(projectId),
+            dailyPlanIdPresent: Boolean(dailyPlanId),
+            targetShotCount,
+            errorCode: diagnostic.errorCode,
+            errorMessage: diagnostic.errorMessage,
+            details: diagnostic.details,
+            hint: diagnostic.hint
+          }
         },
         { status: body.dailyPlanId ? 200 : 201 }
       );
@@ -192,7 +216,25 @@ function isPostgresUniqueViolation(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
 }
 
-function getDatabaseErrorMessage(error: unknown) {
-  if (!error || typeof error !== "object" || !("message" in error)) return "컷 진행 데이터를 동기화하지 못했습니다.";
-  return String(error.message || "컷 진행 데이터를 동기화하지 못했습니다.");
+function getShotsSyncDiagnostic(error: unknown) {
+  if (error instanceof ProgressShotsSyncError) {
+    return {
+      step: error.step,
+      errorCode: error.code,
+      errorMessage: error.message,
+      details: error.details,
+      hint: error.hint
+    };
+  }
+  return {
+    step: "unknown",
+    errorCode: "UNKNOWN",
+    errorMessage: safeDiagnosticValue(error instanceof Error ? error.message : error, "컷 진행 데이터를 동기화하지 못했습니다."),
+    details: "",
+    hint: ""
+  };
+}
+
+function safeDiagnosticValue(value: unknown, fallback = "") {
+  return String(value ?? fallback).replace(/[\r\n]+/g, " ").slice(0, 500);
 }

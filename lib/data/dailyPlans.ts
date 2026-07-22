@@ -34,6 +34,8 @@ export type SaveDailyPlanResult = DailyPlanWithShots & {
   progressSyncStatus?: "synced" | "failed";
   progressShotCount?: number;
   progressSyncError?: string;
+  progressSyncStep?: string;
+  progressSyncErrorCode?: string;
 };
 
 export class DailyPlanDuplicateError extends Error {
@@ -45,7 +47,7 @@ export class DailyPlanDuplicateError extends Error {
 
 type SaveDailyPlanApiPayload = {
   ok?: boolean;
-  status?: "saved" | "duplicate";
+  status?: "saved" | "saved_shots_failed" | "duplicate";
   message?: string;
   dailyPlan?: Record<string, unknown>;
   plan?: Record<string, unknown>;
@@ -54,6 +56,17 @@ type SaveDailyPlanApiPayload = {
     status?: "synced" | "failed";
     shotCount?: number;
     error?: string;
+  };
+  shotsSync?: {
+    ok?: boolean;
+    step?: string;
+    projectIdPresent?: boolean;
+    dailyPlanIdPresent?: boolean;
+    targetShotCount?: number;
+    errorCode?: string;
+    errorMessage?: string;
+    details?: string;
+    hint?: string;
   };
   error?: string;
 };
@@ -255,9 +268,11 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
         shots: payload.shots.map(dailyPlanShotFromRow),
         saveStatus: payload.status === "duplicate" ? "duplicate" : "saved",
         message: payload.message ?? (payload.status === "duplicate" ? "이미 저장된 일촬표입니다." : "일촬표가 저장되었습니다."),
-        progressSyncStatus: payload.progressSync?.status,
-        progressShotCount: payload.progressSync?.shotCount,
-        progressSyncError: payload.progressSync?.error
+        progressSyncStatus: payload.shotsSync ? (payload.shotsSync.ok ? "synced" : "failed") : payload.progressSync?.status,
+        progressShotCount: payload.shotsSync?.targetShotCount ?? payload.progressSync?.shotCount,
+        progressSyncError: payload.shotsSync?.errorMessage ?? payload.progressSync?.error,
+        progressSyncStep: payload.shotsSync?.step,
+        progressSyncErrorCode: payload.shotsSync?.errorCode
       };
     }
     if (response.status === 409 || payload.status === "duplicate") {

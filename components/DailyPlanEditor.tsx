@@ -310,7 +310,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           const didSyncShots = await completeShotBoardSync(saved);
           window.localStorage.removeItem(storageKey);
           hasPendingChangesRef.current = false;
-          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(didSyncShots ? "자동 저장됨" : "일촬표 저장됨 · 진행표 동기화 실패");
+          if (requestId === autoSaveRequestRef.current) {
+            setAutoSaveStatus(didSyncShots ? "자동 저장됨" : formatProgressSyncFailure(saved, true));
+          }
         } catch (error) {
           hasPendingChangesRef.current = true;
           if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(error instanceof DailyPlanDuplicateError ? "이미 저장된 일촬표" : "저장 실패");
@@ -807,7 +809,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       }
 
       if (showMessage) {
-        setMessage(didSyncShots ? saved.message : "일촬표는 저장됐지만 컷 진행 동기화에 실패했습니다.");
+        setMessage(didSyncShots ? saved.message : formatProgressSyncFailure(saved));
       }
 
       return { saved, didSyncShots };
@@ -829,7 +831,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       const count = dailyPlanShotsToShotDrafts(result.saved.plan, result.saved.shots.map(dailyPlanShotToDraft)).length;
       setMessage(`${count}개 컷을 진행표와 동기화했습니다.`);
     } else if (result) {
-      setMessage("일촬표는 저장됐지만 컷 진행 동기화에 실패했습니다.");
+      setMessage(formatProgressSyncFailure(result.saved));
     }
   }
 
@@ -3461,6 +3463,17 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
 
 function sanitizeNumericInput(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
+}
+
+function formatProgressSyncFailure(saved: SaveDailyPlanResult, compact = false) {
+  const diagnostic = [saved.progressSyncStep, saved.progressSyncErrorCode].filter(Boolean).join(" / ");
+  if (compact) return `일촬표 저장됨 · 진행표 동기화 실패${diagnostic ? ` (${diagnostic})` : ""}`;
+
+  return [
+    "일촬표는 저장됐지만 진행표 동기화에 실패했습니다.",
+    diagnostic ? `단계/코드: ${diagnostic}.` : "",
+    saved.progressSyncError ? `원인: ${saved.progressSyncError}` : ""
+  ].filter(Boolean).join(" ");
 }
 
 function sanitizeShootingOrderInput(value: string) {
