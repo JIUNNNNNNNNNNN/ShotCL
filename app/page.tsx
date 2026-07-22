@@ -1,34 +1,53 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { CalendarDays, ChevronRight, Clock, FolderKanban, Plus } from "lucide-react";
-import { PageHeader } from "@/components/PageHeader";
-import { SupabaseDebugPanel } from "@/components/SupabaseDebugPanel";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { X } from "lucide-react";
 import { listProjects } from "@/lib/data/projects";
 import type { Project } from "@/lib/types";
 
-/** 프로젝트 생성일을 데스크탑 카드에서 읽기 쉬운 날짜로 표시합니다. */
-function formatCreatedDate(value: string) {
-  if (!value) return "생성일 없음";
+type ProjectPickerMode = "load" | "progress";
 
-  try {
-    return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium" }).format(new Date(value));
-  } catch {
-    return value.slice(0, 10);
+const wheelItems = [
+  {
+    id: "new",
+    label: ["새 프로젝트", "만들기"],
+    path: "M180 180 L180 24 A156 156 0 0 1 315.1 258 Z",
+    textX: 246,
+    textY: 134,
+    fillClass: "fill-field-primary group-hover:fill-[#174d3b]"
+  },
+  {
+    id: "load",
+    label: ["프로젝트", "불러오기"],
+    path: "M180 180 L315.1 258 A156 156 0 0 1 44.9 258 Z",
+    textX: 180,
+    textY: 246,
+    fillClass: "fill-[#285d49] group-hover:fill-[#326b55]"
+  },
+  {
+    id: "progress",
+    label: ["진행", "보기"],
+    path: "M180 180 L44.9 258 A156 156 0 0 1 180 24 Z",
+    textX: 114,
+    textY: 134,
+    fillClass: "fill-[#416f5d] group-hover:fill-[#4c7b68]"
   }
-}
+] as const;
 
-/** 첫 화면에서 프로젝트 목록을 불러와 현재 촬영 회차를 선택하게 합니다. */
-export default function ProjectsPage() {
+/** 빈 종이 위 원형 메뉴만 제공하는 앱 진입 화면입니다. */
+export default function HomePage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [pickerMode, setPickerMode] = useState<ProjectPickerMode | null>(null);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadProjects() {
+    async function loadSavedProjects() {
       try {
         const data = await listProjects();
         if (isMounted) setProjects(data);
@@ -39,91 +58,130 @@ export default function ProjectsPage() {
       }
     }
 
-    loadProjects();
+    loadSavedProjects();
     return () => {
       isMounted = false;
     };
   }, []);
 
+  useEffect(() => {
+    if (!pickerMode) return;
+
+    function closeOnOutsideClick(event: PointerEvent) {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) setPickerMode(null);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setPickerMode(null);
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [pickerMode]);
+
+  function activateWheelItem(id: (typeof wheelItems)[number]["id"]) {
+    if (id === "new") {
+      router.push("/projects/new");
+      return;
+    }
+    setPickerMode(id);
+  }
+
+  function handleWheelKeyDown(event: React.KeyboardEvent<SVGGElement>, id: (typeof wheelItems)[number]["id"]) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    activateWheelItem(id);
+  }
+
+  function openProject(projectId: string) {
+    if (pickerMode === "load") {
+      router.push(`/projects/${projectId}/daily-plans`);
+      return;
+    }
+    router.push(`/projects/${projectId}`);
+  }
+
+  const pickerTitle = pickerMode === "load" ? "불러올 프로젝트" : "진행을 볼 프로젝트";
+
   return (
-    <>
-      <PageHeader
-        title="프로젝트 목록"
-        description="오늘 촬영할 프로젝트를 선택하세요."
-        actions={
-          <Link
-            href="/projects/new"
-            className="flex h-11 items-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary"
-          >
-            <Plus className="h-5 w-5" aria-hidden />
-            만들기
-          </Link>
-        }
-      />
-
-      {errorMessage ? (
-        <div className="mb-4 rounded-md border border-stage-red bg-stage-red/10 p-4 text-sm font-bold text-stage-red">
-          {errorMessage}
-        </div>
-      ) : null}
-
-      {isLoading ? (
-        <div className="rounded-md border border-field-border bg-white p-5 text-field-muted">프로젝트를 불러오는 중입니다.</div>
-      ) : projects.length === 0 ? (
-        <section className="rounded-md border border-field-border bg-white p-6 md:p-8">
-          <div className="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-md bg-field-light">
-                <FolderKanban className="h-6 w-6 text-field-primary" aria-hidden />
-              </div>
-              <h2 className="mt-4 text-xl font-black">첫 프로젝트를 만들어보세요</h2>
-              <p className="mt-2 max-w-2xl text-base leading-6 text-field-muted">
-                프로젝트 생성 후 문서를 올리고 컷 단위 mock 분석으로 진행표를 만들 수 있습니다.
-              </p>
-            </div>
-            <Link
-              href="/projects/new"
-              className="flex min-h-12 items-center justify-center gap-2 rounded-md bg-field-primary px-5 font-black text-white md:min-w-48"
+    <div className="relative grid min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg px-4 py-8">
+      <div className="relative w-[min(82vw,21rem)] max-w-full" ref={pickerRef}>
+        <svg viewBox="0 0 360 360" className="block h-auto w-full drop-shadow-[0_12px_24px_rgba(15,61,46,0.12)]" role="group" aria-label="첫 화면 기능 메뉴">
+          <circle cx="180" cy="180" r="160" className="fill-white stroke-field-border" strokeWidth="2" />
+          {wheelItems.map((item) => (
+            <g
+              key={item.id}
+              role="button"
+              tabIndex={0}
+              aria-label={item.label.join(" ")}
+              className="group cursor-pointer outline-none"
+              onClick={() => activateWheelItem(item.id)}
+              onKeyDown={(event) => handleWheelKeyDown(event, item.id)}
             >
-              <Plus className="h-5 w-5" aria-hidden />
-              새 프로젝트 만들기
-            </Link>
-          </div>
-        </section>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {projects.map((project) => (
-            <Link
-              key={project.id}
-              href={`/projects/${project.id}`}
-              className="flex min-h-56 flex-col justify-between rounded-md border border-field-border bg-white p-5 transition hover:border-field-secondary hover:shadow-sm"
-            >
-              <div>
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="min-w-0 break-words text-xl font-black text-field-primary">{project.name}</h2>
-                  <ChevronRight className="mt-1 h-6 w-6 shrink-0 text-field-muted" aria-hidden />
-                </div>
-                <div className="mt-3 grid gap-2 text-sm font-bold text-field-muted">
-                  <p className="flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4" aria-hidden />
-                    {project.shootDate || "촬영일 미정"}
-                  </p>
-                  <p className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" aria-hidden />
-                    {formatCreatedDate(project.createdAt)}
-                  </p>
-                </div>
-                {project.description ? <p className="mt-4 line-clamp-3 text-base leading-6 text-field-text">{project.description}</p> : null}
-              </div>
-              <div className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md border border-field-border bg-field-light px-3 text-sm font-black text-field-primary">
-                상세 보기
-              </div>
-            </Link>
+              <path
+                d={item.path}
+                className={`${item.fillClass} stroke-field-bg transition-colors duration-150 group-focus-visible:stroke-[#d7b95f]`}
+                strokeWidth="5"
+              />
+              <text
+                x={item.textX}
+                y={item.textY}
+                textAnchor="middle"
+                className="pointer-events-none select-none fill-white text-[14px] font-black"
+              >
+                <tspan x={item.textX} dy="0">{item.label[0]}</tspan>
+                <tspan x={item.textX} dy="20">{item.label[1]}</tspan>
+              </text>
+            </g>
           ))}
-        </div>
-      )}
+          <circle cx="180" cy="180" r="16" className="fill-field-bg stroke-field-border" strokeWidth="2" aria-hidden />
+        </svg>
 
-      <SupabaseDebugPanel />
-    </>
+        {pickerMode ? (
+          <div
+            role="dialog"
+            aria-label={pickerTitle}
+            className="absolute left-1/2 top-1/2 z-20 w-[min(19rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[8px] border border-field-border bg-white p-2 shadow-[0_16px_36px_rgba(28,28,26,0.2)]"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-field-border px-1 pb-1.5">
+              <h1 className="text-sm font-black text-field-primary">{pickerTitle}</h1>
+              <button
+                type="button"
+                onClick={() => setPickerMode(null)}
+                className="flex h-8 w-8 items-center justify-center rounded-[5px] text-field-muted hover:bg-field-soft"
+                aria-label="프로젝트 선택창 닫기"
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+
+            <div className="mt-1.5 grid max-h-64 gap-1 overflow-y-auto">
+              {isLoading ? <p className="px-2 py-4 text-center text-xs font-bold text-field-muted">프로젝트를 불러오는 중입니다.</p> : null}
+              {!isLoading && errorMessage ? <p className="px-2 py-4 text-center text-xs font-bold text-field-danger">{errorMessage}</p> : null}
+              {!isLoading && !errorMessage && projects.length === 0 ? (
+                <p className="px-2 py-4 text-center text-xs font-bold text-field-muted">
+                  {pickerMode === "load" ? "저장된 프로젝트가 없습니다." : "진행을 볼 프로젝트가 없습니다."}
+                </p>
+              ) : null}
+              {!isLoading && !errorMessage ? projects.map((project) => (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => openProject(project.id)}
+                  className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[5px] border border-field-border bg-field-bg px-2.5 py-1.5 text-left hover:border-field-secondary hover:bg-field-light"
+                >
+                  <span className="truncate text-sm font-black text-field-text">{project.name}</span>
+                  <span className="whitespace-nowrap text-[10px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</span>
+                </button>
+              )) : null}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }

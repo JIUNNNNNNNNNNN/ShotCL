@@ -16,11 +16,12 @@ export function AppShell({ children }: AppShellProps) {
   const demoStorageMode = isDemoStorageMode();
   const modeLabel = hasSupabaseEnv() ? "Supabase" : "TEST";
   const pathname = usePathname();
+  const isHome = pathname === "/";
   const isProjectDashboard = /^\/projects\/[^/]+$/.test(pathname);
 
   return (
     <div className="min-h-screen bg-field-bg text-field-text">
-      <header className="safe-top sticky top-0 z-40 border-b border-field-border bg-white/95 backdrop-blur">
+      {!isHome ? <header className="safe-top sticky top-0 z-40 border-b border-field-border bg-white/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 pb-2.5 md:px-8 lg:px-12">
           <Link href="/" className="flex min-w-0 items-center gap-3" title="프로젝트 목록">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-field-border bg-field-light">
@@ -54,13 +55,13 @@ export function AppShell({ children }: AppShellProps) {
             </Link>
           </div>
         </div>
-      </header>
+      </header> : null}
 
-      <main className="safe-bottom mx-auto w-full max-w-6xl px-3 py-4 md:px-8 md:py-6 lg:px-12">
-        {demoStorageMode ? <TestModeWarning compact={isProjectDashboard} /> : null}
+      <main className={isHome ? "min-h-screen w-full" : "safe-bottom mx-auto w-full max-w-6xl px-3 py-4 md:px-8 md:py-6 lg:px-12"}>
+        {demoStorageMode && !isHome ? <TestModeWarning compact={isProjectDashboard} /> : null}
         {children}
       </main>
-      <DevRuntimeInfo />
+      {!isHome ? <DevRuntimeInfo /> : null}
     </div>
   );
 }
