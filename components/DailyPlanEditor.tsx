@@ -243,7 +243,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const managedShotKeysRef = useRef<Set<string>>(
     new Set(
       initialSourceShots.length > 0
-        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(shotsToScenes(initialSourceShots, initialLocations))).map(getShotIdentityKey)
+        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(shotsToScenes(initialSourceShots, initialLocations))).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
         : []
     )
   );
@@ -545,8 +545,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   async function syncShotBoardFromDailyPlan(savedPlan: DailyPlanDraft | DailyPlan, savedShots: DailyPlanShotDraft[]) {
     const drafts = dailyPlanShotsToShotDrafts(savedPlan, savedShots);
-    await syncShotsFromDrafts(project.id, drafts, managedShotKeysRef.current);
-    managedShotKeysRef.current = new Set(drafts.map(getShotIdentityKey));
+    if (!("id" in savedPlan) || !savedPlan.id) return;
+    await syncShotsFromDrafts(project.id, savedPlan.id, drafts, managedShotKeysRef.current);
+    managedShotKeysRef.current = new Set(drafts.map((shot) => getShotIdentityKey(shot, savedPlan.id)));
   }
 
   function updateSceneTimeField(sceneIndex: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {

@@ -197,6 +197,7 @@ export type StoryboardFile = {
 export type Shot = {
   id: string;
   projectId: string;
+  dailyPlanId: string | null;
   analysisRunId: string | null;
   sceneNumber: string;
   cutNumber: string;

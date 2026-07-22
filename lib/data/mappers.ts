@@ -230,6 +230,7 @@ export function shotFromRow(row: AnyRow): Shot {
   return {
     id: row.id,
     projectId: row.project_id,
+    dailyPlanId: row.daily_plan_id ?? null,
     analysisRunId: row.analysis_run_id ?? null,
     sceneNumber: row.scene_number ?? "",
     cutNumber: row.cut_number ?? row.shot_number ?? "",
@@ -250,9 +251,10 @@ export function shotFromRow(row: AnyRow): Shot {
 }
 
 /** 화면 타입의 컷 초안을 Supabase insert row로 바꿉니다. */
-export function shotDraftToInsertRow(projectId: string, draft: ShotDraft, orderIndex?: number) {
+export function shotDraftToInsertRow(projectId: string, draft: ShotDraft, orderIndex?: number, dailyPlanId?: string | null) {
   return {
     project_id: projectId,
+    daily_plan_id: dailyPlanId ?? null,
     scene_number: draft.sceneNumber,
     cut_number: draft.cutNumber,
     shot_number: draft.cutNumber,

@@ -8,10 +8,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     const { projectId } = await context.params;
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
-    if (grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
     const supabase = requireProjectAccessDb();
+    const planColumns = grant.role === "progress"
+      ? "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at"
+      : "*";
     const [{ data: plans, error: planError }, { data: shots, error: shotError }] = await Promise.all([
-      supabase.from("daily_plans").select("*").eq("project_id", projectId).order("updated_at", { ascending: false }),
+      supabase.from("daily_plans").select(planColumns).eq("project_id", projectId).order("updated_at", { ascending: false }),
       supabase.from("daily_plan_shots").select("daily_plan_id").eq("project_id", projectId)
     ]);
     if (planError) throw planError;

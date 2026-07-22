@@ -15,9 +15,10 @@ async function getSharedRole(projectId: string): Promise<"admin" | "progress" | 
 }
 
 /** 프로젝트의 컷 리스트를 촬영 순서대로 가져옵니다. */
-export async function listShots(projectId: string): Promise<Shot[]> {
+export async function listShots(projectId: string, dailyPlanId?: string): Promise<Shot[]> {
   try {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, { cache: "no-store" });
+    const query = dailyPlanId ? `?dailyPlanId=${encodeURIComponent(dailyPlanId)}` : "";
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots${query}`, { cache: "no-store" });
     if (response.ok) {
       const payload = (await response.json()) as { shots: Record<string, unknown>[] };
       return payload.shots.map(shotFromRow);
@@ -28,22 +29,36 @@ export async function listShots(projectId: string): Promise<Shot[]> {
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("shots")
       .select("*")
       .eq("project_id", projectId)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true });
+    if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
+    const { data, error } = await query;
 
     if (error) throw error;
     return data.map(shotFromRow);
   }
 
-  const { shots } = readLocalBuckets();
-  return shots
-    .filter((shot) => shot.projectId === projectId)
+  const buckets = readLocalBuckets();
+  const firstPlanId = buckets.dailyPlans
+    .filter((plan) => plan.projectId === projectId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.id ?? null;
+  let didMigrateLegacyShots = false;
+  const locallyScopedShots = buckets.shots.map((shot) => {
+    if (shot.projectId !== projectId || shot.dailyPlanId || !firstPlanId) return shot;
+    didMigrateLegacyShots = true;
+    return { ...shot, dailyPlanId: firstPlanId };
+  });
+  if (didMigrateLegacyShots) writeLocalBuckets({ shots: locallyScopedShots }, projectId);
+
+  return locallyScopedShots
+    .filter((shot) => shot.projectId === projectId && (!dailyPlanId || shot.dailyPlanId === dailyPlanId))
     .map((shot) => ({
       ...shot,
+      dailyPlanId: shot.dailyPlanId ?? null,
       cutNumber: shot.cutNumber ?? (shot as unknown as { shotNumber?: string }).shotNumber ?? "",
       memo: shot.memo ?? (shot as unknown as { notes?: string }).notes ?? "",
       status: normalizeShotStatus(shot.status),
@@ -57,14 +72,14 @@ export async function listShots(projectId: string): Promise<Shot[]> {
 }
 
 /** AI 분석 결과나 수동 입력 컷을 프로젝트에 추가합니다. */
-export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft[]): Promise<Shot[]> {
-  const existingShots = await listShots(projectId);
+export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft[], dailyPlanId?: string): Promise<Shot[]> {
+  const existingShots = await listShots(projectId, dailyPlanId);
   const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
   if (await getSharedRole(projectId)) {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ drafts })
+      body: JSON.stringify({ drafts, dailyPlanId: dailyPlanId ?? null })
     });
     const payload = (await response.json()) as { shots?: Record<string, unknown>[]; error?: string };
     if (!response.ok || !payload.shots) throw new Error(payload.error || "컷을 추가하지 못했습니다.");
@@ -73,7 +88,7 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
-    const rows = drafts.map((draft, index) => shotDraftToInsertRow(projectId, draft, maxOrder + index + 1));
+    const rows = drafts.map((draft, index) => shotDraftToInsertRow(projectId, draft, maxOrder + index + 1, dailyPlanId));
     const { data, error } = await supabase.from("shots").insert(rows).select("*").order("order_index");
     if (error) throw error;
     return data.map(shotFromRow);
@@ -83,6 +98,7 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
   const newShots: Shot[] = drafts.map((draft, index) => ({
     id: createLocalId("shot"),
     projectId,
+    dailyPlanId: dailyPlanId ?? null,
     sceneNumber: draft.sceneNumber,
     cutNumber: draft.cutNumber,
     title: draft.title,
@@ -107,15 +123,15 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
 }
 
 /** 일촬표에서 파생된 컷 목록을 scene + cutNumber 기준으로 동기화합니다. */
-export async function syncShotsFromDrafts(projectId: string, drafts: ShotDraft[], previouslyManagedKeys: ReadonlySet<string>): Promise<Shot[]> {
-  const existingShots = await listShots(projectId);
+export async function syncShotsFromDrafts(projectId: string, dailyPlanId: string, drafts: ShotDraft[], previouslyManagedKeys: ReadonlySet<string>): Promise<Shot[]> {
+  const existingShots = await listShots(projectId, dailyPlanId);
   const desiredByKey = new Map<string, ShotDraft>();
-  drafts.forEach((draft) => desiredByKey.set(getShotIdentityKey(draft), draft));
+  drafts.forEach((draft) => desiredByKey.set(getShotIdentityKey(draft, dailyPlanId), draft));
 
   const existingByKey = new Map<string, Shot>();
   const duplicateShots: Shot[] = [];
   existingShots.forEach((shot) => {
-    const key = getShotIdentityKey(shot);
+    const key = getShotIdentityKey(shot, dailyPlanId);
     const existing = existingByKey.get(key);
     if (!existing) {
       existingByKey.set(key, shot);
@@ -131,10 +147,10 @@ export async function syncShotsFromDrafts(projectId: string, drafts: ShotDraft[]
   });
 
   const staleShots = existingShots.filter((shot) => {
-    const key = getShotIdentityKey(shot);
+    const key = getShotIdentityKey(shot, dailyPlanId);
     return previouslyManagedKeys.has(key) && !desiredByKey.has(key);
   });
-  const managedDuplicates = duplicateShots.filter((shot) => previouslyManagedKeys.has(getShotIdentityKey(shot)));
+  const managedDuplicates = duplicateShots.filter((shot) => previouslyManagedKeys.has(getShotIdentityKey(shot, dailyPlanId)));
   const shotsToDelete = new Map([...staleShots, ...managedDuplicates].map((shot) => [shot.id, shot]));
   await Promise.all([...shotsToDelete.values()].map((shot) => deleteShot(shot)));
 
@@ -161,12 +177,13 @@ export async function syncShotsFromDrafts(projectId: string, drafts: ShotDraft[]
   });
 
   await Promise.all(updateTasks);
-  if (missingDrafts.length > 0) await createShotsFromDrafts(projectId, missingDrafts);
-  return listShots(projectId);
+  if (missingDrafts.length > 0) await createShotsFromDrafts(projectId, missingDrafts, dailyPlanId);
+  return listShots(projectId, dailyPlanId);
 }
 
-export function getShotIdentityKey(shot: Pick<Shot, "sceneNumber" | "cutNumber"> | Pick<ShotDraft, "sceneNumber" | "cutNumber">) {
-  return `${shot.sceneNumber.trim()}\u0000${shot.cutNumber.trim()}`;
+export function getShotIdentityKey(shot: Pick<Shot, "sceneNumber" | "cutNumber"> | Pick<ShotDraft, "sceneNumber" | "cutNumber">, dailyPlanId?: string | null) {
+  const planId = dailyPlanId ?? ("dailyPlanId" in shot ? shot.dailyPlanId : null) ?? "legacy";
+  return `${planId}\u0000${shot.sceneNumber.trim()}\u0000${shot.cutNumber.trim()}`;
 }
 
 function hasShotDraftChanges(existing: Shot, patch: Partial<Shot>) {
@@ -215,6 +232,7 @@ export async function updateShot(shotId: string, patch: Partial<Shot>, projectId
     ...existingShot,
     id: existingShot.id,
     projectId: existingShot.projectId,
+    dailyPlanId: existingShot.dailyPlanId ?? null,
     cutNumber: existingShot.cutNumber ?? (existingShot as unknown as { shotNumber?: string }).shotNumber ?? "",
     memo: existingShot.memo ?? (existingShot as unknown as { notes?: string }).notes ?? "",
     status: normalizeShotStatus(existingShot.status),
@@ -288,9 +306,10 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
 }
 
 /** 분석 결과로 기존 컷 리스트를 교체할 때 사용합니다. */
-export async function deleteAllShots(projectId: string): Promise<void> {
+export async function deleteAllShots(projectId: string, dailyPlanId?: string): Promise<void> {
   if (await getSharedRole(projectId)) {
-    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, { method: "DELETE" });
+    const query = dailyPlanId ? `?dailyPlanId=${encodeURIComponent(dailyPlanId)}` : "";
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots${query}`, { method: "DELETE" });
     if (!response.ok) {
       const payload = (await response.json()) as { error?: string };
       throw new Error(payload.error || "컷 목록을 삭제하지 못했습니다.");
@@ -300,13 +319,15 @@ export async function deleteAllShots(projectId: string): Promise<void> {
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
-    const { error } = await supabase.from("shots").delete().eq("project_id", projectId);
+    let query = supabase.from("shots").delete().eq("project_id", projectId);
+    if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
+    const { error } = await query;
     if (error) throw error;
     return;
   }
 
   const buckets = readLocalBuckets();
-  writeLocalBuckets({ shots: buckets.shots.filter((shot) => shot.projectId !== projectId) }, projectId);
+  writeLocalBuckets({ shots: buckets.shots.filter((shot) => shot.projectId !== projectId || (dailyPlanId ? shot.dailyPlanId !== dailyPlanId : false)) }, projectId);
 }
 
 /** 컷을 삭제합니다. */
@@ -332,20 +353,20 @@ export async function deleteShot(shot: Shot): Promise<void> {
 }
 
 /** 드래그 앤 드롭 대신 위/아래 버튼으로 촬영 순서를 바꿉니다. */
-export async function moveShot(projectId: string, shotId: string, direction: "up" | "down") {
+export async function moveShot(projectId: string, shotId: string, direction: "up" | "down", dailyPlanId?: string) {
   if (await getSharedRole(projectId)) {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/move`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ direction })
+      body: JSON.stringify({ direction, dailyPlanId: dailyPlanId ?? null })
     });
     if (!response.ok) {
       const payload = (await response.json()) as { error?: string };
       throw new Error(payload.error || "컷 순서를 변경하지 못했습니다.");
     }
-    return listShots(projectId);
+    return listShots(projectId, dailyPlanId);
   }
-  const shots = await listShots(projectId);
+  const shots = await listShots(projectId, dailyPlanId);
   const currentIndex = shots.findIndex((shot) => shot.id === shotId);
   const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
 
@@ -375,5 +396,5 @@ export async function moveShot(projectId: string, shotId: string, direction: "up
     writeLocalBuckets({ shots: nextShots }, projectId);
   }
 
-  return listShots(projectId);
+  return listShots(projectId, dailyPlanId);
 }

@@ -2,7 +2,7 @@ import { subscribeToLocalProjectChanges } from "@/lib/data/localStore";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 /** Supabase Realtime 또는 로컬 개발 이벤트로 컷 변경을 구독합니다. */
-export function subscribeToShotChanges(projectId: string, onChange: () => void) {
+export function subscribeToShotChanges(projectId: string, onChange: () => void, dailyPlanId?: string) {
   const supabase = getSupabaseBrowserClient();
 
   if (!supabase) {
@@ -10,7 +10,7 @@ export function subscribeToShotChanges(projectId: string, onChange: () => void) 
   }
 
   const channel = supabase
-    .channel(`shots:${projectId}`)
+    .channel(`shots:${projectId}:${dailyPlanId ?? "all"}`)
     .on(
       "postgres_changes",
       {

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { CalendarPlus, Ellipsis, FileSpreadsheet, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
+import { useParams, useSearchParams } from "next/navigation";
+import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FileSpreadsheet, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
@@ -12,12 +12,13 @@ import { ShotEditorModal, type ShotEditorValues } from "@/components/ShotEditorM
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, updateShot, updateShotStatus } from "@/lib/data/shots";
+import { listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { downloadStandardDailyPlanTemplate } from "@/lib/dailyPlan/excel";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
+import type { DailyPlan, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
 /** URL 파라미터에서 프로젝트 ID를 안전하게 읽습니다. */
 function useProjectId() {
@@ -47,7 +48,11 @@ export default function ProjectDetailPage() {
   const { role } = useProjectAccess();
   const progressOnly = role === "progress";
   const projectId = useProjectId();
+  const searchParams = useSearchParams();
+  const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
   const [project, setProject] = useState<Project | null>(null);
+  const [dailyPlans, setDailyPlans] = useState<Array<DailyPlan & { shotCount: number }>>([]);
+  const [episodeShots, setEpisodeShots] = useState<Record<string, Shot[]>>({});
   const [shots, setShots] = useState<Shot[]>([]);
   const [filter, setFilter] = useState<ShotFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
@@ -62,28 +67,33 @@ export default function ProjectDetailPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, shotData] = await Promise.all([getProject(projectId), listShots(projectId)]);
+      const [projectData, planData] = await Promise.all([getProject(projectId), listDailyPlans(projectId)]);
+      const shotEntries = await Promise.all(planData.map(async (plan) => [plan.id, await listShots(projectId, plan.id)] as const));
+      const shotsByPlan = Object.fromEntries(shotEntries);
       setProject(projectData);
-      setShots(shotData);
+      setDailyPlans(planData);
+      setEpisodeShots(shotsByPlan);
+      setShots(dailyPlanId ? shotsByPlan[dailyPlanId] ?? [] : []);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [dailyPlanId, projectId]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
   useEffect(() => {
-    if (!projectId) return undefined;
-    return subscribeToShotChanges(projectId, refresh);
-  }, [projectId, refresh]);
+    if (!projectId || !dailyPlanId) return undefined;
+    return subscribeToShotChanges(projectId, refresh, dailyPlanId);
+  }, [dailyPlanId, projectId, refresh]);
 
   const filteredShots = useMemo(() => filterShots(shots, filter), [filter, shots]);
   const nextOrderIndex = shots.length + 1;
+  const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
 
   async function handleStatusChange(targetShot: Shot, status: ShotStatus) {
     if (progressOnly && !(targetShot.status === "pending" && status === "ok")) {
@@ -103,7 +113,7 @@ export default function ProjectDetailPage() {
   }
 
   async function handleSaveNewShot(values: ShotEditorValues) {
-    if (!projectId) return;
+    if (!projectId || !dailyPlanId) return;
 
     setIsSaving(true);
     setErrorMessage("");
@@ -124,7 +134,7 @@ export default function ProjectDetailPage() {
         }
       ];
 
-      const [createdShot] = await createShotsFromDrafts(projectId, drafts);
+      const [createdShot] = await createShotsFromDrafts(projectId, drafts, dailyPlanId);
       if (createdShot && values.imageFile) {
         const imageUrl = await saveShotStoryboardImage(projectId, createdShot.id, values.imageFile);
         await updateShot(createdShot.id, { storyboardImageUrl: imageUrl }, projectId);
@@ -197,10 +207,10 @@ export default function ProjectDetailPage() {
   }
 
   async function handleMoveShot(shot: Shot, direction: "up" | "down") {
-    if (!projectId) return;
+    if (!projectId || !dailyPlanId) return;
 
     try {
-      await moveShot(projectId, shot.id, direction);
+      await moveShot(projectId, shot.id, direction, dailyPlanId);
       await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "순서를 바꾸지 못했습니다.");
@@ -208,9 +218,9 @@ export default function ProjectDetailPage() {
   }
 
   async function handleResetCurrentProjectShots() {
-    if (!projectId) return;
+    if (!projectId || !dailyPlanId) return;
 
-    const shouldReset = window.confirm("현재 프로젝트의 컷 목록만 삭제합니다. 프로젝트 정보와 분석 기록은 유지됩니다. 계속할까요?");
+    const shouldReset = window.confirm("현재 회차의 컷 목록만 삭제합니다. 다른 회차와 프로젝트 정보는 유지됩니다. 계속할까요?");
     if (!shouldReset) return;
 
     setIsSaving(true);
@@ -218,9 +228,9 @@ export default function ProjectDetailPage() {
     setSuccessMessage("");
 
     try {
-      await deleteAllShots(projectId);
+      await deleteAllShots(projectId, dailyPlanId);
       setShots([]);
-      setSuccessMessage("현재 프로젝트의 컷 목록을 초기화했습니다. 프로젝트 정보는 유지됩니다.");
+      setSuccessMessage("현재 회차의 컷 목록을 초기화했습니다. 다른 회차는 유지됩니다.");
       await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷 목록을 초기화하지 못했습니다.");
@@ -245,6 +255,17 @@ export default function ProjectDetailPage() {
     );
   }
 
+  if (!dailyPlanId || !selectedPlan) {
+    return (
+      <EpisodeSelection
+        project={project}
+        plans={dailyPlans}
+        shotsByPlan={episodeShots}
+        invalidSelection={Boolean(dailyPlanId)}
+      />
+    );
+  }
+
   return (
     <>
       <div className="relative z-30 mb-3 flex items-center justify-between" aria-label="진행 페이지 이동 메뉴">
@@ -256,6 +277,11 @@ export default function ProjectDetailPage() {
         >
           <House className="h-5 w-5" aria-hidden />
         </Link>
+
+        <div className="min-w-0 flex-1 px-3 text-center">
+          <p className="truncate text-sm font-black text-field-primary">{project.name} / {formatEpisodeLabel(selectedPlan, 0)}</p>
+          <p className="truncate text-[11px] font-bold text-field-muted">{selectedPlan.shootingDate || "촬영일 미정"}</p>
+        </div>
 
         {!progressOnly ? <details className="group relative">
           <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-full border border-field-border bg-white text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
@@ -279,7 +305,7 @@ export default function ProjectDetailPage() {
             <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
               <FileSpreadsheet className="h-4 w-4" aria-hidden /> Excel 일촬표 업로드
             </Link>
-            <Link href={`/projects/${project.id}/upload`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
               <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
             </Link>
             <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted hover:bg-field-soft">
@@ -293,6 +319,9 @@ export default function ProjectDetailPage() {
       </div>
 
       <section className="mb-3">
+        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-8 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택
+        </Link>
         <ProgressSummary shots={shots} />
         <div className="mt-2">
           <FilterTabs value={filter} onChange={setFilter} />
@@ -351,7 +380,7 @@ export default function ProjectDetailPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-field-border p-4">
             <p className="text-xs font-bold leading-5 text-field-muted">테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.</p>
             <Button variant="danger" onClick={handleResetCurrentProjectShots} disabled={isSaving || shots.length === 0}>
-              <RotateCcw className="h-5 w-5" aria-hidden /> 현재 프로젝트 컷 목록 초기화
+              <RotateCcw className="h-5 w-5" aria-hidden /> 현재 회차 컷 목록 초기화
             </Button>
           </div>
         </details>
@@ -392,4 +421,77 @@ export default function ProjectDetailPage() {
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? ""} onClose={() => setPreview(null)} />
     </>
   );
+}
+
+function EpisodeSelection({
+  project,
+  plans,
+  shotsByPlan,
+  invalidSelection
+}: {
+  project: Project;
+  plans: Array<DailyPlan & { shotCount: number }>;
+  shotsByPlan: Record<string, Shot[]>;
+  invalidSelection: boolean;
+}) {
+  return (
+    <main className="mx-auto w-full max-w-3xl pb-12">
+      <div className="mb-8 flex items-center gap-3">
+        <Link
+          href="/"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-field-secondary bg-white text-field-primary transition-[background-color,transform,border-color] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+          aria-label="홈으로 이동"
+        >
+          <House className="h-5 w-5" aria-hidden />
+        </Link>
+        <div className="min-w-0">
+          <p className="truncate text-xl font-black text-field-primary">{project.name}</p>
+          <p className="text-sm font-bold text-field-muted">진행할 회차를 선택하세요</p>
+        </div>
+      </div>
+
+      {invalidSelection ? <p className="mb-4 rounded-full border border-field-danger/40 bg-white px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
+
+      {plans.length === 0 ? (
+        <section className="rounded-[2rem] border border-field-border bg-white px-6 py-10 text-center">
+          <CalendarDays className="mx-auto h-9 w-9 text-field-secondary" aria-hidden />
+          <h1 className="mt-3 text-lg font-black text-field-primary">아직 저장된 일촬표가 없습니다</h1>
+          <p className="mt-2 text-sm font-bold leading-6 text-field-muted">관리자가 일촬표를 저장하면 회차별 진행보기가 생성됩니다.</p>
+        </section>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {plans.map((plan, index) => {
+            const planShots = shotsByPlan[plan.id] ?? [];
+            const total = planShots.length || plan.shotCount;
+            const completed = planShots.filter((shot) => shot.status === "ok" || shot.status === "omit").length;
+            const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
+            return (
+              <Link
+                key={plan.id}
+                href={`/projects/${project.id}?dailyPlanId=${encodeURIComponent(plan.id)}`}
+                className="group rounded-[2rem] border border-field-border bg-white p-5 transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-light active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-lg font-black text-field-primary">{formatEpisodeLabel(plan, index)}</h2>
+                    <p className="mt-1 text-xs font-bold text-field-muted">{plan.shootingDate || "촬영일 미정"}</p>
+                  </div>
+                  <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full border border-field-border bg-field-light text-sm font-black text-field-primary">{progress}%</div>
+                </div>
+                <div className="mt-4 flex items-center justify-between rounded-full border border-field-border bg-field-soft/60 px-4 py-2 text-xs font-black">
+                  {total > 0 ? <><span className="text-field-primary">총 {total}컷</span><span className="text-field-muted">완료 {completed}컷</span></> : <span className="w-full text-center text-field-muted">컷 없음 · 일촬표에서 컷수를 입력하세요</span>}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </main>
+  );
+}
+
+function formatEpisodeLabel(plan: Pick<DailyPlan, "episode" | "shootingDate">, index: number) {
+  const episode = plan.episode.trim();
+  if (episode) return episode.includes("회차") ? episode : `${episode}회차`;
+  return plan.shootingDate || `${index + 1}회차`;
 }

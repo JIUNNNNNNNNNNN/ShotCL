@@ -6,10 +6,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const { projectId, shotId } = await context.params;
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
-    const { direction } = (await request.json()) as { direction?: "up" | "down" };
+    const { direction, dailyPlanId } = (await request.json()) as { direction?: "up" | "down"; dailyPlanId?: string | null };
     if (direction !== "up" && direction !== "down") return NextResponse.json({ error: "이동 방향이 올바르지 않습니다." }, { status: 400 });
     const supabase = requireProjectAccessDb();
-    const { data: shots, error } = await supabase.from("shots").select("id,order_index").eq("project_id", projectId).order("order_index").order("created_at");
+    let query = supabase.from("shots").select("id,order_index").eq("project_id", projectId).order("order_index").order("created_at");
+    if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
+    const { data: shots, error } = await query;
     if (error) throw error;
     const currentIndex = shots.findIndex((shot) => shot.id === shotId);
     const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;

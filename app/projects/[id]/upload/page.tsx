@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Bot, Camera, FileUp, History, ListChecks, RotateCcw, Trash2, UploadCloud } from "lucide-react";
 import { AnalysisPreview } from "@/components/AnalysisPreview";
 import { PageHeader } from "@/components/PageHeader";
@@ -10,10 +10,11 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { confirmAnalysisRun, createAnalysisRun, discardAnalysisRun, saveAnalysisRunFeedback } from "@/lib/data/analysisRuns";
 import { createShotsFromDrafts, deleteAllShots, listShots } from "@/lib/data/shots";
+import { listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { deleteStoryboardFile, listStoryboardFiles, saveStoryboardFile } from "@/lib/data/storyboardFiles";
 import { ensureSupabaseDevSession, getSupabaseBrowserClient } from "@/lib/supabase/client";
-import type { AnalysisReviewedShot, ExtractionPreview, Project, ShotDraft, StoryboardAnalysisResult, StoryboardFile } from "@/lib/types";
+import type { AnalysisReviewedShot, DailyPlan, ExtractionPreview, Project, ShotDraft, StoryboardAnalysisResult, StoryboardFile } from "@/lib/types";
 
 type LastAnalysis = {
   analysisRunId: string | null;
@@ -44,7 +45,10 @@ function isPdfFile(file: StoryboardFile) {
 /** 스토리보드/일일촬영계획서 업로드와 컷 단위 분석을 처리합니다. */
 export default function UploadStoryboardPage() {
   const projectId = useProjectId();
+  const searchParams = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
+  const [dailyPlans, setDailyPlans] = useState<Array<DailyPlan & { shotCount: number }>>([]);
+  const [selectedDailyPlanId, setSelectedDailyPlanId] = useState(searchParams.get("dailyPlanId") ?? "");
   const [files, setFiles] = useState<StoryboardFile[]>([]);
   const [selectedFilesById, setSelectedFilesById] = useState<Record<string, File>>({});
   const [existingShotCount, setExistingShotCount] = useState(0);
@@ -59,16 +63,20 @@ export default function UploadStoryboardPage() {
     if (!projectId) return;
 
     try {
-      const [projectData, fileData, shotData] = await Promise.all([getProject(projectId), listStoryboardFiles(projectId), listShots(projectId)]);
+      const [projectData, fileData, planData] = await Promise.all([getProject(projectId), listStoryboardFiles(projectId), listDailyPlans(projectId)]);
+      const nextDailyPlanId = planData.some((plan) => plan.id === selectedDailyPlanId) ? selectedDailyPlanId : planData[0]?.id ?? "";
+      const shotData = nextDailyPlanId ? await listShots(projectId, nextDailyPlanId) : [];
       setProject(projectData);
       setFiles(fileData);
+      setDailyPlans(planData);
+      setSelectedDailyPlanId(nextDailyPlanId);
       setExistingShotCount(shotData.length);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "업로드 정보를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, selectedDailyPlanId]);
 
   useEffect(() => {
     refresh();
@@ -191,6 +199,10 @@ export default function UploadStoryboardPage() {
     }
   ) {
     if (!projectId || !lastAnalysis) return;
+    if (!selectedDailyPlanId) {
+      setErrorMessage("먼저 컷을 반영할 회차를 선택하세요.");
+      return;
+    }
 
     setBusyFileId("importing");
     setErrorMessage("");
@@ -209,10 +221,10 @@ export default function UploadStoryboardPage() {
       }));
 
       if (mode === "replace") {
-        await deleteAllShots(projectId);
+        await deleteAllShots(projectId, selectedDailyPlanId);
       }
 
-      await createShotsFromDrafts(projectId, finalShots);
+      await createShotsFromDrafts(projectId, finalShots, selectedDailyPlanId);
 
       if (lastAnalysis.analysisRunId) {
         await confirmAnalysisRun({
@@ -378,7 +390,7 @@ export default function UploadStoryboardPage() {
         actions={
           <div className="grid gap-2 sm:grid-cols-2">
             <Link
-              href={`/projects/${project.id}`}
+              href={`/projects/${project.id}${selectedDailyPlanId ? `?dailyPlanId=${encodeURIComponent(selectedDailyPlanId)}` : ""}`}
               className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary"
             >
               <ListChecks className="h-4 w-4" aria-hidden />
@@ -398,6 +410,14 @@ export default function UploadStoryboardPage() {
       <div className="mb-4 rounded-md border border-field-border bg-white p-4 text-sm font-bold leading-6 text-field-muted">
         가장 안정적인 방식은 Excel 일촬표를 업로드하거나 웹 일촬표 편집기에서 수정하는 것입니다. PDF 분석은 외부에서 PDF만 받은 경우에만 보조 기능으로 사용하세요.
       </div>
+
+      <label className="mb-4 grid gap-2 rounded-md border border-field-border bg-white p-4 text-sm font-black text-field-primary">
+        컷을 반영할 회차
+        <select className="min-h-11 rounded-md border border-field-border bg-white px-3 text-center" value={selectedDailyPlanId} onChange={(event) => setSelectedDailyPlanId(event.target.value)}>
+          <option value="">회차 선택</option>
+          {dailyPlans.map((plan, index) => <option key={plan.id} value={plan.id}>{plan.episode ? `${plan.episode}${plan.episode.includes("회차") ? "" : "회차"}` : plan.shootingDate || `${index + 1}회차`}</option>)}
+        </select>
+      </label>
 
       {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
       {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}

@@ -129,6 +129,7 @@ create table if not exists public.analysis_runs (
 create table if not exists public.shots (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
+  daily_plan_id uuid references public.daily_plans(id) on delete set null,
   analysis_run_id uuid references public.analysis_runs(id) on delete set null,
   scene_number text not null default '',
   cut_number text not null default '',
@@ -206,6 +207,8 @@ create index if not exists idx_analysis_run_items_run_id on public.analysis_run_
 create index if not exists idx_analysis_run_items_project_id on public.analysis_run_items(project_id);
 create index if not exists shots_project_order_idx on public.shots(project_id, order_index);
 create index if not exists shots_project_status_idx on public.shots(project_id, status);
+create index if not exists idx_shots_project_daily_plan_order on public.shots(project_id, daily_plan_id, order_index, created_at);
+create index if not exists idx_shots_daily_plan_scene_cut on public.shots(daily_plan_id, scene_number, cut_number);
 create index if not exists idx_shots_analysis_run_id on public.shots(analysis_run_id);
 create index if not exists shot_status_logs_shot_id_idx on public.shot_status_logs(shot_id);
 
