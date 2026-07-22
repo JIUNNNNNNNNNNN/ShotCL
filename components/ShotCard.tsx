@@ -45,7 +45,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
       onPointerUp={handleCardOpen}
       aria-label={`${shot.title} 컷 수정`}
       className={cn(
-        "grid cursor-pointer grid-cols-[96px_minmax(0,1fr)] items-center gap-3 rounded-2xl border bg-white p-2 shadow-sm transition sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
+        "grid cursor-pointer grid-cols-[96px_minmax(0,1fr)] items-center gap-2 rounded-[8px] border bg-white p-1.5 transition-colors sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
         isOk && "border-field-primary bg-field-light",
         isOmit && "border-field-danger bg-white opacity-75",
         !isOk && !isOmit && "border-field-border hover:border-field-secondary"
@@ -55,14 +55,14 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
         <button
           type="button"
           onClick={handleImageClick}
-          className="flex h-[72px] w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-field-border bg-field-soft text-xs font-black"
+          className="flex h-[72px] w-24 shrink-0 items-center justify-center overflow-hidden rounded-[6px] border border-field-border bg-field-soft text-xs font-black"
           title="콘티 크게 보기"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={shot.storyboardImageUrl} alt={`${shot.title} 콘티`} className="h-full w-full object-contain" />
         </button>
       ) : (
-        <div className="flex h-[72px] w-24 shrink-0 items-center justify-center rounded-xl border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
+        <div className="flex h-[72px] w-24 shrink-0 items-center justify-center rounded-[6px] border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
           <span className="grid place-items-center gap-1">
             <ImageIcon className="mx-auto h-4 w-4" aria-hidden />
             콘티 없음
@@ -72,10 +72,10 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
 
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="rounded-lg bg-field-light px-2 py-0.5 text-[11px] font-black text-field-primary">
+          <p className="rounded-[4px] bg-field-light px-1.5 py-0.5 text-[10px] font-black text-field-primary">
             S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}
           </p>
-          <p className={cn("rounded-lg px-2 py-0.5 text-[10px] font-black", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
+          <p className={cn("rounded-[4px] px-1.5 py-0.5 text-[10px] font-black", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
         </div>
 
@@ -95,7 +95,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
             className={cn(
-              "min-h-8 rounded-xl border text-xs font-black",
+              "min-h-7 rounded-[5px] border text-xs font-black",
               isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
             )}
           >
@@ -106,7 +106,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange }: ShotC
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "min-h-8 rounded-xl border text-xs font-black",
+              "min-h-7 rounded-[5px] border text-xs font-black",
               isOmit ? "border-field-danger bg-field-danger text-white" : "border-field-border bg-white text-field-danger"
             )}
           >

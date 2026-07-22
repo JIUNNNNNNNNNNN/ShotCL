@@ -180,7 +180,7 @@ const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-none";
-const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-1 max-md:[&_button]:h-7 max-md:[&_button]:min-h-7 max-md:[&_button]:px-0.5 max-md:[&_button]:text-[10px] max-md:[&_input]:h-7 max-md:[&_input]:min-h-7 max-md:[&_input]:px-0.5 max-md:[&_input]:text-[10px] max-md:[&_select]:h-7 max-md:[&_select]:min-h-7 max-md:[&_select]:px-0.5 max-md:[&_select]:text-[10px]";
+const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-7 max-md:[&_button]:min-h-7 max-md:[&_button]:px-0.5 max-md:[&_button]:text-[10px] max-md:[&_input]:h-7 max-md:[&_input]:min-h-7 max-md:[&_input]:px-0.5 max-md:[&_input]:text-[10px] max-md:[&_select]:h-7 max-md:[&_select]:min-h-7 max-md:[&_select]:px-0.5 max-md:[&_select]:text-[10px]";
 
 const maxRuntimeMinutes = 1440;
 let daumPostcodeScriptPromise: Promise<void> | null = null;
@@ -832,7 +832,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
         {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
-        <section className="rounded-md border border-field-border bg-white p-5">
+        <section className="field-section p-3 md:p-5">
           <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
             <div>
               <h1 className="text-2xl font-black text-field-primary">{plan.title || "새 일촬표"}</h1>
@@ -847,7 +847,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
 
-        <section className="mt-5 overflow-hidden rounded-md border border-field-border bg-white p-3 md:p-5">
+        <section className="field-section mt-3 overflow-hidden p-2 md:mt-5 md:p-5">
           <div className="grid gap-3">
             <div className="grid min-w-0 gap-1.5 md:hidden">
               <div className="grid grid-cols-[0.72fr_1.56fr_0.72fr] gap-1.5">
@@ -897,7 +897,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
 
           <div className="flex flex-col">
-          <section className="order-1 mt-5 rounded-md border border-field-border bg-field-soft p-3">
+          <section className="field-subsection order-1 mt-3 p-2 md:mt-5 md:p-3">
             <h3 className="text-sm font-black text-field-primary">날씨 정보</h3>
             <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <WeatherRegionPicker
@@ -989,8 +989,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             {weatherStatus ? <p className="mt-3 hidden text-xs font-bold text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
           </section>
 
-          <div className="order-2 mt-6 grid gap-5">
-            <section className="rounded-md border border-field-border bg-field-soft p-4">
+          <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
+            <section className="field-subsection p-2 md:p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
                   <h3 className="text-base font-black text-field-primary">촬영 장소</h3>
@@ -1117,7 +1117,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           </div>
         </section>
 
-        <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
+        <section className="field-section mt-3 p-1.5 md:mt-5 md:p-5">
           <div className="flex items-center justify-between gap-2 md:grid md:grid-cols-[1fr_auto] md:gap-4 md:items-center">
             <div>
               <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
@@ -1128,7 +1128,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </Button>
           </div>
 
-          <div className="mt-2 w-full md:mt-5">
+          <div className="mt-1.5 w-full md:mt-5">
             <table className="w-full table-fixed border-collapse text-xs max-lg:block">
               <colgroup className="max-lg:hidden">
                 {[8, 7, 8, 10, 6, 7, 7, 13, 14, 10, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
@@ -1142,7 +1142,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                   ))}
                 </tr>
               </thead>
-              <tbody className="max-lg:grid max-lg:gap-3 max-md:gap-1.5">
+              <tbody className="max-lg:grid max-lg:gap-3 max-md:gap-1">
                 {timetableRows.map((row, rowIndex) => {
                   if (row.type === "event") {
                     const meal = row.item;
@@ -1222,7 +1222,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         </section>
 
         <div className="flex flex-col">
-        <section className="order-2 mt-5 hidden rounded-md border border-field-border bg-white p-5 text-center md:block">
+        <section className="field-section order-2 mt-5 hidden p-5 text-center md:block">
           <div className="flex flex-col items-center justify-center gap-3 text-center">
             <h2 className="text-center text-lg font-black text-field-primary">스태프&amp;배우</h2>
             <Button variant="secondary" onClick={() => setIsStaffOpen((current) => !current)} aria-expanded={isStaffOpen}>
@@ -1335,7 +1335,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         </section>
       ) : null}
 
-      <section className="mt-5 rounded-md border border-field-border bg-white p-5">
+      <section className="field-section mt-5 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
           <p className="text-sm font-bold text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">

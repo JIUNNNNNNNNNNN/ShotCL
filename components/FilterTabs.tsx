@@ -20,14 +20,14 @@ export function FilterTabs({
   const filters: ShotFilter[] = ["all", "remaining", "ok", "omit"];
 
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-2xl border border-field-border bg-white p-1 sm:grid-cols-4">
+    <div className="field-section grid grid-cols-4 gap-0.5 p-0.5">
       {filters.map((filter) => (
         <button
           key={filter}
           type="button"
           onClick={() => onChange(filter)}
           className={cn(
-            "min-h-9 rounded-xl px-2 text-sm font-black transition-colors",
+            "min-h-8 rounded-[5px] px-1 text-xs font-black transition-colors md:text-sm",
             value === filter ? "bg-field-primary text-white" : "bg-white text-field-muted"
           )}
         >

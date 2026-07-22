@@ -11,12 +11,12 @@ const config: Config = {
     extend: {
       colors: {
         field: {
-          bg: "#FFFFFF",
-          soft: "#FAFAF7",
+          bg: "#FCFBF7",
+          soft: "#F7F5EF",
           primary: "#0F3D2E",
           secondary: "#1F6B4A",
-          light: "#EAF3EE",
-          border: "#E5E2DA",
+          light: "#EDF4EF",
+          border: "#DED9CF",
           text: "#1C1C1A",
           muted: "#6B6B63",
           danger: "#9B2C2C"

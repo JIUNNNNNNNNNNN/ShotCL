@@ -17,13 +17,13 @@ type BaseProps = {
   children: React.ReactNode;
 };
 
-/** 모든 화면에서 같은 터치 영역과 색을 쓰는 공통 버튼입니다. */
+/** 현장 문서 UI에 맞춘 낮은 높이와 명확한 위계를 쓰는 공통 버튼입니다. */
 export function Button({ variant = "primary", className, children, ...props }: BaseProps & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-black transition disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[6px] border px-3 text-sm font-black transition-colors disabled:cursor-not-allowed disabled:opacity-50",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-2 rounded-md border px-4 text-sm font-black transition",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[6px] border px-3 text-sm font-black transition-colors",
         variantClass[variant],
         className
       )}

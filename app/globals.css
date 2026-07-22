@@ -4,7 +4,12 @@
 
 :root {
   color-scheme: light;
-  background: #ffffff;
+  background: #fcfbf7;
+  --field-paper: #fcfbf7;
+  --field-panel: #ffffff;
+  --field-soft: #f7f5ef;
+  --field-line: #ded9cf;
+  --field-green: #0f3d2e;
 }
 
 * {
@@ -13,13 +18,13 @@
 
 html {
   min-height: 100%;
-  background: #ffffff;
+  background: var(--field-paper);
 }
 
 body {
   min-height: 100%;
   margin: 0;
-  background: #ffffff;
+  background: var(--field-paper);
   color: #1c1c1a;
   font-family:
     Arial,
@@ -37,6 +42,32 @@ select {
 
 button {
   -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: #d9e9df;
+  color: #0f3d2e;
+}
+
+@layer components {
+  .field-section {
+    border: 1px solid var(--field-line);
+    border-radius: 8px;
+    background: var(--field-panel);
+  }
+
+  .field-subsection {
+    border: 1px solid var(--field-line);
+    border-radius: 6px;
+    background: var(--field-soft);
+  }
+
+  .field-cell {
+    min-width: 0;
+    border: 1px solid var(--field-line);
+    border-radius: 5px;
+    background: var(--field-panel);
+  }
 }
 
 .safe-bottom {

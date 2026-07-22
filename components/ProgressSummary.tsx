@@ -15,23 +15,23 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
   const isComplete = total > 0 && completed === total;
 
   return (
-    <section className="rounded-3xl border border-field-border bg-field-light/70 p-4 md:p-5" aria-labelledby="today-progress-title">
+    <section className="field-section bg-field-light/55 p-3 md:p-4" aria-labelledby="today-progress-title">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-black text-field-muted">오늘 컷 진행률</p>
-          <h2 id="today-progress-title" className="mt-1 text-xl font-black text-field-primary md:text-2xl">
+          <p className="text-[10px] font-black uppercase tracking-[0.08em] text-field-muted">오늘 컷 진행률</p>
+          <h2 id="today-progress-title" className="mt-0.5 text-lg font-black text-field-primary md:text-xl">
             {isComplete ? "즐거운 바라시" : "집에 가기까지"}
           </h2>
-          <p className="mt-1 text-4xl font-black leading-none text-field-primary">{progress}%</p>
+          <p className="mt-1 text-3xl font-black leading-none text-field-primary md:text-4xl">{progress}%</p>
         </div>
-        <p className="text-right text-sm font-bold text-field-muted">{completed}/{total} 처리 완료</p>
+        <p className="text-right text-xs font-bold text-field-muted">{completed}/{total} 처리 완료</p>
       </div>
 
-      <div className="mt-4 h-3 overflow-hidden rounded-full bg-white shadow-inner">
+      <div className="mt-3 h-2 overflow-hidden rounded-sm border border-field-border bg-white">
         <div className="h-full bg-field-primary transition-all" style={{ width: `${progress}%` }} />
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mt-2 grid grid-cols-4 gap-1.5">
         <Stat label="전체" value={total} />
         <Stat label="OK" value={ok} />
         <Stat label="omit" value={omit} danger />
@@ -43,9 +43,9 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
 
 function Stat({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-field-border bg-white px-4 py-2">
-      <p className="text-xs font-bold text-field-muted">{label}</p>
-      <p className={danger ? "text-xl font-black text-field-danger" : "text-xl font-black text-field-primary"}>{value}</p>
+    <div className="field-cell grid min-h-11 place-items-center gap-0 px-1 py-1.5 text-center md:flex md:justify-between md:px-3">
+      <p className="text-[10px] font-bold text-field-muted md:text-xs">{label}</p>
+      <p className={danger ? "text-base font-black text-field-danger md:text-lg" : "text-base font-black text-field-primary md:text-lg"}>{value}</p>
     </div>
   );
 }

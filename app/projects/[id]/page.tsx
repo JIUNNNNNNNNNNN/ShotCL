@@ -240,48 +240,48 @@ export default function ProjectDetailPage() {
 
   return (
     <>
-      <section className="relative z-20 mb-3 rounded-2xl border border-field-border bg-white p-2 shadow-sm" aria-label="상단 퀵 메뉴">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="min-w-0 px-2 py-1 sm:w-44 sm:shrink-0">
+      <section className="field-section relative z-20 mb-2 p-1.5" aria-label="상단 퀵 메뉴">
+        <div className="grid gap-1.5 sm:grid-cols-[11rem_minmax(0,1fr)] sm:items-center">
+          <div className="min-w-0 border-b border-field-border px-1.5 py-1 sm:border-b-0 sm:border-r sm:pr-3">
             <h1 className="truncate text-sm font-black text-field-primary">{project.name}</h1>
             <p className="truncate text-[11px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</p>
           </div>
 
-          <nav className="grid min-w-0 flex-1 grid-cols-3 gap-1.5 sm:grid-cols-6" aria-label="홈 기능 목차">
-            <Link href="#cut-board" className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-field-light px-2 text-center text-xs font-black text-field-primary">
+          <nav className="grid min-w-0 grid-cols-3 gap-1 sm:grid-cols-6" aria-label="홈 기능 목차">
+            <Link href="#cut-board" className="flex min-h-8 items-center justify-center gap-1 rounded-[5px] bg-field-light px-1.5 text-center text-[11px] font-black text-field-primary">
               <ListChecks className="h-3.5 w-3.5" aria-hidden /> 컷 진행표
             </Link>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl bg-field-primary px-2 text-center text-xs font-black text-white">
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-8 items-center justify-center gap-1 rounded-[5px] bg-field-primary px-1.5 text-center text-[11px] font-black text-white">
               <Plus className="h-3.5 w-3.5" aria-hidden /> 새 컷 추가
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-primary">
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-8 items-center justify-center gap-1 rounded-[5px] border border-field-border bg-white px-1.5 text-center text-[11px] font-black text-field-primary">
               <CalendarPlus className="h-3.5 w-3.5" aria-hidden /> 새 일촬표
             </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-9 items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-primary">
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-8 items-center justify-center gap-1 rounded-[5px] border border-field-border bg-white px-1.5 text-center text-[11px] font-black text-field-primary">
               <FolderOpen className="h-3.5 w-3.5" aria-hidden /> 일촬표 목록
             </Link>
             <details className="group relative">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-muted">
+              <summary className="flex min-h-8 cursor-pointer list-none items-center justify-center gap-1 rounded-[5px] border border-field-border bg-white px-2 text-center text-[11px] font-black text-field-muted">
                 <Upload className="h-3.5 w-3.5" aria-hidden /> 업로드 / 분석
               </summary>
-              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 grid w-60 gap-1 rounded-2xl border border-field-border bg-white p-2 shadow-xl">
-                <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+              <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 grid w-60 gap-0.5 rounded-[7px] border border-field-border bg-white p-1.5 shadow-lg">
+                <Link href={`/projects/${project.id}/daily-plan/import`} className="flex min-h-8 items-center gap-2 rounded-[5px] px-2 text-xs font-black text-field-muted hover:bg-field-soft">
                   <FileSpreadsheet className="h-4 w-4" aria-hidden /> Excel 일촬표 업로드
                 </Link>
-                <Link href={`/projects/${project.id}/upload`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+                <Link href={`/projects/${project.id}/upload`} className="flex min-h-8 items-center gap-2 rounded-[5px] px-2 text-xs font-black text-field-muted hover:bg-field-soft">
                   <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
                 </Link>
               </div>
             </details>
             <details className="group relative">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center justify-center gap-1.5 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-black text-field-muted">
+              <summary className="flex min-h-8 cursor-pointer list-none items-center justify-center gap-1 rounded-[5px] border border-field-border bg-white px-2 text-center text-[11px] font-black text-field-muted">
                 <History className="h-3.5 w-3.5" aria-hidden /> 기타
               </summary>
-              <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 grid w-60 gap-1 rounded-2xl border border-field-border bg-white p-2 shadow-xl">
-                <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-xs font-black text-field-muted hover:bg-field-soft">
+              <div className="absolute right-0 top-[calc(100%+0.35rem)] z-30 grid w-60 gap-0.5 rounded-[7px] border border-field-border bg-white p-1.5 shadow-lg">
+                <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-8 items-center gap-2 rounded-[5px] px-2 text-xs font-black text-field-muted hover:bg-field-soft">
                   <History className="h-4 w-4" aria-hidden /> 분석 기록
                 </Link>
-                <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-9 items-center gap-2 rounded-xl px-2 text-left text-xs font-black text-field-muted hover:bg-field-soft">
+                <button type="button" onClick={() => downloadStandardDailyPlanTemplate(project)} className="flex min-h-8 items-center gap-2 rounded-[5px] px-2 text-left text-xs font-black text-field-muted hover:bg-field-soft">
                   <FileSpreadsheet className="h-4 w-4" aria-hidden /> 표준 Excel 양식 다운로드
                 </button>
               </div>
@@ -298,13 +298,13 @@ export default function ProjectDetailPage() {
       </section>
 
       {errorMessage ? (
-        <div className="mb-4 rounded-2xl border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">
+        <div className="mb-3 rounded-[7px] border border-field-danger bg-white p-3 text-sm font-bold text-field-danger">
           {errorMessage}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="mb-4 rounded-2xl border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">
+        <div className="mb-3 rounded-[7px] border border-field-primary bg-field-light p-3 text-sm font-bold text-field-primary">
           {successMessage}
         </div>
       ) : null}
@@ -315,7 +315,7 @@ export default function ProjectDetailPage() {
         <p className="text-xs font-bold text-field-muted">{filteredShots.length}개 표시</p>
       </div>
       {shots.length === 0 ? (
-        <Card className="rounded-3xl">
+        <Card>
           <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
           <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
           <div className="mt-5 max-w-xs">
@@ -326,7 +326,7 @@ export default function ProjectDetailPage() {
           </div>
         </Card>
       ) : filteredShots.length === 0 ? (
-        <Card className="rounded-3xl text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
+        <Card className="text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
       ) : (
         <div className="grid gap-2 pb-24">
           {filteredShots.map((shot) => (
@@ -343,7 +343,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {process.env.NODE_ENV !== "production" ? (
-        <details className="mt-4 rounded-2xl border border-field-border bg-white">
+        <details className="mt-4 rounded-[8px] border border-field-border bg-white">
           <summary className="cursor-pointer px-4 py-3 text-xs font-black text-field-muted">개발용 도구</summary>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-field-border p-4">
             <p className="text-xs font-bold leading-5 text-field-muted">테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.</p>
@@ -354,9 +354,9 @@ export default function ProjectDetailPage() {
         </details>
       ) : null}
 
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-field-border bg-white/95 p-4 backdrop-blur md:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-field-border bg-white/95 p-2 backdrop-blur md:hidden">
         <div className="mx-auto max-w-6xl">
-          <Button onClick={() => setIsAddOpen(true)} className="w-full rounded-2xl">
+          <Button onClick={() => setIsAddOpen(true)} className="w-full">
             <Plus className="h-5 w-5" aria-hidden />
             새 컷 추가
           </Button>
