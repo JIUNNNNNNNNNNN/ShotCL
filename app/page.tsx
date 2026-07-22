@@ -8,41 +8,60 @@ import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
 import { projectFromRow } from "@/lib/data/mappers";
 import type { Project } from "@/lib/types";
 
-type ProjectPickerMode = "new" | "load" | "progress" | "join";
+type ProjectPickerMode = "new" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
+
+const HIDDEN_PROJECT_IDS_KEY = "shotcl:hiddenProjectIds";
+
+function readHiddenProjectIds() {
+  if (typeof window === "undefined") return new Set<string>();
+
+  try {
+    const storedValue = JSON.parse(window.localStorage.getItem(HIDDEN_PROJECT_IDS_KEY) ?? "[]") as unknown;
+    return new Set(Array.isArray(storedValue) ? storedValue.filter((value): value is string => typeof value === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeHiddenProjectIds(projectIds: Set<string>) {
+  try {
+    window.localStorage.setItem(HIDDEN_PROJECT_IDS_KEY, JSON.stringify([...projectIds]));
+  } catch {
+    // 저장소가 차단된 브라우저에서도 현재 화면의 숨김 동작은 계속 허용합니다.
+  }
+}
+
+function unhideProject(projectId: string) {
+  const hiddenProjectIds = readHiddenProjectIds();
+  if (!hiddenProjectIds.delete(projectId)) return;
+  writeHiddenProjectIds(hiddenProjectIds);
+}
 
 const wheelItems = [
   {
     id: "new",
-    label: ["새 프로젝트", "만들기"],
-    path: "M180 180 L69.7 69.7 A156 156 0 0 1 290.3 69.7 Z",
-    textX: 180,
-    textY: 92,
+    label: "New Project",
+    path: "M180 180 L180 24 A156 156 0 0 1 315.1 258 Z",
+    textX: 250,
+    textY: 116,
     fillClass: "fill-field-primary group-hover:fill-[#174d3b]"
   },
   {
-    id: "load",
-    label: ["프로젝트", "불러오기"],
-    path: "M180 180 L290.3 69.7 A156 156 0 0 1 290.3 290.3 Z",
-    textX: 266,
-    textY: 170,
-    fillClass: "fill-[#285d49] group-hover:fill-[#326b55]"
+    id: "join",
+    label: "Join Project",
+    path: "M180 180 L44.9 258 A156 156 0 0 1 180 24 Z",
+    textX: 110,
+    textY: 116,
+    fillClass: "fill-[#557d6d] group-hover:fill-[#628b7a]"
   },
   {
     id: "progress",
-    label: ["진행", "보기"],
-    path: "M180 180 L290.3 290.3 A156 156 0 0 1 69.7 290.3 Z",
+    label: "Go",
+    path: "M180 180 L315.1 258 A156 156 0 0 1 44.9 258 Z",
     textX: 180,
-    textY: 252,
+    textY: 272,
     fillClass: "fill-[#416f5d] group-hover:fill-[#4c7b68]"
-  },
-  {
-    id: "join",
-    label: ["프로젝트", "참여"],
-    path: "M180 180 L69.7 290.3 A156 156 0 0 1 69.7 69.7 Z",
-    textX: 94,
-    textY: 170,
-    fillClass: "fill-[#557d6d] group-hover:fill-[#628b7a]"
   }
 ] as const;
 
@@ -72,7 +91,8 @@ export default function HomePage() {
     async function loadSavedProjects() {
       try {
         const data = await listProjects();
-        if (isMounted) setProjects(data);
+        const hiddenProjectIds = readHiddenProjectIds();
+        if (isMounted) setProjects(data.filter((project) => !hiddenProjectIds.has(project.id)));
       } catch (error) {
         if (isMounted) setErrorMessage(error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다.");
       } finally {
@@ -180,6 +200,9 @@ export default function HomePage() {
 
   function hideProjectFromCurrentList(project: Project) {
     if (!window.confirm("이 프로젝트를 목록에서 삭제할까요?")) return;
+    const hiddenProjectIds = readHiddenProjectIds();
+    hiddenProjectIds.add(project.id);
+    writeHiddenProjectIds(hiddenProjectIds);
     setProjects((currentProjects) => currentProjects.filter((item) => item.id !== project.id));
     if (projects.length === 1) setPickerMode(null);
   }
@@ -191,10 +214,6 @@ export default function HomePage() {
   }
 
   function openProject(project: Project) {
-    if (pickerMode === "load" && project.accessRole !== "progress") {
-      router.push(`/projects/${project.id}/daily-plans`);
-      return;
-    }
     router.push(`/projects/${project.id}`);
   }
 
@@ -228,6 +247,7 @@ export default function HomePage() {
       const payload = (await response.json()) as { project?: Record<string, unknown>; error?: string };
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
+      unhideProject(project.id);
       router.push(`/projects/${project.id}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
@@ -252,6 +272,7 @@ export default function HomePage() {
       });
       const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
       if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
+      unhideProject(payload.projectId);
       router.push(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
@@ -259,7 +280,7 @@ export default function HomePage() {
     }
   }
 
-  const pickerTitle = pickerMode === "new" ? "새 프로젝트" : pickerMode === "join" ? "프로젝트 참여" : pickerMode === "load" ? "프로젝트 불러오기" : "진행보기";
+  const pickerTitle = pickerMode === "new" ? "New Project" : pickerMode === "join" ? "Join Project" : "Go";
 
   function renderProjectFruits() {
     if (isLoading || errorMessage || projects.length === 0) return null;
@@ -296,8 +317,8 @@ export default function HomePage() {
     ));
   }
 
-  function renderFruitBranches(mode: "load" | "progress") {
-    const columnCount = mode === "load" ? 3 : 2;
+  function renderFruitBranches() {
+    const columnCount = 2;
     const rowCount = Math.max(1, Math.ceil(projects.length / columnCount));
 
     return projects.map((project, index) => {
@@ -305,9 +326,7 @@ export default function HomePage() {
       const row = Math.floor(index / columnCount);
       const targetX = ((column + 0.5) / columnCount) * 100;
       const targetY = ((row + 0.5) / rowCount) * 100;
-      const path = mode === "load"
-        ? `M50 0 C50 ${targetY * 0.32} ${targetX} ${targetY * 0.68} ${targetX} ${targetY}`
-        : `M100 50 C${82 + targetX * 0.08} 50 ${targetX + 10} ${targetY} ${targetX} ${targetY}`;
+      const path = `M100 50 C${82 + targetX * 0.08} 50 ${targetX + 10} ${targetY} ${targetX} ${targetY}`;
 
       return <path key={project.id} d={path} fill="none" stroke="#c9d6d0" strokeWidth="0.7" vectorEffect="non-scaling-stroke" />;
     });
@@ -331,7 +350,7 @@ export default function HomePage() {
                 key={item.id}
                 role="button"
                 tabIndex={0}
-                aria-label={item.label.join(" ")}
+                aria-label={item.label}
                 aria-pressed={isSelected}
                 className="group cursor-pointer outline-none"
                 onClick={() => activateWheelItem(item.id)}
@@ -349,8 +368,7 @@ export default function HomePage() {
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-white text-[14px] font-black transition-opacity duration-150 group-active:opacity-80"
                 >
-                  <tspan x={item.textX} dy="0">{item.label[0]}</tspan>
-                  <tspan x={item.textX} dy="20">{item.label[1]}</tspan>
+                  <tspan x={item.textX} dy="0">{item.label}</tspan>
                 </text>
               </g>
             );
@@ -372,10 +390,8 @@ export default function HomePage() {
                 <path d="M274 244 C236 224 226 180 190 150" fill="none" stroke="#8ca99d" strokeWidth="2" />
                 <path d="M190 150 C168 136 150 132 128 134" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
               </>
-            ) : pickerMode === "progress" ? (
-              <path d="M292 470 C254 500 226 528 208 558" fill="none" stroke="#8ca99d" strokeWidth="2" />
             ) : (
-              <path d="M400 500 C400 516 390 528 400 536" fill="none" stroke="#8ca99d" strokeWidth="2" />
+              <path d="M292 470 C254 500 226 528 208 558" fill="none" stroke="#8ca99d" strokeWidth="2" />
             )}
           </svg>
           <div
@@ -387,12 +403,10 @@ export default function HomePage() {
                 ? "left-[36.5rem] top-[4.5rem] w-[12.5rem]"
                 : pickerMode === "join"
                   ? "left-2 top-[4.5rem] w-[12.5rem]"
-                : pickerMode === "progress"
-                  ? "left-2 top-[31rem] w-[12.5rem]"
-                  : "left-[14rem] top-[31rem] w-[22rem]"
+                : "left-2 top-[31rem] w-[12.5rem]"
             }`}
           >
-            <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "load" ? "justify-center" : pickerMode === "new" ? "justify-start" : "justify-end"}`}>
+            <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "new" ? "justify-start" : "justify-end"}`}>
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">{pickerTitle}</h1>
             </div>
             {pickerMode === "new" ? (
@@ -503,13 +517,11 @@ export default function HomePage() {
               <div className="py-1">
                 {projects.length === 0 ? (
                   <p className="rounded-full border border-field-border bg-white px-4 py-2 text-center text-[11px] font-black text-field-muted">
-                    {pickerMode === "load" ? "불러올 프로젝트가 없습니다" : "진행 볼 프로젝트가 없습니다"}
+                    진행 볼 프로젝트가 없습니다
                   </p>
-                ) : <div className={`relative grid auto-rows-[5rem] gap-2 md:auto-rows-[5.5rem] ${
-                  pickerMode === "progress" ? "grid-cols-2 justify-items-center" : "grid-cols-3 justify-items-center"
-                }`}>
+                ) : <div className="relative grid auto-rows-[5rem] grid-cols-2 justify-items-center gap-2 md:auto-rows-[5.5rem]">
                   <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-                    {renderFruitBranches(pickerMode)}
+                    {renderFruitBranches()}
                   </svg>
                   {renderProjectFruits()}
                 </div>}
@@ -522,7 +534,7 @@ export default function HomePage() {
           <p
             role="status"
             className={`absolute z-30 whitespace-nowrap rounded-full border border-field-border bg-white px-3 py-1.5 text-[11px] font-black text-field-primary shadow-[0_5px_14px_rgba(15,61,46,0.12)] ${
-              feedback.target === "load"
+              feedback.target === "progress"
                 ? "left-1/2 top-[calc(100%+0.5rem)] -translate-x-1/2"
                 : "right-[calc(100%+0.5rem)] top-1/3"
             }`}

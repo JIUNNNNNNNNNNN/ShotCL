@@ -262,6 +262,7 @@ export default function ProjectDetailPage() {
         plans={dailyPlans}
         shotsByPlan={episodeShots}
         invalidSelection={Boolean(dailyPlanId)}
+        canEdit={role === "admin"}
       />
     );
   }
@@ -427,12 +428,14 @@ function EpisodeSelection({
   project,
   plans,
   shotsByPlan,
-  invalidSelection
+  invalidSelection,
+  canEdit
 }: {
   project: Project;
   plans: Array<DailyPlan & { shotCount: number }>;
   shotsByPlan: Record<string, Shot[]>;
   invalidSelection: boolean;
+  canEdit: boolean;
 }) {
   return (
     <main className="mx-auto w-full max-w-3xl pb-12">
@@ -444,10 +447,34 @@ function EpisodeSelection({
         >
           <House className="h-5 w-5" aria-hidden />
         </Link>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-xl font-black text-field-primary">{project.name}</p>
           <p className="text-sm font-bold text-field-muted">진행할 회차를 선택하세요</p>
         </div>
+        {canEdit ? (
+          <details className="group relative shrink-0">
+            <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
+              <Ellipsis className="h-4 w-4" aria-hidden />
+              프로젝트 수정
+            </summary>
+            <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
+              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-9 items-center gap-2 rounded-full px-3 text-xs font-black text-field-primary hover:bg-field-light">
+                <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정
+              </Link>
+              <details className="group/settings">
+                <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-full px-3 text-xs font-black text-field-muted marker:content-none hover:bg-field-soft">
+                  <Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정
+                </summary>
+                <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
+                  <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
+                  <p>현재 권한: admin</p>
+                  <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
+                  <p>실제 삭제는 아직 지원하지 않습니다.</p>
+                </div>
+              </details>
+            </div>
+          </details>
+        ) : null}
       </div>
 
       {invalidSelection ? <p className="mb-4 rounded-full border border-field-danger/40 bg-white px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
