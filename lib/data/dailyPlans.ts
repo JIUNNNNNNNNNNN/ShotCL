@@ -366,7 +366,9 @@ export function dailyPlanShotsToShotDrafts(plan: DailyPlanDraft | DailyPlan, sho
     const location = findDailyPlanLocation(locations, shot);
     const locationAddress = formatDailyPlanLocationAddress(location);
     const locationMapUrl = location?.naverMapUrl ?? "";
-    const cutNumbers = expandDailyPlanShootingOrder(shot.cutNumber);
+    const cutNumber = String(Number(shot.cutNumber));
+    if (!shot.sceneNumber.trim() || !/^\d+$/.test(shot.cutNumber) || Number(cutNumber) < 1) return [];
+    const sceneMemo = stripShootingOrderMetadata(shot.sceneMemo ?? "");
     const extraMemo = [
       timeMemo ? `시간: ${timeMemo}` : "",
       shot.dayNight ? `D/N: ${shot.dayNight}` : "",
@@ -374,15 +376,14 @@ export function dailyPlanShotsToShotDrafts(plan: DailyPlanDraft | DailyPlan, sho
       locationMapUrl ? `지도: ${locationMapUrl}` : "",
       shot.props ? `소품: ${shot.props}` : "",
       shot.costumeMakeup ? `의상/분장: ${shot.costumeMakeup}` : "",
-      shot.sceneMemo ? `씬 메모: ${shot.sceneMemo}` : "",
+      sceneMemo ? `씬 메모: ${sceneMemo}` : "",
       shot.memo
     ]
       .filter(Boolean)
       .join("\n");
 
-    return cutNumbers.map((cutNumber) => {
-      orderIndex += 1;
-      return {
+    orderIndex += 1;
+    return [{
         sceneNumber: shot.sceneNumber,
         cutNumber,
         title: shot.description.trim().slice(0, 40) || `씬 ${shot.sceneNumber || "-"} 컷 ${cutNumber || "-"}`,
@@ -392,9 +393,12 @@ export function dailyPlanShotsToShotDrafts(plan: DailyPlanDraft | DailyPlan, sho
         memo: extraMemo,
         orderIndex,
         status: normalizeShotStatus("pending")
-      };
-    });
+      }];
   });
+}
+
+function stripShootingOrderMetadata(value: string) {
+  return value.replace(/^\[\[SHOTCL_SHOOTING_ORDER:[^\]]*\]\](?:\n)?/, "");
 }
 
 export function dailyPlanShotToDraft(shot: DailyPlanShot | DailyPlanShotDraft): DailyPlanShotDraft {
@@ -427,15 +431,6 @@ function splitPeople(value: string) {
     .split(/[,/·]/)
     .map((item) => item.trim())
     .filter(Boolean);
-}
-
-function expandDailyPlanShootingOrder(value: string) {
-  const tokens = String(value ?? "")
-    .split(/[-,/\s]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return tokens.length > 0 ? tokens : ["1"];
 }
 
 function findDailyPlanLocation(locations: DailyPlan["shootingLocations"], shot: DailyPlanShotDraft) {

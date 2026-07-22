@@ -106,6 +106,84 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
   return newShots;
 }
 
+/** 일촬표에서 파생된 컷 목록을 scene + cutNumber 기준으로 동기화합니다. */
+export async function syncShotsFromDrafts(projectId: string, drafts: ShotDraft[], previouslyManagedKeys: ReadonlySet<string>): Promise<Shot[]> {
+  const existingShots = await listShots(projectId);
+  const desiredByKey = new Map<string, ShotDraft>();
+  drafts.forEach((draft) => desiredByKey.set(getShotIdentityKey(draft), draft));
+
+  const existingByKey = new Map<string, Shot>();
+  const duplicateShots: Shot[] = [];
+  existingShots.forEach((shot) => {
+    const key = getShotIdentityKey(shot);
+    const existing = existingByKey.get(key);
+    if (!existing) {
+      existingByKey.set(key, shot);
+      return;
+    }
+
+    if (shotStatusRank(shot.status) > shotStatusRank(existing.status)) {
+      existingByKey.set(key, shot);
+      duplicateShots.push(existing);
+    } else {
+      duplicateShots.push(shot);
+    }
+  });
+
+  const staleShots = existingShots.filter((shot) => {
+    const key = getShotIdentityKey(shot);
+    return previouslyManagedKeys.has(key) && !desiredByKey.has(key);
+  });
+  const managedDuplicates = duplicateShots.filter((shot) => previouslyManagedKeys.has(getShotIdentityKey(shot)));
+  const shotsToDelete = new Map([...staleShots, ...managedDuplicates].map((shot) => [shot.id, shot]));
+  await Promise.all([...shotsToDelete.values()].map((shot) => deleteShot(shot)));
+
+  const missingDrafts: ShotDraft[] = [];
+  const updateTasks: Array<Promise<Shot>> = [];
+  desiredByKey.forEach((draft, key) => {
+    const existing = existingByKey.get(key);
+    if (!existing) {
+      missingDrafts.push(draft);
+      return;
+    }
+
+    const patch: Partial<Shot> = {
+      sceneNumber: draft.sceneNumber,
+      cutNumber: draft.cutNumber,
+      title: draft.title,
+      description: draft.description,
+      location: draft.location,
+      characters: draft.characters,
+      memo: draft.memo,
+      orderIndex: draft.orderIndex
+    };
+    if (hasShotDraftChanges(existing, patch)) updateTasks.push(updateShot(existing.id, patch, projectId));
+  });
+
+  await Promise.all(updateTasks);
+  if (missingDrafts.length > 0) await createShotsFromDrafts(projectId, missingDrafts);
+  return listShots(projectId);
+}
+
+export function getShotIdentityKey(shot: Pick<Shot, "sceneNumber" | "cutNumber"> | Pick<ShotDraft, "sceneNumber" | "cutNumber">) {
+  return `${shot.sceneNumber.trim()}\u0000${shot.cutNumber.trim()}`;
+}
+
+function hasShotDraftChanges(existing: Shot, patch: Partial<Shot>) {
+  return existing.sceneNumber !== patch.sceneNumber
+    || existing.cutNumber !== patch.cutNumber
+    || existing.title !== patch.title
+    || existing.description !== patch.description
+    || existing.location !== patch.location
+    || existing.memo !== patch.memo
+    || existing.orderIndex !== patch.orderIndex
+    || JSON.stringify(existing.characters) !== JSON.stringify(patch.characters);
+}
+
+function shotStatusRank(status: ShotStatus) {
+  return status === "pending" ? 0 : 1;
+}
+
 /** 컷 하나의 제목, 설명, 상태 같은 일부 필드를 수정합니다. */
 export async function updateShot(shotId: string, patch: Partial<Shot>, projectId?: string): Promise<Shot> {
   if (projectId && await getSharedRole(projectId)) {

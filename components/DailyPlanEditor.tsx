@@ -13,7 +13,7 @@ import {
   normalizeDailyPlanShotDrafts,
   saveDailyPlanWithShots
 } from "@/lib/data/dailyPlans";
-import { createShotsFromDrafts, deleteAllShots, listShots } from "@/lib/data/shots";
+import { getShotIdentityKey, syncShotsFromDrafts } from "@/lib/data/shots";
 import { downloadDailyPlanExcel } from "@/lib/dailyPlan/excel";
 import {
   createBlankCallSheetPerson,
@@ -204,7 +204,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
-  const [applyChoiceOpen, setApplyChoiceOpen] = useState(false);
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [isStaffOpen, setIsStaffOpen] = useState(false);
   const [isDraftReady, setIsDraftReady] = useState(false);
@@ -241,6 +240,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     savedAt: new Date().toISOString()
   };
   const latestDraftRef = useRef(draftSnapshot);
+  const managedShotKeysRef = useRef<Set<string>>(
+    new Set(
+      initialSourceShots.length > 0
+        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(shotsToScenes(initialSourceShots, initialLocations))).map(getShotIdentityKey)
+        : []
+    )
+  );
   latestDraftRef.current = draftSnapshot;
 
   useEffect(() => {
@@ -289,12 +295,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
       autoSaveQueueRef.current = autoSaveQueueRef.current.then(async () => {
         try {
-          await saveDailyPlanWithShots({
+          const saved = await saveDailyPlanWithShots({
             projectId: project.id,
             dailyPlanId: snapshot.dailyPlanId,
             plan: buildPlanForSave(snapshot.plan, snapshot.locations, snapshot.mealTimes, snapshot.printMeta),
             shots: scenesToShotDrafts(snapshot.scenes)
           });
+          await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
           window.localStorage.removeItem(storageKey);
           hasPendingChangesRef.current = false;
           if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("자동 저장됨");
@@ -521,6 +528,27 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     setScenes((current) => current.map((scene, index) => (index === sceneIndex ? { ...scene, ...patch } : scene)));
   }
 
+  function updateSceneCutCount(sceneIndex: number, value: string) {
+    const sanitized = value.replace(/\D/g, "").slice(0, 2);
+    const count = parseCutCount(sanitized);
+    setScenes((current) => current.map((scene, index) => {
+      if (index !== sceneIndex) return scene;
+      const cuts = Array.from({ length: count }, (_, cutIndex) => scene.cuts[cutIndex] ?? {
+        id: makeLocalId("cut"),
+        cutNumber: String(cutIndex + 1),
+        description: "",
+        memo: ""
+      }).map((cut, cutIndex) => ({ ...cut, cutNumber: String(cutIndex + 1) }));
+      return { ...scene, cutCount: sanitized, cuts };
+    }));
+  }
+
+  async function syncShotBoardFromDailyPlan(savedPlan: DailyPlanDraft | DailyPlan, savedShots: DailyPlanShotDraft[]) {
+    const drafts = dailyPlanShotsToShotDrafts(savedPlan, savedShots);
+    await syncShotsFromDrafts(project.id, drafts, managedShotKeysRef.current);
+    managedShotKeysRef.current = new Set(drafts.map(getShotIdentityKey));
+  }
+
   function updateSceneTimeField(sceneIndex: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
     setScenes((current) => current.map((scene, index) => (index === sceneIndex ? applyTimeFieldEdit(scene, field, value) : scene)));
   }
@@ -604,7 +632,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     setScenes((current) =>
       current.map((scene, index) => {
         if (index !== sceneIndex) return scene;
-        const count = clampCutCount(scene.cutCount);
+        const count = parseCutCount(scene.cutCount);
         return {
           ...scene,
           cutCount: String(count),
@@ -719,7 +747,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   async function saveCurrentPlan(showMessage = true) {
     setIsSaving(true);
     setErrorMessage("");
-    setApplyChoiceOpen(false);
 
     try {
       const planForSave = buildPlanForSave(plan, locations, mealTimes, printMeta);
@@ -729,6 +756,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         plan: planForSave,
         shots: scenesToShotDrafts(scenes)
       });
+      await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
       const savedDraft = planToDraft(saved.plan);
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
@@ -763,39 +791,9 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   async function startApplyToShotBoard() {
     const saved = await saveCurrentPlan(false);
-    if (!saved) return;
-
-    const existingShots = await listShots(project.id);
-    if (existingShots.length === 0) {
-      await applyToShotBoard("append", saved.plan, saved.shots.map(dailyPlanShotToDraft));
-      return;
-    }
-
-    setApplyChoiceOpen(true);
-    setMessage(`기존 컷 진행표에 ${existingShots.length}개 컷이 있습니다. 아래에서 반영 방식을 선택해주세요.`);
-  }
-
-  async function applyToShotBoard(mode: "append" | "replace", savedPlan: DailyPlanDraft | DailyPlan = plan, savedShots: DailyPlanShotDraft[] = flattenedShots) {
-    if (mode === "replace") {
-      const shouldReplace = window.confirm("기존 컷 목록이 삭제되고 현재 일촬표 기준으로 교체됩니다. 계속할까요?");
-      if (!shouldReplace) return;
-    }
-
-    setIsSaving(true);
-    setErrorMessage("");
-
-    try {
-      const drafts = dailyPlanShotsToShotDrafts(savedPlan, savedShots);
-      if (mode === "replace") {
-        await deleteAllShots(project.id);
-      }
-      await createShotsFromDrafts(project.id, drafts);
-      setApplyChoiceOpen(false);
-      setMessage(`${mode === "replace" ? "기존 컷 진행표를 교체하고" : "기존 컷 진행표 뒤에"} ${drafts.length}개 컷을 반영했습니다.`);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "컷 진행표로 반영하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
+    if (saved) {
+      const count = dailyPlanShotsToShotDrafts(saved.plan, saved.shots.map(dailyPlanShotToDraft)).length;
+      setMessage(`${count}개 컷을 진행표와 동기화했습니다.`);
     }
   }
 
@@ -1182,7 +1180,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-3`}><span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>컷 수</span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="number" min="0" max="80" value={scene.cutCount} onCommit={(value) => updateScene(sceneIndex, { cutCount: value })} /></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>컷 수</span><input aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} value={scene.cutCount} onChange={(event) => updateSceneCutCount(sceneIndex, event.currentTarget.value)} /></td>
                       <td className={`${timetableWideCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
                       <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
                         <span className={mobileTimetableLabelClass}>내용</span>
@@ -1318,22 +1316,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         </div>
 
         <DailyPlanLivePreview data={previewData} />
-
-      {applyChoiceOpen ? (
-        <section className="mt-5 rounded-md border border-field-primary bg-white p-5">
-          <h2 className="text-lg font-black text-field-primary">컷 진행표 반영 방식 선택</h2>
-          <p className="mt-1 text-sm font-bold text-field-muted">기존 컷이 남아 있어 자동으로 덮어쓰지 않습니다.</p>
-          <div className="mt-4 grid gap-2 md:grid-cols-3">
-            <Button onClick={() => applyToShotBoard("append")}>기존 컷 뒤에 추가</Button>
-            <Button variant="danger" onClick={() => applyToShotBoard("replace")}>
-              기존 컷 삭제 후 교체
-            </Button>
-            <Button variant="ghost" onClick={() => setApplyChoiceOpen(false)}>
-              취소
-            </Button>
-          </div>
-        </section>
-      ) : null}
 
       <section className="field-section mt-5 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
@@ -2048,7 +2030,7 @@ function ShootingOrderField({
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const draftValueRef = useRef(value);
-  const displayValue = normalizeShootingOrder(value, totalCut);
+  const displayValue = value;
 
   function updateDraft(nextValue: string) {
     const sanitized = sanitizeShootingOrderInput(nextValue);
@@ -3041,6 +3023,7 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
     let scene = sceneMap.get(key);
     if (!scene) {
       const location = locations.find((item) => item.id === shot.locationId) ?? locations.find((item) => item.name === (shot.locationName || shot.subLocation));
+      const sceneMetadata = decodeSceneMemoMetadata(shot.sceneMemo ?? "");
       scene = {
         id: makeLocalId("scene"),
         sceneNumber: shot.sceneNumber || String(scenes.length + 1),
@@ -3054,12 +3037,12 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
         locationName: location?.name ?? shot.locationName ?? shot.subLocation ?? "",
         dayNight: shot.dayNight ?? "",
         storyDay: shot.storyDay ?? "",
-        shootingOrder: shot.cutNumber ?? "",
+        shootingOrder: sceneMetadata.shootingOrder,
         notes: shot.memo ?? "",
         subject: shot.subject ?? "",
         props: shot.props ?? "",
         costumeMakeup: shot.costumeMakeup ?? "",
-        sceneMemo: shot.sceneMemo ?? "",
+        sceneMemo: sceneMetadata.sceneMemo,
         cutCount: "0",
         cuts: []
       };
@@ -3067,31 +3050,33 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
       scenes.push(scene);
     }
 
-    scene.cuts.push({
-      id: makeLocalId("cut"),
-      cutNumber: shot.cutNumber,
-      description: shot.description,
-      memo: shot.memo
+    const legacyCutNumbers = expandLegacyCutNumbers(shot.cutNumber);
+    legacyCutNumbers.forEach((cutNumber) => {
+      if (scene?.cuts.some((cut) => cut.cutNumber === cutNumber)) return;
+      scene?.cuts.push({ id: makeLocalId("cut"), cutNumber, description: shot.description, memo: shot.memo });
     });
+    if (!scene.shootingOrder && /[-,/\s]/.test(shot.cutNumber)) {
+      scene.shootingOrder = sanitizeShootingOrderInput(shot.cutNumber).trim();
+    }
     scene.cutCount = String(scene.cuts.length);
-    scene.shootingOrder = scene.cuts.map((cut) => cut.cutNumber).filter(Boolean).join("-");
     scene.description = scene.description || shot.description;
     scene.notes = scene.notes || shot.memo;
   });
 
-  return scenes.map((scene) => ({ ...scene, cuts: scene.cuts.length > 0 ? scene.cuts : [createBlankCut([])], cutCount: String(Math.max(1, scene.cuts.length)) }));
+  return scenes.map((scene) => ({ ...scene, cuts: scene.cuts, cutCount: String(scene.cuts.length) }));
 }
 
 function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
   let orderIndex = 0;
 
   return scenes
-    .filter((scene) => isMeaningfulTimetableScene(scene))
-    .map((scene) => {
+    .filter((scene) => isMeaningfulTimetableScene(scene) && scene.sceneNumber.trim() && parseCutCount(scene.cutCount) > 0)
+    .flatMap((scene) => Array.from({ length: parseCutCount(scene.cutCount) }, (_, cutIndex) => {
       orderIndex += 1;
-      const shootingOrder = normalizeShootingOrder(scene.shootingOrder, scene.cutCount);
+      const cutNumber = String(cutIndex + 1);
+      const cut = scene.cuts[cutIndex];
       return {
-        ...createBlankDailyPlanShotDraft(orderIndex, scene.sceneNumber, shootingOrder || String(orderIndex)),
+        ...createBlankDailyPlanShotDraft(orderIndex, scene.sceneNumber, cutNumber),
         startTime: scene.startTime,
         endTime: scene.endTime,
         sceneTitle: scene.sceneTitle,
@@ -3101,14 +3086,14 @@ function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
         subLocation: "",
         dayNight: scene.dayNight,
         storyDay: scene.storyDay,
-        description: scene.description || scene.cuts[0]?.description || "",
+        description: scene.description || cut?.description || "",
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
-        sceneMemo: scene.sceneMemo,
-        memo: scene.notes || scene.cuts[0]?.memo || "",
+        sceneMemo: encodeSceneMemoMetadata(scene.sceneMemo, normalizeShootingOrder(scene.shootingOrder, scene.cutCount)),
+        memo: scene.notes || cut?.memo || "",
         status: "촬영 전"
       };
-    });
+    }));
 }
 
 function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlockInput {
@@ -3215,10 +3200,10 @@ function getNextCutNumber(currentValue: string | undefined, fallback: number) {
   return String(fallback);
 }
 
-function clampCutCount(value: string) {
+function parseCutCount(value: string) {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.max(1, Math.min(80, Math.floor(parsed)));
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(80, Math.floor(parsed));
 }
 
 function isMeaningfulTimetableScene(scene: SceneBlockInput) {
@@ -3238,9 +3223,9 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
 }
 
 function normalizeShootingOrder(value: string, totalCut: string) {
-  const count = clampCutCount(totalCut);
+  const count = parseCutCount(totalCut);
   const sanitized = sanitizeShootingOrderInput(String(value ?? "")).trim();
-  if (!sanitized) return Array.from({ length: count }, (_, index) => String(count - index)).join("-");
+  if (!sanitized || count === 0) return "";
 
   const hasSeparator = /[-,/ ]/.test(sanitized);
   const cutNumbers = hasSeparator
@@ -3248,6 +3233,38 @@ function normalizeShootingOrder(value: string, totalCut: string) {
     : parseCompactShootingOrder(sanitized, count);
 
   return cutNumbers.join("-");
+}
+
+const sceneShootingOrderPrefix = "[[SHOTCL_SHOOTING_ORDER:";
+
+function encodeSceneMemoMetadata(sceneMemo: string, shootingOrder: string) {
+  const cleanMemo = decodeSceneMemoMetadata(sceneMemo).sceneMemo;
+  if (!shootingOrder) return cleanMemo;
+  return `${sceneShootingOrderPrefix}${encodeURIComponent(shootingOrder)}]]${cleanMemo ? `\n${cleanMemo}` : ""}`;
+}
+
+function decodeSceneMemoMetadata(value: string) {
+  const match = value.match(/^\[\[SHOTCL_SHOOTING_ORDER:([^\]]*)\]\](?:\n)?/);
+  if (!match) return { shootingOrder: "", sceneMemo: value };
+  let shootingOrder = "";
+  try {
+    shootingOrder = decodeURIComponent(match[1]);
+  } catch {
+    shootingOrder = "";
+  }
+  return { shootingOrder, sceneMemo: value.slice(match[0].length) };
+}
+
+function expandLegacyCutNumbers(value: string) {
+  const normalized = String(value ?? "").trim();
+  if (/^\d+$/.test(normalized)) {
+    const cutNumber = Number(normalized);
+    return Number.isInteger(cutNumber) && cutNumber > 0 && cutNumber <= 80 ? [String(cutNumber)] : [];
+  }
+
+  const tokens = normalized.split(/[-,/\s]+/).map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0 && item <= 80);
+  const highestCut = Math.max(0, ...tokens);
+  return Array.from({ length: highestCut }, (_, index) => String(index + 1));
 }
 
 function calculateRuntime(startTime: string, endTime: string) {
@@ -3373,7 +3390,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
           memo: cut.memo
         };
       });
-      totalCutCount += Number(clampCutCount(scene.cutCount)) || cuts.length;
+      totalCutCount += parseCutCount(scene.cutCount);
 
       return {
         id: scene.id,
@@ -3388,7 +3405,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDayNight(scene.dayNight),
         storyDay: scene.storyDay,
-        shootingOrder: normalizeShootingOrder(scene.shootingOrder, scene.cutCount),
+        shootingOrder: scene.shootingOrder,
         notes: scene.notes || cuts[0]?.memo || "",
         subject: scene.subject,
         props: scene.props,
