@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
+import { syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
@@ -131,7 +132,34 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       }
     }
 
-    return NextResponse.json({ ok: true, status: "saved", message: SAVED_MESSAGE, dailyPlan: planRow, shots: shotRows }, { status: body.dailyPlanId ? 200 : 201 });
+    const dailyPlanId = String(planRow.id);
+    try {
+      const progressSync = await syncProgressShotsForDailyPlan(supabase, projectId, dailyPlanId, body.plan, body.shots);
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "saved",
+          message: SAVED_MESSAGE,
+          dailyPlan: planRow,
+          shots: shotRows,
+          progressSync: { status: "synced", shotCount: progressSync.count }
+        },
+        { status: body.dailyPlanId ? 200 : 201 }
+      );
+    } catch (syncError) {
+      const syncMessage = getDatabaseErrorMessage(syncError);
+      return NextResponse.json(
+        {
+          ok: true,
+          status: "saved",
+          message: SAVED_MESSAGE,
+          dailyPlan: planRow,
+          shots: shotRows,
+          progressSync: { status: "failed", shotCount: 0, error: syncMessage }
+        },
+        { status: body.dailyPlanId ? 200 : 201 }
+      );
+    }
   } catch (error) {
     if (isPostgresUniqueViolation(error)) {
       return NextResponse.json({ ok: false, status: "duplicate", message: DUPLICATE_MESSAGE }, { status: 409 });
@@ -162,4 +190,9 @@ async function findDuplicateDailyPlan(supabase: ReturnType<typeof requireProject
 
 function isPostgresUniqueViolation(error: unknown) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "23505");
+}
+
+function getDatabaseErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object" || !("message" in error)) return "컷 진행 데이터를 동기화하지 못했습니다.";
+  return String(error.message || "컷 진행 데이터를 동기화하지 못했습니다.");
 }

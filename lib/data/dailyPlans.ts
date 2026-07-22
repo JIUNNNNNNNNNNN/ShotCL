@@ -3,10 +3,10 @@ import {
   dailyPlanFromRow,
   dailyPlanShotDraftToRow,
   dailyPlanShotFromRow,
-  normalizeDailyPlanShotStatus,
-  normalizeShotStatus
+  normalizeDailyPlanShotStatus
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
+import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import type {
@@ -31,6 +31,9 @@ export type SaveDailyPlanInput = {
 export type SaveDailyPlanResult = DailyPlanWithShots & {
   saveStatus: "saved" | "duplicate";
   message: string;
+  progressSyncStatus?: "synced" | "failed";
+  progressShotCount?: number;
+  progressSyncError?: string;
 };
 
 export class DailyPlanDuplicateError extends Error {
@@ -47,6 +50,11 @@ type SaveDailyPlanApiPayload = {
   dailyPlan?: Record<string, unknown>;
   plan?: Record<string, unknown>;
   shots?: Record<string, unknown>[];
+  progressSync?: {
+    status?: "synced" | "failed";
+    shotCount?: number;
+    error?: string;
+  };
   error?: string;
 };
 
@@ -246,7 +254,10 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
         plan: dailyPlanFromRow(planRow),
         shots: payload.shots.map(dailyPlanShotFromRow),
         saveStatus: payload.status === "duplicate" ? "duplicate" : "saved",
-        message: payload.message ?? (payload.status === "duplicate" ? "이미 저장된 일촬표입니다." : "일촬표가 저장되었습니다.")
+        message: payload.message ?? (payload.status === "duplicate" ? "이미 저장된 일촬표입니다." : "일촬표가 저장되었습니다."),
+        progressSyncStatus: payload.progressSync?.status,
+        progressShotCount: payload.progressSync?.shotCount,
+        progressSyncError: payload.progressSync?.error
       };
     }
     if (response.status === 409 || payload.status === "duplicate") {
@@ -461,47 +472,7 @@ export async function deleteDailyPlan(projectId: string, dailyPlanId: string): P
 
 /** 일촬표 컷 행을 기존 shots 진행표에 넣을 수 있는 초안으로 바꿉니다. */
 export function dailyPlanShotsToShotDrafts(plan: DailyPlanDraft | DailyPlan, shots: Array<DailyPlanShotDraft | DailyPlanShot>): ShotDraft[] {
-  const locations = plan.shootingLocations ?? [];
-  let orderIndex = 0;
-
-  return normalizeDailyPlanShotDrafts(shots.map((shot) => dailyPlanShotToDraft(shot))).flatMap((shot) => {
-    const timeMemo = [shot.startTime, shot.endTime].filter(Boolean).join("~");
-    const location = findDailyPlanLocation(locations, shot);
-    const locationAddress = formatDailyPlanLocationAddress(location);
-    const locationMapUrl = location?.naverMapUrl ?? "";
-    const cutNumber = String(Number(shot.cutNumber));
-    if (!shot.sceneNumber.trim() || !/^\d+$/.test(shot.cutNumber) || Number(cutNumber) < 1) return [];
-    const sceneMemo = stripShootingOrderMetadata(shot.sceneMemo ?? "");
-    const extraMemo = [
-      timeMemo ? `시간: ${timeMemo}` : "",
-      shot.dayNight ? `D/N: ${shot.dayNight}` : "",
-      locationAddress ? `주소: ${locationAddress}` : "",
-      locationMapUrl ? `지도: ${locationMapUrl}` : "",
-      shot.props ? `소품: ${shot.props}` : "",
-      shot.costumeMakeup ? `의상/분장: ${shot.costumeMakeup}` : "",
-      sceneMemo ? `씬 메모: ${sceneMemo}` : "",
-      shot.memo
-    ]
-      .filter(Boolean)
-      .join("\n");
-
-    orderIndex += 1;
-    return [{
-        sceneNumber: shot.sceneNumber,
-        cutNumber,
-        title: shot.description.trim().slice(0, 40) || `씬 ${shot.sceneNumber || "-"} 컷 ${cutNumber || "-"}`,
-        description: shot.description,
-        location: shot.locationName || shot.subLocation || plan.shootingLocation,
-        characters: splitPeople(shot.subject),
-        memo: extraMemo,
-        orderIndex,
-        status: normalizeShotStatus("pending")
-      }];
-  });
-}
-
-function stripShootingOrderMetadata(value: string) {
-  return value.replace(/^\[\[SHOTCL_SHOOTING_ORDER:[^\]]*\]\](?:\n)?/, "");
+  return buildProgressShotDrafts(plan, shots);
 }
 
 export function dailyPlanShotToDraft(shot: DailyPlanShot | DailyPlanShotDraft): DailyPlanShotDraft {
@@ -527,20 +498,4 @@ export function dailyPlanShotToDraft(shot: DailyPlanShot | DailyPlanShotDraft): 
     memo: shot.memo,
     status: normalizeDailyPlanShotStatus(shot.status)
   };
-}
-
-function splitPeople(value: string) {
-  return value
-    .split(/[,/·]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function findDailyPlanLocation(locations: DailyPlan["shootingLocations"], shot: DailyPlanShotDraft) {
-  return locations.find((location) => location.id === shot.locationId) ?? locations.find((location) => location.name === shot.locationName);
-}
-
-function formatDailyPlanLocationAddress(location: DailyPlan["shootingLocations"][number] | undefined) {
-  if (!location) return "";
-  return [location.roadAddress, location.address].find((value) => value?.trim()) ?? location.detail ?? "";
 }

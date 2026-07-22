@@ -12,7 +12,8 @@ import {
   dailyPlanShotToDraft,
   dailyPlanShotsToShotDrafts,
   normalizeDailyPlanShotDrafts,
-  saveDailyPlanWithShots
+  saveDailyPlanWithShots,
+  type SaveDailyPlanResult
 } from "@/lib/data/dailyPlans";
 import { getShotIdentityKey, syncShotsFromDrafts } from "@/lib/data/shots";
 import {
@@ -306,12 +307,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("이미 저장된 일촬표");
             return;
           }
-          let didSyncShots = true;
-          try {
-            await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
-          } catch {
-            didSyncShots = false;
-          }
+          const didSyncShots = await completeShotBoardSync(saved);
           window.localStorage.removeItem(storageKey);
           hasPendingChangesRef.current = false;
           if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(didSyncShots ? "자동 저장됨" : "일촬표 저장됨 · 진행표 동기화 실패");
@@ -560,6 +556,23 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     managedShotKeysRef.current = new Set(drafts.map((shot) => getShotIdentityKey(shot, savedPlan.id)));
   }
 
+  async function completeShotBoardSync(saved: SaveDailyPlanResult) {
+    const savedShots = saved.shots.map(dailyPlanShotToDraft);
+    const progressDrafts = dailyPlanShotsToShotDrafts(saved.plan, savedShots);
+    if (saved.progressSyncStatus === "synced") {
+      managedShotKeysRef.current = new Set(progressDrafts.map((shot) => getShotIdentityKey(shot, saved.plan.id)));
+      return true;
+    }
+    if (saved.progressSyncStatus === "failed") return false;
+
+    try {
+      await syncShotBoardFromDailyPlan(saved.plan, savedShots);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function updateSceneTimeField(sceneIndex: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
     setScenes((current) => current.map((scene, index) => (index === sceneIndex ? applyTimeFieldEdit(scene, field, value) : scene)));
   }
@@ -773,12 +786,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         return null;
       }
 
-      let didSyncShots = true;
-      try {
-        await syncShotBoardFromDailyPlan(saved.plan, saved.shots.map(dailyPlanShotToDraft));
-      } catch {
-        didSyncShots = false;
-      }
+      const didSyncShots = await completeShotBoardSync(saved);
       const savedDraft = planToDraft(saved.plan);
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
