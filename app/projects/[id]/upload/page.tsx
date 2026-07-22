@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Bot, Camera, FileUp, History, ListChecks, RotateCcw, Trash2, UploadCloud } from "lucide-react";
 import { AnalysisPreview } from "@/components/AnalysisPreview";
+import { CorgiLoader } from "@/components/CorgiLoader";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -382,7 +383,7 @@ export default function UploadStoryboardPage() {
   }
 
   if (isLoading) {
-    return <Card className="text-field-muted">업로드 화면을 불러오는 중입니다.</Card>;
+    return <CorgiLoader />;
   }
 
   if (!project) {

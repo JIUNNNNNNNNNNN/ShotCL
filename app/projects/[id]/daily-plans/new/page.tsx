@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { CorgiLoader } from "@/components/CorgiLoader";
 import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { Card } from "@/components/ui/Card";
 import { getProject } from "@/lib/data/projects";
@@ -32,7 +33,7 @@ export default function NewDailyPlanPage() {
   }, [projectId]);
 
   if (isLoading) {
-    return <Card className="text-field-muted">새 일촬표 화면을 불러오는 중입니다.</Card>;
+    return <CorgiLoader size="lg" />;
   }
 
   if (!project) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { AlertTriangle, Download, ListChecks, Upload } from "lucide-react";
+import { CorgiLoader } from "@/components/CorgiLoader";
 import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -75,7 +76,7 @@ export default function AnalysisRunsPage() {
   }, [refresh]);
 
   if (isLoading) {
-    return <Card className="text-field-muted">분석 기록을 불러오는 중입니다.</Card>;
+    return <CorgiLoader />;
   }
 
   if (!project) {

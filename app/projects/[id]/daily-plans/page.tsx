@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Copy, Plus, Trash2 } from "lucide-react";
+import { CorgiLoader } from "@/components/CorgiLoader";
 import { PageHeader } from "@/components/PageHeader";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -92,7 +93,7 @@ export default function DailyPlansPage() {
   }
 
   if (isLoading) {
-    return <Card className="text-field-muted">저장된 일촬표 목록을 불러오는 중입니다.</Card>;
+    return <CorgiLoader />;
   }
 
   if (!project) {

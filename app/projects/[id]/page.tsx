@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, House, Plus, RotateCcw, Upload } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
+import { CorgiLoader } from "@/components/CorgiLoader";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import { ShotCard } from "@/components/ShotCard";
@@ -247,7 +248,7 @@ export default function ProjectDetailPage() {
   }
 
   if (isLoading) {
-    return <Card className="text-field-muted">컷 리스트를 불러오는 중입니다.</Card>;
+    return <CorgiLoader size="lg" />;
   }
 
   if (!project) {

@@ -2,6 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes corgi-run-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes corgi-run-step-a {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(4px, -2px); }
+}
+
+@keyframes corgi-run-step-b {
+  0%, 100% { transform: translate(4px, -2px); }
+  50% { transform: translate(0, 0); }
+}
+
+@keyframes corgi-tail-wag {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(12deg); }
+}
+
+@keyframes corgi-ground-scroll {
+  to { stroke-dashoffset: -56; }
+}
+
+.corgi-loader__dog {
+  animation: corgi-run-bounce 500ms steps(2, end) infinite;
+  transform-origin: center bottom;
+}
+
+.corgi-loader__tail {
+  animation: corgi-tail-wag 300ms steps(2, end) infinite;
+  transform-box: fill-box;
+  transform-origin: right center;
+}
+
+.corgi-loader__legs--front,
+.corgi-loader__legs--back-alt {
+  animation: corgi-run-step-a 300ms steps(2, end) infinite;
+}
+
+.corgi-loader__legs--back,
+.corgi-loader__legs--front-alt {
+  animation: corgi-run-step-b 300ms steps(2, end) infinite;
+}
+
+.corgi-loader__ground {
+  animation: corgi-ground-scroll 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .corgi-loader__dog,
+  .corgi-loader__tail,
+  .corgi-loader__legs,
+  .corgi-loader__ground {
+    animation: none;
+  }
+}
+
 :root {
   color-scheme: light;
   background: #fcfbf7;
