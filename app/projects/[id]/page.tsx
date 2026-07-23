@@ -10,15 +10,17 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import { ShotCard } from "@/components/ShotCard";
 import { ShotEditorModal, type ShotEditorValues } from "@/components/ShotEditorModal";
+import { ShotOverheadEditor } from "@/components/ShotOverheadEditor";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, updateShot, updateShotStatus } from "@/lib/data/shots";
+import { loadShotOverheadDiagram, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
 import { listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { DailyPlan, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
+import type { DailyPlan, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
 
 /** URL 파라미터에서 프로젝트 ID를 안전하게 읽습니다. */
 function useProjectId() {
@@ -60,6 +62,8 @@ export default function ProjectDetailPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
+  const [overheadShot, setOverheadShot] = useState<Shot | null>(null);
+  const [overheadLoadingShotId, setOverheadLoadingShotId] = useState<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
@@ -214,6 +218,51 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleSaveOverhead(diagram: ShotOverheadDiagram) {
+    if (!projectId || !overheadShot || progressOnly) return;
+
+    setIsSaving(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      const savedDiagram = await saveShotOverheadDiagram(overheadShot, diagram);
+      const updatedShot = { ...overheadShot, overheadDiagram: savedDiagram };
+      setShots((current) => current.map((shot) => shot.id === updatedShot.id ? updatedShot : shot));
+      setEpisodeShots((current) => {
+        const planId = updatedShot.dailyPlanId;
+        if (!planId || !current[planId]) return current;
+        return {
+          ...current,
+          [planId]: current[planId].map((shot) => shot.id === updatedShot.id ? updatedShot : shot)
+        };
+      });
+      setOverheadShot(null);
+      setSuccessMessage("컷 부감도를 저장했습니다.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "컷 부감도를 저장하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleOpenOverhead(shot: Shot) {
+    if (overheadLoadingShotId) return;
+    setOverheadLoadingShotId(shot.id);
+    setErrorMessage("");
+
+    try {
+      const diagram = await loadShotOverheadDiagram(shot);
+      const loadedShot = { ...shot, overheadDiagram: diagram };
+      setShots((current) => current.map((item) => item.id === shot.id ? loadedShot : item));
+      setOverheadShot(loadedShot);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "컷 부감도를 불러오지 못했습니다.");
+    } finally {
+      setOverheadLoadingShotId(null);
+    }
+  }
+
   async function handleMoveShot(shot: Shot, direction: "up" | "down") {
     if (!projectId || !dailyPlanId) return;
 
@@ -352,6 +401,8 @@ export default function ProjectDetailPage() {
               key={shot.id}
               shot={shot}
               onOpen={setEditingShot}
+              onOpenOverhead={handleOpenOverhead}
+              isOverheadLoading={overheadLoadingShotId === shot.id}
               onImagePreview={(url, title) => setPreview({ url, title })}
               onStatusChange={handleStatusChange}
               progressOnly={progressOnly}
@@ -404,6 +455,16 @@ export default function ProjectDetailPage() {
         onDelete={handleDeleteShot}
         onMove={handleMoveShot}
       /> : null}
+
+      {overheadShot ? (
+        <ShotOverheadEditor
+          shot={overheadShot}
+          readOnly={progressOnly}
+          isSaving={isSaving}
+          onClose={() => setOverheadShot(null)}
+          onSave={handleSaveOverhead}
+        />
+      ) : null}
 
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? ""} onClose={() => setPreview(null)} />
     </>

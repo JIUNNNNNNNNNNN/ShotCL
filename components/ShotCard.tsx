@@ -1,22 +1,34 @@
 "use client";
 
-import { ImageIcon } from "lucide-react";
+import { ImageIcon, Map } from "lucide-react";
 import { type Shot, type ShotStatus } from "@/lib/types";
+import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
 
 type ShotCardProps = {
   shot: Shot;
   onOpen: (shot: Shot) => void;
+  onOpenOverhead: (shot: Shot) => void;
   onImagePreview: (url: string, title: string) => void;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
   progressOnly?: boolean;
+  isOverheadLoading?: boolean;
 };
 
 /** 컷 중심 현장 진행표 카드입니다. 버튼 클릭은 카드 수정 모달과 분리합니다. */
-export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progressOnly = false }: ShotCardProps) {
+export function ShotCard({
+  shot,
+  onOpen,
+  onOpenOverhead,
+  onImagePreview,
+  onStatusChange,
+  progressOnly = false,
+  isOverheadLoading = false
+}: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
   const isProcessed = isOk || isOmit;
+  const hasOverhead = hasShotOverheadContent(shot.overheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
 
   function shouldIgnoreCardOpen(target: EventTarget | null) {
@@ -81,6 +93,22 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
             <span className="font-display">{statusLabel}</span>
           </p>
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenOverhead(shot);
+            }}
+            disabled={isOverheadLoading}
+            className={cn(
+              "ml-auto inline-flex min-h-7 shrink-0 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
+              hasOverhead ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
+            )}
+            title={progressOnly ? "부감도 보기" : hasOverhead ? "부감도 편집" : "부감도 만들기"}
+          >
+            <Map className="h-3.5 w-3.5" aria-hidden />
+            부감도
+          </button>
         </div>
 
         <h2 className={cn("mt-1 truncate text-sm font-black leading-5 text-field-text", isProcessed && "underline decoration-2 underline-offset-4")}>

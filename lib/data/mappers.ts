@@ -227,6 +227,7 @@ export function shotFromRow(row: AnyRow): Shot {
     orderIndex: row.order_index,
     status: normalizeShotStatus(row.status),
     storyboardImageUrl: row.storyboard_image_url ?? null,
+    overheadDiagram: null,
     sourceFileId: row.source_file_id ?? null,
     sourcePage: row.source_page ?? null,
     sourceRow: row.source_row ?? null,

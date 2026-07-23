@@ -64,6 +64,7 @@ export async function listShots(projectId: string, dailyPlanId?: string): Promis
       status: normalizeShotStatus(shot.status),
       analysisRunId: shot.analysisRunId ?? null,
       storyboardImageUrl: shot.storyboardImageUrl ?? null,
+      overheadDiagram: null,
       sourceFileId: shot.sourceFileId ?? null,
       sourcePage: shot.sourcePage ?? null,
       sourceRow: shot.sourceRow ?? null
@@ -110,6 +111,7 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
     status: normalizeShotStatus(draft.status),
     analysisRunId: draft.analysisRunId ?? null,
     storyboardImageUrl: draft.storyboardImageUrl ?? null,
+    overheadDiagram: null,
     sourceFileId: draft.sourceFileId ?? null,
     sourcePage: draft.sourcePage ?? null,
     sourceRow: draft.sourceRow ?? null,
@@ -238,6 +240,7 @@ export async function updateShot(shotId: string, patch: Partial<Shot>, projectId
     status: normalizeShotStatus(existingShot.status),
     analysisRunId: existingShot.analysisRunId ?? null,
     storyboardImageUrl: existingShot.storyboardImageUrl ?? null,
+    overheadDiagram: null,
     sourceFileId: existingShot.sourceFileId ?? null,
     sourcePage: existingShot.sourcePage ?? null,
     sourceRow: existingShot.sourceRow ?? null

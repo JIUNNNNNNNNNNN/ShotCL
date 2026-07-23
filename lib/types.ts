@@ -87,6 +87,52 @@ export type ProjectInput = {
   description: string;
 };
 
+export type ShotOverheadPerson = {
+  id: string;
+  x: number;
+  y: number;
+  label: string;
+};
+
+export type ShotOverheadCamera = {
+  id: string;
+  x: number;
+  y: number;
+  rotation: number;
+  label: string;
+};
+
+export type ShotOverheadLine = {
+  id: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: "black" | "red";
+};
+
+export type ShotOverheadShape = {
+  id: string;
+  type: "rect";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+};
+
+export type ShotOverheadDiagram = {
+  version: 1;
+  canvas: {
+    width: number;
+    height: number;
+  };
+  people: ShotOverheadPerson[];
+  cameras: ShotOverheadCamera[];
+  lines: ShotOverheadLine[];
+  shapes: ShotOverheadShape[];
+};
+
 export type Shot = {
   id: string;
   projectId: string;
@@ -102,6 +148,7 @@ export type Shot = {
   orderIndex: number;
   status: ShotStatus;
   storyboardImageUrl: string | null;
+  overheadDiagram: ShotOverheadDiagram | null;
   sourceFileId: string | null;
   sourcePage: number | null;
   sourceRow: number | null;
