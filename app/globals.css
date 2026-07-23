@@ -96,7 +96,7 @@ body {
     Arial,
     sans-serif;
   line-height: 1.45;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -108,7 +108,6 @@ textarea,
 select {
   font: inherit;
   line-height: 1.35;
-  letter-spacing: 0.01em;
 }
 
 a,

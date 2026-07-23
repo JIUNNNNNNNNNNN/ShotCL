@@ -29,7 +29,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
 
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.08em] text-field-muted">오늘 컷 진행률</p>
-          <h2 id="today-progress-title" className="mt-0.5 truncate text-lg font-black text-field-primary md:text-xl">
+          <h2 id="today-progress-title" className="mt-0.5 truncate text-lg font-black tracking-[-0.015em] text-field-primary md:text-xl">
             {isComplete ? "즐거운 바라시" : "집에 가기까지"}
           </h2>
           <p className="mt-1 text-xs font-bold text-field-muted">{completed}/{total} 처리 완료</p>
@@ -49,7 +49,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
 function Stat({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
   return (
     <div className="grid min-h-11 place-items-center gap-0 rounded-full border border-field-border bg-white px-1 py-1.5 text-center md:min-h-12">
-      <p className="text-[10px] font-bold text-field-muted md:text-xs">{label}</p>
+      <p className="text-[10px] font-bold tracking-[-0.015em] text-field-muted md:text-xs">{label}</p>
       <p className={danger ? "text-base font-black text-field-danger md:text-lg" : "text-base font-black text-field-primary md:text-lg"}>{value}</p>
     </div>
   );

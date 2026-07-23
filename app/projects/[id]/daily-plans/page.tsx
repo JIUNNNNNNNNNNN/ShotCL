@@ -142,7 +142,7 @@ export default function DailyPlansPage() {
               <div className="mt-4 grid gap-2">
                 <Link
                   href={`/projects/${project.id}/daily-plans/${plan.id}`}
-                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-field-primary bg-field-primary px-4 text-sm font-black text-white"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-field-primary bg-field-primary px-4 text-sm font-black tracking-[-0.015em] text-white"
                 >
                   열기
                 </Link>

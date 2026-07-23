@@ -292,19 +292,19 @@ export default function ProjectDetailPage() {
               <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
               <p className="truncate text-[10px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</p>
             </div>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-left text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-left text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-primary hover:bg-field-light">
               <Plus className="h-4 w-4" aria-hidden /> 새 컷 추가
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
               <CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표
             </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
               <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록
             </Link>
-            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
               <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
             </Link>
-            <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
               <History className="h-4 w-4" aria-hidden /> 분석 기록
             </Link>
           </nav>
@@ -312,7 +312,7 @@ export default function ProjectDetailPage() {
       </div>
 
       <section className="mb-3">
-        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택
         </Link>
         <ProgressSummary shots={shots} />
@@ -443,11 +443,11 @@ function EpisodeSelection({
               프로젝트 수정
             </summary>
             <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
-              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
+              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-primary hover:bg-field-light">
                 <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정
               </Link>
               <details className="group/settings">
-                <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
+                <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted marker:content-none hover:bg-field-soft">
                   <Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정
                 </summary>
                 <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
