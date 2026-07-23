@@ -27,7 +27,7 @@ export function FilterTabs({
           type="button"
           onClick={() => onChange(filter)}
           className={cn(
-            "min-h-8 rounded-full px-1 text-xs font-black transition-[background-color,transform] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] md:text-sm",
+            "min-h-[38px] rounded-full px-1 text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] md:text-sm",
             value === filter ? "bg-field-primary text-white" : "bg-transparent text-field-muted hover:bg-field-soft"
           )}
         >

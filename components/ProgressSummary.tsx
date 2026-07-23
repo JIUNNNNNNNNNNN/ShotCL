@@ -23,7 +23,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
           aria-label={`진행률 ${progress}%`}
         >
           <div className="grid h-full w-full place-items-center rounded-full border border-field-border bg-white">
-            <p className="text-xl font-black leading-none text-field-primary md:text-2xl">{progress}%</p>
+            <p className="text-xl font-black leading-[1.15] text-field-primary md:text-2xl">{progress}%</p>
           </div>
         </div>
 

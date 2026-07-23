@@ -174,16 +174,16 @@ type OpenMeteoResponse = {
 const dayNightOptions = ["D", "N"];
 
 const inputClass =
-  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
 const compactInputClass =
-  "min-h-9 w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
 const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden !text-left text-ellipsis whitespace-nowrap placeholder:!text-center`;
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
-const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-none";
+const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-7 max-md:[&_button]:min-h-7 max-md:[&_button]:px-0.5 max-md:[&_button]:text-[10px] max-md:[&_input]:h-7 max-md:[&_input]:min-h-7 max-md:[&_input]:px-0.5 max-md:[&_input]:text-[10px] max-md:[&_select]:h-7 max-md:[&_select]:min-h-7 max-md:[&_select]:px-0.5 max-md:[&_select]:text-[10px]";
 
 const maxRuntimeMinutes = 1440;

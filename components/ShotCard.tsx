@@ -98,7 +98,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
             aria-pressed={isOk}
             disabled={progressOnly && shot.status !== "pending"}
             className={cn(
-              "min-h-8 rounded-full border text-xs font-black transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary",
               progressOnly && shot.status !== "pending" && "cursor-not-allowed opacity-60"
             )}
@@ -111,7 +111,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "min-h-8 rounded-full border text-xs font-black transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOmit ? "border-field-danger bg-field-danger text-white" : "border-field-border bg-white text-field-danger"
             )}
           >

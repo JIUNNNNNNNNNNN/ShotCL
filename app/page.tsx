@@ -442,7 +442,7 @@ export default function HomePage() {
                   }}
                   placeholder="프로젝트 이름"
                   aria-label="새 프로젝트 이름"
-                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -452,7 +452,7 @@ export default function HomePage() {
                   onChange={(event) => setAdminPassword(sanitizePasscode(event.target.value))}
                   placeholder="관리자 비밀번호 4자리"
                   aria-label="관리자 비밀번호"
-                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -462,13 +462,13 @@ export default function HomePage() {
                   onChange={(event) => setProgressPassword(sanitizePasscode(event.target.value))}
                   placeholder="진행도 비밀번호 4자리"
                   aria-label="진행도 비밀번호"
-                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
                   disabled={isCreatingProject}
-                  className="h-9 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                  className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
                   {isCreatingProject ? "만드는 중" : "만들기"}
                 </button>
@@ -499,7 +499,7 @@ export default function HomePage() {
                   }}
                   placeholder="프로젝트 이름"
                   aria-label="참여할 프로젝트 이름"
-                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -509,13 +509,13 @@ export default function HomePage() {
                   onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
                   placeholder="비밀번호 4자리"
                   aria-label="프로젝트 참여 비밀번호"
-                  className="h-9 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
                   disabled={isCreatingProject}
-                  className="h-9 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                  className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
                   {isCreatingProject ? "확인 중" : "참여"}
                 </button>
