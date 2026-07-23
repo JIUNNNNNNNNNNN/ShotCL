@@ -23,15 +23,13 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center rounded-full border px-3 py-2 text-sm font-black leading-[1.35] tracking-[-0.05em] transition-[background-color,border-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-sm font-black leading-[1.35] transition-[background-color,border-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         variantClass[variant],
         className
       )}
       {...props}
     >
-      <span className="font-condensed">
-        <span className="inline-flex items-center justify-center gap-1.5">{children}</span>
-      </span>
+      {children}
     </button>
   );
 }
@@ -48,15 +46,13 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center rounded-full border px-3 py-2 text-sm font-black leading-[1.35] tracking-[-0.05em] transition-[background-color,border-color,transform] active:scale-[0.98]",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-sm font-black leading-[1.35] transition-[background-color,border-color,transform] active:scale-[0.98]",
         variantClass[variant],
         className
       )}
       {...props}
     >
-      <span className="font-condensed">
-        <span className="inline-flex items-center justify-center gap-1.5">{children}</span>
-      </span>
+      {children}
     </Link>
   );
 }

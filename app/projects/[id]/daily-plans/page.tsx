@@ -133,9 +133,7 @@ export default function DailyPlansPage() {
             <Card key={plan.id}>
               <div className="min-w-0">
                 <p className="text-xs font-black text-field-muted">{plan.sourceType === "web_editor" ? "웹 편집기" : "가져온 일촬표"}</p>
-                <h2 className="mt-1 break-words text-lg font-black text-field-primary">
-                  <span className="font-condensed">{plan.title || "제목 없는 일촬표"}</span>
-                </h2>
+                <h2 className="mt-1 break-words text-lg font-black text-field-primary">{plan.title || "제목 없는 일촬표"}</h2>
                 <p className="mt-2 text-sm font-bold leading-6 text-field-muted">
                   촬영일: {plan.shootingDate || "미정"} · 회차: {plan.episode || "-"} · 컷 {plan.shotCount}개
                 </p>
@@ -144,9 +142,9 @@ export default function DailyPlansPage() {
               <div className="mt-4 grid gap-2">
                 <Link
                   href={`/projects/${project.id}/daily-plans/${plan.id}`}
-                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-field-primary bg-field-primary px-4 text-sm font-black tracking-[-0.05em] text-white"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border border-field-primary bg-field-primary px-4 text-sm font-black text-white"
                 >
-                  <span className="font-condensed-strong">열기</span>
+                  열기
                 </Link>
                 <div className="grid grid-cols-2 gap-2">
                   <Button variant="secondary" onClick={() => handleDuplicate(plan.id)} disabled={isBusy}>

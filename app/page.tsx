@@ -300,8 +300,8 @@ export default function HomePage() {
           className="group/fruit flex h-full w-full flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
           aria-label={`${project.name} ${pickerTitle}`}
         >
-          <span className="overflow-hidden text-[11px] font-black leading-[1.4] tracking-[-0.04em] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
-            <span className="font-condensed">{project.name}</span>
+          <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+            <span className="font-display">{project.name}</span>
           </span>
           <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
             {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
@@ -373,7 +373,7 @@ export default function HomePage() {
                   x={item.textX}
                   y={item.textY}
                   textAnchor="middle"
-                  className="font-condensed-strong pointer-events-none select-none fill-white text-[14px] font-black transition-opacity duration-150 group-active:opacity-80"
+                  className="font-display-strong pointer-events-none select-none fill-white text-[14px] font-black transition-opacity duration-150 group-active:opacity-80"
                 >
                   <tspan x={item.textX} dy="0">{item.label}</tspan>
                 </text>
@@ -415,7 +415,7 @@ export default function HomePage() {
           >
             <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "new" ? "justify-start" : "justify-end"}`}>
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
-                <span className="font-condensed">{pickerTitle}</span>
+                <span className="font-display">{pickerTitle}</span>
               </h1>
             </div>
             {pickerMode === "new" ? (
@@ -472,7 +472,7 @@ export default function HomePage() {
                   disabled={isCreatingProject}
                   className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
-                  <span className="font-condensed">{isCreatingProject ? "만드는 중" : "만들기"}</span>
+                  <span className="font-display">{isCreatingProject ? "만드는 중" : "만들기"}</span>
                 </button>
               </form>
             ) : pickerMode === "join" ? (
@@ -519,7 +519,7 @@ export default function HomePage() {
                   disabled={isCreatingProject}
                   className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
-                  <span className="font-condensed">{isCreatingProject ? "확인 중" : "참여"}</span>
+                  <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
                 </button>
               </form>
             ) : (
@@ -542,7 +542,7 @@ export default function HomePage() {
         {feedback ? (
           <p
             role="status"
-            className={`absolute z-30 whitespace-nowrap rounded-full border border-field-border bg-white px-3 py-1.5 text-[11px] font-black tracking-[-0.025em] text-field-primary shadow-[0_5px_14px_rgba(15,61,46,0.12)] ${
+            className={`absolute z-30 whitespace-nowrap rounded-full border border-field-border bg-white px-3 py-1.5 text-[11px] font-black text-field-primary shadow-[0_5px_14px_rgba(15,61,46,0.12)] ${
               feedback.target === "progress"
                 ? "left-1/2 top-[calc(100%+0.5rem)] -translate-x-1/2"
                 : "right-[calc(100%+0.5rem)] top-1/3"

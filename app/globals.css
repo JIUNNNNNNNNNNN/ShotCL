@@ -82,7 +82,6 @@ html {
   min-height: 100%;
   background: var(--field-paper);
   line-height: 1.45;
-  letter-spacing: -0.04em;
 }
 
 body {
@@ -91,25 +90,46 @@ body {
   background: var(--field-paper);
   color: #1c1c1a;
   font-family:
-    "GPZDongneGomulsang",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
     "Apple SD Gothic Neo",
     "Noto Sans KR",
-    Arial,
     sans-serif;
   line-height: 1.45;
-  letter-spacing: -0.04em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
-button,
 input,
 textarea,
 select {
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
+  line-height: 1.35;
+  letter-spacing: normal;
+}
+
+button {
   font: inherit;
   line-height: 1.35;
-  letter-spacing: -0.035em;
+}
+
+table {
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
+  letter-spacing: normal;
 }
 
 a,
@@ -120,21 +140,25 @@ div {
   font-family: inherit;
 }
 
-.font-condensed,
-.font-condensed-strong {
+.font-display,
+.font-display-strong {
+  font-family:
+    "GPZDongneGomulsang",
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
+}
+
+.font-display {
+  letter-spacing: -0.025em;
+}
+
+.font-display-strong {
   display: inline-block;
   transform-origin: center;
   transform-box: fill-box;
-}
-
-.font-condensed {
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
   transform: scaleX(0.94);
-}
-
-.font-condensed-strong {
-  letter-spacing: -0.065em;
-  transform: scaleX(0.9);
 }
 
 button {
@@ -201,7 +225,7 @@ a[class*="min-h-"][class*="items-center"] {
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
-  font-family: "GPZDongneGomulsang", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
 .daily-plan-template table,
