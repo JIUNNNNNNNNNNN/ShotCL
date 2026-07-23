@@ -8,6 +8,11 @@ import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
 import { projectFromRow } from "@/lib/data/mappers";
 import { getLocalProjectIdCandidates } from "@/lib/projectId";
 import type { Project } from "@/lib/types";
+import {
+  getSpinnerItemAngle,
+  normalizeSpinnerAngle,
+  useDragSpinner
+} from "@/components/useDragSpinner";
 
 type ProjectPickerMode = "new" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
@@ -47,36 +52,19 @@ const wheelItems = [
   {
     id: "new",
     label: "New Project",
-    angle: 0,
     colorClass: "bg-field-primary"
   },
   {
     id: "join",
     label: "Join Project",
-    angle: 120,
     colorClass: "bg-[#557d6d]"
   },
   {
     id: "progress",
     label: "Go",
-    angle: 240,
     colorClass: "bg-[#416f5d]"
   }
 ] as const;
-
-const SPINNER_SETTLE_DELAY_MS = 180;
-const SPINNER_SNAP_DURATION_MS = 260;
-
-function normalizeAngle(angle: number) {
-  return ((angle + 180) % 360 + 360) % 360 - 180;
-}
-
-function getNearestWheelItem(rotation: number) {
-  return wheelItems.reduce((nearest, item) => {
-    const distance = Math.abs(normalizeAngle(item.angle + rotation));
-    return distance < nearest.distance ? { id: item.id, distance } : nearest;
-  }, { id: wheelItems[0].id as WheelItemId, distance: Number.POSITIVE_INFINITY });
-}
 
 /** 빈 종이 위 원형 메뉴만 제공하는 앱 진입 화면입니다. */
 export default function HomePage() {
@@ -93,23 +81,22 @@ export default function HomePage() {
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
-  const [wheelRotation, setWheelRotation] = useState(0);
-  const [previewItem, setPreviewItem] = useState<WheelItemId>("new");
-  const [isDraggingWheel, setIsDraggingWheel] = useState(false);
   const wheelRef = useRef<HTMLDivElement | null>(null);
+  const projectWheelRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const compositionRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wheelRotationRef = useRef(0);
-  const dragStateRef = useRef<{
-    pointerId: number;
-    lastAngle: number;
-    moved: boolean;
-  } | null>(null);
-  const suppressClickRef = useRef(false);
+  const projectNavigationRef = useRef(false);
+  const mainSpinner = useDragSpinner({
+    itemCount: wheelItems.length,
+    onCommit: (index) => commitWheelItem(wheelItems[index]?.id ?? "new")
+  });
+  const projectSpinner = useDragSpinner({
+    itemCount: projects.length,
+    onCommit: (index) => openProject(projects[index])
+  });
+  const previewItem = wheelItems[mainSpinner.activeIndex]?.id ?? "new";
 
   useEffect(() => {
     let isMounted = true;
@@ -134,8 +121,6 @@ export default function HomePage() {
 
   useEffect(() => () => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -146,16 +131,16 @@ export default function HomePage() {
       const clickedWheel = wheelRef.current?.contains(event.target);
       const clickedSubmenu = clusterRef.current?.contains(event.target);
       if (!clickedWheel && !clickedSubmenu) {
-        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-        if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+        mainSpinner.cancelPending();
+        projectSpinner.cancelPending();
         setPickerMode(null);
       }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-        if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+        mainSpinner.cancelPending();
+        projectSpinner.cancelPending();
         setPickerMode(null);
       }
     }
@@ -166,7 +151,12 @@ export default function HomePage() {
       document.removeEventListener("pointerdown", closeOnOutsideClick);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [pickerMode]);
+  }, [mainSpinner.cancelPending, pickerMode, projectSpinner.cancelPending]);
+
+  useEffect(() => {
+    projectNavigationRef.current = false;
+    if (pickerMode !== "progress") projectSpinner.cancelPending();
+  }, [pickerMode, projectSpinner.cancelPending]);
 
   useEffect(() => {
     if (!pickerMode || !window.matchMedia("(max-width: 767px)").matches) return;
@@ -216,92 +206,9 @@ export default function HomePage() {
     setPickerMode(id);
   }
 
-  function updateWheelRotation(nextRotation: number) {
-    wheelRotationRef.current = nextRotation;
-    setWheelRotation(nextRotation);
-    setPreviewItem(getNearestWheelItem(nextRotation).id);
-  }
-
   function snapToWheelItem(id: WheelItemId) {
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
-
-    const item = wheelItems.find((candidate) => candidate.id === id) ?? wheelItems[0];
-    const snappedRotation = wheelRotationRef.current - normalizeAngle(item.angle + wheelRotationRef.current);
-    updateWheelRotation(snappedRotation);
-    setPreviewItem(id);
-
-    snapTimerRef.current = setTimeout(() => {
-      commitWheelItem(id);
-    }, SPINNER_SNAP_DURATION_MS);
-  }
-
-  function scheduleWheelSettle() {
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => {
-      snapToWheelItem(getNearestWheelItem(wheelRotationRef.current).id);
-    }, SPINNER_SETTLE_DELAY_MS);
-  }
-
-  function getPointerAngle(event: React.PointerEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const centerX = bounds.left + bounds.width / 2;
-    const centerY = bounds.top + bounds.height / 2;
-    return Math.atan2(event.clientY - centerY, event.clientX - centerX) * (180 / Math.PI);
-  }
-
-  function handleWheelPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 && event.pointerType === "mouse") return;
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      lastAngle: getPointerAngle(event),
-      moved: false
-    };
-    suppressClickRef.current = false;
-    setIsDraggingWheel(true);
-  }
-
-  function handleWheelPointerMove(event: React.PointerEvent<HTMLDivElement>) {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-
-    const nextPointerAngle = getPointerAngle(event);
-    const delta = normalizeAngle(nextPointerAngle - dragState.lastAngle);
-    if (Math.abs(delta) < 0.15) return;
-
-    dragState.lastAngle = nextPointerAngle;
-    dragState.moved = true;
-    suppressClickRef.current = true;
-    updateWheelRotation(wheelRotationRef.current + delta);
-  }
-
-  function finishWheelPointer(event: React.PointerEvent<HTMLDivElement>) {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    dragStateRef.current = null;
-    setIsDraggingWheel(false);
-    scheduleWheelSettle();
-    if (dragState.moved) {
-      window.setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
-    }
-  }
-
-  function handleSpinnerWheel(event: React.WheelEvent<HTMLDivElement>) {
-    event.preventDefault();
-    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
-    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
-    updateWheelRotation(wheelRotationRef.current + Math.max(-72, Math.min(72, delta * 0.35)));
-    scheduleWheelSettle();
+    const index = wheelItems.findIndex((item) => item.id === id);
+    if (index >= 0) mainSpinner.snapToIndex(index);
   }
 
   function closeInputSubmenu(mode: "new" | "join") {
@@ -320,11 +227,14 @@ export default function HomePage() {
 
   function hideProjectFromCurrentList(project: Project) {
     if (!window.confirm("이 프로젝트를 목록에서 삭제할까요?")) return;
+    projectSpinner.cancelPending();
+    projectNavigationRef.current = false;
     const hiddenProjectIds = readHiddenProjectIds();
     hiddenProjectIds.add(project.id);
     writeHiddenProjectIds(hiddenProjectIds);
-    setProjects((currentProjects) => currentProjects.filter((item) => item.id !== project.id));
-    if (projects.length === 1) setPickerMode(null);
+    const nextProjects = projects.filter((item) => item.id !== project.id);
+    setProjects(nextProjects);
+    if (nextProjects.length === 0) setPickerMode(null);
   }
 
   function handleWheelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -339,10 +249,27 @@ export default function HomePage() {
     const currentIndex = wheelItems.findIndex((item) => item.id === previewItem);
     const direction = event.key === "ArrowRight" ? 1 : -1;
     const nextIndex = (currentIndex + direction + wheelItems.length) % wheelItems.length;
-    snapToWheelItem(wheelItems[nextIndex].id);
+    mainSpinner.snapToIndex(nextIndex);
   }
 
-  function openProject(project: Project) {
+  function handleProjectSpinnerKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (projects.length === 0) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      projectSpinner.snapToIndex(projectSpinner.activeIndex);
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (projectSpinner.activeIndex + direction + projects.length) % projects.length;
+    projectSpinner.snapToIndex(nextIndex);
+  }
+
+  function openProject(project: Project | undefined) {
+    if (!project || pickerMode !== "progress" || projectNavigationRef.current) return;
+    projectNavigationRef.current = true;
     router.push(`/projects/${project.id}`);
   }
 
@@ -411,54 +338,94 @@ export default function HomePage() {
 
   const pickerTitle = pickerMode === "new" ? "New Project" : pickerMode === "join" ? "Join Project" : "Go";
 
-  function renderProjectFruits() {
+  function renderProjectSpinner() {
     if (isLoading || errorMessage || projects.length === 0) return null;
 
-    return projects.map((project) => (
-      <div key={project.id} className="relative z-10 h-20 w-20 shrink-0 md:h-[5.5rem] md:w-[5.5rem]">
-        <button
-          type="button"
-          onClick={() => openProject(project)}
-          className="group/fruit flex h-full w-full flex-col items-center justify-center rounded-full border border-field-secondary/50 bg-white px-2 text-center shadow-[0_5px_14px_rgba(15,61,46,0.10)] transition-[background-color,border-color,box-shadow,transform] duration-150 hover:border-field-primary hover:bg-field-light hover:shadow-[0_7px_18px_rgba(15,61,46,0.16)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-          aria-label={`${project.name} ${pickerTitle}`}
-        >
-          <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
-            <span className="font-display">{project.name}</span>
-          </span>
-          <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
-            {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            hideProjectFromCurrentList(project);
-          }}
-          className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
-          aria-label={`${project.name} 목록에서 숨기기`}
-        >
-          <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
-            <X className="h-3 w-3" aria-hidden />
-          </span>
-        </button>
+    return (
+      <div
+        ref={projectWheelRef}
+        role="group"
+        tabIndex={0}
+        aria-label="프로젝트 원형 메뉴. 좌우 방향키 또는 드래그로 회전"
+        className="relative mx-auto aspect-square w-[min(82vw,20rem)] touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
+        {...projectSpinner.pointerHandlers}
+        onKeyDown={handleProjectSpinnerKeyDown}
+      >
+        <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/35 shadow-[inset_0_0_0_8px_rgba(255,255,255,0.3),0_12px_26px_rgba(15,61,46,0.07)]" aria-hidden />
+        <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
+        <div className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-sm" aria-hidden />
+        <div
+          className="pointer-events-none absolute left-[85%] top-1/2 h-[5.5rem] w-[5.5rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)]"
+          aria-hidden
+        />
+        {projects.map((project, index) => {
+          const itemAngle = getSpinnerItemAngle(index, projects.length) + projectSpinner.rotation;
+          const radians = itemAngle * (Math.PI / 180);
+          const left = Number((50 + Math.cos(radians) * 35).toFixed(4));
+          const top = Number((50 + Math.sin(radians) * 35).toFixed(4));
+          const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
+          const proximity = Math.max(0, 1 - distance / 180);
+          const isActive = projectSpinner.activeIndex === index;
+          const scale = isActive ? 0.98 : 0.58 + proximity * 0.22;
+          const opacity = isActive ? 1 : 0.32 + proximity * 0.46;
+
+          return (
+            <div
+              key={project.id}
+              className={`absolute h-20 w-20 will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
+                projectSpinner.isDragging
+                  ? "transition-none"
+                  : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
+              }`}
+              style={{
+                left: `${left}%`,
+                top: `${top}%`,
+                opacity,
+                transform: `translate(-50%, -50%) scale(${scale})`,
+                zIndex: isActive ? 20 : Math.max(1, Math.round(proximity * 10))
+              }}
+            >
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (projectSpinner.consumeSuppressedClick()) return;
+                  projectSpinner.snapToIndex(index);
+                }}
+                className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] ${
+                  isActive
+                    ? "border-[#d7b95f] bg-[#fffdf4] shadow-[inset_0_4px_9px_rgba(15,61,46,0.08),0_6px_16px_rgba(15,61,46,0.16)] brightness-95"
+                    : "border-field-secondary/50 shadow-[0_5px_12px_rgba(15,61,46,0.10)] hover:border-field-primary hover:bg-field-light"
+                } active:brightness-90 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                aria-label={`${project.name} ${pickerTitle}`}
+                aria-pressed={isActive}
+              >
+                <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+                  <span className="font-display">{project.name}</span>
+                </span>
+                <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
+                  {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  hideProjectFromCurrentList(project);
+                }}
+                className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                aria-label={`${project.name} 목록에서 숨기기`}
+              >
+                <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                  <X className="h-3 w-3" aria-hidden />
+                </span>
+              </button>
+            </div>
+          );
+        })}
       </div>
-    ));
-  }
-
-  function renderFruitBranches() {
-    const columnCount = 2;
-    const rowCount = Math.max(1, Math.ceil(projects.length / columnCount));
-
-    return projects.map((project, index) => {
-      const column = index % columnCount;
-      const row = Math.floor(index / columnCount);
-      const targetX = ((column + 0.5) / columnCount) * 100;
-      const targetY = ((row + 0.5) / rowCount) * 100;
-      const path = `M100 50 C${82 + targetX * 0.08} 50 ${targetX + 10} ${targetY} ${targetX} ${targetY}`;
-
-      return <path key={project.id} d={path} fill="none" stroke="#c9d6d0" strokeWidth="0.7" vectorEffect="non-scaling-stroke" />;
-    });
+    );
   }
 
   return (
@@ -467,7 +434,9 @@ export default function HomePage() {
         <div
           ref={compositionRef}
           className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-300 ${
-            pickerMode ? "max-w-[42rem] flex-col gap-7 md:flex-row md:gap-12" : "max-w-[24rem]"
+            pickerMode
+              ? `${pickerMode === "progress" ? "max-w-[50rem]" : "max-w-[42rem]"} flex-col gap-7 md:flex-row md:gap-12`
+              : "max-w-[24rem]"
           }`}
         >
           <div
@@ -476,11 +445,7 @@ export default function HomePage() {
             tabIndex={0}
             aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
             className="relative z-20 aspect-square w-[min(82vw,22rem)] shrink-0 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
-            onPointerDown={handleWheelPointerDown}
-            onPointerMove={handleWheelPointerMove}
-            onPointerUp={finishWheelPointer}
-            onPointerCancel={finishWheelPointer}
-            onWheel={handleSpinnerWheel}
+            {...mainSpinner.pointerHandlers}
             onKeyDown={handleWheelKeyDown}
           >
             <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
@@ -490,8 +455,8 @@ export default function HomePage() {
               className="pointer-events-none absolute left-[85%] top-1/2 h-[6.25rem] w-[6.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)]"
               aria-hidden
             />
-            {wheelItems.map((item) => {
-              const angle = (item.angle + wheelRotation) * (Math.PI / 180);
+            {wheelItems.map((item, index) => {
+              const angle = (getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation) * (Math.PI / 180);
               const left = Number((50 + Math.cos(angle) * 35).toFixed(4));
               const top = Number((50 + Math.sin(angle) * 35).toFixed(4));
               const isSelected = previewItem === item.id;
@@ -503,14 +468,11 @@ export default function HomePage() {
                   aria-pressed={isSelected}
                   onClick={(event) => {
                     event.stopPropagation();
-                    if (suppressClickRef.current) {
-                      suppressClickRef.current = false;
-                      return;
-                    }
-                    snapToWheelItem(item.id);
+                    if (mainSpinner.consumeSuppressedClick()) return;
+                    mainSpinner.snapToIndex(index);
                   }}
                   className={`absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] sm:h-24 sm:w-24 ${item.colorClass} ${
-                    isDraggingWheel
+                    mainSpinner.isDragging
                       ? "transition-none"
                       : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
                   } ${
@@ -536,7 +498,9 @@ export default function HomePage() {
             ref={clusterRef}
             role="region"
             aria-label={pickerTitle}
-            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] md:w-[14rem]"
+            className={`relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] ${
+              pickerMode === "progress" ? "md:w-[20rem]" : "md:w-[14rem]"
+            }`}
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
@@ -653,12 +617,7 @@ export default function HomePage() {
                   <p className="rounded-full border border-field-border bg-white px-4 py-2 text-center text-[11px] font-black text-field-muted">
                     진행 볼 프로젝트가 없습니다
                   </p>
-                ) : <div className="relative grid auto-rows-[5rem] grid-cols-2 justify-items-center gap-2 md:auto-rows-[5.5rem]">
-                  <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-                    {renderFruitBranches()}
-                  </svg>
-                  {renderProjectFruits()}
-                </div>}
+                ) : renderProjectSpinner()}
               </div>
             )}
           </div>
