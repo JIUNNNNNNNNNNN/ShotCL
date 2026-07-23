@@ -20,13 +20,13 @@ type ShotReorderListProps = {
   renderShot: (shot: Shot) => ReactNode;
 };
 
-const MOUSE_LONG_PRESS_MS = 300;
-const TOUCH_LONG_PRESS_MS = 420;
-const PRESS_MOVE_TOLERANCE_PX = 10;
+const MOUSE_LONG_PRESS_MS = 220;
+const TOUCH_LONG_PRESS_MS = 330;
+const CLICK_MOVE_TOLERANCE_PX = 10;
 
 function isDragExcludedTarget(target: EventTarget | null) {
   return target instanceof Element
-    && Boolean(target.closest("button, a, input, textarea, select, [data-no-drag]"));
+    && Boolean(target.closest("input, textarea, select, [contenteditable='true'], [data-no-drag]"));
 }
 
 function reorderShots(
@@ -52,8 +52,8 @@ function reorderShots(
 }
 
 /**
- * 카드 본문을 길게 누른 뒤 위아래로 움직여 정렬합니다.
- * 짧은 클릭과 카드 안 버튼은 기존 이벤트를 그대로 사용합니다.
+ * 카드와 부감도/콘티 영역을 길게 누른 뒤 위아래로 움직여 정렬합니다.
+ * 짧은 클릭은 기존 동작을 유지하고, 상태 버튼과 편집 필드는 드래그에서 제외합니다.
  */
 export function ShotReorderList({
   allShots,
@@ -93,10 +93,12 @@ export function ShotReorderList({
     const startX = event.clientX;
     const startY = event.clientY;
     const pressedCard = event.currentTarget;
+    const captureTarget = event.target instanceof Element ? event.target : pressedCard;
     const delay = event.pointerType === "mouse" ? MOUSE_LONG_PRESS_MS : TOUCH_LONG_PRESS_MS;
     const originalUserSelect = document.body.style.userSelect;
     const originalWebkitUserSelect = document.body.style.webkitUserSelect;
     let activated = false;
+    let movedBeyondClickTolerance = false;
     let latestTargetId: string | null = shotId;
     let latestInsertAfter = false;
     let latestClientY = startY;
@@ -119,14 +121,8 @@ export function ShotReorderList({
       restoreDocumentInteraction();
       setDragState(null);
       cleanupPointerSessionRef.current = null;
-      if (pressedCard.hasPointerCapture(pointerId)) pressedCard.releasePointerCapture(pointerId);
-    };
-
-    const cancelBeforeActivation = () => {
-      if (!activated) {
-        suppressClickUntilRef.current = Date.now() + 400;
-        cleanup();
-      }
+      if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
+      else if (pressedCard.hasPointerCapture(pointerId)) pressedCard.releasePointerCapture(pointerId);
     };
 
     const findDropTarget = (clientY: number) => {
@@ -159,11 +155,9 @@ export function ShotReorderList({
       document.body.style.userSelect = "none";
       document.body.style.webkitUserSelect = "none";
       window.getSelection()?.removeAllRanges();
-      if (event.pointerType !== "mouse") {
-        window.addEventListener("touchmove", preventTouchScroll, { passive: false });
-      }
+      findDropTarget(latestClientY);
       try {
-        pressedCard.setPointerCapture(pointerId);
+        if (!captureTarget.hasPointerCapture(pointerId)) pressedCard.setPointerCapture(pointerId);
       } catch {
         // 일부 모바일 브라우저는 long press 시점의 pointer capture를 지원하지 않습니다.
       }
@@ -186,7 +180,7 @@ export function ShotReorderList({
 
       if (!activated) {
         const distance = Math.hypot(pointerEvent.clientX - startX, pointerEvent.clientY - startY);
-        if (distance > PRESS_MOVE_TOLERANCE_PX) cancelBeforeActivation();
+        if (distance > CLICK_MOVE_TOLERANCE_PX) movedBeyondClickTolerance = true;
         return;
       }
 
@@ -204,6 +198,7 @@ export function ShotReorderList({
     function handlePointerUp(pointerEvent: PointerEvent) {
       if (pointerEvent.pointerId !== pointerId) return;
       if (!activated) {
+        if (movedBeyondClickTolerance) suppressClickUntilRef.current = Date.now() + 400;
         cleanup();
         return;
       }
@@ -231,6 +226,14 @@ export function ShotReorderList({
     }
 
     const longPressTimer = window.setTimeout(activateDrag, delay);
+    try {
+      captureTarget.setPointerCapture(pointerId);
+    } catch {
+      // 일부 브라우저에서는 요소 종류에 따라 pointer capture를 즉시 설정할 수 없습니다.
+    }
+    if (event.pointerType !== "mouse") {
+      window.addEventListener("touchmove", preventTouchScroll, { passive: false });
+    }
     window.addEventListener("pointermove", handlePointerMove, { passive: false });
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);

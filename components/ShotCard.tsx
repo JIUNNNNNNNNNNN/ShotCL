@@ -128,6 +128,7 @@ export function ShotCard({
         <div className={cn("col-span-2 grid gap-2 sm:col-span-1", progressOnly ? "grid-cols-1" : "grid-cols-2")}>
           <button
             type="button"
+            data-no-drag="true"
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
             disabled={progressOnly && shot.status !== "pending"}
@@ -142,6 +143,7 @@ export function ShotCard({
           {!progressOnly ? (
           <button
             type="button"
+            data-no-drag="true"
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
