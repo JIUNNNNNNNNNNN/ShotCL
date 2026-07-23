@@ -71,7 +71,7 @@ export async function listShots(projectId: string, dailyPlanId?: string): Promis
     .sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt));
 }
 
-/** AI 분석 결과나 수동 입력 컷을 프로젝트에 추가합니다. */
+/** 일촬표 동기화 결과나 수동 입력 컷을 프로젝트에 추가합니다. */
 export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft[], dailyPlanId?: string): Promise<Shot[]> {
   const existingShots = await listShots(projectId, dailyPlanId);
   const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
@@ -305,7 +305,7 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
   return updatedShot;
 }
 
-/** 분석 결과로 기존 컷 리스트를 교체할 때 사용합니다. */
+/** 현재 회차의 컷 목록을 초기화할 때 사용합니다. */
 export async function deleteAllShots(projectId: string, dailyPlanId?: string): Promise<void> {
   if (await getSharedRole(projectId)) {
     const query = dailyPlanId ? `?dailyPlanId=${encodeURIComponent(dailyPlanId)}` : "";

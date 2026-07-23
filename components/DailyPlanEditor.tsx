@@ -2674,7 +2674,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
 
   return (
     <article className={className}>
-      <table className="daily-plan-grid w-full border-collapse border-2 border-black text-center">
+      <table className="daily-plan-grid daily-plan-export-table w-full border-collapse border-2 border-black text-center">
         <tbody>
           <tr>
             <td rowSpan={4} className="border border-black font-black">
@@ -2725,14 +2725,17 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
           </tr>
           <tr><td colSpan={16} className="h-1 border-0 p-0" /></tr>
           {locations.map((location, index) => (
-            <tr key={`print-location-${location?.id ?? index}`}>
+            <tr
+              key={`print-location-${location?.id ?? index}`}
+              className={`${index === 0 ? "pdf-section-start" : ""} ${index === locations.length - 1 ? "pdf-section-end" : ""}`}
+            >
               <td className="border border-black text-left font-black">LOCATION {index + 1}</td>
               <td colSpan={7} className="border border-black">{location?.name || "-"}</td>
               <td colSpan={8} className="border border-black">{getLocationAddress(location ?? undefined) || location?.detail || "-"}</td>
             </tr>
           ))}
           <tr><td colSpan={16} className="h-1 border-0 p-0" /></tr>
-          <tr className="bg-[#d9d9d9] font-black">
+          <tr className={`pdf-section-start bg-[#d9d9d9] font-black ${timetableRows.length === 0 ? "pdf-section-end" : ""}`}>
             <td className="border border-black">START</td>
             <td className="border border-black">END</td>
             <td className="border border-black">RT</td>
@@ -2746,7 +2749,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
           </tr>
           {timetableRows.map((row, index) =>
             row.type === "break" ? (
-              <tr key={`time-row-${index}`} className="bg-[#fff2cc]">
+              <tr key={`time-row-${index}`} className={`bg-[#fff2cc] ${index === timetableRows.length - 1 ? "pdf-section-end" : ""}`}>
                 <td className="border border-black">{row.start}</td>
                 <td className="border border-black">{row.end}</td>
                 <td className="border border-black">{row.runtime}</td>
@@ -2760,7 +2763,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 )}
               </tr>
             ) : (
-              <tr key={`time-row-${index}`}>
+              <tr key={`time-row-${index}`} className={index === timetableRows.length - 1 ? "pdf-section-end" : undefined}>
                 <td className="border border-black">{row.start}</td>
                 <td className="border border-black">{row.end}</td>
                 <td className="border border-black">{row.runtime}</td>
@@ -2775,16 +2778,16 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
             )
           )}
           <tr><td colSpan={16} className="h-2 border-0 p-0" /></tr>
-          <tr>
+          <tr className="pdf-section-start">
             <td colSpan={8} className="border border-black font-black">Notice</td>
             <td colSpan={8} className="border border-black font-black">Memo</td>
           </tr>
-          <tr>
+          <tr className="pdf-section-end">
             <td colSpan={8} className="h-24 whitespace-pre-wrap border border-black align-top text-left">{data.plan.safetyNotice || ""}</td>
             <td colSpan={8} className="h-24 whitespace-pre-wrap border border-black align-top text-left">{data.meta.memoText || ""}</td>
           </tr>
           <tr><td colSpan={16} className="h-2 border-0 p-0" /></tr>
-          <tr className="bg-[#d9d9d9] font-black">
+          <tr className="pdf-section-start bg-[#d9d9d9] font-black">
             <td colSpan={2} className="border border-black">Starring</td>
             <td colSpan={2} className="border border-black">Roll</td>
             <td className="border border-black">CALL</td>
@@ -2800,7 +2803,10 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
             const person = starringRows[index];
             const team = teamRows[index];
             return (
-              <tr key={`call-sheet-${index}`}>
+              <tr
+                key={`call-sheet-${index}`}
+                className={index === Math.max(starringRows.length, teamRows.length) - 1 ? "pdf-section-end" : undefined}
+              >
                 <td colSpan={2} className="border border-black">{person?.name || ""}</td>
                 <td colSpan={2} className="border border-black">{person?.role || ""}</td>
                 <td className="border border-black">{person?.callTime || ""}</td>

@@ -1,6 +1,6 @@
 export type ShotStatus = "pending" | "ok" | "omit";
 
-export type DailyPlanSourceType = "web_editor" | "excel_import" | "pdf_ai_import";
+export type DailyPlanSourceType = "web_editor" | "excel_import";
 
 export type DailyPlanShotStatus = "촬영 전" | "촬영중" | "OK" | "보류" | "Omit";
 
@@ -46,126 +46,6 @@ export const shotStatusStyles: Record<ShotStatus, string> = {
 
 export type LegacyShotStatus = ShotStatus | "todo" | "shooting" | "done" | "hold" | "skipped";
 
-export type AnalyzeStats = {
-  detectedSheetNames?: string[];
-  detectedHeaderRow?: number | null;
-  detectedColumns?: Record<string, string | null>;
-  detectedCandidateCount: number;
-  detectedShotCandidateCount?: number;
-  detectedRowCount: number;
-  generatedShotCount: number;
-  confidence?: "low" | "medium" | "high";
-  warning?: string;
-  warnings?: string[];
-  rawTextSample?: string;
-};
-
-export type TextQualityResult = {
-  isLikelyCorrupted: boolean;
-  koreanCharCount: number;
-  suspiciousCharCount: number;
-  totalLength: number;
-  koreanRatio: number;
-  suspiciousRatio: number;
-  warnings: string[];
-};
-
-export type ExtractionPreview = {
-  fileName: string;
-  fileType: string;
-  extractionMethod: string;
-  nativeTextPreview?: string;
-  nativeTextQuality?: TextQualityResult | null;
-  usedFallback?: boolean;
-  fallbackReason?: string;
-  ocrPageCount?: number;
-  renderedPageCount?: number;
-  renderedImageInfo?: Array<{
-    pageNumber: number;
-    width: number;
-    height: number;
-    byteSize: number;
-    dpi: number;
-  }>;
-  renderedImagePreviewDataUrl?: string;
-  ocrTextPreview?: string;
-  ocrTextQuality?: TextQualityResult | null;
-  ocrEngine?: string;
-  ocrLanguage?: string;
-  availableLanguages?: string[];
-  tesseractDataPath?: string;
-  ocrErrorMessage?: string;
-  ocrSucceeded?: boolean;
-  ocrFailureReason?: string;
-  openaiApiKeyConfigured?: boolean;
-  visionSucceeded?: boolean;
-  visionModelUsed?: string;
-  visionRequestSent?: boolean;
-  visionResponseReceived?: boolean;
-  visionRawResponsePreview?: string;
-  parsedShotCount?: number;
-  imageMimeType?: string;
-  imageByteSize?: number;
-  firstPageImageWidth?: number;
-  firstPageImageHeight?: number;
-  firstPageImageDpi?: number;
-  textSample: string;
-  textQuality: TextQualityResult;
-  hasEncodingWarning: boolean;
-};
-
-export type ShotCandidate = {
-  sceneNumber: string;
-  cutNumber: string;
-  title: string;
-  description: string;
-  location: string;
-  characters: string[];
-  memo: string;
-  orderIndex: number;
-  sourceSheet?: string | null;
-  sourcePage?: number | null;
-  sourceRow?: number | null;
-  rawText?: string;
-  rawData?: Record<string, string>;
-};
-
-export type AnalysisDebugInfo = {
-  extractedTextSample: string;
-  detectedRows?: Array<{
-    sheetName?: string;
-    rowNumber: number;
-    cells: string[];
-  }>;
-  rawCandidates: ShotCandidate[];
-  promptPayloadSummary?: Record<string, unknown>;
-  aiRawResponse?: string;
-  parseError?: string;
-  textQuality?: TextQualityResult;
-  extractionPreview?: ExtractionPreview;
-};
-
-export type StoryboardAnalysisResult = {
-  source: "rules" | "mock" | "openai" | "mock-fallback";
-  analysisRunId?: string | null;
-  analysisRunPersistenceWarning?: string;
-  analyzerType?: string;
-  projectId?: string;
-  fileName?: string;
-  fileType?: string;
-  sourceFileUrl?: string | null;
-  extractionPreview?: ExtractionPreview;
-  textQuality?: TextQualityResult;
-  isTextCorrupted?: boolean;
-  failureReason?: string | null;
-  summary: AnalyzeStats;
-  stats: AnalyzeStats;
-  warning?: string;
-  shots: ShotDraft[];
-  candidates: ShotCandidate[];
-  debug: AnalysisDebugInfo;
-};
-
 export type ProjectRole = "admin" | "progress" | "crew";
 
 export type Project = {
@@ -182,16 +62,6 @@ export type ProjectInput = {
   name: string;
   shootDate: string;
   description: string;
-};
-
-export type StoryboardFile = {
-  id: string;
-  projectId: string;
-  fileName: string;
-  fileType: string;
-  fileSize: number;
-  storagePath: string;
-  createdAt: string;
 };
 
 export type Shot = {
@@ -304,64 +174,4 @@ export type DailyPlanShotDraft = Omit<DailyPlanShot, "id" | "dailyPlanId" | "pro
 export type DailyPlanWithShots = {
   plan: DailyPlan;
   shots: DailyPlanShot[];
-};
-
-export type AnalysisRunStatus = "preview" | "confirmed" | "discarded" | "failed";
-
-export type AnalysisRunAction = "unchanged" | "edited" | "deleted" | "added";
-
-export type AnalysisReviewedShot = ShotDraft & {
-  excluded?: boolean;
-};
-
-export type AnalysisRun = {
-  id: string;
-  projectId: string;
-  sourceFileName: string;
-  sourceFileType: string;
-  sourceFileUrl: string | null;
-  analyzerType: string;
-  status: AnalysisRunStatus;
-  detectedRowCount: number;
-  detectedShotCandidateCount: number;
-  generatedShotCount: number;
-  finalShotCount: number;
-  aiRawResult: unknown;
-  aiNormalizedShots: ShotDraft[];
-  finalConfirmedShots: ShotDraft[];
-  warnings: string[];
-  debugPayload: unknown;
-  textQuality: TextQualityResult | null;
-  isTextCorrupted: boolean;
-  failureReason: string;
-  userFeedback: string;
-  createdAt: string;
-  confirmedAt: string | null;
-};
-
-export type AnalysisRunItem = {
-  id: string;
-  analysisRunId: string;
-  projectId: string;
-  originalOrderIndex: number | null;
-  finalOrderIndex: number | null;
-  aiSceneNumber: string;
-  aiCutNumber: string;
-  aiTitle: string;
-  aiDescription: string;
-  aiLocation: string;
-  aiCharacters: string[];
-  aiMemo: string;
-  finalSceneNumber: string;
-  finalCutNumber: string;
-  finalTitle: string;
-  finalDescription: string;
-  finalLocation: string;
-  finalCharacters: string[];
-  finalMemo: string;
-  action: AnalysisRunAction;
-  sourceSheet: string | null;
-  sourcePage: number | null;
-  sourceRow: number | null;
-  createdAt: string;
 };

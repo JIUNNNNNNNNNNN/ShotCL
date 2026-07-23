@@ -1,7 +1,4 @@
 import type {
-  AnalysisRun,
-  AnalysisRunItem,
-  AnalysisRunStatus,
   DailyPlan,
   DailyPlanDraft,
   DailyPlanLocation,
@@ -13,8 +10,7 @@ import type {
   Project,
   Shot,
   ShotDraft,
-  ShotStatus,
-  StoryboardFile
+  ShotStatus
 } from "@/lib/types";
 
 type AnyRow = Record<string, any>;
@@ -36,7 +32,7 @@ export function normalizeDailyPlanShotStatus(status: unknown): DailyPlanShotStat
 }
 
 function normalizeDailyPlanSourceType(value: unknown): DailyPlanSourceType {
-  if (value === "excel_import" || value === "pdf_ai_import") return value;
+  if (value === "excel_import") return value;
   return "web_editor";
 }
 
@@ -212,19 +208,6 @@ export function dailyPlanShotDraftToRow(projectId: string, dailyPlanId: string, 
   };
 }
 
-/** Supabase의 storyboard_files row를 화면 타입으로 바꿉니다. */
-export function storyboardFileFromRow(row: AnyRow): StoryboardFile {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    fileName: row.file_name,
-    fileType: row.file_type ?? "",
-    fileSize: row.file_size ?? 0,
-    storagePath: row.storage_path,
-    createdAt: row.created_at
-  };
-}
-
 /** Supabase의 shots row를 화면 타입으로 바꿉니다. */
 export function shotFromRow(row: AnyRow): Shot {
   return {
@@ -300,131 +283,4 @@ export function shotPatchToRow(patch: Partial<Shot>) {
   if (patch.sourceRow !== undefined) row.source_row = patch.sourceRow;
 
   return row;
-}
-
-function normalizeAnalysisRunStatus(status: unknown): AnalysisRunStatus {
-  if (status === "confirmed" || status === "discarded" || status === "failed") return status;
-  return "preview";
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
-}
-
-function normalizeShotDraftArray(value: unknown): ShotDraft[] {
-  return Array.isArray(value) ? (value as ShotDraft[]) : [];
-}
-
-/** Supabase의 analysis_runs row를 화면에서 쓰는 camelCase 타입으로 바꿉니다. */
-export function analysisRunFromRow(row: AnyRow): AnalysisRun {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    sourceFileName: row.source_file_name ?? "",
-    sourceFileType: row.source_file_type ?? "",
-    sourceFileUrl: row.source_file_url ?? null,
-    analyzerType: row.analyzer_type ?? "mock",
-    status: normalizeAnalysisRunStatus(row.status),
-    detectedRowCount: row.detected_row_count ?? 0,
-    detectedShotCandidateCount: row.detected_shot_candidate_count ?? 0,
-    generatedShotCount: row.generated_shot_count ?? 0,
-    finalShotCount: row.final_shot_count ?? 0,
-    aiRawResult: row.ai_raw_result ?? null,
-    aiNormalizedShots: normalizeShotDraftArray(row.ai_normalized_shots),
-    finalConfirmedShots: normalizeShotDraftArray(row.final_confirmed_shots),
-    warnings: normalizeStringArray(row.warnings),
-    debugPayload: row.debug_payload ?? null,
-    textQuality: row.text_quality ?? null,
-    isTextCorrupted: Boolean(row.is_text_corrupted),
-    failureReason: row.failure_reason ?? "",
-    userFeedback: row.user_feedback ?? "",
-    createdAt: row.created_at,
-    confirmedAt: row.confirmed_at ?? null
-  };
-}
-
-/** analysis_runs insert/update 입력값을 Supabase row로 바꿉니다. */
-export function analysisRunToRow(input: Partial<AnalysisRun> & { projectId?: string }) {
-  const row: AnyRow = {};
-
-  if (input.projectId !== undefined) row.project_id = input.projectId;
-  if (input.sourceFileName !== undefined) row.source_file_name = input.sourceFileName;
-  if (input.sourceFileType !== undefined) row.source_file_type = input.sourceFileType;
-  if (input.sourceFileUrl !== undefined) row.source_file_url = input.sourceFileUrl;
-  if (input.analyzerType !== undefined) row.analyzer_type = input.analyzerType;
-  if (input.status !== undefined) row.status = input.status;
-  if (input.detectedRowCount !== undefined) row.detected_row_count = input.detectedRowCount;
-  if (input.detectedShotCandidateCount !== undefined) row.detected_shot_candidate_count = input.detectedShotCandidateCount;
-  if (input.generatedShotCount !== undefined) row.generated_shot_count = input.generatedShotCount;
-  if (input.finalShotCount !== undefined) row.final_shot_count = input.finalShotCount;
-  if (input.aiRawResult !== undefined) row.ai_raw_result = input.aiRawResult;
-  if (input.aiNormalizedShots !== undefined) row.ai_normalized_shots = input.aiNormalizedShots;
-  if (input.finalConfirmedShots !== undefined) row.final_confirmed_shots = input.finalConfirmedShots;
-  if (input.warnings !== undefined) row.warnings = input.warnings;
-  if (input.debugPayload !== undefined) row.debug_payload = input.debugPayload;
-  if (input.textQuality !== undefined) row.text_quality = input.textQuality;
-  if (input.isTextCorrupted !== undefined) row.is_text_corrupted = input.isTextCorrupted;
-  if (input.failureReason !== undefined) row.failure_reason = input.failureReason;
-  if (input.userFeedback !== undefined) row.user_feedback = input.userFeedback;
-  if (input.confirmedAt !== undefined) row.confirmed_at = input.confirmedAt;
-
-  return row;
-}
-
-/** Supabase의 analysis_run_items row를 화면 타입으로 바꿉니다. */
-export function analysisRunItemFromRow(row: AnyRow): AnalysisRunItem {
-  return {
-    id: row.id,
-    analysisRunId: row.analysis_run_id,
-    projectId: row.project_id,
-    originalOrderIndex: row.original_order_index ?? null,
-    finalOrderIndex: row.final_order_index ?? null,
-    aiSceneNumber: row.ai_scene_number ?? "",
-    aiCutNumber: row.ai_cut_number ?? "",
-    aiTitle: row.ai_title ?? "",
-    aiDescription: row.ai_description ?? "",
-    aiLocation: row.ai_location ?? "",
-    aiCharacters: normalizeStringArray(row.ai_characters),
-    aiMemo: row.ai_memo ?? "",
-    finalSceneNumber: row.final_scene_number ?? "",
-    finalCutNumber: row.final_cut_number ?? "",
-    finalTitle: row.final_title ?? "",
-    finalDescription: row.final_description ?? "",
-    finalLocation: row.final_location ?? "",
-    finalCharacters: normalizeStringArray(row.final_characters),
-    finalMemo: row.final_memo ?? "",
-    action: row.action ?? "unchanged",
-    sourceSheet: row.source_sheet ?? null,
-    sourcePage: row.source_page ?? null,
-    sourceRow: row.source_row ?? null,
-    createdAt: row.created_at
-  };
-}
-
-/** 분석 컷 단위 비교 결과를 Supabase insert row로 바꿉니다. */
-export function analysisRunItemToRow(item: Omit<AnalysisRunItem, "id" | "createdAt">) {
-  return {
-    analysis_run_id: item.analysisRunId,
-    project_id: item.projectId,
-    original_order_index: item.originalOrderIndex,
-    final_order_index: item.finalOrderIndex,
-    ai_scene_number: item.aiSceneNumber,
-    ai_cut_number: item.aiCutNumber,
-    ai_title: item.aiTitle,
-    ai_description: item.aiDescription,
-    ai_location: item.aiLocation,
-    ai_characters: item.aiCharacters,
-    ai_memo: item.aiMemo,
-    final_scene_number: item.finalSceneNumber,
-    final_cut_number: item.finalCutNumber,
-    final_title: item.finalTitle,
-    final_description: item.finalDescription,
-    final_location: item.finalLocation,
-    final_characters: item.finalCharacters,
-    final_memo: item.finalMemo,
-    action: item.action,
-    source_sheet: item.sourceSheet,
-    source_page: item.sourcePage,
-    source_row: item.sourceRow
-  };
 }

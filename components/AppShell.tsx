@@ -47,7 +47,7 @@ function TestModeWarning({ compact = false }: { compact?: boolean }) {
             <span className="ml-auto text-xs font-bold text-amber-800">안내 보기</span>
           </summary>
           <p className="mt-2 pl-6 text-xs font-bold leading-5 text-amber-900">
-            Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않습니다. 실제 작품 정보, 배우 연락처, 촬영 장소, PDF·콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
+            Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않습니다. 실제 작품 정보, 배우 연락처, 촬영 장소, 콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
           </p>
         </details>
       </aside>
@@ -65,7 +65,7 @@ function TestModeWarning({ compact = false }: { compact?: boolean }) {
           <p className="font-black">현재 앱은 테스트 모드입니다.</p>
           <p className="mt-1 text-sm font-bold leading-6">
             Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않으며, 데이터는 이 브라우저에만 임시 저장될 수 있습니다.
-            실제 작품 정보, 배우 연락처, 촬영 장소, PDF·콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
+            실제 작품 정보, 배우 연락처, 촬영 장소, 콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
           </p>
         </div>
       </div>

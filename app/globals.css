@@ -225,12 +225,31 @@ a[class*="min-h-"][class*="items-center"] {
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
+  --daily-plan-section-line: rgba(28, 28, 28, 0.82);
+  --daily-plan-card-line: rgba(78, 78, 78, 0.68);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+.daily-plan-print-document {
+  --daily-plan-section-line: rgba(28, 28, 28, 0.82);
+  --daily-plan-card-line: rgba(78, 78, 78, 0.68);
 }
 
 .daily-plan-template table,
 .daily-plan-template .daily-plan-grid {
   table-layout: fixed;
+}
+
+.daily-plan-template .daily-plan-section-table,
+.daily-plan-print-document .daily-plan-export-table {
+  border: 2.5px solid var(--daily-plan-section-line) !important;
+}
+
+.daily-plan-template td,
+.daily-plan-template th,
+.daily-plan-print-document td,
+.daily-plan-print-document th {
+  border-color: var(--daily-plan-card-line) !important;
 }
 
 .daily-plan-template td,
@@ -239,6 +258,14 @@ a[class*="min-h-"][class*="items-center"] {
   padding: 3px 5px;
   vertical-align: middle;
   word-break: keep-all;
+}
+
+.daily-plan-print-document tr.pdf-section-start > :is(td, th) {
+  border-top: 2.5px solid var(--daily-plan-section-line) !important;
+}
+
+.daily-plan-print-document tr.pdf-section-end > :is(td, th) {
+  border-bottom: 2.5px solid var(--daily-plan-section-line) !important;
 }
 
 @media print {
@@ -279,6 +306,14 @@ a[class*="min-h-"][class*="items-center"] {
     width: 100% !important;
     margin: 0 !important;
     font-size: 8.5px !important;
+  }
+
+  .daily-plan-template,
+  .daily-plan-print-document {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    --daily-plan-section-line: #262626;
+    --daily-plan-card-line: #737373;
   }
 
   .daily-plan-template td,

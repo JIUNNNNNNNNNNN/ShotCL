@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, History, Plus, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -300,12 +300,6 @@ export default function ProjectDetailPage() {
             </Link>
             <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
               <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
-            </Link>
-            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
-              <span className="font-display"><span className="inline-flex items-center gap-2"><Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석</span></span>
-            </Link>
-            <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
-              <span className="font-display"><span className="inline-flex items-center gap-2"><History className="h-4 w-4" aria-hidden /> 분석 기록</span></span>
             </Link>
           </nav>
         </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도 권한</span>}

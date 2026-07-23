@@ -9,8 +9,8 @@ type DailyPlanDesktopLandscapePreviewProps = {
   timetableRows: MobileDailyPlanTimetableRow[];
 };
 
-const sectionTableClass = "mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
-const halfTableClass = "w-full table-fixed border-collapse border-2 border-black text-center";
+const sectionTableClass = "daily-plan-section-table mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
+const halfTableClass = "daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center";
 const cellClass = "border border-black px-1.5 py-1 text-center align-middle";
 const headerCellClass = `${cellClass} bg-[#d9d9d9] font-black`;
 
@@ -23,7 +23,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
   return (
     <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-tight text-black">
       <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
-        <table className="w-full table-fixed border-collapse border-2 border-black text-center">
+        <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <colgroup>
             <col style={{ width: "11%" }} />
             {Array.from({ length: 8 }, (_, index) => <col key={`call-column-${index}`} style={{ width: "7.5%" }} />)}
@@ -73,7 +73,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           </tbody>
         </table>
 
-        <table className="w-full table-fixed border-collapse border-2 border-black text-center">
+        <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <tbody>
             <tr><td className={`${cellClass} font-bold`}>Sunrise</td><td className={cellClass}>{meta.sunrise || "-"}</td></tr>
             <tr><td className={`${cellClass} font-bold`}>Sunset</td><td className={cellClass}>{meta.sunset || "-"}</td></tr>
