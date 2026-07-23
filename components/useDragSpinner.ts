@@ -80,6 +80,7 @@ export function useDragSpinner({
   const onRejectRef = useRef(onReject);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivationRef = useRef<{ index: number; activatedAt: number } | null>(null);
   const dragStateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -112,6 +113,20 @@ export function useDragSpinner({
     setActiveIndex(nextActiveIndex);
   }, [itemCount]);
 
+  const commitIndex = useCallback((index: number) => {
+    const now = Date.now();
+    const lastActivation = lastActivationRef.current;
+    if (
+      lastActivation
+      && lastActivation.index === index
+      && now - lastActivation.activatedAt < 400
+    ) return false;
+
+    lastActivationRef.current = { index, activatedAt: now };
+    onCommitRef.current(index);
+    return true;
+  }, []);
+
   const snapToIndex = useCallback((requestedIndex: number, options: SnapOptions = {}) => {
     cancelPending();
     if (itemCount <= 0) return;
@@ -125,9 +140,23 @@ export function useDragSpinner({
 
     if (options.commit === false) return;
     snapTimerRef.current = setTimeout(() => {
-      onCommitRef.current(index);
+      commitIndex(index);
     }, snapDurationMs);
-  }, [cancelPending, itemCount, snapDurationMs, updateRotation]);
+  }, [cancelPending, commitIndex, itemCount, snapDurationMs, updateRotation]);
+
+  const activateIndex = useCallback((requestedIndex: number) => {
+    cancelPending();
+    const activationIndex = getSpinnerActivationIndex(
+      rotationRef.current,
+      itemCount,
+      activationThresholdDegrees
+    );
+    if (activationIndex === null || activationIndex !== requestedIndex) {
+      onRejectRef.current?.();
+      return false;
+    }
+    return commitIndex(activationIndex);
+  }, [activationThresholdDegrees, cancelPending, commitIndex, itemCount]);
 
   const scheduleSettle = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
@@ -236,6 +265,7 @@ export function useDragSpinner({
     isDragging,
     cancelPending,
     snapToIndex,
+    activateIndex,
     consumeSuppressedClick,
     pointerHandlers: {
       onPointerDown,

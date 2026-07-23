@@ -241,7 +241,7 @@ export default function HomePage() {
         closeProjectRing();
         return;
       }
-      mainSpinner.snapToIndex(mainSpinner.activationIndex);
+      mainSpinner.activateIndex(mainSpinner.activationIndex);
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -261,7 +261,7 @@ export default function HomePage() {
         closeProjectRing();
         return;
       }
-      projectSpinner.snapToIndex(projectSpinner.activationIndex);
+      projectSpinner.activateIndex(projectSpinner.activationIndex);
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -416,7 +416,7 @@ export default function HomePage() {
                     closeProjectRing();
                     return;
                   }
-                  projectSpinner.snapToIndex(index);
+                  projectSpinner.activateIndex(index);
                 }}
                 className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] ${
                   isActive
@@ -489,7 +489,7 @@ export default function HomePage() {
               }`}
               {...mainSpinner.pointerHandlers}
               onClick={(event) => {
-                if (!isProjectRingOpen || event.target !== event.currentTarget) return;
+                if (event.target !== event.currentTarget) return;
                 if (mainSpinner.consumeSuppressedClick()) return;
                 closeProjectRing();
               }}
@@ -525,7 +525,7 @@ export default function HomePage() {
                         closeProjectRing();
                         return;
                       }
-                      mainSpinner.snapToIndex(index);
+                      mainSpinner.activateIndex(index);
                     }}
                     className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${
                       isProjectRingOpen
