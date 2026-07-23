@@ -202,9 +202,9 @@ export function useDragSpinner({
   measureTarget,
   activationKey = null,
   activationThresholdDegrees = SPINNER_ACTIVATION_THRESHOLD_DEGREES,
-  settleDelayMs = 180,
-  snapDurationMs = 220,
-  bounceDurationMs = 220
+  settleDelayMs = 220,
+  snapDurationMs = 260,
+  bounceDurationMs = 280
 }: DragSpinnerOptions) {
   const [rotation, setRotation] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);

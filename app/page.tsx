@@ -19,6 +19,8 @@ type ProjectPickerMode = "new" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
 
 const HIDDEN_PROJECT_IDS_KEY = "shotcl:hiddenProjectIds";
+const MAIN_SELECTION_FEEDBACK_MS = 140;
+const PROJECT_SELECTION_FEEDBACK_MS = 190;
 
 function readHiddenProjectIds() {
   if (typeof window === "undefined") return new Set<string>();
@@ -52,17 +54,20 @@ function unhideProject(projectId: string) {
 const wheelItems = [
   {
     id: "new",
-    label: "New Project",
+    label: "New",
+    ariaLabel: "New Project",
     colorClass: "bg-field-primary"
   },
   {
     id: "join",
-    label: "Join Project",
+    label: "Join",
+    ariaLabel: "Join Project",
     colorClass: "bg-[#557d6d]"
   },
   {
     id: "progress",
     label: "Go",
+    ariaLabel: "Go",
     colorClass: "bg-[#416f5d]"
   }
 ] as const;
@@ -82,6 +87,8 @@ export default function HomePage() {
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
+  const [selectedMainId, setSelectedMainId] = useState<WheelItemId | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const isProgressMode = pickerMode === "progress";
   const isProjectRingOpen = isProgressMode && projects.length > 0;
   const wheelRef = useRef<HTMLDivElement | null>(null);
@@ -94,6 +101,8 @@ export default function HomePage() {
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const compositionRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mainSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectNavigationRef = useRef(false);
   const measureMainTarget = useCallback(
     (index: number) => getBubbleTargetMeasurement(mainBubbleRefs.current[index], mainTargetRef.current),
@@ -121,6 +130,8 @@ export default function HomePage() {
   const activatedWheelItem = mainSpinner.activationIndex === null
     ? null
     : wheelItems[mainSpinner.activationIndex]?.id ?? null;
+  const isProjectTargetEngaged = projectSpinner.activationIndex !== null
+    && projectSpinner.activationState !== "outside";
 
   useEffect(() => {
     let isMounted = true;
@@ -145,6 +156,8 @@ export default function HomePage() {
 
   useEffect(() => () => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);
+    if (projectSelectionTimerRef.current) clearTimeout(projectSelectionTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -176,7 +189,10 @@ export default function HomePage() {
 
   useEffect(() => {
     projectNavigationRef.current = false;
-    if (pickerMode !== "progress") projectSpinner.cancelPending();
+    if (pickerMode !== "progress") {
+      projectSpinner.cancelPending();
+      setSelectedProjectId(null);
+    }
   }, [pickerMode, projectSpinner.cancelPending]);
 
   useEffect(() => {
@@ -204,27 +220,33 @@ export default function HomePage() {
   }
 
   function commitWheelItem(id: WheelItemId) {
-    if (pickerMode === id) return;
+    if (pickerMode === id || mainSelectionTimerRef.current) return;
+    setSelectedMainId(id);
     setFeedback(null);
     setNewProjectError("");
     setIsCreatingProject(false);
 
-    if (id === "new" || id === "join") {
+    mainSelectionTimerRef.current = setTimeout(() => {
+      mainSelectionTimerRef.current = null;
+      if (id === "new" || id === "join") {
+        setPickerMode(id);
+        return;
+      }
+
+      if (isLoading) {
+        showFeedback(id, "프로젝트 확인 중");
+        setSelectedMainId(null);
+        return;
+      }
+
+      if (errorMessage) {
+        showFeedback(id, "프로젝트를 불러오지 못했습니다");
+        setSelectedMainId(null);
+        return;
+      }
+
       setPickerMode(id);
-      return;
-    }
-
-    if (isLoading) {
-      showFeedback(id, "프로젝트 확인 중");
-      return;
-    }
-
-    if (errorMessage) {
-      showFeedback(id, "프로젝트를 불러오지 못했습니다");
-      return;
-    }
-
-    setPickerMode(id);
+    }, MAIN_SELECTION_FEEDBACK_MS);
   }
 
   function closeInputSubmenu(mode: "new" | "join") {
@@ -238,6 +260,7 @@ export default function HomePage() {
     }
     setNewProjectError("");
     setIsCreatingProject(false);
+    setSelectedMainId(null);
     setPickerMode(null);
   }
 
@@ -294,13 +317,29 @@ export default function HomePage() {
   function openProject(project: Project | undefined) {
     if (!project || pickerMode !== "progress" || projectNavigationRef.current) return;
     projectNavigationRef.current = true;
-    router.push(`/projects/${project.id}`);
+    setSelectedProjectId(project.id);
+    projectSelectionTimerRef.current = setTimeout(() => {
+      projectSelectionTimerRef.current = null;
+      try {
+        router.push(`/projects/${project.id}`);
+      } catch {
+        projectNavigationRef.current = false;
+        setSelectedProjectId(null);
+        showFeedback("progress", "프로젝트를 열지 못했습니다");
+      }
+    }, PROJECT_SELECTION_FEEDBACK_MS);
   }
 
   function closeProjectRing() {
     mainSpinner.cancelPending();
     projectSpinner.cancelPending();
+    if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);
+    if (projectSelectionTimerRef.current) clearTimeout(projectSelectionTimerRef.current);
+    mainSelectionTimerRef.current = null;
+    projectSelectionTimerRef.current = null;
     projectNavigationRef.current = false;
+    setSelectedMainId(null);
+    setSelectedProjectId(null);
     setPickerMode(null);
     setFeedback(null);
   }
@@ -395,9 +434,19 @@ export default function HomePage() {
         <div className="pointer-events-none absolute inset-[14%] rounded-full border border-dashed border-field-secondary/45" aria-hidden />
         <div
           ref={projectTargetRef}
-          className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)] md:h-[5.5rem] md:w-[5.5rem]"
+          className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] -translate-x-1/2 -translate-y-1/2 md:h-[5.5rem] md:w-[5.5rem]"
           aria-hidden
-        />
+        >
+          <div
+            className={`absolute inset-0 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 transition-[transform,box-shadow,background-color] duration-[260ms] ease-out ${
+              selectedProjectId
+                ? "scale-[1.18] bg-[#fff2b7]/55 shadow-[0_0_28px_rgba(215,185,95,0.62)] motion-safe:animate-[project-target-confirm_420ms_ease-out]"
+                : isProjectTargetEngaged
+                  ? "scale-[1.1] shadow-[0_0_24px_rgba(215,185,95,0.5)]"
+                  : "scale-100 shadow-[0_0_16px_rgba(215,185,95,0.32)]"
+            }`}
+          />
+        </div>
         {projects.map((project, index) => {
           const itemAngle = getSpinnerItemAngle(index, projects.length) + projectSpinner.rotation;
           const radians = itemAngle * (Math.PI / 180);
@@ -406,6 +455,7 @@ export default function HomePage() {
           const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
           const proximity = Math.max(0, 1 - distance / 180);
           const isActive = projectSpinner.activationIndex === index;
+          const isSelectedProject = selectedProjectId === project.id;
           const scale = isActive ? 0.96 : 0.52 + proximity * 0.24;
           const opacity = isActive ? 1 : 0.2 + proximity * 0.52;
 
@@ -415,7 +465,7 @@ export default function HomePage() {
               className={`absolute h-[4.25rem] w-[4.25rem] will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
                 projectSpinner.isDragging
                   ? "transition-none"
-                  : "transition-[left,top,transform,opacity] duration-[220ms] ease-out"
+                  : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
               }`}
               style={{
                 left: `${left}%`,
@@ -435,13 +485,15 @@ export default function HomePage() {
                   if (projectSpinner.consumeSuppressedClick()) return;
                   projectSpinner.activateIndex(index);
                 }}
-                className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] ${
-                  isActive
+                className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] duration-[240ms] ease-out ${
+                  isSelectedProject
+                    ? "border-[#d7b95f] bg-[#fff9df] shadow-[inset_0_5px_10px_rgba(15,61,46,0.12),0_8px_22px_rgba(215,185,95,0.32)] brightness-90 motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
+                    : isActive
                     ? "border-[#d7b95f] bg-[#fffdf4] shadow-[inset_0_4px_9px_rgba(15,61,46,0.08),0_6px_16px_rgba(15,61,46,0.16)] brightness-95"
                     : "border-field-secondary/50 shadow-[0_5px_12px_rgba(15,61,46,0.10)] hover:border-field-primary hover:bg-field-light"
                 } active:brightness-90 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
                 aria-label={`${project.name} ${pickerTitle}`}
-                aria-pressed={isActive}
+                aria-pressed={isActive || isSelectedProject}
               >
                 <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
                   <span className="font-display">{project.name}</span>
@@ -476,7 +528,7 @@ export default function HomePage() {
       <div ref={canvasRef} className="flex h-full w-full overflow-auto overscroll-contain px-4 py-6 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden md:px-8">
         <div
           ref={compositionRef}
-          className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-300 ${
+          className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-[360ms] ease-out ${
             isProjectRingOpen
               ? "max-w-[25rem] md:max-w-[36rem]"
               : isProgressMode
@@ -489,7 +541,7 @@ export default function HomePage() {
           <div
             className={
               isProjectRingOpen
-                ? "relative flex aspect-square w-[min(94vw,25rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_220ms_ease-out] md:w-[min(92vw,36rem)]"
+                ? "relative flex aspect-square w-[min(94vw,25rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_260ms_ease-out] md:w-[min(92vw,36rem)]"
                 : "contents"
             }
           >
@@ -499,7 +551,7 @@ export default function HomePage() {
               role="group"
               tabIndex={0}
               aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
-              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width,opacity] duration-300 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
+              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
                 isProjectRingOpen
                   ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
                   : "w-[min(90vw,21rem)] md:w-[min(82vw,22rem)]"
@@ -529,7 +581,9 @@ export default function HomePage() {
                 const radius = isProjectRingOpen ? 29 : 33;
                 const left = Number((50 + Math.cos(angle) * radius).toFixed(4));
                 const top = Number((50 + Math.sin(angle) * radius).toFixed(4));
-                const isSelected = activatedWheelItem === item.id;
+                const isTargeted = activatedWheelItem === item.id;
+                const isSelected = selectedMainId === item.id || pickerMode === item.id;
+                const isEmphasized = isTargeted || isSelected;
                 return (
                   <button
                     key={item.id}
@@ -537,8 +591,8 @@ export default function HomePage() {
                       mainBubbleRefs.current[index] = element;
                     }}
                     type="button"
-                    aria-label={item.label}
-                    aria-pressed={isSelected}
+                    aria-label={item.ariaLabel}
+                    aria-pressed={isTargeted || isSelected}
                     onClick={(event) => {
                       event.stopPropagation();
                       if (mainSpinner.consumeSuppressedClick()) return;
@@ -546,27 +600,39 @@ export default function HomePage() {
                     }}
                     className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${
                       isProjectRingOpen
-                        ? "h-14 w-14 text-[10px] md:h-20 md:w-20 md:text-[12px]"
-                        : "h-[4.25rem] w-[4.25rem] text-[12px] sm:h-24 sm:w-24 sm:text-sm"
+                        ? "h-14 w-14 md:h-20 md:w-20"
+                        : "h-[4.25rem] w-[4.25rem] sm:h-24 sm:w-24"
                     } ${
                       mainSpinner.isDragging
                         ? "transition-none"
-                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[220ms] ease-out"
+                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
                     } ${
-                      isSelected
+                      isEmphasized
                         ? isProjectRingOpen
                           ? "z-20 scale-[0.86] border-[#d7b95f] opacity-85 shadow-[inset_0_4px_8px_rgba(0,0,0,0.18),0_5px_12px_rgba(15,61,46,0.13)] brightness-95 md:scale-[0.94] md:opacity-100"
                           : "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
                         : isProjectRingOpen
                           ? "z-10 scale-[0.7] border-white/70 opacity-55 shadow-[0_4px_10px_rgba(15,61,46,0.08)] hover:opacity-75 md:scale-[0.82] md:opacity-70"
                           : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
-                    } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                    } ${isSelected ? "motion-safe:animate-[main-selection-confirm_260ms_ease-out]" : ""} active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
                     style={{
                       left: `${left}%`,
                       top: `${top}%`
                     }}
                   >
-                    <span className="font-display-strong font-black leading-[1.35]">{item.label}</span>
+                    <span
+                      className={`font-display-strong font-black leading-[1.2] transition-[font-size,font-weight,transform] duration-[240ms] ease-out ${
+                        isEmphasized
+                          ? isProjectRingOpen
+                            ? "text-[11px] md:text-sm"
+                            : "text-[15px] sm:text-lg"
+                          : isProjectRingOpen
+                            ? "text-[8px] md:text-[10px]"
+                            : "text-[11px] sm:text-[13px]"
+                      }`}
+                    >
+                      {item.label}
+                    </span>
                   </button>
                 );
               })}
@@ -580,12 +646,12 @@ export default function HomePage() {
 
           {pickerMode && !isProgressMode ? (
           <>
-          <div className="h-8 w-px shrink-0 bg-field-secondary/60 motion-safe:animate-[branch-reveal_180ms_ease-out] md:h-px md:w-12" aria-hidden />
+          <div className="h-8 w-px shrink-0 bg-field-secondary/60 motion-safe:animate-[branch-reveal_220ms_ease-out] md:h-px md:w-12" aria-hidden />
           <div
             ref={clusterRef}
             role="region"
             aria-label={pickerTitle}
-            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] md:w-[14rem]"
+            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_220ms_ease-out] md:w-[14rem]"
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
@@ -722,6 +788,21 @@ export default function HomePage() {
         @keyframes project-ring-reveal {
           from { opacity: 0; transform: scale(0.96); }
           to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes main-selection-confirm {
+          0% { filter: brightness(1); }
+          45% { filter: brightness(0.86); }
+          100% { filter: brightness(0.95); }
+        }
+        @keyframes project-target-confirm {
+          0% { transform: scale(1.1); }
+          55% { transform: scale(1.25); }
+          100% { transform: scale(1.18); }
+        }
+        @keyframes project-bubble-confirm {
+          0% { filter: brightness(0.95); }
+          50% { filter: brightness(0.84); }
+          100% { filter: brightness(0.9); }
         }
       `}</style>
     </div>
