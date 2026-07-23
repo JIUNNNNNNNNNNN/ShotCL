@@ -12,6 +12,7 @@ import {
   ListChecks,
   PanelRight,
   Printer,
+  Users,
   X
 } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
@@ -317,6 +318,14 @@ function PanelContent({
                   현재 일촬표 수정
                 </SideActionLink>
               ) : null}
+              <SideActionLink
+                href={currentPlanId
+                  ? `${projectBasePath}/daily-plans/${currentPlanId}/staff-list`
+                  : `${projectBasePath}/daily-plans`}
+                icon={Users}
+              >
+                스텝 리스트
+              </SideActionLink>
               <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>
                 기본정보 수정
               </SideActionLink>

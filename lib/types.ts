@@ -248,3 +248,18 @@ export type DailyPlanWithShots = {
   plan: DailyPlan;
   shots: DailyPlanShot[];
 };
+
+export type DailyPlanStaffMember = {
+  id: string;
+  projectId: string;
+  dailyPlanId: string;
+  department: string;
+  name: string;
+  phone: string;
+  province: string;
+  cityDistrict: string;
+  notes: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};

@@ -43,6 +43,23 @@ export type DailyPlanPrintMeta = {
   teams: TeamCallSheetRow[];
 };
 
+/** 일촬표 스태프 섹션과 상세 스텝 리스트가 함께 사용하는 부서 목록입니다. */
+export const dailyPlanTeamDepartments = [
+  "연출",
+  "제작",
+  "촬영",
+  "조명",
+  "미술",
+  "의상",
+  "녹음",
+  "데이터",
+  "엔터",
+  "보조 출연",
+  "분장",
+  "배우",
+  "기타"
+] as const;
+
 const META_START = "[[TODAY_BOARD_DAILY_PLAN_PRINT_META_V1]]";
 const META_END = "[[/TODAY_BOARD_DAILY_PLAN_PRINT_META_V1]]";
 
@@ -199,7 +216,7 @@ function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {
 }
 
 function createDefaultTeamRows() {
-  return ["연출", "제작", "촬영", "조명", "미술", "의상", "녹음", "데이터", "엔터", "보조 출연"].map(createBlankTeamCallSheetRow);
+  return dailyPlanTeamDepartments.slice(0, 10).map(createBlankTeamCallSheetRow);
 }
 
 function createMetaId(prefix: string) {
