@@ -32,10 +32,10 @@ export function ShotCard({
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
 
   function shouldIgnoreCardOpen(target: EventTarget | null) {
-    return target instanceof HTMLElement && Boolean(target.closest("button"));
+    return target instanceof HTMLElement && Boolean(target.closest("button, a, input, textarea, select, [data-no-drag]"));
   }
 
-  function handleCardOpen(event: React.MouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) {
+  function handleCardOpen(event: React.MouseEvent<HTMLElement>) {
     if (progressOnly || shouldIgnoreCardOpen(event.target)) return;
     onOpen(shot);
   }
@@ -55,7 +55,6 @@ export function ShotCard({
   return (
     <article
       onClick={handleCardOpen}
-      onPointerUp={handleCardOpen}
       aria-label={progressOnly ? `${shot.title} 컷 진행 상태` : `${shot.title} 컷 수정`}
       className={cn(
         "grid grid-cols-[96px_minmax(0,1fr)] items-center gap-2 rounded-[1.5rem] border bg-white p-1.5 transition-[background-color,border-color,transform] active:scale-[0.995] sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",

@@ -355,7 +355,7 @@ export async function deleteShot(shot: Shot): Promise<void> {
   writeLocalBuckets({ shots: buckets.shots.filter((item) => item.id !== shot.id) }, shot.projectId);
 }
 
-/** 드래그 앤 드롭 대신 위/아래 버튼으로 촬영 순서를 바꿉니다. */
+/** 편집 모달의 기존 위/아래 버튼으로 촬영 순서를 한 칸 바꿉니다. */
 export async function moveShot(projectId: string, shotId: string, direction: "up" | "down", dailyPlanId?: string) {
   if (await getSharedRole(projectId)) {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/move`, {
@@ -399,5 +399,60 @@ export async function moveShot(projectId: string, shotId: string, direction: "up
     writeLocalBuckets({ shots: nextShots }, projectId);
   }
 
+  return listShots(projectId, dailyPlanId);
+}
+
+/** 같은 프로젝트·회차의 전체 컷 순서를 order_index에 일괄 저장합니다. */
+export async function reorderShots(projectId: string, dailyPlanId: string, orderedShotIds: string[]): Promise<Shot[]> {
+  if (!dailyPlanId.trim() || orderedShotIds.length === 0 || new Set(orderedShotIds).size !== orderedShotIds.length) {
+    throw new Error("저장할 컷 순서가 올바르지 않습니다.");
+  }
+
+  if (await getSharedRole(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dailyPlanId, shotIds: orderedShotIds })
+    });
+    if (!response.ok) {
+      const payload = (await response.json()) as { error?: string };
+      throw new Error(payload.error || "컷 순서를 저장하지 못했습니다.");
+    }
+    return listShots(projectId, dailyPlanId);
+  }
+
+  const scopedShots = await listShots(projectId, dailyPlanId);
+  const scopedIds = new Set(scopedShots.map((shot) => shot.id));
+  if (scopedIds.size !== orderedShotIds.length || orderedShotIds.some((id) => !scopedIds.has(id))) {
+    throw new Error("현재 프로젝트와 회차의 전체 컷만 정렬할 수 있습니다.");
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { data: rawShots, error: selectError } = await supabase
+      .from("shots")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("daily_plan_id", dailyPlanId);
+    if (selectError) throw selectError;
+    const rawById = new Map(rawShots.map((shot) => [shot.id, shot]));
+    const rows = orderedShotIds.map((id, index) => ({
+      ...rawById.get(id),
+      order_index: index + 1
+    }));
+    const { error } = await supabase.from("shots").upsert(rows, { onConflict: "id" });
+    if (error) throw error;
+    return listShots(projectId, dailyPlanId);
+  }
+
+  const orderById = new Map(orderedShotIds.map((id, index) => [id, index + 1]));
+  const now = new Date().toISOString();
+  const buckets = readLocalBuckets();
+  const nextShots = buckets.shots.map((shot) => {
+    if (shot.projectId !== projectId || shot.dailyPlanId !== dailyPlanId) return shot;
+    const orderIndex = orderById.get(shot.id);
+    return orderIndex === undefined ? shot : { ...shot, orderIndex, updatedAt: now };
+  });
+  writeLocalBuckets({ shots: nextShots }, projectId);
   return listShots(projectId, dailyPlanId);
 }

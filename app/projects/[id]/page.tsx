@@ -11,9 +11,10 @@ import { ProgressSummary } from "@/components/ProgressSummary";
 import { ShotCard } from "@/components/ShotCard";
 import { ShotEditorModal, type ShotEditorValues } from "@/components/ShotEditorModal";
 import { ShotOverheadEditor } from "@/components/ShotOverheadEditor";
+import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, updateShot, updateShotStatus } from "@/lib/data/shots";
+import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
 import { loadShotOverheadDiagram, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
 import { listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
@@ -59,6 +60,7 @@ export default function ProjectDetailPage() {
   const [filter, setFilter] = useState<ShotFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isReordering, setIsReordering] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
@@ -274,6 +276,28 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function handleReorderShots(nextShots: Shot[]) {
+    if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
+
+    const previousShots = shots;
+    setIsReordering(true);
+    setErrorMessage("");
+    setShots(nextShots);
+    setEpisodeShots((current) => ({ ...current, [dailyPlanId]: nextShots }));
+
+    try {
+      const savedShots = await reorderShots(projectId, dailyPlanId, nextShots.map((shot) => shot.id));
+      setShots(savedShots);
+      setEpisodeShots((current) => ({ ...current, [dailyPlanId]: savedShots }));
+    } catch {
+      setShots(previousShots);
+      setEpisodeShots((current) => ({ ...current, [dailyPlanId]: previousShots }));
+      setErrorMessage("컷 순서를 저장하지 못했습니다.");
+    } finally {
+      setIsReordering(false);
+    }
+  }
+
   async function handleResetCurrentProjectShots() {
     if (!projectId || !dailyPlanId) return;
 
@@ -395,10 +419,13 @@ export default function ProjectDetailPage() {
       ) : filteredShots.length === 0 ? (
         <Card className="rounded-[1.5rem] text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
       ) : (
-        <div className="grid gap-2 pb-24">
-          {filteredShots.map((shot) => (
+        <ShotReorderList
+          allShots={shots}
+          visibleShots={filteredShots}
+          disabled={role !== "admin" || isReordering}
+          onReorder={handleReorderShots}
+          renderShot={(shot) => (
             <ShotCard
-              key={shot.id}
               shot={shot}
               onOpen={setEditingShot}
               onOpenOverhead={handleOpenOverhead}
@@ -407,8 +434,8 @@ export default function ProjectDetailPage() {
               onStatusChange={handleStatusChange}
               progressOnly={progressOnly}
             />
-          ))}
-        </div>
+          )}
+        />
       )}
       </div>
 
