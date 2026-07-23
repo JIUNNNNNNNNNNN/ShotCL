@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 @font-face {
-  font-family: "GangwonEduTnTn";
-  src: url("/fonts/GangwonEduTnTn-Regular.otf") format("opentype");
+  font-family: "GPZDongneGomulsang";
+  src: url("/fonts/GPZDongneGomulsang-Basic-Medium.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -89,7 +89,7 @@ body {
   background: var(--field-paper);
   color: #1c1c1a;
   font-family:
-    "GangwonEduTnTn",
+    "GPZDongneGomulsang",
     "Apple SD Gothic Neo",
     "Noto Sans KR",
     Arial,
@@ -167,7 +167,7 @@ a[class*="min-h-"][class*="items-center"] {
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
-  font-family: "GangwonEduTnTn", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
+  font-family: "GPZDongneGomulsang", "Apple SD Gothic Neo", "Noto Sans KR", Arial, sans-serif;
 }
 
 .daily-plan-template table,
