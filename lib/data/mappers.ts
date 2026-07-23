@@ -12,6 +12,7 @@ import type {
   ShotDraft,
   ShotStatus
 } from "@/lib/types";
+import { normalizeProjectBasicInfo } from "@/lib/projectBasicInfo";
 
 type AnyRow = Record<string, any>;
 
@@ -81,7 +82,8 @@ export function projectFromRow(row: AnyRow): Project {
     description: row.description ?? "",
     createdAt: row.created_at,
     shareConfigured: Boolean(row.share_enabled),
-    accessRole: row.access_role === "admin" || row.access_role === "progress" ? row.access_role : undefined
+    accessRole: row.access_role === "admin" || row.access_role === "progress" ? row.access_role : undefined,
+    basicInfo: row.project_basic_info == null ? undefined : normalizeProjectBasicInfo(row.project_basic_info)
   };
 }
 

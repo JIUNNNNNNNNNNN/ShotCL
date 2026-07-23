@@ -3,7 +3,8 @@ import { toReadableDataError } from "@/lib/data/errors";
 import { projectFromRow, projectInputToRow } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { getLocalProjectIdCandidates, isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
-import type { Project, ProjectInput } from "@/lib/types";
+import { emptyProjectBasicInfo, normalizeProjectBasicInfo, validateProjectBasicInfo } from "@/lib/projectBasicInfo";
+import type { Project, ProjectBasicInfo, ProjectInput } from "@/lib/types";
 
 type ProjectApiErrorPayload = { error?: string; code?: string };
 
@@ -117,6 +118,54 @@ export async function createProject(input: ProjectInput): Promise<Project> {
 
   writeLocalBuckets({ projects: [project, ...projects] }, project.id);
   return project;
+}
+
+/** 프로젝트 단위 기본정보를 읽습니다. 일촬표 데이터는 생성하거나 조회하지 않습니다. */
+export async function getProjectBasicInfo(projectId: string): Promise<ProjectBasicInfo> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  if (!isValidDatabaseProjectId(databaseProjectId)) {
+    const { projects } = readLocalBuckets();
+    const project = projects.find((item) => getLocalProjectIdCandidates(projectId).includes(item.id));
+    return normalizeProjectBasicInfo(project?.basicInfo ?? emptyProjectBasicInfo);
+  }
+
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/basic-info`, { cache: "no-store" });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & { basicInfo?: unknown };
+  if (!response.ok) {
+    throw new Error(payload.error || "프로젝트 기본정보를 불러오지 못했습니다.");
+  }
+  return normalizeProjectBasicInfo(payload.basicInfo);
+}
+
+/** 프로젝트 단위 기본정보만 저장합니다. daily_plans에는 어떤 row도 만들지 않습니다. */
+export async function saveProjectBasicInfo(projectId: string, basicInfo: ProjectBasicInfo): Promise<ProjectBasicInfo> {
+  const validation = validateProjectBasicInfo(basicInfo);
+  if (!validation.ok) throw new Error(validation.error);
+
+  const databaseProjectId = normalizeProjectId(projectId);
+  if (!isValidDatabaseProjectId(databaseProjectId)) {
+    const candidates = getLocalProjectIdCandidates(projectId);
+    const { projects } = readLocalBuckets();
+    const projectIndex = projects.findIndex((project) => candidates.includes(project.id));
+    if (projectIndex < 0) throw new Error("프로젝트를 찾을 수 없습니다.");
+    const nextProjects = projects.map((project, index) => (
+      index === projectIndex ? { ...project, basicInfo: validation.value } : project
+    ));
+    writeLocalBuckets({ projects: nextProjects }, projects[projectIndex].id);
+    return validation.value;
+  }
+
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/basic-info`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ basicInfo: validation.value })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & { basicInfo?: unknown };
+  if (!response.ok) {
+    throw new Error(payload.error || "프로젝트 기본정보를 저장하지 못했습니다.");
+  }
+  return normalizeProjectBasicInfo(payload.basicInfo);
 }
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
