@@ -79,7 +79,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
+    <form noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="min-w-0">
           <p className="font-display text-xl font-black text-field-primary md:text-2xl">프로젝트 기본정보</p>
@@ -242,10 +242,11 @@ function StaffFields({
       <input
         className={fieldClass}
         type="tel"
-        inputMode="numeric"
-        pattern="[0-9]*"
+        inputMode="tel"
+        maxLength={13}
         value={phone}
         placeholder={`${label} 연락처`}
+        aria-label={`${label} 연락처`}
         onChange={(event) => onPhoneChange(event.currentTarget.value)}
       />
     </div>

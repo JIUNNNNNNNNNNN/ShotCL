@@ -12,7 +12,6 @@ import {
   ListChecks,
   PanelRight,
   Printer,
-  Settings,
   X
 } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
@@ -342,9 +341,6 @@ function PanelContent({
                 icon={ListChecks}
               >
                 진행도 보기
-              </SideActionLink>
-              <SideActionLink href={`${projectBasePath}/edit`} icon={Settings}>
-                프로젝트 설정
               </SideActionLink>
             </div>
           </div>

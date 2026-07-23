@@ -1,4 +1,5 @@
 import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/lib/types";
+import { isValidKoreanPhoneNumber, sanitizeKoreanPhoneDigits } from "@/lib/formatKoreanPhoneNumber";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -51,6 +52,19 @@ export function validateProjectBasicInfo(value: unknown) {
     return { ok: false as const, error: "촬영 시작일은 종료일보다 늦을 수 없습니다." };
   }
 
+  const mainStaff = isRecord(value.mainStaff) ? value.mainStaff : {};
+  const staffPhoneFields = [
+    ["director", "감독"],
+    ["assistantDirector", "조감독"],
+    ["producer", "제작"]
+  ] as const;
+  for (const [role, label] of staffPhoneFields) {
+    const member = isRecord(mainStaff[role]) ? mainStaff[role] : {};
+    if (!isValidKoreanPhoneNumber(String(member.phone ?? ""))) {
+      return { ok: false as const, error: `${label} 연락처 형식을 확인해주세요.` };
+    }
+  }
+
   const normalized = normalizeProjectBasicInfo(value);
   return {
     ok: true as const,
@@ -67,7 +81,7 @@ function normalizeStaffMember(value: unknown): ProjectMainStaffMember {
   const source = isRecord(value) ? value : {};
   return {
     name: normalizeText(source.name, 100),
-    phone: String(source.phone ?? "").replace(/\D/g, "").slice(0, 11)
+    phone: sanitizeKoreanPhoneDigits(String(source.phone ?? ""))
   };
 }
 
