@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 
 const ProjectAccessContext = createContext<{ role: SharedProjectRole | null; isShared: boolean }>({ role: null, isShared: false });
@@ -25,7 +26,14 @@ export function ProjectAccessGate({ projectId, role, children }: { projectId: st
     );
   }
 
-  return <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>{children}</ProjectAccessContext.Provider>;
+  return (
+    <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>
+      <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-5">
+        <div className="min-w-0">{children}</div>
+        <RightProjectSidebar projectId={projectId} role={role} />
+      </div>
+    </ProjectAccessContext.Provider>
+  );
 }
 
 export function useProjectAccess() {

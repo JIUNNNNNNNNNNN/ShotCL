@@ -856,6 +856,12 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     window.print();
   }
 
+  useEffect(() => {
+    const handleSidebarPrintRequest = () => handlePrint();
+    window.addEventListener("daily-plan:request-print", handleSidebarPrintRequest);
+    return () => window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
+  }, [canPrint]);
+
   return (
     <div className="print-daily-plan">
       <div className="daily-plan-editor no-print text-center text-[13px] md:text-sm">

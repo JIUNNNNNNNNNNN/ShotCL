@@ -24,8 +24,8 @@ export function AppShell({ children }: AppShellProps) {
         isHome
           ? "min-h-screen w-full"
           : isProjectDashboard
-            ? "safe-bottom mx-auto w-full max-w-5xl px-3 pb-6 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-8"
-            : "safe-bottom mx-auto w-full max-w-6xl px-3 pb-4 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-6 lg:px-12"
+            ? "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-6 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-8"
+            : "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-4 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-6 lg:px-12"
       }>
         {demoStorageMode && !isHome ? <TestModeWarning compact={isProjectDashboard} /> : null}
         {children}
