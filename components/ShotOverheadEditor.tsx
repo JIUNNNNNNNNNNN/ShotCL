@@ -16,6 +16,7 @@ import type {
 
 type Tool = "select" | "line";
 type Selection = { kind: "person" | "camera" | "line" | "shape"; id: string } | null;
+type RotatableSelection = { kind: "person" | "camera" | "shape"; id: string };
 type CanvasPoint = { x: number; y: number };
 
 type DragState =
@@ -23,10 +24,28 @@ type DragState =
   | { kind: "person-scale"; id: string; pointerId: number; center: CanvasPoint; startDistance: number; startScale: number }
   | { kind: "camera-move"; id: string; pointerId: number; offsetX: number; offsetY: number }
   | { kind: "shape-move"; id: string; pointerId: number; offsetX: number; offsetY: number }
-  | { kind: "shape-resize"; id: string; pointerId: number; origin: CanvasPoint }
+  | { kind: "shape-resize"; id: string; pointerId: number; anchor: CanvasPoint; rotation: number }
   | { kind: "line-move"; id: string; pointerId: number; start: CanvasPoint; original: ShotOverheadLine }
   | { kind: "line-start"; id: string; pointerId: number; original: ShotOverheadLine }
-  | { kind: "line-end"; id: string; pointerId: number; original: ShotOverheadLine };
+  | { kind: "line-end"; id: string; pointerId: number; original: ShotOverheadLine }
+  | {
+      kind: "element-rotate";
+      elementKind: "person" | "camera" | "shape";
+      id: string;
+      pointerId: number;
+      pivot: CanvasPoint;
+      startPointerAngle: number;
+      startRotation: number;
+    }
+  | {
+      kind: "line-rotate";
+      id: string;
+      pointerId: number;
+      pivot: CanvasPoint;
+      startPointerAngle: number;
+      startLineAngle: number;
+      length: number;
+    };
 
 type ShotOverheadEditorProps = {
   shot: Shot;
@@ -63,9 +82,47 @@ const MAX_PERSON_SCALE = 3;
 const MIN_SHAPE_WIDTH = 80;
 const MIN_SHAPE_HEIGHT = 60;
 const MIN_LINE_LENGTH = 24;
+const ROTATE_HANDLE_DISTANCE = 54;
 
 function pointDistance(first: CanvasPoint, second: CanvasPoint) {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function normalizedRotation(rotation: number) {
+  return ((rotation % 360) + 360) % 360;
+}
+
+function normalizedAngleDelta(angle: number) {
+  return ((angle + 180) % 360 + 360) % 360 - 180;
+}
+
+function pointerAngle(point: CanvasPoint, pivot: CanvasPoint) {
+  return Math.atan2(point.y - pivot.y, point.x - pivot.x) * (180 / Math.PI);
+}
+
+function rotatePoint(point: CanvasPoint, pivot: CanvasPoint, rotation: number): CanvasPoint {
+  const radians = rotation * (Math.PI / 180);
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const offsetX = point.x - pivot.x;
+  const offsetY = point.y - pivot.y;
+  return {
+    x: pivot.x + offsetX * cos - offsetY * sin,
+    y: pivot.y + offsetX * sin + offsetY * cos
+  };
+}
+
+function pointAtAngle(pivot: CanvasPoint, distance: number, angle: number): CanvasPoint {
+  const radians = angle * (Math.PI / 180);
+  return {
+    x: pivot.x + Math.cos(radians) * distance,
+    y: pivot.y + Math.sin(radians) * distance
+  };
+}
+
+function maybeSnapRotation(rotation: number, shiftKey: boolean) {
+  const normalized = normalizedRotation(rotation);
+  return shiftKey ? normalizedRotation(Math.round(normalized / 15) * 15) : normalized;
 }
 
 function keepMinimumLineLength(point: CanvasPoint, anchor: CanvasPoint, fallback: CanvasPoint) {
@@ -79,6 +136,46 @@ function keepMinimumLineLength(point: CanvasPoint, anchor: CanvasPoint, fallback
     x: clamp(anchor.x + unitX * MIN_LINE_LENGTH, 0, OVERHEAD_CANVAS_WIDTH),
     y: clamp(anchor.y + unitY * MIN_LINE_LENGTH, 0, OVERHEAD_CANVAS_HEIGHT)
   };
+}
+
+function RotationHandle({
+  pivot,
+  handle,
+  label,
+  onPointerDown
+}: {
+  pivot: CanvasPoint;
+  handle: CanvasPoint;
+  label: string;
+  onPointerDown: (event: React.PointerEvent<SVGCircleElement>) => void;
+}) {
+  return (
+    <g>
+      <line
+        x1={pivot.x}
+        y1={pivot.y}
+        x2={handle.x}
+        y2={handle.y}
+        stroke="#d7b95f"
+        strokeWidth="4"
+        strokeDasharray="8 6"
+        pointerEvents="none"
+      />
+      <circle cx={pivot.x} cy={pivot.y} r="7" fill="#0f3d2e" stroke="#fff" strokeWidth="3" pointerEvents="none" />
+      <circle
+        cx={handle.x}
+        cy={handle.y}
+        r="14"
+        fill="#fff7d8"
+        stroke="#0f3d2e"
+        strokeWidth="5"
+        className="cursor-grab active:cursor-grabbing"
+        role="button"
+        aria-label={label}
+        onPointerDown={onPointerDown}
+      />
+    </g>
+  );
 }
 
 /** 컷에 귀속된 JSON 부감도를 편집하거나 진행 권한에서 열람합니다. */
@@ -165,6 +262,7 @@ export function ShotOverheadEditor({
       y: 120 + (index % 3) * 70,
       width: 240,
       height: 160,
+      rotation: 0,
       label: "공간"
     };
     setDiagram((current) => ({ ...current, shapes: [...current.shapes, shape] }));
@@ -277,13 +375,16 @@ export function ShotOverheadEditor({
     if (readOnly || tool !== "select") return;
     const item = diagram.shapes.find((shape) => shape.id === id);
     if (!item) return;
+    const pivot = { x: item.x + item.width / 2, y: item.y + item.height / 2 };
+    const anchor = rotatePoint({ x: item.x, y: item.y }, pivot, item.rotation);
     capturePointer(event.pointerId);
     setSelected({ kind: "shape", id });
     setDrag({
       kind: "shape-resize",
       id,
       pointerId: event.pointerId,
-      origin: { x: item.x, y: item.y }
+      anchor,
+      rotation: item.rotation
     });
   }
 
@@ -300,6 +401,51 @@ export function ShotOverheadEditor({
       id,
       pointerId: event.pointerId,
       original: { ...item }
+    });
+  }
+
+  function handleElementRotatePointerDown(
+    event: React.PointerEvent<SVGElement>,
+    selection: RotatableSelection,
+    pivot: CanvasPoint,
+    rotation: number
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (readOnly || tool !== "select") return;
+    const point = canvasPoint(event.clientX, event.clientY);
+    capturePointer(event.pointerId);
+    setSelected(selection);
+    setDrag({
+      kind: "element-rotate",
+      elementKind: selection.kind,
+      id: selection.id,
+      pointerId: event.pointerId,
+      pivot,
+      startPointerAngle: pointerAngle(point, pivot),
+      startRotation: rotation
+    });
+  }
+
+  function handleLineRotatePointerDown(event: React.PointerEvent<SVGElement>, line: ShotOverheadLine) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (readOnly || tool !== "select") return;
+    const pivot = {
+      x: (line.x1 + line.x2) / 2,
+      y: (line.y1 + line.y2) / 2
+    };
+    const point = canvasPoint(event.clientX, event.clientY);
+    capturePointer(event.pointerId);
+    setSelected({ kind: "line", id: line.id });
+    setDrag({
+      kind: "line-rotate",
+      id: line.id,
+      pointerId: event.pointerId,
+      pivot,
+      startPointerAngle: pointerAngle(point, pivot),
+      startLineAngle: pointerAngle({ x: line.x2, y: line.y2 }, pivot),
+      length: pointDistance({ x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 })
     });
   }
 
@@ -352,14 +498,64 @@ export function ShotOverheadEditor({
         };
       }
       if (activeDrag.kind === "shape-resize") {
+        const localPointer = rotatePoint(point, activeDrag.anchor, -activeDrag.rotation);
+        const width = clamp(localPointer.x - activeDrag.anchor.x, MIN_SHAPE_WIDTH, OVERHEAD_CANVAS_WIDTH);
+        const height = clamp(localPointer.y - activeDrag.anchor.y, MIN_SHAPE_HEIGHT, OVERHEAD_CANVAS_HEIGHT);
+        const nextPivot = rotatePoint(
+          {
+            x: activeDrag.anchor.x + width / 2,
+            y: activeDrag.anchor.y + height / 2
+          },
+          activeDrag.anchor,
+          activeDrag.rotation
+        );
         return {
           ...current,
           shapes: current.shapes.map((item) => item.id === activeDrag.id
             ? {
                 ...item,
-                width: clamp(point.x - activeDrag.origin.x, MIN_SHAPE_WIDTH, OVERHEAD_CANVAS_WIDTH - activeDrag.origin.x),
-                height: clamp(point.y - activeDrag.origin.y, MIN_SHAPE_HEIGHT, OVERHEAD_CANVAS_HEIGHT - activeDrag.origin.y)
+                x: nextPivot.x - width / 2,
+                y: nextPivot.y - height / 2,
+                width,
+                height
               }
+            : item)
+        };
+      }
+      if (activeDrag.kind === "element-rotate") {
+        const delta = normalizedAngleDelta(
+          pointerAngle(point, activeDrag.pivot) - activeDrag.startPointerAngle
+        );
+        const rotation = maybeSnapRotation(activeDrag.startRotation + delta, event.shiftKey);
+        if (activeDrag.elementKind === "person") {
+          return {
+            ...current,
+            people: current.people.map((item) => item.id === activeDrag.id ? { ...item, rotation } : item)
+          };
+        }
+        if (activeDrag.elementKind === "camera") {
+          return {
+            ...current,
+            cameras: current.cameras.map((item) => item.id === activeDrag.id ? { ...item, rotation } : item)
+          };
+        }
+        return {
+          ...current,
+          shapes: current.shapes.map((item) => item.id === activeDrag.id ? { ...item, rotation } : item)
+        };
+      }
+      if (activeDrag.kind === "line-rotate") {
+        const delta = normalizedAngleDelta(
+          pointerAngle(point, activeDrag.pivot) - activeDrag.startPointerAngle
+        );
+        const angle = maybeSnapRotation(activeDrag.startLineAngle + delta, event.shiftKey);
+        const halfLength = activeDrag.length / 2;
+        const start = pointAtAngle(activeDrag.pivot, halfLength, angle + 180);
+        const end = pointAtAngle(activeDrag.pivot, halfLength, angle);
+        return {
+          ...current,
+          lines: current.lines.map((item) => item.id === activeDrag.id
+            ? { ...item, x1: start.x, y1: start.y, x2: end.x, y2: end.y }
             : item)
         };
       }
@@ -547,31 +743,55 @@ export function ShotOverheadEditor({
 
               {diagram.shapes.map((shape) => {
                 const isSelected = selected?.kind === "shape" && selected.id === shape.id;
+                const pivot = {
+                  x: shape.x + shape.width / 2,
+                  y: shape.y + shape.height / 2
+                };
+                const resizeHandle = rotatePoint(
+                  { x: shape.x + shape.width, y: shape.y + shape.height },
+                  pivot,
+                  shape.rotation
+                );
+                const rotateHandle = rotatePoint(
+                  { x: pivot.x, y: shape.y - ROTATE_HANDLE_DISTANCE },
+                  pivot,
+                  shape.rotation
+                );
                 return (
                   <g key={shape.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "shape", id: shape.id })}>
-                    <rect
-                      x={shape.x}
-                      y={shape.y}
-                      width={shape.width}
-                      height={shape.height}
-                      rx="8"
-                      fill="rgba(255,255,255,0.65)"
-                      stroke={isSelected ? "#0f3d2e" : "#77746e"}
-                      strokeWidth={isSelected ? 6 : 4}
-                      strokeDasharray={isSelected ? "14 8" : undefined}
-                    />
-                    {shape.label ? <text pointerEvents="none" x={shape.x + 18} y={shape.y + 34} fill="#4f4c46" fontSize="24" fontWeight="700">{shape.label}</text> : null}
-                    {isSelected && !readOnly ? (
-                      <circle
-                        cx={shape.x + shape.width}
-                        cy={shape.y + shape.height}
-                        r="14"
-                        fill="#fff"
-                        stroke="#0f3d2e"
-                        strokeWidth="6"
-                        className="cursor-nwse-resize"
-                        onPointerDown={(event) => handleShapeResizePointerDown(event, shape.id)}
+                    <g transform={`rotate(${shape.rotation} ${pivot.x} ${pivot.y})`}>
+                      <rect
+                        x={shape.x}
+                        y={shape.y}
+                        width={shape.width}
+                        height={shape.height}
+                        rx="8"
+                        fill="rgba(255,255,255,0.65)"
+                        stroke={isSelected ? "#0f3d2e" : "#77746e"}
+                        strokeWidth={isSelected ? 6 : 4}
+                        strokeDasharray={isSelected ? "14 8" : undefined}
                       />
+                      {shape.label ? <text pointerEvents="none" x={shape.x + 18} y={shape.y + 34} fill="#4f4c46" fontSize="24" fontWeight="700">{shape.label}</text> : null}
+                    </g>
+                    {isSelected && !readOnly ? (
+                      <>
+                        <RotationHandle
+                          pivot={pivot}
+                          handle={rotateHandle}
+                          label={`${shape.label || "공간"} 회전`}
+                          onPointerDown={(event) => handleElementRotatePointerDown(event, { kind: "shape", id: shape.id }, pivot, shape.rotation)}
+                        />
+                        <circle
+                          cx={resizeHandle.x}
+                          cy={resizeHandle.y}
+                          r="14"
+                          fill="#fff"
+                          stroke="#0f3d2e"
+                          strokeWidth="6"
+                          className="cursor-nwse-resize"
+                          onPointerDown={(event) => handleShapeResizePointerDown(event, shape.id)}
+                        />
+                      </>
                     ) : null}
                   </g>
                 );
@@ -580,6 +800,12 @@ export function ShotOverheadEditor({
               {diagram.lines.map((line) => {
                 const isSelected = selected?.kind === "line" && selected.id === line.id;
                 const stroke = line.color === "red" ? "#ad2b28" : "#242424";
+                const pivot = {
+                  x: (line.x1 + line.x2) / 2,
+                  y: (line.y1 + line.y2) / 2
+                };
+                const lineAngle = pointerAngle({ x: line.x2, y: line.y2 }, pivot);
+                const rotateHandle = pointAtAngle(pivot, ROTATE_HANDLE_DISTANCE, lineAngle - 90);
                 return (
                   <g key={line.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "line", id: line.id })}>
                     <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="transparent" strokeWidth="28" />
@@ -594,6 +820,12 @@ export function ShotOverheadEditor({
                     />
                     {isSelected && !readOnly ? (
                       <>
+                        <RotationHandle
+                          pivot={pivot}
+                          handle={rotateHandle}
+                          label="선 회전"
+                          onPointerDown={(event) => handleLineRotatePointerDown(event, line)}
+                        />
                         <circle
                           cx={line.x1}
                           cy={line.y1}
@@ -631,6 +863,12 @@ export function ShotOverheadEditor({
                 const isSelected = selected?.kind === "person" && selected.id === person.id;
                 const selectionRadius = 40 * person.scale;
                 const handleOffset = 34 * person.scale;
+                const pivot = { x: person.x, y: person.y };
+                const rotateHandle = pointAtAngle(
+                  pivot,
+                  selectionRadius + ROTATE_HANDLE_DISTANCE,
+                  person.rotation - 90
+                );
                 return (
                   <g key={person.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "person", id: person.id })}>
                     {isSelected ? <circle cx={person.x} cy={person.y} r={selectionRadius} fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
@@ -640,16 +878,24 @@ export function ShotOverheadEditor({
                     </g>
                     <text pointerEvents="none" x={person.x} y={person.y + selectionRadius + 28} textAnchor="middle" fill="#0f3d2e" fontSize="25" fontWeight="800">{person.label || "인물"}</text>
                     {isSelected && !readOnly ? (
-                      <circle
-                        cx={person.x + handleOffset}
-                        cy={person.y + handleOffset}
-                        r="13"
-                        fill="#fff"
-                        stroke="#0f3d2e"
-                        strokeWidth="5"
-                        className="cursor-nwse-resize"
-                        onPointerDown={(event) => handlePersonScalePointerDown(event, person.id)}
-                      />
+                      <>
+                        <RotationHandle
+                          pivot={pivot}
+                          handle={rotateHandle}
+                          label={`${person.label || "인물"} 회전`}
+                          onPointerDown={(event) => handleElementRotatePointerDown(event, { kind: "person", id: person.id }, pivot, person.rotation)}
+                        />
+                        <circle
+                          cx={person.x + handleOffset}
+                          cy={person.y + handleOffset}
+                          r="13"
+                          fill="#fff"
+                          stroke="#0f3d2e"
+                          strokeWidth="5"
+                          className="cursor-nwse-resize"
+                          onPointerDown={(event) => handlePersonScalePointerDown(event, person.id)}
+                        />
+                      </>
                     ) : null}
                   </g>
                 );
@@ -657,6 +903,8 @@ export function ShotOverheadEditor({
 
               {diagram.cameras.map((camera) => {
                 const isSelected = selected?.kind === "camera" && selected.id === camera.id;
+                const pivot = { x: camera.x, y: camera.y };
+                const rotateHandle = pointAtAngle(pivot, 112, camera.rotation - 90);
                 return (
                   <g key={camera.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "camera", id: camera.id })}>
                     {isSelected ? <circle cx={camera.x} cy={camera.y} r="60" fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
@@ -666,6 +914,14 @@ export function ShotOverheadEditor({
                       <circle cx={camera.x - 6} cy={camera.y} r="12" fill="#fbfaf6" />
                     </g>
                     <text x={camera.x} y={camera.y + 67} textAnchor="middle" fill="#0f3d2e" fontSize="24" fontWeight="800">{camera.label || "CAM"}</text>
+                    {isSelected && !readOnly ? (
+                      <RotationHandle
+                        pivot={pivot}
+                        handle={rotateHandle}
+                        label={`${camera.label || "카메라"} 회전`}
+                        onPointerDown={(event) => handleElementRotatePointerDown(event, { kind: "camera", id: camera.id }, pivot, camera.rotation)}
+                      />
+                    ) : null}
                   </g>
                 );
               })}

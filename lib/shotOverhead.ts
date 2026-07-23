@@ -19,6 +19,10 @@ function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function normalizedRotation(value: unknown) {
+  return ((finiteNumber(value, 0) % 360) + 360) % 360;
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -34,7 +38,7 @@ function normalizePerson(value: unknown, index: number): ShotOverheadPerson | nu
     x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
     y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
     scale: Math.min(3, Math.max(0.5, finiteNumber(value.scale, 1))),
-    rotation: ((finiteNumber(value.rotation, 0) % 360) + 360) % 360,
+    rotation: normalizedRotation(value.rotation),
     label: text(value.label)
   };
 }
@@ -45,7 +49,7 @@ function normalizeCamera(value: unknown, index: number): ShotOverheadCamera | nu
     id: text(value.id, `camera-${index + 1}`),
     x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
     y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
-    rotation: finiteNumber(value.rotation, 0),
+    rotation: normalizedRotation(value.rotation),
     label: text(value.label)
   };
 }
@@ -77,6 +81,7 @@ function normalizeShape(value: unknown, index: number): ShotOverheadShape | null
     y: finiteNumber(value.y, 100),
     width: Math.max(80, finiteNumber(value.width, 240)),
     height: Math.max(60, finiteNumber(value.height, 160)),
+    rotation: normalizedRotation(value.rotation),
     label: text(value.label)
   };
 }
