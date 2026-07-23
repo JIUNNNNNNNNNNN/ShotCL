@@ -28,7 +28,7 @@ export function ProgressSummary({ shots }: ProgressSummaryProps) {
         </div>
 
         <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-[0.08em] text-field-muted">오늘 컷 진행률</p>
+          <p className="text-[10px] font-black uppercase tracking-[-0.025em] text-field-muted">오늘 컷 진행률</p>
           <h2 id="today-progress-title" className="mt-0.5 truncate text-lg font-black tracking-[-0.04em] text-field-primary md:text-xl">
             <span className="font-condensed">{isComplete ? "즐거운 바라시" : "집에 가기까지"}</span>
           </h2>

@@ -82,6 +82,7 @@ html {
   min-height: 100%;
   background: var(--field-paper);
   line-height: 1.45;
+  letter-spacing: -0.04em;
 }
 
 body {
@@ -96,7 +97,7 @@ body {
     Arial,
     sans-serif;
   line-height: 1.45;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.04em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -108,6 +109,7 @@ textarea,
 select {
   font: inherit;
   line-height: 1.35;
+  letter-spacing: -0.035em;
 }
 
 a,
@@ -120,21 +122,19 @@ div {
 
 .font-condensed,
 .font-condensed-strong {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
   transform-origin: center;
   transform-box: fill-box;
 }
 
 .font-condensed {
-  letter-spacing: -0.04em;
-  transform: scaleX(0.96);
+  letter-spacing: -0.05em;
+  transform: scaleX(0.94);
 }
 
 .font-condensed-strong {
-  letter-spacing: -0.055em;
-  transform: scaleX(0.94);
+  letter-spacing: -0.065em;
+  transform: scaleX(0.9);
 }
 
 button {

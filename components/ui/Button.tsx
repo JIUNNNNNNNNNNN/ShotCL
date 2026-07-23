@@ -29,7 +29,9 @@ export function Button({ variant = "primary", className, children, ...props }: B
       )}
       {...props}
     >
-      <span className="font-condensed gap-1.5">{children}</span>
+      <span className="font-condensed">
+        <span className="inline-flex items-center justify-center gap-1.5">{children}</span>
+      </span>
     </button>
   );
 }
@@ -52,7 +54,9 @@ export function ButtonLink({
       )}
       {...props}
     >
-      <span className="font-condensed gap-1.5">{children}</span>
+      <span className="font-condensed">
+        <span className="inline-flex items-center justify-center gap-1.5">{children}</span>
+      </span>
     </Link>
   );
 }

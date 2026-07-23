@@ -77,7 +77,9 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
           <p className="rounded-full bg-field-light px-2 py-1 text-[10px] font-black leading-[1.35] text-field-primary">
             S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}
           </p>
-          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35] tracking-[-0.025em]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
+          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35] tracking-[-0.025em]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
+            <span className="font-condensed">{statusLabel}</span>
+          </p>
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
         </div>
 
