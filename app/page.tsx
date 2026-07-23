@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { listProjects } from "@/lib/data/projects";
@@ -9,6 +9,7 @@ import { projectFromRow } from "@/lib/data/mappers";
 import { getLocalProjectIdCandidates } from "@/lib/projectId";
 import type { Project } from "@/lib/types";
 import {
+  getBubbleTargetMeasurement,
   getSpinnerItemAngle,
   normalizeSpinnerAngle,
   useDragSpinner
@@ -81,22 +82,40 @@ export default function HomePage() {
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
+  const isProgressMode = pickerMode === "progress";
+  const isProjectRingOpen = isProgressMode && projects.length > 0;
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const projectWheelRef = useRef<HTMLDivElement | null>(null);
+  const mainTargetRef = useRef<HTMLDivElement | null>(null);
+  const projectTargetRef = useRef<HTMLDivElement | null>(null);
+  const mainBubbleRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const projectBubbleRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const compositionRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectNavigationRef = useRef(false);
+  const measureMainTarget = useCallback(
+    (index: number) => getBubbleTargetMeasurement(mainBubbleRefs.current[index], mainTargetRef.current),
+    []
+  );
+  const measureProjectTarget = useCallback(
+    (index: number) => getBubbleTargetMeasurement(projectBubbleRefs.current[index], projectTargetRef.current),
+    []
+  );
   const mainSpinner = useDragSpinner({
     itemCount: wheelItems.length,
     onCommit: (index) => commitWheelItem(wheelItems[index]?.id ?? "new"),
-    onReject: () => closeProjectRing()
+    onReject: () => closeProjectRing(),
+    measureTarget: measureMainTarget,
+    activationKey: isProjectRingOpen
   });
   const projectSpinner = useDragSpinner({
     itemCount: projects.length,
     onCommit: (index) => openProject(projects[index]),
-    onReject: () => closeProjectRing()
+    onReject: () => closeProjectRing(),
+    measureTarget: measureProjectTarget,
+    activationKey: isProjectRingOpen
   });
   const previewItem = wheelItems[mainSpinner.activeIndex]?.id ?? "new";
   const activatedWheelItem = mainSpinner.activationIndex === null
@@ -350,8 +369,6 @@ export default function HomePage() {
   }
 
   const pickerTitle = pickerMode === "new" ? "New Project" : pickerMode === "join" ? "Join Project" : "Go";
-  const isProgressMode = pickerMode === "progress";
-  const isProjectRingOpen = isProgressMode && projects.length > 0;
 
   function renderProjectSpinner() {
     if (isLoading || errorMessage || projects.length === 0) return null;
@@ -377,6 +394,7 @@ export default function HomePage() {
         />
         <div className="pointer-events-none absolute inset-[14%] rounded-full border border-dashed border-field-secondary/45" aria-hidden />
         <div
+          ref={projectTargetRef}
           className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)] md:h-[5.5rem] md:w-[5.5rem]"
           aria-hidden
         />
@@ -408,14 +426,13 @@ export default function HomePage() {
               }}
             >
               <button
+                ref={(element) => {
+                  projectBubbleRefs.current[index] = element;
+                }}
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   if (projectSpinner.consumeSuppressedClick()) return;
-                  if (projectSpinner.activationIndex !== index) {
-                    closeProjectRing();
-                    return;
-                  }
                   projectSpinner.activateIndex(index);
                 }}
                 className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] ${
@@ -499,6 +516,7 @@ export default function HomePage() {
               <div className="pointer-events-none absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
               <div className="pointer-events-none absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)] md:h-8 md:w-8" aria-hidden />
               <div
+                ref={mainTargetRef}
                 className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)] ${
                   isProjectRingOpen
                     ? "left-[79%] h-16 w-16 md:h-[6.25rem] md:w-[6.25rem]"
@@ -515,16 +533,15 @@ export default function HomePage() {
                 return (
                   <button
                     key={item.id}
+                    ref={(element) => {
+                      mainBubbleRefs.current[index] = element;
+                    }}
                     type="button"
                     aria-label={item.label}
                     aria-pressed={isSelected}
                     onClick={(event) => {
                       event.stopPropagation();
                       if (mainSpinner.consumeSuppressedClick()) return;
-                      if (mainSpinner.activationIndex !== index) {
-                        closeProjectRing();
-                        return;
-                      }
                       mainSpinner.activateIndex(index);
                     }}
                     className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${

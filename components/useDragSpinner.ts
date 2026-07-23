@@ -1,12 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
+
+export type SpinnerTargetState = "outside" | "magnet" | "inside";
+
+export type SpinnerTargetMeasurement = {
+  state: SpinnerTargetState;
+  overlapRatio: number;
+  centerDistance: number;
+};
 
 type DragSpinnerOptions = {
   itemCount: number;
   onCommit: (index: number) => void;
   onReject?: () => void;
+  measureTarget?: (index: number) => SpinnerTargetMeasurement;
+  activationKey?: string | number | boolean | null;
   activationThresholdDegrees?: number;
   settleDelayMs?: number;
   snapDurationMs?: number;
@@ -24,6 +34,82 @@ export function normalizeSpinnerAngle(angle: number) {
 
 export function getSpinnerItemAngle(index: number, itemCount: number) {
   return itemCount > 0 ? (index * 360) / itemCount : 0;
+}
+
+function circleIntersectionArea(firstRadius: number, secondRadius: number, distance: number) {
+  if (distance >= firstRadius + secondRadius) return 0;
+  if (distance <= Math.abs(firstRadius - secondRadius)) {
+    return Math.PI * Math.min(firstRadius, secondRadius) ** 2;
+  }
+
+  const firstCosine = (distance ** 2 + firstRadius ** 2 - secondRadius ** 2)
+    / (2 * distance * firstRadius);
+  const secondCosine = (distance ** 2 + secondRadius ** 2 - firstRadius ** 2)
+    / (2 * distance * secondRadius);
+  const firstAngle = Math.acos(Math.min(1, Math.max(-1, firstCosine)));
+  const secondAngle = Math.acos(Math.min(1, Math.max(-1, secondCosine)));
+  const lensArea = 0.5 * Math.sqrt(
+    Math.max(
+      0,
+      (-distance + firstRadius + secondRadius)
+      * (distance + firstRadius - secondRadius)
+      * (distance - firstRadius + secondRadius)
+      * (distance + firstRadius + secondRadius)
+    )
+  );
+
+  return firstRadius ** 2 * firstAngle + secondRadius ** 2 * secondAngle - lensArea;
+}
+
+/** 화면에 그려진 두 원의 실제 겹침을 기준으로 클릭/자석 스냅 가능 상태를 판정합니다. */
+export function getBubbleTargetMeasurement(
+  bubble: Element | null | undefined,
+  target: Element | null | undefined
+): SpinnerTargetMeasurement {
+  if (!bubble || !target) {
+    return { state: "outside", overlapRatio: 0, centerDistance: Number.POSITIVE_INFINITY };
+  }
+
+  const bubbleBounds = bubble.getBoundingClientRect();
+  const targetBounds = target.getBoundingClientRect();
+  const bubbleLayoutWidth = "offsetWidth" in bubble && typeof bubble.offsetWidth === "number"
+    ? bubble.offsetWidth
+    : bubbleBounds.width;
+  const bubbleLayoutHeight = "offsetHeight" in bubble && typeof bubble.offsetHeight === "number"
+    ? bubble.offsetHeight
+    : bubbleBounds.height;
+  const targetLayoutWidth = "offsetWidth" in target && typeof target.offsetWidth === "number"
+    ? target.offsetWidth
+    : targetBounds.width;
+  const targetLayoutHeight = "offsetHeight" in target && typeof target.offsetHeight === "number"
+    ? target.offsetHeight
+    : targetBounds.height;
+  const bubbleRadius = Math.min(bubbleLayoutWidth, bubbleLayoutHeight) / 2;
+  const targetRadius = Math.min(targetLayoutWidth, targetLayoutHeight) / 2;
+  if (bubbleRadius <= 0 || targetRadius <= 0) {
+    return { state: "outside", overlapRatio: 0, centerDistance: Number.POSITIVE_INFINITY };
+  }
+
+  const bubbleCenterX = bubbleBounds.left + bubbleBounds.width / 2;
+  const bubbleCenterY = bubbleBounds.top + bubbleBounds.height / 2;
+  const targetCenterX = targetBounds.left + targetBounds.width / 2;
+  const targetCenterY = targetBounds.top + targetBounds.height / 2;
+  const centerDistance = Math.hypot(
+    bubbleCenterX - targetCenterX,
+    bubbleCenterY - targetCenterY
+  );
+  const overlapArea = circleIntersectionArea(bubbleRadius, targetRadius, centerDistance);
+  const overlapRatio = Math.min(1, overlapArea / (Math.PI * bubbleRadius ** 2));
+
+  if (centerDistance <= targetRadius || centerDistance + bubbleRadius <= targetRadius) {
+    return { state: "inside", overlapRatio, centerDistance };
+  }
+  // 작은 화면에서도 "버블의 절반 정도가 걸쳤다"는 체감과 일치하도록
+  // 실제 면적 50% 또는 버블 반지름의 절반까지 타겟 경계를 지난 경우를 자석 구역으로 봅니다.
+  if (overlapRatio >= 0.5 || centerDistance <= targetRadius + bubbleRadius * 0.5) {
+    return { state: "magnet", overlapRatio, centerDistance };
+  }
+  return { state: "outside", overlapRatio, centerDistance };
 }
 
 export function getSpinnerActivationIndex(
@@ -67,20 +153,24 @@ export function useDragSpinner({
   itemCount,
   onCommit,
   onReject,
+  measureTarget,
+  activationKey = null,
   activationThresholdDegrees = SPINNER_ACTIVATION_THRESHOLD_DEGREES,
   settleDelayMs = 180,
   snapDurationMs = 260
 }: DragSpinnerOptions) {
   const [rotation, setRotation] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activationIndex, setActivationIndex] = useState<number | null>(itemCount > 0 ? 0 : null);
+  const [activationState, setActivationState] = useState<SpinnerTargetState>(itemCount > 0 ? "inside" : "outside");
   const [isDragging, setIsDragging] = useState(false);
   const rotationRef = useRef(0);
   const activeIndexRef = useRef(0);
   const onCommitRef = useRef(onCommit);
   const onRejectRef = useRef(onReject);
+  const measureTargetRef = useRef(measureTarget);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastActivationRef = useRef<{ index: number; activatedAt: number } | null>(null);
   const dragStateRef = useRef<{
     pointerId: number;
     startX: number;
@@ -98,6 +188,10 @@ export function useDragSpinner({
     onRejectRef.current = onReject;
   }, [onReject]);
 
+  useLayoutEffect(() => {
+    measureTargetRef.current = measureTarget;
+  }, [measureTarget]);
+
   const cancelPending = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
@@ -114,18 +208,52 @@ export function useDragSpinner({
   }, [itemCount]);
 
   const commitIndex = useCallback((index: number) => {
-    const now = Date.now();
-    const lastActivation = lastActivationRef.current;
-    if (
-      lastActivation
-      && lastActivation.index === index
-      && now - lastActivation.activatedAt < 400
-    ) return false;
-
-    lastActivationRef.current = { index, activatedAt: now };
     onCommitRef.current(index);
     return true;
   }, []);
+
+  const measureActivation = useCallback(() => {
+    const measure = measureTargetRef.current;
+    if (!measure) {
+      const index = getSpinnerActivationIndex(
+        rotationRef.current,
+        itemCount,
+        activationThresholdDegrees
+      );
+      return {
+        index,
+        state: index === null ? "outside" as const : "inside" as const
+      };
+    }
+
+    let bestIndex: number | null = null;
+    let bestMeasurement: SpinnerTargetMeasurement | null = null;
+    for (let index = 0; index < itemCount; index += 1) {
+      const measurement = measure(index);
+      if (measurement.state === "outside") continue;
+      const stateRank = measurement.state === "inside" ? 2 : 1;
+      const bestStateRank = bestMeasurement?.state === "inside" ? 2 : bestMeasurement ? 1 : 0;
+      if (
+        !bestMeasurement
+        || stateRank > bestStateRank
+        || (stateRank === bestStateRank && measurement.overlapRatio > bestMeasurement.overlapRatio)
+      ) {
+        bestIndex = index;
+        bestMeasurement = measurement;
+      }
+    }
+    return {
+      index: bestIndex,
+      state: bestMeasurement?.state ?? "outside"
+    };
+  }, [activationThresholdDegrees, itemCount]);
+
+  const refreshActivation = useCallback(() => {
+    const next = measureActivation();
+    setActivationIndex(next.index);
+    setActivationState(next.state);
+    return next;
+  }, [measureActivation]);
 
   const snapToIndex = useCallback((requestedIndex: number, options: SnapOptions = {}) => {
     cancelPending();
@@ -137,6 +265,8 @@ export function useDragSpinner({
     updateRotation(snappedRotation);
     activeIndexRef.current = index;
     setActiveIndex(index);
+    setActivationIndex(index);
+    setActivationState("inside");
 
     if (options.commit === false) return;
     snapTimerRef.current = setTimeout(() => {
@@ -146,33 +276,28 @@ export function useDragSpinner({
 
   const activateIndex = useCallback((requestedIndex: number) => {
     cancelPending();
-    const activationIndex = getSpinnerActivationIndex(
-      rotationRef.current,
-      itemCount,
-      activationThresholdDegrees
-    );
-    if (activationIndex === null || activationIndex !== requestedIndex) {
+    const activation = measureActivation();
+    if (activation.index === null || activation.index !== requestedIndex) {
       onRejectRef.current?.();
       return false;
     }
-    return commitIndex(activationIndex);
-  }, [activationThresholdDegrees, cancelPending, commitIndex, itemCount]);
+    if (activation.state === "magnet") {
+      snapToIndex(activation.index, { commit: false });
+    }
+    return commitIndex(activation.index);
+  }, [cancelPending, commitIndex, measureActivation, snapToIndex]);
 
   const scheduleSettle = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = setTimeout(() => {
-      const activationIndex = getSpinnerActivationIndex(
-        rotationRef.current,
-        itemCount,
-        activationThresholdDegrees
-      );
-      if (activationIndex === null) {
+      const activation = measureActivation();
+      if (activation.index === null) {
         onRejectRef.current?.();
         return;
       }
-      snapToIndex(activationIndex);
+      snapToIndex(activation.index);
     }, settleDelayMs);
-  }, [activationThresholdDegrees, itemCount, settleDelayMs, snapToIndex]);
+  }, [measureActivation, settleDelayMs, snapToIndex]);
 
   useEffect(() => {
     cancelPending();
@@ -187,6 +312,10 @@ export function useDragSpinner({
   }, [cancelPending, itemCount, updateRotation]);
 
   useEffect(() => cancelPending, [cancelPending]);
+
+  useLayoutEffect(() => {
+    refreshActivation();
+  }, [activationKey, refreshActivation, rotation]);
 
   function getPointerAngle(event: ReactPointerEvent<HTMLElement>) {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -257,11 +386,8 @@ export function useDragSpinner({
   return {
     rotation,
     activeIndex,
-    activationIndex: getSpinnerActivationIndex(
-      rotation,
-      itemCount,
-      activationThresholdDegrees
-    ),
+    activationIndex,
+    activationState,
     isDragging,
     cancelPending,
     snapToIndex,
