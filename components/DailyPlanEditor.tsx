@@ -184,7 +184,7 @@ const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
-const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-7 max-md:[&_button]:min-h-7 max-md:[&_button]:px-0.5 max-md:[&_button]:text-[10px] max-md:[&_input]:h-7 max-md:[&_input]:min-h-7 max-md:[&_input]:px-0.5 max-md:[&_input]:text-[10px] max-md:[&_select]:h-7 max-md:[&_select]:min-h-7 max-md:[&_select]:px-0.5 max-md:[&_select]:text-[10px]";
+const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
 const maxRuntimeMinutes = 1440;
 let daumPostcodeScriptPromise: Promise<void> | null = null;
@@ -1076,7 +1076,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                         type="button"
                         aria-pressed={Boolean(location.isPrimary)}
                         onClick={() => setMeetingLocation(index)}
-                        className={`inline-flex min-h-8 items-center justify-center whitespace-nowrap rounded-md border px-2 text-[11px] font-black ${
+                        className={`inline-flex min-h-9 items-center justify-center whitespace-nowrap rounded-md border px-2 py-1.5 text-[11px] font-black leading-[1.35] ${
                           location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
                         }`}
                       >
@@ -1520,9 +1520,9 @@ function MobileInfoField({
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
     <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
-      <span className="truncate text-center text-[9px] font-black leading-tight text-field-primary">{label}</span>
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
       <DraftInput
-        className={`${compactInputClass} h-8 min-h-8 max-w-full min-w-0 truncate px-1 py-1 text-[11px] ${type === "date" ? "appearance-none" : ""}`}
+        className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
         type={type}
         value={numeric ? sanitizeNumericInput(value, 4) : value}
         onCommit={(nextValue) => onChange(sanitize ? sanitize(nextValue) : nextValue)}
@@ -1539,8 +1539,8 @@ function MobileInfoField({
 
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1 max-md:[&_input]:h-8 max-md:[&_input]:min-h-8 max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[11px]">
-      <span className="truncate text-center text-[9px] font-black leading-tight text-field-primary">{label}</span>
+    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
   );
@@ -1779,7 +1779,7 @@ function RoleContactGroup({
   onContactChange: (value: string) => void;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-md border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-8 max-md:[&_input]:min-h-8 max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[11px]">
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-md border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="whitespace-nowrap text-xs font-black text-field-primary">{role}</span>
       <DraftInput
         className={`${compactInputClass} min-w-0`}
@@ -1830,7 +1830,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       <div className="relative">
         <input
           ref={inputRef}
-          className={`${compactInputClass} h-9 min-h-9 pr-7 ${isInvalid ? "!border-field-danger" : ""}`}
+          className={`${compactInputClass} h-auto min-h-[38px] py-1.5 pr-7 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
           type="text"
           value={draftValue}
           inputMode="numeric"
@@ -2207,14 +2207,14 @@ function ShootingOrderField({
           </div>
           <div className="mt-2 grid grid-cols-5 gap-1.5">
             {["-", ",", "/"].map((separator) => (
-              <button key={separator} type="button" className="min-h-9 rounded border border-field-border bg-field-soft text-sm font-black text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor(separator)}>
+              <button key={separator} type="button" className="min-h-[38px] rounded border border-field-border bg-field-soft py-1.5 text-sm font-black leading-[1.35] text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor(separator)}>
                 {separator}
               </button>
             ))}
-            <button type="button" className="min-h-9 rounded border border-field-border bg-white px-1 text-[11px] font-black text-field-text" onPointerDown={(event) => event.preventDefault()} onClick={deleteAtCursor}>
+            <button type="button" className="min-h-[38px] rounded border border-field-border bg-white px-1 py-1.5 text-[11px] font-black leading-[1.35] text-field-text" onPointerDown={(event) => event.preventDefault()} onClick={deleteAtCursor}>
               지우기
             </button>
-            <button type="button" className="min-h-9 rounded border border-field-border bg-white px-1 text-[11px] font-black text-field-danger" onPointerDown={(event) => event.preventDefault()} onClick={() => updateDraft("")}>
+            <button type="button" className="min-h-[38px] rounded border border-field-border bg-white px-1 py-1.5 text-[11px] font-black leading-[1.35] text-field-danger" onPointerDown={(event) => event.preventDefault()} onClick={() => updateDraft("")}>
               전체삭제
             </button>
           </div>
@@ -2349,7 +2349,7 @@ function SceneCastSelector({
     <div ref={selectorRef} className="relative">
       <button
         type="button"
-        className="flex min-h-9 w-full items-center justify-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[12px] font-bold text-field-text"
+        className="flex min-h-[38px] w-full items-center justify-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[12px] font-bold leading-[1.4] text-field-text"
         onClick={() => setIsOpen((current) => !current)}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
@@ -2443,7 +2443,7 @@ function TimeWheelPicker({
       {showLabel ? <span className={compact ? "text-xs font-black text-field-primary" : "text-sm font-black text-field-primary"}>{label}</span> : null}
       <input
         ref={inputRef}
-        className={`${compactInputClass} h-9 min-h-9 ${isInvalid ? "!border-field-danger" : ""}`}
+        className={`${compactInputClass} h-auto min-h-[38px] py-1.5 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
         type="text"
         value={isFocused ? draftValue : formatTimeDisplay(value)}
         inputMode="numeric"

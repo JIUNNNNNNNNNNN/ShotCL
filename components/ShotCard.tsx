@@ -74,10 +74,10 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
 
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="rounded-full bg-field-light px-2 py-0.5 text-[10px] font-black text-field-primary">
+          <p className="rounded-full bg-field-light px-2 py-1 text-[10px] font-black leading-[1.35] text-field-primary">
             S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}
           </p>
-          <p className={cn("rounded-full px-2 py-0.5 text-[10px] font-black", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
+          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
         </div>
 

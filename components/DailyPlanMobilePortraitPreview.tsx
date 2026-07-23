@@ -46,7 +46,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
   return (
     <article
       data-testid="daily-plan-mobile-portrait-preview"
-      className="mt-4 w-full overflow-hidden bg-white font-[Arial,sans-serif] text-[10px] leading-[1.2] text-black md:hidden"
+      className="mt-4 w-full overflow-hidden bg-white [font-family:inherit] text-[10px] leading-[1.4] text-black md:hidden"
     >
       <table className="w-full table-fixed border-collapse border-2 border-black text-center">
         <SheetColumns />
@@ -54,7 +54,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
           <tr className="h-[54px]">
             <td className={`${cellClass} whitespace-nowrap font-bold`}>
               <span className="text-[8px]">DAY</span>
-              <span className="ml-0.5 text-[22px] leading-none">{meta.day || ""}</span>
+              <span className="ml-0.5 text-[22px] leading-[1.2]">{meta.day || ""}</span>
             </td>
             <td colSpan={9} className={`${cellClass} bg-[#ead1d1] px-1`}>
               <span className="text-[16px] font-bold">&lt;{plan.title || "작품명"}&gt;</span>
