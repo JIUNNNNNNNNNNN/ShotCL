@@ -4,6 +4,8 @@ import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { shotDraftToInsertRow } from "@/lib/data/mappers";
 import type { ShotDraft } from "@/lib/types";
 
+const shotListColumns = "id,project_id,daily_plan_id,analysis_run_id,scene_number,cut_number,shot_number,title,description,location,characters,memo,notes,order_index,status,storyboard_image_url,source_file_id,source_page,source_row,created_at,updated_at";
+
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId: routeProjectId } = await context.params;
@@ -14,7 +16,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     const dailyPlanId = request.nextUrl.searchParams.get("dailyPlanId");
     if (grant.role === "progress" && !dailyPlanId) return NextResponse.json({ error: "회차를 먼저 선택하세요." }, { status: 400 });
     const supabase = requireProjectAccessDb();
-    let query = supabase.from("shots").select("*").eq("project_id", projectId).order("order_index").order("created_at");
+    let query = supabase.from("shots").select(shotListColumns).eq("project_id", projectId).order("order_index").order("created_at");
     if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
     const { data, error } = await query;
     if (error) throw error;

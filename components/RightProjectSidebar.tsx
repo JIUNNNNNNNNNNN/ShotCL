@@ -16,14 +16,13 @@ import {
   X
 } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { listDailyPlans } from "@/lib/data/dailyPlans";
+import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
-import { listShots } from "@/lib/data/shots";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
-import type { DailyPlan, Project, Shot } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
-type PlanWithCount = DailyPlan & { shotCount: number };
+type PlanWithCount = DailyPlanListItem;
 
 type EpisodeProgress = {
   total: number;
@@ -66,16 +65,12 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
       }
 
       const planData = sortDailyPlans(await listDailyPlans(projectData.id));
-      const progressEntries = await Promise.all(
-        planData.map(async (plan) => {
-          const shots = await listShots(projectData.id, plan.id);
-          return [plan.id, summarizeShots(shots)] as const;
-        })
-      );
 
       setProject(projectData);
       setPlans(planData);
-      setProgressByPlan(Object.fromEntries(progressEntries));
+      setProgressByPlan(Object.fromEntries(
+        planData.map((plan) => [plan.id, summarizePlanProgress(plan)])
+      ));
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "회차 정보를 불러오지 못했습니다.");
@@ -86,7 +81,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
 
   useEffect(() => {
     loadPanelData();
-  }, [loadPanelData, pathname, currentPlanId]);
+  }, [loadPanelData]);
 
   useEffect(() => {
     if (!project?.id) return undefined;
@@ -374,9 +369,9 @@ function SideActionLink({
   );
 }
 
-function summarizeShots(shots: Shot[]): EpisodeProgress {
-  const completed = shots.filter((shot) => shot.status === "ok" || shot.status === "omit").length;
-  const total = shots.length;
+function summarizePlanProgress(plan: DailyPlanListItem): EpisodeProgress {
+  const completed = plan.progressCompleted;
+  const total = plan.progressTotal;
   return {
     total,
     completed,
@@ -405,7 +400,7 @@ function parseEpisodeNumber(value: string) {
   return matched ? Number(matched[0]) : null;
 }
 
-function formatEpisodeLabel(plan: Pick<DailyPlan, "episode" | "shootingDate">, index: number) {
+function formatEpisodeLabel(plan: Pick<DailyPlanListItem, "episode" | "shootingDate">, index: number) {
   const episode = plan.episode.trim();
   if (episode) return episode.includes("회차") ? episode : `${episode}회차`;
   return plan.shootingDate || `${index + 1}회차`;

@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
+import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { listProjects } from "@/lib/data/projects";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
 import { projectFromRow } from "@/lib/data/mappers";
@@ -76,7 +77,8 @@ const wheelItems = [
 export default function HomePage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedProjects, setHasLoadedProjects] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [pickerMode, setPickerMode] = useState<ProjectPickerMode | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
@@ -103,6 +105,7 @@ export default function HomePage() {
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mainSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectsLoadPromiseRef = useRef<Promise<void> | null>(null);
   const projectNavigationRef = useRef(false);
   const measureMainTarget = useCallback(
     (index: number) => getBubbleTargetMeasurement(mainBubbleRefs.current[index], mainTargetRef.current),
@@ -132,27 +135,6 @@ export default function HomePage() {
     : wheelItems[mainSpinner.activationIndex]?.id ?? null;
   const isProjectTargetEngaged = projectSpinner.activationIndex !== null
     && projectSpinner.activationState !== "outside";
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadSavedProjects() {
-      try {
-        const data = await listProjects();
-        const hiddenProjectIds = readHiddenProjectIds();
-        if (isMounted) setProjects(data.filter((project) => !getLocalProjectIdCandidates(project.id).some((candidate) => hiddenProjectIds.has(candidate))));
-      } catch (error) {
-        if (isMounted) setErrorMessage(error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다.");
-      } finally {
-        if (isMounted) setIsLoading(false);
-      }
-    }
-
-    loadSavedProjects();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   useEffect(() => () => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
@@ -219,6 +201,29 @@ export default function HomePage() {
     feedbackTimerRef.current = setTimeout(() => setFeedback(null), 1500);
   }
 
+  function loadProjectsForSpinner() {
+    if (hasLoadedProjects || projectsLoadPromiseRef.current) return;
+    setIsLoading(true);
+    setErrorMessage("");
+    const request = listProjects()
+      .then((data) => {
+        const hiddenProjectIds = readHiddenProjectIds();
+        setProjects(data.filter((project) => (
+          !getLocalProjectIdCandidates(project.id).some((candidate) => hiddenProjectIds.has(candidate))
+        )));
+        setHasLoadedProjects(true);
+      })
+      .catch((error) => {
+        setErrorMessage(error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다.");
+        showFeedback("progress", "프로젝트를 불러오지 못했습니다");
+      })
+      .finally(() => {
+        projectsLoadPromiseRef.current = null;
+        setIsLoading(false);
+      });
+    projectsLoadPromiseRef.current = request;
+  }
+
   function commitWheelItem(id: WheelItemId) {
     if (pickerMode === id || mainSelectionTimerRef.current) return;
     setSelectedMainId(id);
@@ -233,19 +238,8 @@ export default function HomePage() {
         return;
       }
 
-      if (isLoading) {
-        showFeedback(id, "프로젝트 확인 중");
-        setSelectedMainId(null);
-        return;
-      }
-
-      if (errorMessage) {
-        showFeedback(id, "프로젝트를 불러오지 못했습니다");
-        setSelectedMainId(null);
-        return;
-      }
-
       setPickerMode(id);
+      loadProjectsForSpinner();
     }, MAIN_SELECTION_FEEDBACK_MS);
   }
 
@@ -638,7 +632,12 @@ export default function HomePage() {
               })}
             </div>
           </div>
-          {isProgressMode && projects.length === 0 ? (
+          {isProgressMode && isLoading ? (
+            <div className="pointer-events-none rounded-full border border-field-border bg-white/95 px-4 py-2 shadow-sm">
+              <PixelDogLoader size="xs" compact />
+            </div>
+          ) : null}
+          {isProgressMode && hasLoadedProjects && !isLoading && projects.length === 0 ? (
             <p className="pointer-events-none whitespace-nowrap rounded-full border border-field-border bg-white/95 px-4 py-2 text-center text-[11px] font-black text-field-muted shadow-sm">
               진행 볼 프로젝트가 없습니다
             </p>

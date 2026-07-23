@@ -1,14 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import type { DailyPlanWithShots, Project, ProjectBasicInfo } from "@/lib/types";
+
+const DailyPlanEditor = dynamic(
+  () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
+  { ssr: false, loading: () => <PixelDogLoader size="lg" /> }
+);
 
 function useRouteIds() {
   const params = useParams<{ id: string | string[]; dailyPlanId: string | string[] }>();

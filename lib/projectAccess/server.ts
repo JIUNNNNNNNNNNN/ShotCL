@@ -149,7 +149,7 @@ export async function listAccessGrants(request: NextRequest) {
   const supabase = requireProjectAccessDb();
   const { data, error } = await supabase
     .from("project_access_sessions")
-    .select("project_id,role,joined_at,expires_at,projects!inner(id,name,shoot_date,description,created_at,share_enabled)")
+    .select("project_id,role,joined_at,expires_at,projects!inner(id,name,created_at,share_enabled)")
     .eq("browser_token_hash", hashSessionToken(token))
     .gt("expires_at", new Date().toISOString())
     .order("joined_at", { ascending: false });

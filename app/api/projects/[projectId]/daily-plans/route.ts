@@ -16,6 +16,7 @@ type DailyPlanSaveBody = {
 
 const SAVED_MESSAGE = "일촬표가 저장되었습니다.";
 const DUPLICATE_MESSAGE = "이미 저장된 일촬표입니다.";
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
@@ -25,16 +26,23 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
     const supabase = requireProjectAccessDb();
-    const planColumns = grant.role === "progress"
-      ? "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at"
-      : "*";
-    const [{ data: plans, error: planError }, { data: shots, error: shotError }] = await Promise.all([
-      supabase.from("daily_plans").select(planColumns).eq("project_id", projectId).order("updated_at", { ascending: false }),
-      supabase.from("daily_plan_shots").select("daily_plan_id").eq("project_id", projectId)
+    const [
+      { data: plans, error: planError },
+      { data: dailyPlanShots, error: dailyPlanShotError },
+      { data: progressShots, error: progressShotError }
+    ] = await Promise.all([
+      supabase.from("daily_plans").select(dailyPlanListColumns).eq("project_id", projectId).order("updated_at", { ascending: false }),
+      supabase.from("daily_plan_shots").select("daily_plan_id").eq("project_id", projectId),
+      supabase.from("shots").select("daily_plan_id,status").eq("project_id", projectId)
     ]);
     if (planError) throw planError;
-    if (shotError) throw shotError;
-    return NextResponse.json({ plans, shotPlanIds: (shots ?? []).map((shot) => shot.daily_plan_id) });
+    if (dailyPlanShotError) throw dailyPlanShotError;
+    if (progressShotError) throw progressShotError;
+    return NextResponse.json({
+      plans,
+      shotPlanIds: (dailyPlanShots ?? []).map((shot) => shot.daily_plan_id),
+      progressShots: progressShots ?? []
+    });
   } catch (error) {
     return NextResponse.json({ error: "일촬표 목록을 불러오지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }

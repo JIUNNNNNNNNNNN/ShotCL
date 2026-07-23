@@ -103,6 +103,7 @@ export function ShotReorderList({
     let latestInsertAfter = false;
     let latestClientY = startY;
     let isCleanedUp = false;
+    let dragFrame = 0;
 
     const restoreDocumentInteraction = () => {
       document.body.style.userSelect = originalUserSelect;
@@ -113,6 +114,7 @@ export function ShotReorderList({
       if (isCleanedUp) return;
       isCleanedUp = true;
       window.clearTimeout(longPressTimer);
+      if (dragFrame) window.cancelAnimationFrame(dragFrame);
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerCancel);
@@ -146,6 +148,22 @@ export function ShotReorderList({
 
       latestTargetId = closest?.id ?? shotId;
       latestInsertAfter = closest?.insertAfter ?? false;
+    };
+
+    const scheduleDragUpdate = () => {
+      if (dragFrame) return;
+      dragFrame = window.requestAnimationFrame(() => {
+        dragFrame = 0;
+        if (isCleanedUp || !activated) return;
+        findDropTarget(latestClientY);
+        setDragState({
+          shotId,
+          startY,
+          currentY: latestClientY,
+          targetId: latestTargetId,
+          insertAfter: latestInsertAfter
+        });
+      });
     };
 
     const activateDrag = () => {
@@ -185,14 +203,7 @@ export function ShotReorderList({
       }
 
       pointerEvent.preventDefault();
-      findDropTarget(pointerEvent.clientY);
-      setDragState({
-        shotId,
-        startY,
-        currentY: pointerEvent.clientY,
-        targetId: latestTargetId,
-        insertAfter: latestInsertAfter
-      });
+      scheduleDragUpdate();
     }
 
     function handlePointerUp(pointerEvent: PointerEvent) {
@@ -206,6 +217,11 @@ export function ShotReorderList({
       pointerEvent.preventDefault();
       pointerEvent.stopPropagation();
       suppressClickUntilRef.current = Date.now() + 700;
+      if (dragFrame) {
+        window.cancelAnimationFrame(dragFrame);
+        dragFrame = 0;
+      }
+      findDropTarget(pointerEvent.clientY);
       const targetId = latestTargetId;
       const nextShots = targetId
         ? reorderShots(allShots, shotId, targetId, latestInsertAfter)

@@ -1,12 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import type { Project, ProjectBasicInfo } from "@/lib/types";
+
+const DailyPlanEditor = dynamic(
+  () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
+  { ssr: false, loading: () => <PixelDogLoader size="lg" /> }
+);
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();

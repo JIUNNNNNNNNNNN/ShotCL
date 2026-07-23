@@ -3,6 +3,8 @@ import { normalizeShotStatus, shotDraftToInsertRow, shotFromRow, shotPatchToRow 
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import type { Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
+const shotListColumns = "id,project_id,daily_plan_id,analysis_run_id,scene_number,cut_number,shot_number,title,description,location,characters,memo,notes,order_index,status,storyboard_image_url,source_file_id,source_page,source_row,created_at,updated_at";
+
 async function getSharedRole(projectId: string): Promise<"admin" | "progress" | null> {
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/access`, { cache: "no-store" });
@@ -31,7 +33,7 @@ export async function listShots(projectId: string, dailyPlanId?: string): Promis
   if (supabase) {
     let query = supabase
       .from("shots")
-      .select("*")
+      .select(shotListColumns)
       .eq("project_id", projectId)
       .order("order_index", { ascending: true })
       .order("created_at", { ascending: true });
@@ -267,19 +269,18 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
   }
 
   try {
-    const accessResponse = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/access`, { cache: "no-store" });
-    if (accessResponse.ok) {
-      const response = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/shots/${encodeURIComponent(shot.id)}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus })
-      });
-      const payload = (await response.json()) as { shot?: Record<string, unknown>; error?: string };
-      if (!response.ok || !payload.shot) throw new Error(payload.error || "상태를 변경하지 못했습니다.");
-      return shotFromRow(payload.shot);
+    const response = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/shots/${encodeURIComponent(shot.id)}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: newStatus })
+    });
+    const payload = (await response.json().catch(() => ({}))) as { shot?: Record<string, unknown>; error?: string };
+    if (response.ok && payload.shot) return shotFromRow(payload.shot);
+    if (![400, 401, 404, 503].includes(response.status)) {
+      throw new Error(payload.error || "상태를 변경하지 못했습니다.");
     }
   } catch (error) {
-    if (error instanceof Error && !error.message.includes("fetch")) throw error;
+    if (!(error instanceof TypeError)) throw error;
   }
 
   const supabase = getSupabaseBrowserClient();
@@ -408,17 +409,19 @@ export async function reorderShots(projectId: string, dailyPlanId: string, order
     throw new Error("저장할 컷 순서가 올바르지 않습니다.");
   }
 
-  if (await getSharedRole(projectId)) {
+  try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots/reorder`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ dailyPlanId, shotIds: orderedShotIds })
     });
-    if (!response.ok) {
-      const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json().catch(() => ({}))) as { shots?: Record<string, unknown>[]; error?: string };
+    if (response.ok && payload.shots) return payload.shots.map(shotFromRow);
+    if (![400, 401, 404, 503].includes(response.status)) {
       throw new Error(payload.error || "컷 순서를 저장하지 못했습니다.");
     }
-    return listShots(projectId, dailyPlanId);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
   }
 
   const scopedShots = await listShots(projectId, dailyPlanId);
@@ -431,7 +434,7 @@ export async function reorderShots(projectId: string, dailyPlanId: string, order
   if (supabase) {
     const { data: rawShots, error: selectError } = await supabase
       .from("shots")
-      .select("*")
+      .select(shotListColumns)
       .eq("project_id", projectId)
       .eq("daily_plan_id", dailyPlanId);
     if (selectError) throw selectError;

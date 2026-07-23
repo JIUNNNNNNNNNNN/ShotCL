@@ -28,6 +28,15 @@ export type SaveDailyPlanInput = {
   allowDuplicate?: boolean;
 };
 
+export type DailyPlanListItem = DailyPlan & {
+  shotCount: number;
+  progressTotal: number;
+  progressCompleted: number;
+};
+
+const dailyPlanListRequests = new Map<string, Promise<DailyPlanListItem[]>>();
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at";
+
 export type SaveDailyPlanResult = DailyPlanWithShots & {
   saveStatus: "saved" | "duplicate";
   message: string;
@@ -159,14 +168,37 @@ export function normalizeDailyPlanShotDrafts(shots: DailyPlanShotDraft[]) {
 }
 
 /** 프로젝트의 저장된 일촬표 목록을 최신순으로 가져옵니다. */
-export async function listDailyPlans(projectId: string): Promise<Array<DailyPlan & { shotCount: number }>> {
+export function listDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
+  const existingRequest = dailyPlanListRequests.get(projectId);
+  if (existingRequest) return existingRequest;
+
+  const request = loadDailyPlans(projectId);
+  dailyPlanListRequests.set(projectId, request);
+  const clearRequest = () => {
+    if (dailyPlanListRequests.get(projectId) === request) dailyPlanListRequests.delete(projectId);
+  };
+  void request.then(clearRequest, clearRequest);
+  return request;
+}
+
+async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans`, { cache: "no-store" });
     if (response.ok) {
-      const payload = (await response.json()) as { plans: Record<string, unknown>[]; shotPlanIds: string[] };
+      const payload = (await response.json()) as {
+        plans: Record<string, unknown>[];
+        shotPlanIds: string[];
+        progressShots?: Array<{ daily_plan_id?: unknown; status?: unknown }>;
+      };
       const counts = new Map<string, number>();
       payload.shotPlanIds.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));
-      return payload.plans.map(dailyPlanFromRow).map((plan) => ({ ...plan, shotCount: counts.get(plan.id) ?? 0 }));
+      const progress = summarizeProgressRows(payload.progressShots ?? []);
+      return payload.plans.map(dailyPlanFromRow).map((plan) => ({
+        ...plan,
+        shotCount: counts.get(plan.id) ?? 0,
+        progressTotal: progress.get(plan.id)?.total ?? 0,
+        progressCompleted: progress.get(plan.id)?.completed ?? 0
+      }));
     }
     if (response.status === 403) throw new Error("관리자 권한이 필요합니다.");
   } catch (error) {
@@ -177,33 +209,65 @@ export async function listDailyPlans(projectId: string): Promise<Array<DailyPlan
   if (supabase) {
     const { data, error } = await supabase
       .from("daily_plans")
-      .select("*")
+      .select(dailyPlanListColumns)
       .eq("project_id", projectId)
       .order("updated_at", { ascending: false });
 
     if (error) throw error;
 
     const plans = data.map(dailyPlanFromRow);
-    const { data: shotRows, error: shotError } = await supabase
-      .from("daily_plan_shots")
-      .select("daily_plan_id")
-      .eq("project_id", projectId);
-
+    const [
+      { data: shotRows, error: shotError },
+      { data: progressRows, error: progressError }
+    ] = await Promise.all([
+      supabase.from("daily_plan_shots").select("daily_plan_id").eq("project_id", projectId),
+      supabase.from("shots").select("daily_plan_id,status").eq("project_id", projectId)
+    ]);
     if (shotError) throw shotError;
+    if (progressError) throw progressError;
 
     const counts = new Map<string, number>();
     shotRows.forEach((row) => counts.set(row.daily_plan_id, (counts.get(row.daily_plan_id) ?? 0) + 1));
-    return plans.map((plan) => ({ ...plan, shotCount: counts.get(plan.id) ?? 0 }));
+    const progress = summarizeProgressRows(progressRows ?? []);
+    return plans.map((plan) => ({
+      ...plan,
+      shotCount: counts.get(plan.id) ?? 0,
+      progressTotal: progress.get(plan.id)?.total ?? 0,
+      progressCompleted: progress.get(plan.id)?.completed ?? 0
+    }));
   }
 
-  const { dailyPlans, dailyPlanShots } = readLocalBuckets();
+  const { dailyPlans, dailyPlanShots, shots } = readLocalBuckets();
+  const progress = summarizeProgressRows(
+    shots
+      .filter((shot) => shot.projectId === projectId)
+      .map((shot) => ({
+        daily_plan_id: shot.dailyPlanId,
+        status: shot.status
+      }))
+  );
   return dailyPlans
     .filter((plan) => plan.projectId === projectId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((plan) => ({
       ...plan,
-      shotCount: dailyPlanShots.filter((shot) => shot.dailyPlanId === plan.id).length
+      shotCount: dailyPlanShots.filter((shot) => shot.dailyPlanId === plan.id).length,
+      progressTotal: progress.get(plan.id)?.total ?? 0,
+      progressCompleted: progress.get(plan.id)?.completed ?? 0
     }));
+}
+
+function summarizeProgressRows(rows: Array<{ daily_plan_id?: unknown; status?: unknown }>) {
+  const summaries = new Map<string, { total: number; completed: number }>();
+  rows.forEach((row) => {
+    const dailyPlanId = String(row.daily_plan_id ?? "");
+    if (!dailyPlanId) return;
+    const current = summaries.get(dailyPlanId) ?? { total: 0, completed: 0 };
+    current.total += 1;
+    if (row.status === "ok" || row.status === "omit") current.completed += 1;
+    summaries.set(dailyPlanId, current);
+  });
+  return summaries;
 }
 
 /** 일촬표와 컷 행을 함께 가져옵니다. */

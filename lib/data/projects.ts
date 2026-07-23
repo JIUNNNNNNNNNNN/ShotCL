@@ -7,6 +7,7 @@ import { emptyProjectBasicInfo, normalizeProjectBasicInfo, validateProjectBasicI
 import type { Project, ProjectBasicInfo, ProjectInput } from "@/lib/types";
 
 type ProjectApiErrorPayload = { error?: string; code?: string };
+const projectRequests = new Map<string, Promise<Project | null>>();
 
 /** 프로젝트 목록을 최신 생성순으로 가져옵니다. */
 export async function listProjects(): Promise<Project[]> {
@@ -24,7 +25,10 @@ export async function listProjects(): Promise<Project[]> {
 
   if (supabase) {
     await ensureSupabaseDevSession();
-    const { data, error } = await supabase.from("projects").select("*").order("created_at", { ascending: false });
+    const { data, error } = await supabase
+      .from("projects")
+      .select("id,name,created_at,share_enabled")
+      .order("created_at", { ascending: false });
     if (error) throw toReadableDataError(error, "프로젝트 목록을 불러오지 못했습니다.");
     const directProjects = data.map(projectFromRow);
     return mergeProjects(sharedProjects, directProjects);
@@ -35,7 +39,20 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 /** 단일 프로젝트를 ID로 조회합니다. */
-export async function getProject(projectId: string): Promise<Project | null> {
+export function getProject(projectId: string): Promise<Project | null> {
+  const existingRequest = projectRequests.get(projectId);
+  if (existingRequest) return existingRequest;
+
+  const request = loadProject(projectId);
+  projectRequests.set(projectId, request);
+  const clearRequest = () => {
+    if (projectRequests.get(projectId) === request) projectRequests.delete(projectId);
+  };
+  void request.then(clearRequest, clearRequest);
+  return request;
+}
+
+async function loadProject(projectId: string): Promise<Project | null> {
   const localCandidates = getLocalProjectIdCandidates(projectId);
   const databaseProjectId = normalizeProjectId(projectId);
   const localProject = () => {

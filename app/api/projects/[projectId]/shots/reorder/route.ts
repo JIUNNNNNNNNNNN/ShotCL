@@ -7,6 +7,8 @@ type ReorderRequest = {
   shotIds?: string[];
 };
 
+const shotListColumns = "id,project_id,daily_plan_id,analysis_run_id,scene_number,cut_number,shot_number,title,description,location,characters,memo,notes,order_index,status,storyboard_image_url,source_file_id,source_page,source_row,created_at,updated_at";
+
 export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId: routeProjectId } = await context.params;
@@ -36,7 +38,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const supabase = requireProjectAccessDb();
     const { data: scopedShots, error: selectError } = await supabase
       .from("shots")
-      .select("*")
+      .select(shotListColumns)
       .eq("project_id", projectId)
       .eq("daily_plan_id", dailyPlanId);
     if (selectError) throw selectError;
@@ -60,7 +62,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       .upsert(rows, { onConflict: "id" });
     if (updateError) throw updateError;
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, shots: rows });
   } catch (error) {
     console.error("[shots/reorder] failed", error);
     return NextResponse.json(

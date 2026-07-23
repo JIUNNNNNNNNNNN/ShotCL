@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { ImageIcon, Map } from "lucide-react";
 import { type Shot, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
@@ -16,7 +17,7 @@ type ShotCardProps = {
 };
 
 /** 컷 중심 현장 진행표 카드입니다. 버튼 클릭은 카드 수정 모달과 분리합니다. */
-export function ShotCard({
+export const ShotCard = memo(function ShotCard({
   shot,
   onOpen,
   onOpenOverhead,
@@ -157,4 +158,4 @@ export function ShotCard({
         </div>
     </article>
   );
-}
+});

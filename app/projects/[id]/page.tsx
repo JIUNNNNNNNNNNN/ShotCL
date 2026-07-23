@@ -1,27 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ProgressSummary } from "@/components/ProgressSummary";
 import { ShotCard } from "@/components/ShotCard";
-import { ShotEditorModal, type ShotEditorValues } from "@/components/ShotEditorModal";
-import { ShotOverheadEditor } from "@/components/ShotOverheadEditor";
+import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
 import { loadShotOverheadDiagram, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
-import { listDailyPlans } from "@/lib/data/dailyPlans";
+import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
+
+const ShotEditorModal = dynamic(
+  () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
+  { ssr: false, loading: ModalLoadingFallback }
+);
+const ShotOverheadEditor = dynamic(
+  () => import("@/components/ShotOverheadEditor").then((module) => module.ShotOverheadEditor),
+  { ssr: false, loading: ModalLoadingFallback }
+);
+const ImagePreviewModal = dynamic(
+  () => import("@/components/ImagePreviewModal").then((module) => module.ImagePreviewModal),
+  { ssr: false, loading: ModalLoadingFallback }
+);
 
 /** URL 파라미터에서 프로젝트 ID를 안전하게 읽습니다. */
 function useProjectId() {
@@ -54,8 +66,7 @@ export default function ProjectDetailPage() {
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
   const [project, setProject] = useState<Project | null>(null);
-  const [dailyPlans, setDailyPlans] = useState<Array<DailyPlan & { shotCount: number }>>([]);
-  const [episodeShots, setEpisodeShots] = useState<Record<string, Shot[]>>({});
+  const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
   const [filter, setFilter] = useState<ShotFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
@@ -66,6 +77,7 @@ export default function ProjectDetailPage() {
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
   const [overheadShot, setOverheadShot] = useState<Shot | null>(null);
   const [overheadLoadingShotId, setOverheadLoadingShotId] = useState<string | null>(null);
+  const overheadLoadingShotIdRef = useRef<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
@@ -77,17 +89,16 @@ export default function ProjectDetailPage() {
       setProject(projectData);
       if (!projectData) {
         setDailyPlans([]);
-        setEpisodeShots({});
         setShots([]);
         setErrorMessage("");
         return;
       }
-      const planData = await listDailyPlans(projectData.id);
-      const shotEntries = await Promise.all(planData.map(async (plan) => [plan.id, await listShots(projectData.id, plan.id)] as const));
-      const shotsByPlan = Object.fromEntries(shotEntries);
+      const [planData, selectedShots] = await Promise.all([
+        listDailyPlans(projectData.id),
+        dailyPlanId ? listShots(projectData.id, dailyPlanId) : Promise.resolve([])
+      ]);
       setDailyPlans(planData);
-      setEpisodeShots(shotsByPlan);
-      setShots(dailyPlanId ? shotsByPlan[dailyPlanId] ?? [] : []);
+      setShots(selectedShots);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -100,31 +111,42 @@ export default function ProjectDetailPage() {
     refresh();
   }, [refresh]);
 
+  const refreshSelectedShots = useCallback(async () => {
+    if (!projectId || !dailyPlanId) return;
+    try {
+      setShots(await listShots(projectId, dailyPlanId));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "컷 진행도를 갱신하지 못했습니다.");
+    }
+  }, [dailyPlanId, projectId]);
+
   useEffect(() => {
     if (!projectId || !dailyPlanId) return undefined;
-    return subscribeToShotChanges(projectId, refresh, dailyPlanId);
-  }, [dailyPlanId, projectId, refresh]);
+    return subscribeToShotChanges(projectId, refreshSelectedShots, dailyPlanId);
+  }, [dailyPlanId, projectId, refreshSelectedShots]);
 
   const filteredShots = useMemo(() => filterShots(shots, filter), [filter, shots]);
   const nextOrderIndex = shots.length + 1;
   const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
+  const handleImagePreview = useCallback((url: string, title: string) => {
+    setPreview({ url, title });
+  }, []);
 
-  async function handleStatusChange(targetShot: Shot, status: ShotStatus) {
+  const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     if (progressOnly && !(targetShot.status === "pending" && status === "ok")) {
       setErrorMessage("진행도 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다.");
       return;
     }
-    const previousShots = shots;
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
 
     try {
-      await updateShotStatus(targetShot, status);
-      await refresh();
+      const savedShot = await updateShotStatus(targetShot, status);
+      setShots((current) => current.map((shot) => (shot.id === savedShot.id ? savedShot : shot)));
     } catch (error) {
-      setShots(previousShots);
+      setShots((current) => current.map((shot) => (shot.id === targetShot.id ? targetShot : shot)));
       setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
     }
-  }
+  }, [progressOnly]);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -231,14 +253,6 @@ export default function ProjectDetailPage() {
       const savedDiagram = await saveShotOverheadDiagram(overheadShot, diagram);
       const updatedShot = { ...overheadShot, overheadDiagram: savedDiagram };
       setShots((current) => current.map((shot) => shot.id === updatedShot.id ? updatedShot : shot));
-      setEpisodeShots((current) => {
-        const planId = updatedShot.dailyPlanId;
-        if (!planId || !current[planId]) return current;
-        return {
-          ...current,
-          [planId]: current[planId].map((shot) => shot.id === updatedShot.id ? updatedShot : shot)
-        };
-      });
       setOverheadShot(null);
       setSuccessMessage("컷 부감도를 저장했습니다.");
     } catch (error) {
@@ -248,8 +262,9 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleOpenOverhead(shot: Shot) {
-    if (overheadLoadingShotId) return;
+  const handleOpenOverhead = useCallback(async (shot: Shot) => {
+    if (overheadLoadingShotIdRef.current) return;
+    overheadLoadingShotIdRef.current = shot.id;
     setOverheadLoadingShotId(shot.id);
     setErrorMessage("");
 
@@ -261,9 +276,22 @@ export default function ProjectDetailPage() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷 부감도를 불러오지 못했습니다.");
     } finally {
+      overheadLoadingShotIdRef.current = null;
       setOverheadLoadingShotId(null);
     }
-  }
+  }, []);
+
+  const renderShot = useCallback((shot: Shot) => (
+    <ShotCard
+      shot={shot}
+      onOpen={setEditingShot}
+      onOpenOverhead={handleOpenOverhead}
+      isOverheadLoading={overheadLoadingShotId === shot.id}
+      onImagePreview={handleImagePreview}
+      onStatusChange={handleStatusChange}
+      progressOnly={progressOnly}
+    />
+  ), [handleImagePreview, handleOpenOverhead, handleStatusChange, overheadLoadingShotId, progressOnly]);
 
   async function handleMoveShot(shot: Shot, direction: "up" | "down") {
     if (!projectId || !dailyPlanId) return;
@@ -283,15 +311,12 @@ export default function ProjectDetailPage() {
     setIsReordering(true);
     setErrorMessage("");
     setShots(nextShots);
-    setEpisodeShots((current) => ({ ...current, [dailyPlanId]: nextShots }));
 
     try {
       const savedShots = await reorderShots(projectId, dailyPlanId, nextShots.map((shot) => shot.id));
       setShots(savedShots);
-      setEpisodeShots((current) => ({ ...current, [dailyPlanId]: savedShots }));
     } catch {
       setShots(previousShots);
-      setEpisodeShots((current) => ({ ...current, [dailyPlanId]: previousShots }));
       setErrorMessage("컷 순서를 저장하지 못했습니다.");
     } finally {
       setIsReordering(false);
@@ -340,7 +365,6 @@ export default function ProjectDetailPage() {
       <EpisodeSelection
         project={project}
         plans={dailyPlans}
-        shotsByPlan={episodeShots}
         invalidSelection={Boolean(dailyPlanId)}
         canEdit={role === "admin"}
       />
@@ -424,17 +448,7 @@ export default function ProjectDetailPage() {
           visibleShots={filteredShots}
           disabled={role !== "admin" || isReordering}
           onReorder={handleReorderShots}
-          renderShot={(shot) => (
-            <ShotCard
-              shot={shot}
-              onOpen={setEditingShot}
-              onOpenOverhead={handleOpenOverhead}
-              isOverheadLoading={overheadLoadingShotId === shot.id}
-              onImagePreview={(url, title) => setPreview({ url, title })}
-              onStatusChange={handleStatusChange}
-              progressOnly={progressOnly}
-            />
-          )}
+          renderShot={renderShot}
         />
       )}
       </div>
@@ -461,9 +475,9 @@ export default function ProjectDetailPage() {
         <Plus className="h-6 w-6" aria-hidden />
       </button> : null}
 
-      {!progressOnly ? <ShotEditorModal
+      {!progressOnly && isAddOpen ? <ShotEditorModal
         mode="add"
-        open={isAddOpen}
+        open
         shot={null}
         defaultOrderIndex={nextOrderIndex}
         isSaving={isSaving}
@@ -471,9 +485,9 @@ export default function ProjectDetailPage() {
         onSave={handleSaveNewShot}
       /> : null}
 
-      {!progressOnly ? <ShotEditorModal
+      {!progressOnly && editingShot ? <ShotEditorModal
         mode="edit"
-        open={Boolean(editingShot)}
+        open
         shot={editingShot}
         defaultOrderIndex={nextOrderIndex}
         isSaving={isSaving}
@@ -493,7 +507,7 @@ export default function ProjectDetailPage() {
         />
       ) : null}
 
-      <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? ""} onClose={() => setPreview(null)} />
+      {preview ? <ImagePreviewModal imageUrl={preview.url} title={preview.title} onClose={() => setPreview(null)} /> : null}
     </>
   );
 }
@@ -501,13 +515,11 @@ export default function ProjectDetailPage() {
 function EpisodeSelection({
   project,
   plans,
-  shotsByPlan,
   invalidSelection,
   canEdit
 }: {
   project: Project;
-  plans: Array<DailyPlan & { shotCount: number }>;
-  shotsByPlan: Record<string, Shot[]>;
+  plans: DailyPlanListItem[];
   invalidSelection: boolean;
   canEdit: boolean;
 }) {
@@ -556,9 +568,8 @@ function EpisodeSelection({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {plans.map((plan, index) => {
-            const planShots = shotsByPlan[plan.id] ?? [];
-            const total = planShots.length || plan.shotCount;
-            const completed = planShots.filter((shot) => shot.status === "ok" || shot.status === "omit").length;
+            const total = plan.progressTotal || plan.shotCount;
+            const completed = plan.progressCompleted;
             const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
             return (
               <Link
@@ -584,6 +595,16 @@ function EpisodeSelection({
         </div>
       )}
     </main>
+  );
+}
+
+function ModalLoadingFallback() {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/20">
+      <div className="rounded-2xl border border-field-border bg-white p-4 shadow-lg">
+        <PixelDogLoader size="sm" compact />
+      </div>
+    </div>
   );
 }
 

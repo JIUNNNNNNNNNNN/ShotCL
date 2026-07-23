@@ -218,6 +218,7 @@ export function useDragSpinner({
   const measureTargetRef = useRef(measureTarget);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rotationFrameRef = useRef<number | null>(null);
   const isAnimatingRef = useRef(false);
   const dragStateRef = useRef<{
     pointerId: number;
@@ -254,9 +255,27 @@ export function useDragSpinner({
     rotationRef.current = nextRotation;
     setRotation(nextRotation);
     const nextActiveIndex = getNearestItemIndex(nextRotation, nextItemCount);
-    activeIndexRef.current = nextActiveIndex;
-    setActiveIndex(nextActiveIndex);
+    if (activeIndexRef.current !== nextActiveIndex) {
+      activeIndexRef.current = nextActiveIndex;
+      setActiveIndex(nextActiveIndex);
+    }
   }, [itemCount]);
+
+  const scheduleRotation = useCallback((nextRotation: number) => {
+    rotationRef.current = nextRotation;
+    if (rotationFrameRef.current !== null) return;
+    rotationFrameRef.current = window.requestAnimationFrame(() => {
+      rotationFrameRef.current = null;
+      updateRotation(rotationRef.current);
+    });
+  }, [updateRotation]);
+
+  const flushRotationFrame = useCallback(() => {
+    if (rotationFrameRef.current === null) return;
+    window.cancelAnimationFrame(rotationFrameRef.current);
+    rotationFrameRef.current = null;
+    updateRotation(rotationRef.current);
+  }, [updateRotation]);
 
   const commitIndex = useCallback((index: number) => {
     onCommitRef.current(index);
@@ -408,7 +427,10 @@ export function useDragSpinner({
     updateRotation(snappedRotation, itemCount);
   }, [cancelPending, itemCount, updateRotation]);
 
-  useEffect(() => cancelPending, [cancelPending]);
+  useEffect(() => () => {
+    cancelPending();
+    if (rotationFrameRef.current !== null) window.cancelAnimationFrame(rotationFrameRef.current);
+  }, [cancelPending]);
 
   useLayoutEffect(() => {
     if (!isAnimatingRef.current) refreshActivation();
@@ -452,16 +474,18 @@ export function useDragSpinner({
       event.currentTarget.setPointerCapture(event.pointerId);
       dragState.captured = true;
     }
-    dragState.moved = true;
-    suppressClickRef.current = true;
-    setIsDragging(true);
+    if (!dragState.moved) {
+      dragState.moved = true;
+      suppressClickRef.current = true;
+      setIsDragging(true);
+    }
 
     const nextPointerAngle = getPointerAngle(event);
     const delta = normalizeSpinnerAngle(nextPointerAngle - dragState.lastAngle);
     if (Math.abs(delta) < 0.15) return;
 
     dragState.lastAngle = nextPointerAngle;
-    updateRotation(rotationRef.current + delta);
+    scheduleRotation(rotationRef.current + delta);
   }
 
   function finishPointer(event: ReactPointerEvent<HTMLElement>) {
@@ -475,6 +499,7 @@ export function useDragSpinner({
     setIsDragging(false);
 
     if (dragState.moved) {
+      flushRotationFrame();
       scheduleSettle();
       window.setTimeout(() => {
         suppressClickRef.current = false;
