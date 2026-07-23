@@ -9,6 +9,17 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: [
+          "Paperlogy",
+          "system-ui",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "Apple SD Gothic Neo",
+          "Noto Sans KR",
+          "sans-serif"
+        ]
+      },
       colors: {
         field: {
           bg: "#FCFBF7",

@@ -3,9 +3,73 @@
 @tailwind utilities;
 
 @font-face {
-  font-family: "GPZDongneGomulsang";
-  src: url("/fonts/GPZDongneGomulsang-Basic-Medium.ttf") format("truetype");
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-1Thin.ttf") format("truetype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-2ExtraLight.ttf") format("truetype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-3Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-4Regular.ttf") format("truetype");
   font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-5Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-6SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-7Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-8ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("/fonts/paperlogy/Paperlogy-9Black.ttf") format("truetype");
+  font-weight: 900;
   font-style: normal;
   font-display: swap;
 }
@@ -81,6 +145,14 @@
 html {
   min-height: 100%;
   background: var(--field-paper);
+  font-family:
+    "Paperlogy",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Apple SD Gothic Neo",
+    "Noto Sans KR",
+    sans-serif;
   line-height: 1.45;
 }
 
@@ -90,6 +162,7 @@ body {
   background: var(--field-paper);
   color: #1c1c1a;
   font-family:
+    "Paperlogy",
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
@@ -105,15 +178,8 @@ body {
 input,
 textarea,
 select {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Apple SD Gothic Neo",
-    "Noto Sans KR",
-    sans-serif;
+  font-family: inherit;
   line-height: 1.35;
-  letter-spacing: normal;
 }
 
 button {
@@ -122,14 +188,7 @@ button {
 }
 
 table {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Apple SD Gothic Neo",
-    "Noto Sans KR",
-    sans-serif;
-  letter-spacing: normal;
+  font-family: inherit;
 }
 
 a,
@@ -138,27 +197,6 @@ p,
 span,
 div {
   font-family: inherit;
-}
-
-.font-display,
-.font-display-strong {
-  font-family:
-    "GPZDongneGomulsang",
-    "Apple SD Gothic Neo",
-    "Noto Sans KR",
-    sans-serif;
-}
-
-.font-display {
-  letter-spacing: -0.025em;
-}
-
-.font-display-strong {
-  display: inline-block;
-  transform-origin: center;
-  transform-box: fill-box;
-  letter-spacing: -0.04em;
-  transform: scaleX(0.94);
 }
 
 button {
