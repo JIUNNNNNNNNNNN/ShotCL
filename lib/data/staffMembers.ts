@@ -1,11 +1,8 @@
 import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
-import {
-  normalizeStaffDepartment,
-  sortStaffMembers
-} from "@/lib/dailyPlan/staffList";
+import { normalizeStaffDepartment, sortStaffMembers } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
-import type { DailyPlanStaffMember } from "@/lib/types";
+import type { ProjectStaffMember } from "@/lib/types";
 
 type StaffListPayload = {
   members?: Record<string, unknown>[];
@@ -13,27 +10,24 @@ type StaffListPayload = {
   error?: string;
 };
 
-export type DailyPlanStaffListResult = {
-  members: DailyPlanStaffMember[];
+export type ProjectStaffListResult = {
+  members: ProjectStaffMember[];
   warnings: string[];
 };
 
-export function createBlankDailyPlanStaffMember(
+export function createBlankProjectStaffMember(
   projectId: string,
-  dailyPlanId: string,
   department: string,
   sortOrder: number
-): DailyPlanStaffMember {
+): ProjectStaffMember {
   const now = new Date().toISOString();
   return {
     id: createUuid(),
     projectId,
-    dailyPlanId,
     department: normalizeStaffDepartment(department),
     name: "",
     phone: "",
-    province: "",
-    cityDistrict: "",
+    location: "",
     notes: "",
     sortOrder,
     createdAt: now,
@@ -41,11 +35,11 @@ export function createBlankDailyPlanStaffMember(
   };
 }
 
-/** 저장된 스텝 행만 불러오며 일촬표 인원수로 행을 자동 생성하지 않습니다. */
-export async function listDailyPlanStaffMembers(projectId: string, dailyPlanId: string): Promise<DailyPlanStaffListResult> {
+/** 프로젝트 전체에서 공유하는 스탭 풀을 불러옵니다. */
+export async function listProjectStaffMembers(projectId: string): Promise<ProjectStaffListResult> {
   try {
     const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}/staff-list`,
+      `/api/projects/${encodeURIComponent(projectId)}/staff-list`,
       { cache: "no-store" }
     );
     const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
@@ -56,25 +50,24 @@ export async function listDailyPlanStaffMembers(projectId: string, dailyPlanId: 
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
-      throw new Error(payload.error || "스텝 리스트를 불러오지 못했습니다.");
+      throw new Error(payload.error || "스탭 리스트를 불러오지 못했습니다.");
     }
   } catch (error) {
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
 
-  return listLocalStaffMembers(projectId, dailyPlanId);
+  return listLocalStaffMembers(projectId);
 }
 
-/** 사용자가 입력한 상세 행과 순서를 그대로 저장합니다. */
-export async function saveDailyPlanStaffMembers(
+/** 사용자가 입력한 프로젝트 스탭 행과 순서를 그대로 저장합니다. */
+export async function saveProjectStaffMembers(
   projectId: string,
-  dailyPlanId: string,
-  members: DailyPlanStaffMember[]
-): Promise<DailyPlanStaffListResult> {
-  const normalizedMembers = members.map((member, index) => normalizeMember(member, projectId, dailyPlanId, index));
+  members: ProjectStaffMember[]
+): Promise<ProjectStaffListResult> {
+  const normalizedMembers = members.map((member, index) => normalizeMember(member, projectId, index));
   try {
     const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}/staff-list`,
+      `/api/projects/${encodeURIComponent(projectId)}/staff-list`,
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -89,23 +82,24 @@ export async function saveDailyPlanStaffMembers(
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
-      throw new Error(payload.error || "스텝 리스트를 저장하지 못했습니다.");
+      throw new Error(payload.error || "스탭 리스트를 저장하지 못했습니다.");
     }
   } catch (error) {
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
 
-  return saveLocalStaffMembers(projectId, dailyPlanId, normalizedMembers);
+  return saveLocalStaffMembers(projectId, normalizedMembers);
 }
 
-function listLocalStaffMembers(projectId: string, dailyPlanId: string): DailyPlanStaffListResult {
+function listLocalStaffMembers(projectId: string): ProjectStaffListResult {
   const buckets = readLocalBuckets();
-  const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
-  if (!plan) throw new Error("일촬표를 찾을 수 없습니다.");
+  if (!buckets.projects.some((project) => project.id === projectId)) {
+    throw new Error("프로젝트를 찾을 수 없습니다.");
+  }
 
   return {
     members: sortStaffMembers(
-      buckets.dailyPlanStaffMembers.filter((member) => member.projectId === projectId && member.dailyPlanId === dailyPlanId)
+      buckets.projectStaffMembers.filter((member) => member.projectId === projectId)
     ),
     warnings: []
   };
@@ -113,21 +107,19 @@ function listLocalStaffMembers(projectId: string, dailyPlanId: string): DailyPla
 
 function saveLocalStaffMembers(
   projectId: string,
-  dailyPlanId: string,
-  members: DailyPlanStaffMember[]
-): DailyPlanStaffListResult {
+  members: ProjectStaffMember[]
+): ProjectStaffListResult {
   const buckets = readLocalBuckets();
-  const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
-  if (!plan) throw new Error("일촬표를 찾을 수 없습니다.");
+  if (!buckets.projects.some((project) => project.id === projectId)) {
+    throw new Error("프로젝트를 찾을 수 없습니다.");
+  }
 
   const normalizedMembers = sortStaffMembers(
-    members.map((member, index) => normalizeMember(member, projectId, dailyPlanId, index))
+    members.map((member, index) => normalizeMember(member, projectId, index))
   );
   writeLocalBuckets({
-    dailyPlanStaffMembers: [
-      ...buckets.dailyPlanStaffMembers.filter(
-        (member) => member.projectId !== projectId || member.dailyPlanId !== dailyPlanId
-      ),
+    projectStaffMembers: [
+      ...buckets.projectStaffMembers.filter((member) => member.projectId !== projectId),
       ...normalizedMembers
     ]
   }, projectId);
@@ -136,36 +128,31 @@ function saveLocalStaffMembers(
 }
 
 function normalizeMember(
-  member: DailyPlanStaffMember,
+  member: ProjectStaffMember,
   projectId: string,
-  dailyPlanId: string,
   index: number
-): DailyPlanStaffMember {
+): ProjectStaffMember {
   return {
     ...member,
     projectId,
-    dailyPlanId,
     department: normalizeStaffDepartment(member.department),
     name: member.name.slice(0, 100),
     phone: formatKoreanPhoneNumber(member.phone),
-    province: member.province.slice(0, 50),
-    cityDistrict: member.cityDistrict.slice(0, 50),
+    location: member.location.slice(0, 120),
     notes: member.notes.slice(0, 2000),
     sortOrder: index + 1,
     updatedAt: new Date().toISOString()
   };
 }
 
-function staffMemberFromRow(row: Record<string, unknown>): DailyPlanStaffMember {
+function staffMemberFromRow(row: Record<string, unknown>): ProjectStaffMember {
   return {
     id: String(row.id),
     projectId: String(row.project_id),
-    dailyPlanId: String(row.daily_plan_id),
     department: normalizeStaffDepartment(row.department),
     name: String(row.name ?? ""),
     phone: formatKoreanPhoneNumber(String(row.phone ?? "")),
-    province: String(row.province ?? ""),
-    cityDistrict: String(row.city_district ?? ""),
+    location: String(row.location ?? ""),
     notes: String(row.notes ?? ""),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),

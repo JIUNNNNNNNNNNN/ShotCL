@@ -43,7 +43,7 @@ export type DailyPlanPrintMeta = {
   teams: TeamCallSheetRow[];
 };
 
-/** 일촬표 스태프 섹션과 상세 스텝 리스트가 함께 사용하는 부서 목록입니다. */
+/** 일촬표 PDF/콜시트 안에서만 사용하는 기본 부서 목록입니다. */
 export const dailyPlanTeamDepartments = [
   "연출",
   "제작",

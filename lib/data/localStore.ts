@@ -1,4 +1,4 @@
-import type { DailyPlan, DailyPlanShot, DailyPlanStaffMember, Project, Shot, ShotStatusLog } from "@/lib/types";
+import type { DailyPlan, DailyPlanShot, DailyPlanStaffMember, Project, ProjectStaffMember, Shot, ShotStatusLog } from "@/lib/types";
 
 const PROJECTS_KEY = "today-storyboard-projects";
 const SHOTS_KEY = "today-storyboard-shots";
@@ -6,6 +6,7 @@ const LOGS_KEY = "today-storyboard-status-logs";
 const DAILY_PLANS_KEY = "today-storyboard-daily-plans";
 const DAILY_PLAN_SHOTS_KEY = "today-storyboard-daily-plan-shots";
 const DAILY_PLAN_STAFF_MEMBERS_KEY = "today-storyboard-daily-plan-staff-members";
+const PROJECT_STAFF_MEMBERS_KEY = "today-storyboard-project-staff-members";
 const REVISION_KEY = "today-storyboard-revision";
 const LOCAL_CHANGE_EVENT = "today-storyboard-local-change";
 
@@ -16,6 +17,7 @@ type LocalBuckets = {
   dailyPlans: DailyPlan[];
   dailyPlanShots: DailyPlanShot[];
   dailyPlanStaffMembers: DailyPlanStaffMember[];
+  projectStaffMembers: ProjectStaffMember[];
 };
 
 /** 브라우저 저장소에 접근할 수 없는 서버 렌더링 순간을 안전하게 피합니다. */
@@ -55,7 +57,8 @@ export function readLocalBuckets(): LocalBuckets {
     logs: readArray<ShotStatusLog>(LOGS_KEY),
     dailyPlans: readArray<DailyPlan>(DAILY_PLANS_KEY),
     dailyPlanShots: readArray<DailyPlanShot>(DAILY_PLAN_SHOTS_KEY),
-    dailyPlanStaffMembers: readArray<DailyPlanStaffMember>(DAILY_PLAN_STAFF_MEMBERS_KEY)
+    dailyPlanStaffMembers: readArray<DailyPlanStaffMember>(DAILY_PLAN_STAFF_MEMBERS_KEY),
+    projectStaffMembers: readArray<ProjectStaffMember>(PROJECT_STAFF_MEMBERS_KEY)
   };
 }
 
@@ -67,6 +70,7 @@ export function writeLocalBuckets(next: Partial<LocalBuckets>, projectId?: strin
   if (next.dailyPlans) writeArray(DAILY_PLANS_KEY, next.dailyPlans);
   if (next.dailyPlanShots) writeArray(DAILY_PLAN_SHOTS_KEY, next.dailyPlanShots);
   if (next.dailyPlanStaffMembers) writeArray(DAILY_PLAN_STAFF_MEMBERS_KEY, next.dailyPlanStaffMembers);
+  if (next.projectStaffMembers) writeArray(PROJECT_STAFF_MEMBERS_KEY, next.projectStaffMembers);
   notifyLocalProjectChange(projectId);
 }
 

@@ -263,3 +263,16 @@ export type DailyPlanStaffMember = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ProjectStaffMember = {
+  id: string;
+  projectId: string;
+  department: string;
+  name: string;
+  phone: string;
+  location: string;
+  notes: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
