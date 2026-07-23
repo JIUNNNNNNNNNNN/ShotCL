@@ -91,6 +91,8 @@ export type ShotOverheadPerson = {
   id: string;
   x: number;
   y: number;
+  scale: number;
+  rotation: number;
   label: string;
 };
 

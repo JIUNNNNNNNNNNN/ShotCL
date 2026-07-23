@@ -19,10 +19,14 @@ type Selection = { kind: "person" | "camera" | "line" | "shape"; id: string } | 
 type CanvasPoint = { x: number; y: number };
 
 type DragState =
-  | { kind: "person"; id: string; offsetX: number; offsetY: number }
-  | { kind: "camera"; id: string; offsetX: number; offsetY: number }
-  | { kind: "shape"; id: string; offsetX: number; offsetY: number }
-  | { kind: "line"; id: string; start: CanvasPoint; original: ShotOverheadLine };
+  | { kind: "person-move"; id: string; pointerId: number; offsetX: number; offsetY: number }
+  | { kind: "person-scale"; id: string; pointerId: number; center: CanvasPoint; startDistance: number; startScale: number }
+  | { kind: "camera-move"; id: string; pointerId: number; offsetX: number; offsetY: number }
+  | { kind: "shape-move"; id: string; pointerId: number; offsetX: number; offsetY: number }
+  | { kind: "shape-resize"; id: string; pointerId: number; origin: CanvasPoint }
+  | { kind: "line-move"; id: string; pointerId: number; start: CanvasPoint; original: ShotOverheadLine }
+  | { kind: "line-start"; id: string; pointerId: number; original: ShotOverheadLine }
+  | { kind: "line-end"; id: string; pointerId: number; original: ShotOverheadLine };
 
 type ShotOverheadEditorProps = {
   shot: Shot;
@@ -51,6 +55,30 @@ function cloneDiagram(diagram: ShotOverheadDiagram | null): ShotOverheadDiagram 
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+const PERSON_RADIUS = 28;
+const MIN_PERSON_SCALE = 0.5;
+const MAX_PERSON_SCALE = 3;
+const MIN_SHAPE_WIDTH = 80;
+const MIN_SHAPE_HEIGHT = 60;
+const MIN_LINE_LENGTH = 24;
+
+function pointDistance(first: CanvasPoint, second: CanvasPoint) {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function keepMinimumLineLength(point: CanvasPoint, anchor: CanvasPoint, fallback: CanvasPoint) {
+  if (pointDistance(point, anchor) >= MIN_LINE_LENGTH) return point;
+  const fallbackX = fallback.x - anchor.x;
+  const fallbackY = fallback.y - anchor.y;
+  const fallbackLength = Math.hypot(fallbackX, fallbackY);
+  const unitX = fallbackLength > 0 ? fallbackX / fallbackLength : 1;
+  const unitY = fallbackLength > 0 ? fallbackY / fallbackLength : 0;
+  return {
+    x: clamp(anchor.x + unitX * MIN_LINE_LENGTH, 0, OVERHEAD_CANVAS_WIDTH),
+    y: clamp(anchor.y + unitY * MIN_LINE_LENGTH, 0, OVERHEAD_CANVAS_HEIGHT)
+  };
 }
 
 /** 컷에 귀속된 JSON 부감도를 편집하거나 진행 권한에서 열람합니다. */
@@ -105,6 +133,8 @@ export function ShotOverheadEditor({
       id: createElementId("person"),
       x: 360 + (index % 4) * 90,
       y: 330 + (index % 3) * 70,
+      scale: 1,
+      rotation: 0,
       label: String.fromCharCode(65 + (index % 26))
     };
     setDiagram((current) => ({ ...current, people: [...current.people, person] }));
@@ -133,8 +163,8 @@ export function ShotOverheadEditor({
       type: "rect" as const,
       x: 130 + (index % 3) * 90,
       y: 120 + (index % 3) * 70,
-      width: 420,
-      height: 260,
+      width: 240,
+      height: 160,
       label: "공간"
     };
     setDiagram((current) => ({ ...current, shapes: [...current.shapes, shape] }));
@@ -192,33 +222,116 @@ export function ShotOverheadEditor({
     const point = canvasPoint(event.clientX, event.clientY);
     if (selection.kind === "person") {
       const item = diagram.people.find((person) => person.id === selection.id);
-      if (item) setDrag({ kind: "person", id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      if (item) {
+        capturePointer(event.pointerId);
+        setDrag({ kind: "person-move", id: item.id, pointerId: event.pointerId, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      }
     } else if (selection.kind === "camera") {
       const item = diagram.cameras.find((camera) => camera.id === selection.id);
-      if (item) setDrag({ kind: "camera", id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      if (item) {
+        capturePointer(event.pointerId);
+        setDrag({ kind: "camera-move", id: item.id, pointerId: event.pointerId, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      }
     } else if (selection.kind === "shape") {
       const item = diagram.shapes.find((shape) => shape.id === selection.id);
-      if (item) setDrag({ kind: "shape", id: item.id, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      if (item) {
+        capturePointer(event.pointerId);
+        setDrag({ kind: "shape-move", id: item.id, pointerId: event.pointerId, offsetX: point.x - item.x, offsetY: point.y - item.y });
+      }
     } else {
       const item = diagram.lines.find((line) => line.id === selection.id);
-      if (item) setDrag({ kind: "line", id: item.id, start: point, original: { ...item } });
+      if (item) {
+        capturePointer(event.pointerId);
+        setDrag({ kind: "line-move", id: item.id, pointerId: event.pointerId, start: point, original: { ...item } });
+      }
     }
   }
 
+  function capturePointer(pointerId: number) {
+    const canvas = svgRef.current;
+    if (canvas && !canvas.hasPointerCapture(pointerId)) canvas.setPointerCapture(pointerId);
+  }
+
+  function handlePersonScalePointerDown(event: React.PointerEvent<SVGElement>, id: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (readOnly || tool !== "select") return;
+    const item = diagram.people.find((person) => person.id === id);
+    if (!item) return;
+    const point = canvasPoint(event.clientX, event.clientY);
+    capturePointer(event.pointerId);
+    setSelected({ kind: "person", id });
+    setDrag({
+      kind: "person-scale",
+      id,
+      pointerId: event.pointerId,
+      center: { x: item.x, y: item.y },
+      startDistance: Math.max(1, pointDistance(point, item)),
+      startScale: item.scale
+    });
+  }
+
+  function handleShapeResizePointerDown(event: React.PointerEvent<SVGElement>, id: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (readOnly || tool !== "select") return;
+    const item = diagram.shapes.find((shape) => shape.id === id);
+    if (!item) return;
+    capturePointer(event.pointerId);
+    setSelected({ kind: "shape", id });
+    setDrag({
+      kind: "shape-resize",
+      id,
+      pointerId: event.pointerId,
+      origin: { x: item.x, y: item.y }
+    });
+  }
+
+  function handleLineEndpointPointerDown(event: React.PointerEvent<SVGElement>, id: string, endpoint: "start" | "end") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (readOnly || tool !== "select") return;
+    const item = diagram.lines.find((line) => line.id === id);
+    if (!item) return;
+    capturePointer(event.pointerId);
+    setSelected({ kind: "line", id });
+    setDrag({
+      kind: endpoint === "start" ? "line-start" : "line-end",
+      id,
+      pointerId: event.pointerId,
+      original: { ...item }
+    });
+  }
+
   function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
-    if (!drag || readOnly) return;
+    if (!drag || readOnly || drag.pointerId !== event.pointerId) return;
     const point = canvasPoint(event.clientX, event.clientY);
     const activeDrag = drag;
     setDiagram((current) => {
-      if (activeDrag.kind === "person") {
+      if (activeDrag.kind === "person-move") {
         return {
           ...current,
           people: current.people.map((item) => item.id === activeDrag.id
-            ? { ...item, x: clamp(point.x - activeDrag.offsetX, 36, OVERHEAD_CANVAS_WIDTH - 36), y: clamp(point.y - activeDrag.offsetY, 36, OVERHEAD_CANVAS_HEIGHT - 50) }
+            ? {
+                ...item,
+                x: clamp(point.x - activeDrag.offsetX, PERSON_RADIUS * item.scale, OVERHEAD_CANVAS_WIDTH - PERSON_RADIUS * item.scale),
+                y: clamp(point.y - activeDrag.offsetY, PERSON_RADIUS * item.scale, OVERHEAD_CANVAS_HEIGHT - 60)
+              }
             : item)
         };
       }
-      if (activeDrag.kind === "camera") {
+      if (activeDrag.kind === "person-scale") {
+        const nextScale = clamp(
+          activeDrag.startScale * (pointDistance(point, activeDrag.center) / activeDrag.startDistance),
+          MIN_PERSON_SCALE,
+          MAX_PERSON_SCALE
+        );
+        return {
+          ...current,
+          people: current.people.map((item) => item.id === activeDrag.id ? { ...item, scale: nextScale } : item)
+        };
+      }
+      if (activeDrag.kind === "camera-move") {
         return {
           ...current,
           cameras: current.cameras.map((item) => item.id === activeDrag.id
@@ -226,7 +339,7 @@ export function ShotOverheadEditor({
             : item)
         };
       }
-      if (activeDrag.kind === "shape") {
+      if (activeDrag.kind === "shape-move") {
         return {
           ...current,
           shapes: current.shapes.map((item) => item.id === activeDrag.id
@@ -238,21 +351,78 @@ export function ShotOverheadEditor({
             : item)
         };
       }
+      if (activeDrag.kind === "shape-resize") {
+        return {
+          ...current,
+          shapes: current.shapes.map((item) => item.id === activeDrag.id
+            ? {
+                ...item,
+                width: clamp(point.x - activeDrag.origin.x, MIN_SHAPE_WIDTH, OVERHEAD_CANVAS_WIDTH - activeDrag.origin.x),
+                height: clamp(point.y - activeDrag.origin.y, MIN_SHAPE_HEIGHT, OVERHEAD_CANVAS_HEIGHT - activeDrag.origin.y)
+              }
+            : item)
+        };
+      }
+      if (activeDrag.kind === "line-start") {
+        return {
+          ...current,
+          lines: current.lines.map((item) => {
+            if (item.id !== activeDrag.id) return item;
+            const next = keepMinimumLineLength(
+              point,
+              { x: item.x2, y: item.y2 },
+              { x: activeDrag.original.x1, y: activeDrag.original.y1 }
+            );
+            return { ...item, x1: next.x, y1: next.y };
+          })
+        };
+      }
+      if (activeDrag.kind === "line-end") {
+        return {
+          ...current,
+          lines: current.lines.map((item) => {
+            if (item.id !== activeDrag.id) return item;
+            const next = keepMinimumLineLength(
+              point,
+              { x: item.x1, y: item.y1 },
+              { x: activeDrag.original.x2, y: activeDrag.original.y2 }
+            );
+            return { ...item, x2: next.x, y2: next.y };
+          })
+        };
+      }
       const deltaX = point.x - activeDrag.start.x;
       const deltaY = point.y - activeDrag.start.y;
+      const boundedDeltaX = clamp(
+        deltaX,
+        -Math.min(activeDrag.original.x1, activeDrag.original.x2),
+        OVERHEAD_CANVAS_WIDTH - Math.max(activeDrag.original.x1, activeDrag.original.x2)
+      );
+      const boundedDeltaY = clamp(
+        deltaY,
+        -Math.min(activeDrag.original.y1, activeDrag.original.y2),
+        OVERHEAD_CANVAS_HEIGHT - Math.max(activeDrag.original.y1, activeDrag.original.y2)
+      );
       return {
         ...current,
         lines: current.lines.map((item) => item.id === activeDrag.id
           ? {
               ...item,
-              x1: clamp(activeDrag.original.x1 + deltaX, 0, OVERHEAD_CANVAS_WIDTH),
-              y1: clamp(activeDrag.original.y1 + deltaY, 0, OVERHEAD_CANVAS_HEIGHT),
-              x2: clamp(activeDrag.original.x2 + deltaX, 0, OVERHEAD_CANVAS_WIDTH),
-              y2: clamp(activeDrag.original.y2 + deltaY, 0, OVERHEAD_CANVAS_HEIGHT)
+              x1: activeDrag.original.x1 + boundedDeltaX,
+              y1: activeDrag.original.y1 + boundedDeltaY,
+              x2: activeDrag.original.x2 + boundedDeltaX,
+              y2: activeDrag.original.y2 + boundedDeltaY
             }
           : item)
       };
     });
+  }
+
+  function finishPointerDrag(event: React.PointerEvent<SVGSVGElement>) {
+    if (drag && drag.pointerId !== event.pointerId) return;
+    const canvas = svgRef.current;
+    if (canvas?.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    setDrag(null);
   }
 
   function updateSelectedLabel(label: string) {
@@ -274,6 +444,16 @@ export function ShotOverheadEditor({
     }));
   }
 
+  function rotateSelectedPerson(amount: number) {
+    if (selected?.kind !== "person") return;
+    setDiagram((current) => ({
+      ...current,
+      people: current.people.map((item) => item.id === selected.id
+        ? { ...item, rotation: (item.rotation + amount + 360) % 360 }
+        : item)
+    }));
+  }
+
   function updateSelectedShapeSize(axis: "width" | "height", value: string) {
     if (selected?.kind !== "shape") return;
     const parsed = Number(value);
@@ -281,7 +461,14 @@ export function ShotOverheadEditor({
     setDiagram((current) => ({
       ...current,
       shapes: current.shapes.map((item) => item.id === selected.id
-        ? { ...item, [axis]: clamp(parsed, 40, axis === "width" ? OVERHEAD_CANVAS_WIDTH : OVERHEAD_CANVAS_HEIGHT) }
+        ? {
+            ...item,
+            [axis]: clamp(
+              parsed,
+              axis === "width" ? MIN_SHAPE_WIDTH : MIN_SHAPE_HEIGHT,
+              axis === "width" ? OVERHEAD_CANVAS_WIDTH - item.x : OVERHEAD_CANVAS_HEIGHT - item.y
+            )
+          }
         : item)
     }));
   }
@@ -340,8 +527,8 @@ export function ShotOverheadEditor({
               shapeRendering="geometricPrecision"
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handlePointerMove}
-              onPointerUp={() => setDrag(null)}
-              onPointerCancel={() => setDrag(null)}
+              onPointerUp={finishPointerDrag}
+              onPointerCancel={finishPointerDrag}
               aria-label="부감도 캔버스"
             >
               <defs>
@@ -373,7 +560,19 @@ export function ShotOverheadEditor({
                       strokeWidth={isSelected ? 6 : 4}
                       strokeDasharray={isSelected ? "14 8" : undefined}
                     />
-                    {shape.label ? <text x={shape.x + 18} y={shape.y + 34} fill="#4f4c46" fontSize="24" fontWeight="700">{shape.label}</text> : null}
+                    {shape.label ? <text pointerEvents="none" x={shape.x + 18} y={shape.y + 34} fill="#4f4c46" fontSize="24" fontWeight="700">{shape.label}</text> : null}
+                    {isSelected && !readOnly ? (
+                      <circle
+                        cx={shape.x + shape.width}
+                        cy={shape.y + shape.height}
+                        r="14"
+                        fill="#fff"
+                        stroke="#0f3d2e"
+                        strokeWidth="6"
+                        className="cursor-nwse-resize"
+                        onPointerDown={(event) => handleShapeResizePointerDown(event, shape.id)}
+                      />
+                    ) : null}
                   </g>
                 );
               })}
@@ -393,7 +592,30 @@ export function ShotOverheadEditor({
                       strokeWidth={isSelected ? 7 : 5}
                       markerEnd={`url(#overhead-arrow-${line.color})`}
                     />
-                    {isSelected ? <circle cx={line.x1} cy={line.y1} r="10" fill="#fff" stroke="#0f3d2e" strokeWidth="5" /> : null}
+                    {isSelected && !readOnly ? (
+                      <>
+                        <circle
+                          cx={line.x1}
+                          cy={line.y1}
+                          r="13"
+                          fill="#fff"
+                          stroke="#0f3d2e"
+                          strokeWidth="5"
+                          className="cursor-move"
+                          onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "start")}
+                        />
+                        <circle
+                          cx={line.x2}
+                          cy={line.y2}
+                          r="13"
+                          fill="#fff"
+                          stroke="#0f3d2e"
+                          strokeWidth="5"
+                          className="cursor-move"
+                          onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "end")}
+                        />
+                      </>
+                    ) : null}
                   </g>
                 );
               })}
@@ -407,12 +629,28 @@ export function ShotOverheadEditor({
 
               {diagram.people.map((person) => {
                 const isSelected = selected?.kind === "person" && selected.id === person.id;
+                const selectionRadius = 40 * person.scale;
+                const handleOffset = 34 * person.scale;
                 return (
                   <g key={person.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "person", id: person.id })}>
-                    {isSelected ? <circle cx={person.x} cy={person.y} r="48" fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
-                    <circle cx={person.x} cy={person.y - 12} r="20" fill="#fff" stroke="#0f3d2e" strokeWidth="7" />
-                    <path d={`M ${person.x - 28} ${person.y + 30} Q ${person.x} ${person.y + 2} ${person.x + 28} ${person.y + 30}`} fill="#dcebe5" stroke="#0f3d2e" strokeWidth="7" strokeLinecap="round" />
-                    <text x={person.x} y={person.y + 65} textAnchor="middle" fill="#0f3d2e" fontSize="25" fontWeight="800">{person.label || "인물"}</text>
+                    {isSelected ? <circle cx={person.x} cy={person.y} r={selectionRadius} fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
+                    <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`}>
+                      <circle cx="0" cy="0" r={PERSON_RADIUS} fill="#fff" stroke="#0f3d2e" strokeWidth="7" />
+                      <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#0f3d2e" />
+                    </g>
+                    <text pointerEvents="none" x={person.x} y={person.y + selectionRadius + 28} textAnchor="middle" fill="#0f3d2e" fontSize="25" fontWeight="800">{person.label || "인물"}</text>
+                    {isSelected && !readOnly ? (
+                      <circle
+                        cx={person.x + handleOffset}
+                        cy={person.y + handleOffset}
+                        r="13"
+                        fill="#fff"
+                        stroke="#0f3d2e"
+                        strokeWidth="5"
+                        className="cursor-nwse-resize"
+                        onPointerDown={(event) => handlePersonScalePointerDown(event, person.id)}
+                      />
+                    ) : null}
                   </g>
                 );
               })}
@@ -462,15 +700,27 @@ export function ShotOverheadEditor({
                 </div>
               ) : null}
 
+              {selectedPerson ? (
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => rotateSelectedPerson(-15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                    <RotateCcw className="h-4 w-4" aria-hidden /> 방향 -15°
+                  </button>
+                  <button type="button" onClick={() => rotateSelectedPerson(15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                    <RotateCw className="h-4 w-4" aria-hidden /> 방향 +15°
+                  </button>
+                  <span className="px-1 text-xs font-bold text-field-muted">크기 {Math.round(selectedPerson.scale * 100)}%</span>
+                </div>
+              ) : null}
+
               {selectedShape ? (
                 <>
                   <label className="grid w-24 gap-1 text-[11px] font-black text-field-muted">
                     너비
-                    <input type="number" min="40" max={OVERHEAD_CANVAS_WIDTH} value={Math.round(selectedShape.width)} onChange={(event) => updateSelectedShapeSize("width", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
+                    <input type="number" min={MIN_SHAPE_WIDTH} max={OVERHEAD_CANVAS_WIDTH} value={Math.round(selectedShape.width)} onChange={(event) => updateSelectedShapeSize("width", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
                   </label>
                   <label className="grid w-24 gap-1 text-[11px] font-black text-field-muted">
                     높이
-                    <input type="number" min="40" max={OVERHEAD_CANVAS_HEIGHT} value={Math.round(selectedShape.height)} onChange={(event) => updateSelectedShapeSize("height", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
+                    <input type="number" min={MIN_SHAPE_HEIGHT} max={OVERHEAD_CANVAS_HEIGHT} value={Math.round(selectedShape.height)} onChange={(event) => updateSelectedShapeSize("height", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
                   </label>
                 </>
               ) : null}

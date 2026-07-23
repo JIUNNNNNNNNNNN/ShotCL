@@ -19,6 +19,10 @@ function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
@@ -29,6 +33,8 @@ function normalizePerson(value: unknown, index: number): ShotOverheadPerson | nu
     id: text(value.id, `person-${index + 1}`),
     x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
     y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
+    scale: Math.min(3, Math.max(0.5, finiteNumber(value.scale, 1))),
+    rotation: ((finiteNumber(value.rotation, 0) % 360) + 360) % 360,
     label: text(value.label)
   };
 }
@@ -45,13 +51,19 @@ function normalizeCamera(value: unknown, index: number): ShotOverheadCamera | nu
 }
 
 function normalizeLine(value: unknown, index: number): ShotOverheadLine | null {
-  if (!isRecord(value)) return null;
+  if (
+    !isRecord(value)
+    || !isFiniteNumber(value.x1)
+    || !isFiniteNumber(value.y1)
+    || !isFiniteNumber(value.x2)
+    || !isFiniteNumber(value.y2)
+  ) return null;
   return {
     id: text(value.id, `line-${index + 1}`),
-    x1: finiteNumber(value.x1, 0),
-    y1: finiteNumber(value.y1, 0),
-    x2: finiteNumber(value.x2, 0),
-    y2: finiteNumber(value.y2, 0),
+    x1: value.x1,
+    y1: value.y1,
+    x2: value.x2,
+    y2: value.y2,
     color: value.color === "red" ? "red" : "black"
   };
 }
@@ -63,8 +75,8 @@ function normalizeShape(value: unknown, index: number): ShotOverheadShape | null
     type: "rect",
     x: finiteNumber(value.x, 100),
     y: finiteNumber(value.y, 100),
-    width: Math.max(40, finiteNumber(value.width, 320)),
-    height: Math.max(40, finiteNumber(value.height, 220)),
+    width: Math.max(80, finiteNumber(value.width, 240)),
+    height: Math.max(60, finiteNumber(value.height, 160)),
     label: text(value.label)
   };
 }
