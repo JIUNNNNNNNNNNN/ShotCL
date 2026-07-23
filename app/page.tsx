@@ -130,7 +130,8 @@ export default function HomePage() {
       if (!(event.target instanceof Node)) return;
       const clickedWheel = wheelRef.current?.contains(event.target);
       const clickedSubmenu = clusterRef.current?.contains(event.target);
-      if (!clickedWheel && !clickedSubmenu) {
+      const clickedProjectWheel = projectWheelRef.current?.contains(event.target);
+      if (!clickedWheel && !clickedSubmenu && !clickedProjectWheel) {
         mainSpinner.cancelPending();
         projectSpinner.cancelPending();
         setPickerMode(null);
@@ -337,6 +338,8 @@ export default function HomePage() {
   }
 
   const pickerTitle = pickerMode === "new" ? "New Project" : pickerMode === "join" ? "Join Project" : "Go";
+  const isProgressMode = pickerMode === "progress";
+  const isProjectRingOpen = isProgressMode && projects.length > 0;
 
   function renderProjectSpinner() {
     if (isLoading || errorMessage || projects.length === 0) return null;
@@ -347,32 +350,34 @@ export default function HomePage() {
         role="group"
         tabIndex={0}
         aria-label="프로젝트 원형 메뉴. 좌우 방향키 또는 드래그로 회전"
-        className="relative mx-auto aspect-square w-[min(82vw,20rem)] touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
+        className="absolute inset-0 z-10 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
         {...projectSpinner.pointerHandlers}
         onKeyDown={handleProjectSpinnerKeyDown}
       >
-        <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/35 shadow-[inset_0_0_0_8px_rgba(255,255,255,0.3),0_12px_26px_rgba(15,61,46,0.07)]" aria-hidden />
-        <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
-        <div className="absolute left-1/2 top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-sm" aria-hidden />
         <div
-          className="pointer-events-none absolute left-[85%] top-1/2 h-[5.5rem] w-[5.5rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)]"
+          className="pointer-events-none absolute inset-[10%] rounded-full border border-field-border/75 bg-white/15 shadow-[0_14px_34px_rgba(15,61,46,0.06)]"
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute inset-[14%] rounded-full border border-dashed border-field-secondary/45" aria-hidden />
+        <div
+          className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.75rem] w-[4.75rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)] sm:h-[5.5rem] sm:w-[5.5rem]"
           aria-hidden
         />
         {projects.map((project, index) => {
           const itemAngle = getSpinnerItemAngle(index, projects.length) + projectSpinner.rotation;
           const radians = itemAngle * (Math.PI / 180);
-          const left = Number((50 + Math.cos(radians) * 35).toFixed(4));
-          const top = Number((50 + Math.sin(radians) * 35).toFixed(4));
+          const left = Number((50 + Math.cos(radians) * 39.5).toFixed(4));
+          const top = Number((50 + Math.sin(radians) * 39.5).toFixed(4));
           const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
           const proximity = Math.max(0, 1 - distance / 180);
           const isActive = projectSpinner.activeIndex === index;
-          const scale = isActive ? 0.98 : 0.58 + proximity * 0.22;
-          const opacity = isActive ? 1 : 0.32 + proximity * 0.46;
+          const scale = isActive ? 0.96 : 0.52 + proximity * 0.24;
+          const opacity = isActive ? 1 : 0.2 + proximity * 0.52;
 
           return (
             <div
               key={project.id}
-              className={`absolute h-20 w-20 will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
+              className={`absolute h-[4.75rem] w-[4.75rem] will-change-[left,top,transform,opacity] sm:h-[5.5rem] sm:w-[5.5rem] ${
                 projectSpinner.isDragging
                   ? "transition-none"
                   : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
@@ -434,73 +439,91 @@ export default function HomePage() {
         <div
           ref={compositionRef}
           className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-300 ${
-            pickerMode
-              ? `${pickerMode === "progress" ? "max-w-[50rem]" : "max-w-[42rem]"} flex-col gap-7 md:flex-row md:gap-12`
-              : "max-w-[24rem]"
+            isProjectRingOpen
+              ? "max-w-[36rem]"
+              : isProgressMode
+                ? "max-w-[24rem] flex-col gap-4"
+                : pickerMode
+                  ? "max-w-[42rem] flex-col gap-7 md:flex-row md:gap-12"
+                  : "max-w-[24rem]"
           }`}
         >
           <div
-            ref={wheelRef}
-            role="group"
-            tabIndex={0}
-            aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
-            className="relative z-20 aspect-square w-[min(82vw,22rem)] shrink-0 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
-            {...mainSpinner.pointerHandlers}
-            onKeyDown={handleWheelKeyDown}
+            className={
+              isProjectRingOpen
+                ? "relative flex aspect-square w-[min(92vw,36rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_220ms_ease-out]"
+                : "contents"
+            }
           >
-            <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
-            <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
-            <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)]" aria-hidden />
+            {isProjectRingOpen ? renderProjectSpinner() : null}
             <div
-              className="pointer-events-none absolute left-[85%] top-1/2 h-[6.25rem] w-[6.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)]"
-              aria-hidden
-            />
-            {wheelItems.map((item, index) => {
-              const angle = (getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation) * (Math.PI / 180);
-              const left = Number((50 + Math.cos(angle) * 35).toFixed(4));
-              const top = Number((50 + Math.sin(angle) * 35).toFixed(4));
-              const isSelected = previewItem === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  aria-label={item.label}
-                  aria-pressed={isSelected}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (mainSpinner.consumeSuppressedClick()) return;
-                    mainSpinner.snapToIndex(index);
-                  }}
-                  className={`absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] sm:h-24 sm:w-24 ${item.colorClass} ${
-                    mainSpinner.isDragging
-                      ? "transition-none"
-                      : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
-                  } ${
-                    isSelected
-                      ? "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
-                      : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
-                  } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
-                  style={{
-                    left: `${left}%`,
-                    top: `${top}%`
-                  }}
-                >
-                  <span className="font-display-strong text-[12px] font-black leading-[1.35] sm:text-sm">{item.label}</span>
-                </button>
-              );
-            })}
+              ref={wheelRef}
+              role="group"
+              tabIndex={0}
+              aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
+              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width] duration-300 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
+                isProjectRingOpen ? "w-[56%] sm:w-[62%]" : "w-[min(82vw,22rem)]"
+              }`}
+              {...mainSpinner.pointerHandlers}
+              onKeyDown={handleWheelKeyDown}
+            >
+              <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
+              <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
+              <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)]" aria-hidden />
+              <div
+                className="pointer-events-none absolute left-[85%] top-1/2 h-[6.25rem] w-[6.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)]"
+                aria-hidden
+              />
+              {wheelItems.map((item, index) => {
+                const angle = (getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation) * (Math.PI / 180);
+                const left = Number((50 + Math.cos(angle) * 35).toFixed(4));
+                const top = Number((50 + Math.sin(angle) * 35).toFixed(4));
+                const isSelected = previewItem === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-label={item.label}
+                    aria-pressed={isSelected}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (mainSpinner.consumeSuppressedClick()) return;
+                      mainSpinner.snapToIndex(index);
+                    }}
+                    className={`absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] sm:h-24 sm:w-24 ${item.colorClass} ${
+                      mainSpinner.isDragging
+                        ? "transition-none"
+                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
+                    } ${
+                      isSelected
+                        ? "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
+                        : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
+                    } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                    style={{
+                      left: `${left}%`,
+                      top: `${top}%`
+                    }}
+                  >
+                    <span className="font-display-strong text-[12px] font-black leading-[1.35] sm:text-sm">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
+          {isProgressMode && projects.length === 0 ? (
+            <p className="pointer-events-none whitespace-nowrap rounded-full border border-field-border bg-white/95 px-4 py-2 text-center text-[11px] font-black text-field-muted shadow-sm">
+              진행 볼 프로젝트가 없습니다
+            </p>
+          ) : null}
 
-        {pickerMode ? (
+          {pickerMode && !isProgressMode ? (
           <>
           <div className="h-8 w-px shrink-0 bg-field-secondary/60 motion-safe:animate-[branch-reveal_180ms_ease-out] md:h-px md:w-12" aria-hidden />
           <div
             ref={clusterRef}
             role="region"
             aria-label={pickerTitle}
-            className={`relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] ${
-              pickerMode === "progress" ? "md:w-[20rem]" : "md:w-[14rem]"
-            }`}
+            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] md:w-[14rem]"
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
@@ -611,15 +634,7 @@ export default function HomePage() {
                   <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
                 </button>
               </form>
-            ) : (
-              <div className="py-1">
-                {projects.length === 0 ? (
-                  <p className="rounded-full border border-field-border bg-white px-4 py-2 text-center text-[11px] font-black text-field-muted">
-                    진행 볼 프로젝트가 없습니다
-                  </p>
-                ) : renderProjectSpinner()}
-              </div>
-            )}
+            ) : null}
           </div>
           </>
         ) : null}
@@ -640,6 +655,10 @@ export default function HomePage() {
       <style jsx global>{`
         @keyframes branch-reveal {
           from { opacity: 0; transform: scale(0.98); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes project-ring-reveal {
+          from { opacity: 0; transform: scale(0.96); }
           to { opacity: 1; transform: scale(1); }
         }
       `}</style>
