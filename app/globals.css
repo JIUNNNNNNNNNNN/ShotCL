@@ -96,7 +96,7 @@ body {
     Arial,
     sans-serif;
   line-height: 1.45;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.035em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -116,6 +116,25 @@ p,
 span,
 div {
   font-family: inherit;
+}
+
+.font-condensed,
+.font-condensed-strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+
+.font-condensed {
+  letter-spacing: -0.04em;
+  transform: scaleX(0.96);
+}
+
+.font-condensed-strong {
+  letter-spacing: -0.055em;
+  transform: scaleX(0.94);
 }
 
 button {

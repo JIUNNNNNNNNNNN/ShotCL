@@ -292,28 +292,28 @@ export default function ProjectDetailPage() {
               <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
               <p className="truncate text-[10px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</p>
             </div>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-left text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-primary hover:bg-field-light">
-              <Plus className="h-4 w-4" aria-hidden /> 새 컷 추가
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-left text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-primary hover:bg-field-light">
+              <span className="font-condensed gap-2"><Plus className="h-4 w-4" aria-hidden /> 새 컷 추가</span>
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
-              <CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted hover:bg-field-soft">
+              <span className="font-condensed gap-2"><CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표</span>
             </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
-              <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted hover:bg-field-soft">
+              <span className="font-condensed gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span>
             </Link>
-            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
-              <Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석
+            <Link href={`/projects/${project.id}/upload?dailyPlanId=${encodeURIComponent(selectedPlan.id)}`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted hover:bg-field-soft">
+              <span className="font-condensed gap-2"><Upload className="h-4 w-4" aria-hidden /> PDF 업로드 분석</span>
             </Link>
-            <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted hover:bg-field-soft">
-              <History className="h-4 w-4" aria-hidden /> 분석 기록
+            <Link href={`/projects/${project.id}/analysis-runs`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted hover:bg-field-soft">
+              <span className="font-condensed gap-2"><History className="h-4 w-4" aria-hidden /> 분석 기록</span>
             </Link>
           </nav>
         </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도 권한</span>}
       </div>
 
       <section className="mb-3">
-        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
-          <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택
+        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+          <span className="font-condensed gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span>
         </Link>
         <ProgressSummary shots={shots} />
         <div className="mt-2">
@@ -433,22 +433,25 @@ function EpisodeSelection({
     <main className="mx-auto w-full max-w-3xl pb-12">
       <div className="mb-4 flex items-center gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <p className="max-w-[45vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-primary">{project.name}</p>
-          <p className="truncate text-xs font-bold text-field-muted">진행할 회차 선택</p>
+          <p className="max-w-[45vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-primary">
+            <span className="font-condensed">{project.name}</span>
+          </p>
+          <p className="truncate text-xs font-bold text-field-muted">
+            <span className="font-condensed">진행할 회차 선택</span>
+          </p>
         </div>
         {canEdit ? (
           <details className="group relative shrink-0">
             <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
-              <Ellipsis className="h-4 w-4" aria-hidden />
-              프로젝트 수정
+              <span className="font-condensed gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span>
             </summary>
             <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
-              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-primary hover:bg-field-light">
-                <FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정
+              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-primary hover:bg-field-light">
+                <span className="font-condensed gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span>
               </Link>
               <details className="group/settings">
-                <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.015em] text-field-muted marker:content-none hover:bg-field-soft">
-                  <Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정
+                <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] tracking-[-0.05em] text-field-muted marker:content-none hover:bg-field-soft">
+                  <span className="font-condensed gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span>
                 </summary>
                 <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
                   <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
@@ -485,7 +488,9 @@ function EpisodeSelection({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-lg font-black text-field-primary">{formatEpisodeLabel(plan, index)}</h2>
+                    <h2 className="truncate text-lg font-black text-field-primary">
+                      <span className="font-condensed">{formatEpisodeLabel(plan, index)}</span>
+                    </h2>
                     <p className="mt-1 text-xs font-bold text-field-muted">{plan.shootingDate || "촬영일 미정"}</p>
                   </div>
                   <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full border border-field-border bg-field-light text-sm font-black text-field-primary">{progress}%</div>

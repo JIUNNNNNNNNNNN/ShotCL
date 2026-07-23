@@ -77,7 +77,7 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
           <p className="rounded-full bg-field-light px-2 py-1 text-[10px] font-black leading-[1.35] text-field-primary">
             S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}
           </p>
-          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
+          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35] tracking-[-0.025em]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>{statusLabel}</p>
           <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
         </div>
 
@@ -98,12 +98,12 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
             aria-pressed={isOk}
             disabled={progressOnly && shot.status !== "pending"}
             className={cn(
-              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] tracking-[-0.015em] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] tracking-[-0.05em] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary",
               progressOnly && shot.status !== "pending" && "cursor-not-allowed opacity-60"
             )}
           >
-            OK
+            <span className="font-condensed">OK</span>
           </button>
           {!progressOnly ? (
           <button
@@ -111,11 +111,11 @@ export function ShotCard({ shot, onOpen, onImagePreview, onStatusChange, progres
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] tracking-[-0.015em] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] tracking-[-0.05em] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOmit ? "border-field-danger bg-field-danger text-white" : "border-field-border bg-white text-field-danger"
             )}
           >
-            omit
+            <span className="font-condensed">omit</span>
           </button>
           ) : null}
         </div>
