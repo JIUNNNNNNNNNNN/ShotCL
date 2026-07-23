@@ -6,6 +6,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 type DragSpinnerOptions = {
   itemCount: number;
   onCommit: (index: number) => void;
+  onReject?: () => void;
+  activationThresholdDegrees?: number;
   settleDelayMs?: number;
   snapDurationMs?: number;
 };
@@ -14,12 +16,35 @@ type SnapOptions = {
   commit?: boolean;
 };
 
+export const SPINNER_ACTIVATION_THRESHOLD_DEGREES = 12;
+
 export function normalizeSpinnerAngle(angle: number) {
   return ((angle + 180) % 360 + 360) % 360 - 180;
 }
 
 export function getSpinnerItemAngle(index: number, itemCount: number) {
   return itemCount > 0 ? (index * 360) / itemCount : 0;
+}
+
+export function getSpinnerActivationIndex(
+  rotation: number,
+  itemCount: number,
+  thresholdDegrees = SPINNER_ACTIVATION_THRESHOLD_DEGREES
+) {
+  if (itemCount <= 0) return null;
+
+  let activationIndex: number | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < itemCount; index += 1) {
+    const distance = Math.abs(
+      normalizeSpinnerAngle(getSpinnerItemAngle(index, itemCount) + rotation)
+    );
+    if (distance <= thresholdDegrees && distance < nearestDistance) {
+      activationIndex = index;
+      nearestDistance = distance;
+    }
+  }
+  return activationIndex;
 }
 
 function getNearestItemIndex(rotation: number, itemCount: number) {
@@ -37,10 +62,12 @@ function getNearestItemIndex(rotation: number, itemCount: number) {
   return nearestIndex;
 }
 
-/** 휠 이벤트 없이 pointer drag로만 회전하고 3시 방향에 스냅하는 공용 spinner 동작입니다. */
+/** 휠 없이 pointer drag로 회전하며 3시 실행 구역 안에서만 스냅하는 공용 spinner 동작입니다. */
 export function useDragSpinner({
   itemCount,
   onCommit,
+  onReject,
+  activationThresholdDegrees = SPINNER_ACTIVATION_THRESHOLD_DEGREES,
   settleDelayMs = 180,
   snapDurationMs = 260
 }: DragSpinnerOptions) {
@@ -50,6 +77,7 @@ export function useDragSpinner({
   const rotationRef = useRef(0);
   const activeIndexRef = useRef(0);
   const onCommitRef = useRef(onCommit);
+  const onRejectRef = useRef(onReject);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStateRef = useRef<{
@@ -64,6 +92,10 @@ export function useDragSpinner({
   useEffect(() => {
     onCommitRef.current = onCommit;
   }, [onCommit]);
+
+  useEffect(() => {
+    onRejectRef.current = onReject;
+  }, [onReject]);
 
   const cancelPending = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
@@ -100,9 +132,18 @@ export function useDragSpinner({
   const scheduleSettle = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = setTimeout(() => {
-      snapToIndex(getNearestItemIndex(rotationRef.current, itemCount));
+      const activationIndex = getSpinnerActivationIndex(
+        rotationRef.current,
+        itemCount,
+        activationThresholdDegrees
+      );
+      if (activationIndex === null) {
+        onRejectRef.current?.();
+        return;
+      }
+      snapToIndex(activationIndex);
     }, settleDelayMs);
-  }, [itemCount, settleDelayMs, snapToIndex]);
+  }, [activationThresholdDegrees, itemCount, settleDelayMs, snapToIndex]);
 
   useEffect(() => {
     cancelPending();
@@ -187,6 +228,11 @@ export function useDragSpinner({
   return {
     rotation,
     activeIndex,
+    activationIndex: getSpinnerActivationIndex(
+      rotation,
+      itemCount,
+      activationThresholdDegrees
+    ),
     isDragging,
     cancelPending,
     snapToIndex,

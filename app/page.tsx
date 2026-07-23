@@ -90,13 +90,18 @@ export default function HomePage() {
   const projectNavigationRef = useRef(false);
   const mainSpinner = useDragSpinner({
     itemCount: wheelItems.length,
-    onCommit: (index) => commitWheelItem(wheelItems[index]?.id ?? "new")
+    onCommit: (index) => commitWheelItem(wheelItems[index]?.id ?? "new"),
+    onReject: () => closeProjectRing()
   });
   const projectSpinner = useDragSpinner({
     itemCount: projects.length,
-    onCommit: (index) => openProject(projects[index])
+    onCommit: (index) => openProject(projects[index]),
+    onReject: () => closeProjectRing()
   });
   const previewItem = wheelItems[mainSpinner.activeIndex]?.id ?? "new";
+  const activatedWheelItem = mainSpinner.activationIndex === null
+    ? null
+    : wheelItems[mainSpinner.activationIndex]?.id ?? null;
 
   useEffect(() => {
     let isMounted = true;
@@ -203,11 +208,6 @@ export default function HomePage() {
     setPickerMode(id);
   }
 
-  function snapToWheelItem(id: WheelItemId) {
-    const index = wheelItems.findIndex((item) => item.id === id);
-    if (index >= 0) mainSpinner.snapToIndex(index);
-  }
-
   function closeInputSubmenu(mode: "new" | "join") {
     if (mode === "new") {
       setNewProjectName("");
@@ -237,7 +237,11 @@ export default function HomePage() {
   function handleWheelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      snapToWheelItem(previewItem);
+      if (mainSpinner.activationIndex === null) {
+        closeProjectRing();
+        return;
+      }
+      mainSpinner.snapToIndex(mainSpinner.activationIndex);
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -253,7 +257,11 @@ export default function HomePage() {
     if (projects.length === 0) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      projectSpinner.snapToIndex(projectSpinner.activeIndex);
+      if (projectSpinner.activationIndex === null) {
+        closeProjectRing();
+        return;
+      }
+      projectSpinner.snapToIndex(projectSpinner.activationIndex);
       return;
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -379,7 +387,7 @@ export default function HomePage() {
           const top = Number((50 + Math.sin(radians) * 39.5).toFixed(4));
           const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
           const proximity = Math.max(0, 1 - distance / 180);
-          const isActive = projectSpinner.activeIndex === index;
+          const isActive = projectSpinner.activationIndex === index;
           const scale = isActive ? 0.96 : 0.52 + proximity * 0.24;
           const opacity = isActive ? 1 : 0.2 + proximity * 0.52;
 
@@ -404,6 +412,10 @@ export default function HomePage() {
                 onClick={(event) => {
                   event.stopPropagation();
                   if (projectSpinner.consumeSuppressedClick()) return;
+                  if (projectSpinner.activationIndex !== index) {
+                    closeProjectRing();
+                    return;
+                  }
                   projectSpinner.snapToIndex(index);
                 }}
                 className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] ${
@@ -499,7 +511,7 @@ export default function HomePage() {
                 const radius = isProjectRingOpen ? 29 : 33;
                 const left = Number((50 + Math.cos(angle) * radius).toFixed(4));
                 const top = Number((50 + Math.sin(angle) * radius).toFixed(4));
-                const isSelected = previewItem === item.id;
+                const isSelected = activatedWheelItem === item.id;
                 return (
                   <button
                     key={item.id}
@@ -509,6 +521,10 @@ export default function HomePage() {
                     onClick={(event) => {
                       event.stopPropagation();
                       if (mainSpinner.consumeSuppressedClick()) return;
+                      if (mainSpinner.activationIndex !== index) {
+                        closeProjectRing();
+                        return;
+                      }
                       mainSpinner.snapToIndex(index);
                     }}
                     className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${
