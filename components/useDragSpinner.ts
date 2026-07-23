@@ -173,10 +173,12 @@ export function useDragSpinner({
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStateRef = useRef<{
     pointerId: number;
+    pointerType: string;
     startX: number;
     startY: number;
     lastAngle: number;
     moved: boolean;
+    captured: boolean;
   } | null>(null);
   const suppressClickRef = useRef(false);
 
@@ -327,16 +329,16 @@ export function useDragSpinner({
   function onPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (itemCount <= 0 || (event.button !== 0 && event.pointerType === "mouse")) return;
     cancelPending();
-    event.currentTarget.setPointerCapture(event.pointerId);
     dragStateRef.current = {
       pointerId: event.pointerId,
+      pointerType: event.pointerType,
       startX: event.clientX,
       startY: event.clientY,
       lastAngle: getPointerAngle(event),
-      moved: false
+      moved: false,
+      captured: false
     };
     suppressClickRef.current = false;
-    setIsDragging(true);
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLElement>) {
@@ -347,15 +349,22 @@ export function useDragSpinner({
       event.clientX - dragState.startX,
       event.clientY - dragState.startY
     );
-    if (!dragState.moved && dragDistance < 6) return;
+    const dragThreshold = dragState.pointerType === "mouse" ? 5 : 10;
+    if (!dragState.moved && dragDistance < dragThreshold) return;
+
+    if (!dragState.captured) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      dragState.captured = true;
+    }
+    dragState.moved = true;
+    suppressClickRef.current = true;
+    setIsDragging(true);
 
     const nextPointerAngle = getPointerAngle(event);
     const delta = normalizeSpinnerAngle(nextPointerAngle - dragState.lastAngle);
     if (Math.abs(delta) < 0.15) return;
 
     dragState.lastAngle = nextPointerAngle;
-    dragState.moved = true;
-    suppressClickRef.current = true;
     updateRotation(rotationRef.current + delta);
   }
 
@@ -363,7 +372,7 @@ export function useDragSpinner({
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (dragState.captured && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     dragStateRef.current = null;
