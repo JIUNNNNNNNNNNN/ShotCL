@@ -29,7 +29,7 @@ import {
 } from "@/lib/dailyPlan/printMeta";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
-import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
+import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
@@ -39,6 +39,7 @@ const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 
 type DailyPlanEditorProps = {
   project: Project;
+  projectBasicInfo?: ProjectBasicInfo | null;
   initialPlan?: DailyPlan | null;
   initialShots?: DailyPlanShot[];
   initialDraft?: DailyPlanDraft;
@@ -187,13 +188,18 @@ const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
 const maxRuntimeMinutes = 1440;
+const showDailyPlanMainStaffInputs = false;
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, initialPlan, initialShots = [], initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initialShots = [], initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
-  const initialPlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
-  const initialPrintMeta = decodeDailyPlanMemo(initialPlanDraft.memo);
+  const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
+  const sourcePlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
+  const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
+  const initialDefaults = applyProjectBasicInfoDefaults(sourcePlanDraft, sourcePrintMeta, activeProjectBasicInfo);
+  const initialPlanDraft = initialDefaults.plan;
+  const initialPrintMeta = initialDefaults.printMeta;
   const initialEditablePlanDraft = { ...initialPlanDraft, memo: initialPrintMeta.memoText };
   const initialLocations = buildInitialLocations(initialPlanDraft);
   const initialMeals = buildInitialMeals(initialPlanDraft);
@@ -233,6 +239,15 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   );
   const canPrint = previewData.scenes.length > 0 && previewData.totalCutCount > 0;
   const weatherLookupSource = (printMeta.weatherRegion ?? "").trim();
+  const episodeOptions = activeProjectBasicInfo
+    ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
+    : [];
+  const projectConstraintMessage = getProjectConstraintMessage(plan, printMeta, activeProjectBasicInfo);
+  const mainStaffSummary = [
+    plan.director.trim() ? `감독 ${plan.director.trim()}` : "",
+    plan.assistantDirector.trim() ? `조감독 ${plan.assistantDirector.trim()}` : "",
+    plan.production.trim() ? `제작 ${plan.production.trim()}` : ""
+  ].filter(Boolean).join(" / ");
   const draftSnapshot: DailyPlanEditorSnapshot = {
     version: 1,
     dailyPlanId,
@@ -261,9 +276,14 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       if (stored) {
         const restored = JSON.parse(stored) as Partial<DailyPlanEditorSnapshot>;
         if (restored.version === 1 && restored.plan && restored.printMeta && restored.locations && restored.mealTimes && restored.scenes) {
+          const restoredDefaults = applyProjectBasicInfoDefaults(
+            restored.plan,
+            normalizeDailyPlanPrintMeta(restored.printMeta),
+            activeProjectBasicInfo
+          );
           setDailyPlanId(restored.dailyPlanId ?? initialPlan?.id ?? null);
-          setPlan(restored.plan);
-          setPrintMeta(normalizeDailyPlanPrintMeta(restored.printMeta));
+          setPlan(restoredDefaults.plan);
+          setPrintMeta(restoredDefaults.printMeta);
           setLocations(restored.locations);
           setMealTimes(restored.mealTimes);
           setScenes(restored.scenes.map(normalizeDraftScene));
@@ -276,7 +296,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     } finally {
       setIsDraftReady(true);
     }
-  }, [initialPlan?.id, project.id]);
+  }, [activeProjectBasicInfo, initialPlan?.id, project.id]);
 
   useEffect(() => {
     if (!isDraftReady) return;
@@ -290,6 +310,13 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     autoSaveTimerRef.current = setTimeout(() => {
       const storageKey = getDailyPlanDraftStorageKey(project.id, snapshot.dailyPlanId);
       window.localStorage.setItem(storageKey, JSON.stringify({ ...snapshot, savedAt: new Date().toISOString() }));
+
+      const constraintMessage = getProjectConstraintMessage(snapshot.plan, snapshot.printMeta, activeProjectBasicInfo);
+      if (constraintMessage) {
+        hasPendingChangesRef.current = true;
+        if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("입력 범위 확인 필요");
+        return;
+      }
 
       if (!snapshot.dailyPlanId) {
         hasPendingChangesRef.current = false;
@@ -326,7 +353,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [dailyPlanId, isDraftReady, locations, mealTimes, plan, printMeta, project.id, scenes]);
+  }, [activeProjectBasicInfo, dailyPlanId, isDraftReady, locations, mealTimes, plan, printMeta, project.id, scenes]);
 
   useEffect(() => {
     function savePendingDraft() {
@@ -348,6 +375,11 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
 
   function updatePrintMetaField(field: keyof Omit<DailyPlanPrintMeta, "starring" | "teams">, value: string) {
     setPrintMeta((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateEpisode(value: string) {
+    setPlan((current) => ({ ...current, episode: value }));
+    setPrintMeta((current) => ({ ...current, day: value }));
   }
 
   function updateStarring(index: number, patch: Partial<CallSheetPerson>) {
@@ -774,6 +806,14 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
   }
 
   async function saveCurrentPlan(showMessage = true) {
+    const constraintMessage = getProjectConstraintMessage(plan, printMeta, activeProjectBasicInfo);
+    if (constraintMessage) {
+      setMessage("");
+      setErrorMessage(constraintMessage);
+      setAutoSaveStatus("입력 범위 확인 필요");
+      return null;
+    }
+
     setIsSaving(true);
     setErrorMessage("");
     setMessage("");
@@ -885,27 +925,50 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
           <div className="grid gap-3">
             <div className="grid min-w-0 gap-1.5 md:hidden">
               <div className="grid grid-cols-[0.72fr_1.56fr_0.72fr] gap-1.5">
-                <MobileInfoField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
+                <EpisodeField
+                  mobile
+                  value={printMeta.day || plan.episode}
+                  options={episodeOptions}
+                  onChange={updateEpisode}
+                />
                 <MobileInfoField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
                 <MobileInfoField label="총 인원" value={printMeta.totalCrew} numeric onChange={(value) => updatePrintMetaField("totalCrew", value)} />
               </div>
               <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 overflow-hidden">
-                <MobileInfoField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+                <MobileInfoField
+                  label="촬영일"
+                  type="date"
+                  value={plan.shootingDate}
+                  min={activeProjectBasicInfo?.shootingStartDate}
+                  max={activeProjectBasicInfo?.shootingEndDate}
+                  onChange={(value) => updatePlanField("shootingDate", value)}
+                />
                 <MobileInfoTimeField label="집합시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} />
               </div>
             </div>
             <div className="hidden gap-3 md:grid">
               <div className="grid items-center gap-3 md:grid-cols-2">
-                <CompactField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
+                <EpisodeField
+                  value={printMeta.day || plan.episode}
+                  options={episodeOptions}
+                  onChange={updateEpisode}
+                />
                 <CompactField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
               </div>
               <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]">
-                <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+                <CompactField
+                  label="촬영일"
+                  type="date"
+                  value={plan.shootingDate}
+                  min={activeProjectBasicInfo?.shootingStartDate}
+                  max={activeProjectBasicInfo?.shootingEndDate}
+                  onChange={(value) => updatePlanField("shootingDate", value)}
+                />
                 <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
                 <CompactNumericField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
               </div>
             </div>
-            <div className="hidden items-stretch gap-3 md:grid lg:grid-cols-3">
+            {showDailyPlanMainStaffInputs ? <div className="hidden items-stretch gap-3 md:grid lg:grid-cols-3">
               <RoleContactGroup
                 role="감독"
                 name={plan.director}
@@ -927,7 +990,16 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
                 onNameChange={(value) => updatePlanField("production", value)}
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
-            </div>
+            </div> : mainStaffSummary ? (
+              <p className="hidden rounded-md border border-field-border bg-field-soft px-3 py-2 text-xs font-bold text-field-muted md:block">
+                {mainStaffSummary}
+              </p>
+            ) : null}
+            {projectConstraintMessage ? (
+              <p className="rounded-md border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger" role="status">
+                {projectConstraintMessage}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex flex-col">
@@ -1483,11 +1555,87 @@ function Field({ label, value, type = "text", onChange }: { label: string; value
   );
 }
 
-function CompactField({ label, value, type = "text", className = "", onChange }: { label: string; value: string; type?: string; className?: string; onChange: (value: string) => void }) {
+function CompactField({
+  label,
+  value,
+  type = "text",
+  className = "",
+  min,
+  max,
+  onChange
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  className?: string;
+  min?: string;
+  max?: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <label className={`grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 ${className}`}>
       <span className="text-xs font-black text-field-primary">{label}</span>
-      <DraftInput className={compactInputClass} type={type} value={value} onCommit={onChange} />
+      <DraftInput className={compactInputClass} type={type} value={value} min={min} max={max} onCommit={onChange} />
+    </label>
+  );
+}
+
+function EpisodeField({
+  value,
+  options,
+  mobile = false,
+  onChange
+}: {
+  value: string;
+  options: string[];
+  mobile?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const hasConstrainedOptions = options.length > 0;
+  const isLegacyOutOfRange = hasConstrainedOptions && Boolean(value) && !options.includes(value);
+
+  if (mobile) {
+    return (
+      <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+        <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">회차</span>
+        {hasConstrainedOptions ? (
+          <select
+            aria-label="회차"
+            className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 px-1 py-1.5 text-[11px] leading-[1.35]`}
+            value={value}
+            onChange={(event) => onChange(event.currentTarget.value)}
+          >
+            {isLegacyOutOfRange ? <option value={value}>{value} (기존값)</option> : null}
+            {options.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        ) : (
+          <DraftInput
+            className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 px-1 py-1.5 text-[11px] leading-[1.35]`}
+            value={value}
+            onCommit={onChange}
+            aria-label="회차"
+          />
+        )}
+      </label>
+    );
+  }
+
+  return (
+    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-xs font-black text-field-primary">회차</span>
+      {hasConstrainedOptions ? (
+        <select
+          aria-label="회차"
+          className={compactInputClass}
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+        >
+          {isLegacyOutOfRange ? <option value={value}>{value} (기존값 · 범위 밖)</option> : null}
+          {options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      ) : (
+        <DraftInput className={compactInputClass} value={value} onCommit={onChange} aria-label="회차" />
+      )}
     </label>
   );
 }
@@ -1515,12 +1663,16 @@ function MobileInfoField({
   value,
   type = "text",
   numeric = false,
+  min,
+  max,
   onChange
 }: {
   label: string;
   value: string;
   type?: string;
   numeric?: boolean;
+  min?: string;
+  max?: string;
   onChange: (value: string) => void;
 }) {
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
@@ -1530,6 +1682,8 @@ function MobileInfoField({
       <DraftInput
         className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
         type={type}
+        min={min}
+        max={max}
         value={numeric ? sanitizeNumericInput(value, 4) : value}
         onCommit={(nextValue) => onChange(sanitize ? sanitize(nextValue) : nextValue)}
         sanitize={sanitize}
@@ -2319,10 +2473,13 @@ function SceneCastSelector({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const selectorRef = useRef<HTMLDivElement | null>(null);
-  const options = getCastOptions(people);
   const selectedValues = parseSceneCastValues(value);
-  const optionValues = new Set(options.map((option) => option.value));
-  const validSelectedValues = selectedValues.filter((selected) => optionValues.has(selected));
+  const projectOptions = getCastOptions(people);
+  const optionValues = new Set(projectOptions.map((option) => option.value));
+  const legacyOptions = selectedValues
+    .filter((selected) => !optionValues.has(selected))
+    .map((selected, index) => ({ id: `legacy_cast_${index}`, value: selected, label: `${selected} (기존값)` }));
+  const options = [...projectOptions, ...legacyOptions];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -2345,8 +2502,8 @@ function SceneCastSelector({
 
   function toggleValue(nextValue: string, checked: boolean) {
     const next = checked
-      ? [...validSelectedValues.filter((selected) => selected !== nextValue), nextValue]
-      : validSelectedValues.filter((selected) => selected !== nextValue);
+      ? [...selectedValues.filter((selected) => selected !== nextValue), nextValue]
+      : selectedValues.filter((selected) => selected !== nextValue);
     onChange(formatSceneCastValues(next));
     setIsOpen(false);
   }
@@ -2362,7 +2519,7 @@ function SceneCastSelector({
         aria-label={ariaLabel}
         title={ariaLabel}
       >
-        <span className="line-clamp-2">{validSelectedValues.join(", ") || "배우 선택"}</span>
+        <span className="line-clamp-2">{selectedValues.join(", ") || "배우 선택"}</span>
       </button>
       {isOpen ? (
         <>
@@ -2372,7 +2529,7 @@ function SceneCastSelector({
               <label key={option.id} className="flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md px-2 py-1 hover:bg-field-soft">
                 <input
                   type="checkbox"
-                  checked={validSelectedValues.includes(option.value)}
+                  checked={selectedValues.includes(option.value)}
                   onChange={(event) => toggleValue(option.value, event.target.checked)}
                   className="h-4 w-4 accent-field-primary"
                 />
@@ -2926,9 +3083,8 @@ function formatSceneCastValues(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join(", ");
 }
 
-function getValidSceneCastValue(value: string, people: CallSheetPerson[]) {
-  const validValues = new Set(getCastOptions(people).map((option) => option.value));
-  return formatSceneCastValues(parseSceneCastValues(value).filter((item) => validValues.has(item)));
+function getValidSceneCastValue(value: string, _people: CallSheetPerson[]) {
+  return formatSceneCastValues(parseSceneCastValues(value));
 }
 
 function replaceSceneCastValue(value: string, previousValue: string, nextValue: string) {
@@ -2979,6 +3135,104 @@ function formatTimeRange(startTime: string, endTime: string) {
   return startTime || endTime || "";
 }
 
+function isConfiguredProjectBasicInfo(value: ProjectBasicInfo | null | undefined): value is ProjectBasicInfo {
+  if (!value) return false;
+  const staff = value.mainStaff;
+  return Boolean(
+    value.totalEpisodes > 1 ||
+    value.shootingStartDate ||
+    value.shootingEndDate ||
+    value.actors.some((actor) => actor.role.trim() || actor.name.trim()) ||
+    staff.director.name.trim() ||
+    staff.director.phone.trim() ||
+    staff.assistantDirector.name.trim() ||
+    staff.assistantDirector.phone.trim() ||
+    staff.producer.name.trim() ||
+    staff.producer.phone.trim()
+  );
+}
+
+function applyProjectBasicInfoDefaults(
+  sourcePlan: DailyPlanDraft,
+  sourcePrintMeta: DailyPlanPrintMeta,
+  projectBasicInfo: ProjectBasicInfo | null
+) {
+  if (!projectBasicInfo) {
+    const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim();
+    return {
+      plan: { ...sourcePlan, episode },
+      printMeta: { ...sourcePrintMeta, day: episode || sourcePrintMeta.day }
+    };
+  }
+
+  const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim() || "1";
+  const hasSavedPeople = sourcePrintMeta.starring.some((person) => (
+    person.name.trim() ||
+    person.role.trim() ||
+    (person.contact ?? "").trim() ||
+    person.callTime.trim() ||
+    person.callLocation.trim() ||
+    person.notes.trim()
+  ));
+  const projectActors = projectBasicInfo.actors
+    .filter((actor) => actor.role.trim() || actor.name.trim())
+    .map((actor, index): CallSheetPerson => ({
+      id: `project_actor_${index}`,
+      name: actor.name.trim(),
+      role: actor.role.trim(),
+      contact: "",
+      callTime: "",
+      callLocation: "",
+      notes: ""
+    }));
+
+  return {
+    plan: {
+      ...sourcePlan,
+      episode,
+      shootingDate: sourcePlan.shootingDate || projectBasicInfo.shootingStartDate,
+      director: sourcePlan.director || projectBasicInfo.mainStaff.director.name,
+      assistantDirector: sourcePlan.assistantDirector || projectBasicInfo.mainStaff.assistantDirector.name,
+      production: sourcePlan.production || projectBasicInfo.mainStaff.producer.name
+    },
+    printMeta: {
+      ...sourcePrintMeta,
+      day: episode,
+      directorContact: sourcePrintMeta.directorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.director.phone),
+      assistantDirectorContact: sourcePrintMeta.assistantDirectorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.assistantDirector.phone),
+      producerContact: sourcePrintMeta.producerContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.producer.phone),
+      starring: hasSavedPeople || projectActors.length === 0 ? sourcePrintMeta.starring : projectActors
+    }
+  };
+}
+
+function getProjectConstraintMessage(
+  plan: DailyPlanDraft,
+  printMeta: DailyPlanPrintMeta,
+  projectBasicInfo: ProjectBasicInfo | null
+) {
+  if (!projectBasicInfo) return "";
+
+  const episode = (printMeta.day || plan.episode).trim();
+  const episodeNumber = Number(episode);
+  if (!Number.isInteger(episodeNumber) || episodeNumber < 1 || episodeNumber > projectBasicInfo.totalEpisodes) {
+    return `회차는 1~${projectBasicInfo.totalEpisodes} 중에서 선택해주세요.`;
+  }
+
+  const hasShootingDateRange = Boolean(projectBasicInfo.shootingStartDate || projectBasicInfo.shootingEndDate);
+  if (hasShootingDateRange && !plan.shootingDate) {
+    return "프로젝트 촬영 기간 안에서 촬영일을 선택해주세요.";
+  }
+  if (projectBasicInfo.shootingStartDate && plan.shootingDate < projectBasicInfo.shootingStartDate) {
+    return `촬영일은 ${projectBasicInfo.shootingStartDate} 이후로 선택해주세요.`;
+  }
+  if (projectBasicInfo.shootingEndDate && plan.shootingDate > projectBasicInfo.shootingEndDate) {
+    return `촬영일은 ${projectBasicInfo.shootingEndDate} 이전으로 선택해주세요.`;
+  }
+
+  return "";
+}
+
 function planToDraft(plan: DailyPlan): DailyPlanDraft {
   return {
     title: plan.title,
@@ -3011,6 +3265,7 @@ function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], 
 
   return {
     ...plan,
+    episode: meta.day.trim() || plan.episode,
     memo: encodeDailyPlanMemo({ ...meta, memoText: meta.memoText ?? plan.memo }),
     shootingLocations: nextLocations,
     mealTimes: nextMeals,

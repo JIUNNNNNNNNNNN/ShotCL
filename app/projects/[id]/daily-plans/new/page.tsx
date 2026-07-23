@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { Card } from "@/components/ui/Card";
-import { getProject } from "@/lib/data/projects";
-import type { Project } from "@/lib/types";
+import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import type { Project, ProjectBasicInfo } from "@/lib/types";
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -18,18 +18,27 @@ function useProjectId() {
 export default function NewDailyPlanPage() {
   const projectId = useProjectId();
   const [project, setProject] = useState<Project | null>(null);
+  const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
     if (!projectId) return;
-    getProject(projectId)
-      .then((data) => {
+
+    async function loadProject() {
+      try {
+        const data = await getProject(projectId);
         setProject(data);
+        setProjectBasicInfo(data ? await getProjectBasicInfo(data.id).catch(() => null) : null);
         setErrorMessage("");
-      })
-      .catch((error) => setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다."))
-      .finally(() => setIsLoading(false));
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadProject();
   }, [projectId]);
 
   if (isLoading) {
@@ -40,5 +49,5 @@ export default function NewDailyPlanPage() {
     return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
-  return <DailyPlanEditor project={project} />;
+  return <DailyPlanEditor project={project} projectBasicInfo={projectBasicInfo} />;
 }

@@ -7,8 +7,8 @@ import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
-import { getProject } from "@/lib/data/projects";
-import type { DailyPlanWithShots, Project } from "@/lib/types";
+import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import type { DailyPlanWithShots, Project, ProjectBasicInfo } from "@/lib/types";
 
 function useRouteIds() {
   const params = useParams<{ id: string | string[]; dailyPlanId: string | string[] }>();
@@ -21,6 +21,7 @@ function useRouteIds() {
 export default function DailyPlanDetailPage() {
   const { projectId, dailyPlanId } = useRouteIds();
   const [project, setProject] = useState<Project | null>(null);
+  const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [dailyPlan, setDailyPlan] = useState<DailyPlanWithShots | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -34,11 +35,16 @@ export default function DailyPlanDetailPage() {
         setProject(projectData);
         if (!projectData) {
           setDailyPlan(null);
+          setProjectBasicInfo(null);
           setErrorMessage("");
           return;
         }
-        const planData = await getDailyPlanWithShots(projectData.id, dailyPlanId);
+        const [planData, basicInfo] = await Promise.all([
+          getDailyPlanWithShots(projectData.id, dailyPlanId),
+          getProjectBasicInfo(projectData.id).catch(() => null)
+        ]);
         setDailyPlan(planData);
+        setProjectBasicInfo(basicInfo);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다.");
@@ -68,6 +74,7 @@ export default function DailyPlanDetailPage() {
   return (
     <DailyPlanEditor
       project={project}
+      projectBasicInfo={projectBasicInfo}
       initialPlan={dailyPlan.plan}
       initialShots={dailyPlan.shots}
     />
