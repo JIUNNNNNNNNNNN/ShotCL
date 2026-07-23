@@ -54,6 +54,8 @@ export function useDragSpinner({
   const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragStateRef = useRef<{
     pointerId: number;
+    startX: number;
+    startY: number;
     lastAngle: number;
     moved: boolean;
   } | null>(null);
@@ -129,6 +131,8 @@ export function useDragSpinner({
     event.currentTarget.setPointerCapture(event.pointerId);
     dragStateRef.current = {
       pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
       lastAngle: getPointerAngle(event),
       moved: false
     };
@@ -139,6 +143,12 @@ export function useDragSpinner({
   function onPointerMove(event: ReactPointerEvent<HTMLElement>) {
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const dragDistance = Math.hypot(
+      event.clientX - dragState.startX,
+      event.clientY - dragState.startY
+    );
+    if (!dragState.moved && dragDistance < 6) return;
 
     const nextPointerAngle = getPointerAngle(event);
     const delta = normalizeSpinnerAngle(nextPointerAngle - dragState.lastAngle);
@@ -159,9 +169,9 @@ export function useDragSpinner({
     }
     dragStateRef.current = null;
     setIsDragging(false);
-    scheduleSettle();
 
     if (dragState.moved) {
+      scheduleSettle();
       window.setTimeout(() => {
         suppressClickRef.current = false;
       }, 0);

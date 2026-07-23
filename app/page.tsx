@@ -132,17 +132,13 @@ export default function HomePage() {
       const clickedSubmenu = clusterRef.current?.contains(event.target);
       const clickedProjectWheel = projectWheelRef.current?.contains(event.target);
       if (!clickedWheel && !clickedSubmenu && !clickedProjectWheel) {
-        mainSpinner.cancelPending();
-        projectSpinner.cancelPending();
-        setPickerMode(null);
+        closeProjectRing();
       }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        mainSpinner.cancelPending();
-        projectSpinner.cancelPending();
-        setPickerMode(null);
+        closeProjectRing();
       }
     }
 
@@ -274,6 +270,14 @@ export default function HomePage() {
     router.push(`/projects/${project.id}`);
   }
 
+  function closeProjectRing() {
+    mainSpinner.cancelPending();
+    projectSpinner.cancelPending();
+    projectNavigationRef.current = false;
+    setPickerMode(null);
+    setFeedback(null);
+  }
+
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const name = cleanProjectName(newProjectName);
@@ -352,6 +356,11 @@ export default function HomePage() {
         aria-label="프로젝트 원형 메뉴. 좌우 방향키 또는 드래그로 회전"
         className="absolute inset-0 z-10 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
         {...projectSpinner.pointerHandlers}
+        onClick={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (projectSpinner.consumeSuppressedClick()) return;
+          closeProjectRing();
+        }}
         onKeyDown={handleProjectSpinnerKeyDown}
       >
         <div
@@ -360,7 +369,7 @@ export default function HomePage() {
         />
         <div className="pointer-events-none absolute inset-[14%] rounded-full border border-dashed border-field-secondary/45" aria-hidden />
         <div
-          className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.75rem] w-[4.75rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)] sm:h-[5.5rem] sm:w-[5.5rem]"
+          className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_16px_rgba(215,185,95,0.32)] md:h-[5.5rem] md:w-[5.5rem]"
           aria-hidden
         />
         {projects.map((project, index) => {
@@ -377,7 +386,7 @@ export default function HomePage() {
           return (
             <div
               key={project.id}
-              className={`absolute h-[4.75rem] w-[4.75rem] will-change-[left,top,transform,opacity] sm:h-[5.5rem] sm:w-[5.5rem] ${
+              className={`absolute h-[4.25rem] w-[4.25rem] will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
                 projectSpinner.isDragging
                   ? "transition-none"
                   : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
@@ -408,7 +417,7 @@ export default function HomePage() {
                 <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
                   <span className="font-display">{project.name}</span>
                 </span>
-                <span className="mt-1 max-w-full truncate text-[9px] font-bold text-field-muted md:text-[10px]">
+                <span className="mt-1 hidden max-w-full truncate text-[9px] font-bold text-field-muted md:block md:text-[10px]">
                   {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
                 </span>
               </button>
@@ -440,7 +449,7 @@ export default function HomePage() {
           ref={compositionRef}
           className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-300 ${
             isProjectRingOpen
-              ? "max-w-[36rem]"
+              ? "max-w-[25rem] md:max-w-[36rem]"
               : isProgressMode
                 ? "max-w-[24rem] flex-col gap-4"
                 : pickerMode
@@ -451,7 +460,7 @@ export default function HomePage() {
           <div
             className={
               isProjectRingOpen
-                ? "relative flex aspect-square w-[min(92vw,36rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_220ms_ease-out]"
+                ? "relative flex aspect-square w-[min(94vw,25rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_220ms_ease-out] md:w-[min(92vw,36rem)]"
                 : "contents"
             }
           >
@@ -461,23 +470,35 @@ export default function HomePage() {
               role="group"
               tabIndex={0}
               aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
-              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width] duration-300 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
-                isProjectRingOpen ? "w-[56%] sm:w-[62%]" : "w-[min(82vw,22rem)]"
+              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width,opacity] duration-300 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
+                isProjectRingOpen
+                  ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
+                  : "w-[min(90vw,21rem)] md:w-[min(82vw,22rem)]"
               }`}
               {...mainSpinner.pointerHandlers}
+              onClick={(event) => {
+                if (!isProjectRingOpen || event.target !== event.currentTarget) return;
+                if (mainSpinner.consumeSuppressedClick()) return;
+                closeProjectRing();
+              }}
               onKeyDown={handleWheelKeyDown}
             >
-              <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
-              <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
-              <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)]" aria-hidden />
+              <div className="pointer-events-none absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
+              <div className="pointer-events-none absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
+              <div className="pointer-events-none absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)] md:h-8 md:w-8" aria-hidden />
               <div
-                className="pointer-events-none absolute left-[85%] top-1/2 h-[6.25rem] w-[6.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)]"
+                className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)] ${
+                  isProjectRingOpen
+                    ? "left-[79%] h-16 w-16 md:h-[6.25rem] md:w-[6.25rem]"
+                    : "left-[83%] h-[4.75rem] w-[4.75rem] md:h-[6.25rem] md:w-[6.25rem]"
+                }`}
                 aria-hidden
               />
               {wheelItems.map((item, index) => {
                 const angle = (getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation) * (Math.PI / 180);
-                const left = Number((50 + Math.cos(angle) * 35).toFixed(4));
-                const top = Number((50 + Math.sin(angle) * 35).toFixed(4));
+                const radius = isProjectRingOpen ? 29 : 33;
+                const left = Number((50 + Math.cos(angle) * radius).toFixed(4));
+                const top = Number((50 + Math.sin(angle) * radius).toFixed(4));
                 const isSelected = previewItem === item.id;
                 return (
                   <button
@@ -490,21 +511,29 @@ export default function HomePage() {
                       if (mainSpinner.consumeSuppressedClick()) return;
                       mainSpinner.snapToIndex(index);
                     }}
-                    className={`absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] sm:h-24 sm:w-24 ${item.colorClass} ${
+                    className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${
+                      isProjectRingOpen
+                        ? "h-14 w-14 text-[10px] md:h-20 md:w-20 md:text-[12px]"
+                        : "h-[4.25rem] w-[4.25rem] text-[12px] sm:h-24 sm:w-24 sm:text-sm"
+                    } ${
                       mainSpinner.isDragging
                         ? "transition-none"
                         : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
                     } ${
                       isSelected
-                        ? "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
-                        : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
+                        ? isProjectRingOpen
+                          ? "z-20 scale-[0.86] border-[#d7b95f] opacity-85 shadow-[inset_0_4px_8px_rgba(0,0,0,0.18),0_5px_12px_rgba(15,61,46,0.13)] brightness-95 md:scale-[0.94] md:opacity-100"
+                          : "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
+                        : isProjectRingOpen
+                          ? "z-10 scale-[0.7] border-white/70 opacity-55 shadow-[0_4px_10px_rgba(15,61,46,0.08)] hover:opacity-75 md:scale-[0.82] md:opacity-70"
+                          : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
                     } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
                     style={{
                       left: `${left}%`,
                       top: `${top}%`
                     }}
                   >
-                    <span className="font-display-strong text-[12px] font-black leading-[1.35] sm:text-sm">{item.label}</span>
+                    <span className="font-display-strong font-black leading-[1.35]">{item.label}</span>
                   </button>
                 );
               })}
