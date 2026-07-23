@@ -1,13 +1,8 @@
 import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import {
-  applyStaffCountsToPrintMeta,
-  getStaffCountsFromMembers,
-  getStaffCountsFromPrintMeta,
-  isStaffMemberEmpty,
   normalizeStaffDepartment,
   sortStaffMembers
 } from "@/lib/dailyPlan/staffList";
-import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import type { DailyPlanStaffMember } from "@/lib/types";
@@ -46,7 +41,7 @@ export function createBlankDailyPlanStaffMember(
   };
 }
 
-/** 진입 시 일촬표 부서 인원수와 상세 행 수를 안전하게 맞춥니다. */
+/** 저장된 스텝 행만 불러오며 일촬표 인원수로 행을 자동 생성하지 않습니다. */
 export async function listDailyPlanStaffMembers(projectId: string, dailyPlanId: string): Promise<DailyPlanStaffListResult> {
   try {
     const response = await fetch(
@@ -67,10 +62,10 @@ export async function listDailyPlanStaffMembers(projectId: string, dailyPlanId: 
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
 
-  return syncLocalStaffMembers(projectId, dailyPlanId);
+  return listLocalStaffMembers(projectId, dailyPlanId);
 }
 
-/** 상세 행 전체를 저장하고 부서별 행 수를 일촬표 요약값에 반영합니다. */
+/** 사용자가 입력한 상세 행과 순서를 그대로 저장합니다. */
 export async function saveDailyPlanStaffMembers(
   projectId: string,
   dailyPlanId: string,
@@ -103,53 +98,23 @@ export async function saveDailyPlanStaffMembers(
   return saveLocalStaffMembers(projectId, dailyPlanId, normalizedMembers);
 }
 
-function syncLocalStaffMembers(projectId: string, dailyPlanId: string): DailyPlanStaffListResult {
+function listLocalStaffMembers(projectId: string, dailyPlanId: string): DailyPlanStaffListResult {
   const buckets = readLocalBuckets();
   const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
   if (!plan) throw new Error("일촬표를 찾을 수 없습니다.");
 
-  const scopedMembers = sortStaffMembers(
-    buckets.dailyPlanStaffMembers.filter((member) => member.projectId === projectId && member.dailyPlanId === dailyPlanId)
-  );
-  const targets = getStaffCountsFromPrintMeta(decodeDailyPlanMemo(plan.memo));
-  const departments = new Set(targets.keys());
-  scopedMembers.forEach((member) => departments.add(normalizeStaffDepartment(member.department)));
-  const warnings: string[] = [];
-  let nextMembers = [...scopedMembers];
-
-  departments.forEach((department) => {
-    const departmentMembers = nextMembers.filter((member) => member.department === department);
-    const targetCount = targets.get(department) ?? 0;
-    if (departmentMembers.length < targetCount) {
-      for (let index = departmentMembers.length; index < targetCount; index += 1) {
-        nextMembers.push(createBlankDailyPlanStaffMember(projectId, dailyPlanId, department, index + 1));
-      }
-      return;
-    }
-    if (departmentMembers.length > targetCount) {
-      const removableIds = [...departmentMembers]
-        .reverse()
-        .filter(isStaffMemberEmpty)
-        .slice(0, departmentMembers.length - targetCount)
-        .map((member) => member.id);
-      const removable = new Set(removableIds);
-      nextMembers = nextMembers.filter((member) => !removable.has(member.id));
-      const remainingCount = departmentMembers.length - removable.size;
-      if (remainingCount > targetCount) {
-        warnings.push(`${department} 부서는 입력된 정보가 있는 ${remainingCount}명을 보존했습니다.`);
-      }
-    }
-  });
-
-  return saveLocalStaffMembers(projectId, dailyPlanId, nextMembers, warnings, departments);
+  return {
+    members: sortStaffMembers(
+      buckets.dailyPlanStaffMembers.filter((member) => member.projectId === projectId && member.dailyPlanId === dailyPlanId)
+    ),
+    warnings: []
+  };
 }
 
 function saveLocalStaffMembers(
   projectId: string,
   dailyPlanId: string,
-  members: DailyPlanStaffMember[],
-  warnings: string[] = [],
-  extraAffectedDepartments: Iterable<string> = []
+  members: DailyPlanStaffMember[]
 ): DailyPlanStaffListResult {
   const buckets = readLocalBuckets();
   const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
@@ -158,37 +123,16 @@ function saveLocalStaffMembers(
   const normalizedMembers = sortStaffMembers(
     members.map((member, index) => normalizeMember(member, projectId, dailyPlanId, index))
   );
-  const previousMembers = buckets.dailyPlanStaffMembers.filter(
-    (member) => member.projectId === projectId && member.dailyPlanId === dailyPlanId
-  );
-  const affectedDepartments = new Set<string>([
-    ...Array.from(extraAffectedDepartments, normalizeStaffDepartment),
-    ...previousMembers.map((member) => normalizeStaffDepartment(member.department)),
-    ...normalizedMembers.map((member) => normalizeStaffDepartment(member.department))
-  ]);
-  const nextMemo = encodeDailyPlanMemo(
-    applyStaffCountsToPrintMeta(
-      decodeDailyPlanMemo(plan.memo),
-      getStaffCountsFromMembers(normalizedMembers),
-      affectedDepartments
-    )
-  );
-
   writeLocalBuckets({
     dailyPlanStaffMembers: [
       ...buckets.dailyPlanStaffMembers.filter(
         (member) => member.projectId !== projectId || member.dailyPlanId !== dailyPlanId
       ),
       ...normalizedMembers
-    ],
-    dailyPlans: buckets.dailyPlans.map((item) => (
-      item.projectId === projectId && item.id === dailyPlanId
-        ? { ...item, memo: nextMemo, updatedAt: new Date().toISOString() }
-        : item
-    ))
+    ]
   }, projectId);
 
-  return { members: normalizedMembers, warnings };
+  return { members: normalizedMembers, warnings: [] };
 }
 
 function normalizeMember(

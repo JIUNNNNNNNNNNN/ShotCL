@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { ProgressShotsSyncError, syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
-import { syncDailyPlanStaffRows } from "@/lib/dailyPlan/staffSync.server";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
@@ -135,23 +134,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     }
 
     const dailyPlanId = String(planRow.id);
-    try {
-      const staffSync = await syncDailyPlanStaffRows(
-        supabase,
-        projectId,
-        dailyPlanId,
-        String(planRow.memo ?? "")
-      );
-      planRow = { ...planRow, memo: staffSync.memo };
-    } catch (staffSyncError) {
-      // migration 적용 전에도 기존 일촬표 저장 흐름은 유지합니다.
-      console.warn("[daily-plan-staff-sync] skipped", {
-        projectId,
-        dailyPlanId,
-        error: safeDiagnosticValue(staffSyncError instanceof Error ? staffSyncError.message : staffSyncError)
-      });
-    }
-
     const targetShotCount = buildProgressShotDrafts(body.plan, body.shots).length;
     try {
       const progressSync = await syncProgressShotsForDailyPlan(supabase, projectId, dailyPlanId, body.plan, body.shots);

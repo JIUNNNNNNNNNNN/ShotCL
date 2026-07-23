@@ -7,7 +7,6 @@ import { ArrowLeft, Plus, Save, Trash2, Users } from "lucide-react";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import { Button } from "@/components/ui/Button";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
 import {
   createBlankDailyPlanStaffMember,
@@ -17,8 +16,7 @@ import {
 import {
   dailyPlanStaffDepartments,
   isStaffMemberEmpty,
-  normalizeStaffDepartment,
-  sortStaffMembers
+  normalizeStaffDepartment
 } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
@@ -26,7 +24,9 @@ import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeathe
 import type { DailyPlan, DailyPlanStaffMember, Project } from "@/lib/types";
 
 const inputClassName =
-  "min-h-10 w-full min-w-0 rounded-2xl border border-field-border bg-white px-3 py-2 text-center text-sm font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light disabled:cursor-not-allowed disabled:bg-field-soft disabled:text-field-muted";
+const rowGridClassName =
+  "grid grid-cols-[7.5rem_8rem_9.5rem_9rem_9rem_minmax(12rem,1fr)_2.5rem] items-center gap-1.5";
 
 function useRouteIds() {
   const params = useParams<{ id: string | string[]; dailyPlanId: string | string[] }>();
@@ -36,14 +36,13 @@ function useRouteIds() {
   };
 }
 
-/** 일촬표에 종속된 부서별 상세 스텝 정보를 관리합니다. */
+/** 일촬표에 종속된 상세 스텝 행을 수동으로 관리합니다. */
 export default function StaffListPage() {
   const { role } = useProjectAccess();
   const { projectId, dailyPlanId } = useRouteIds();
   const [project, setProject] = useState<Project | null>(null);
   const [plan, setPlan] = useState<DailyPlan | null>(null);
   const [members, setMembers] = useState<DailyPlanStaffMember[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -62,7 +61,6 @@ export default function StaffListPage() {
       setProject(projectData);
       setPlan(planData?.plan ?? null);
       setMembers(staffData.members);
-      setWarnings(staffData.warnings);
       setIsDirty(false);
       setErrorMessage("");
     } catch (error) {
@@ -85,10 +83,9 @@ export default function StaffListPage() {
       const result = await saveDailyPlanStaffMembers(projectId, dailyPlanId, sourceMembers);
       if (editVersionRef.current === version) {
         setMembers(result.members);
-        setWarnings(result.warnings);
         setIsDirty(false);
       }
-      if (showMessage) setMessage("스텝 리스트와 일촬표 인원수를 저장했습니다.");
+      if (showMessage) setMessage("스텝 리스트를 저장했습니다.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "스텝 리스트를 저장하지 못했습니다.");
     } finally {
@@ -102,7 +99,7 @@ export default function StaffListPage() {
     return () => window.clearTimeout(timer);
   }, [errorMessage, isDirty, isLoading, isSaving, members, save]);
 
-  const departments = useMemo(() => {
+  const departmentOptions = useMemo(() => {
     const customDepartments = members
       .map((member) => normalizeStaffDepartment(member.department))
       .filter((department) => !dailyPlanStaffDepartments.includes(department as typeof dailyPlanStaffDepartments[number]));
@@ -111,7 +108,10 @@ export default function StaffListPage() {
 
   function commitMembers(updater: (current: DailyPlanStaffMember[]) => DailyPlanStaffMember[]) {
     editVersionRef.current += 1;
-    setMembers((current) => sortStaffMembers(updater(current)));
+    setMembers((current) => updater(current).map((member, index) => ({
+      ...member,
+      sortOrder: index + 1
+    })));
     setIsDirty(true);
     setMessage("");
     setErrorMessage("");
@@ -123,14 +123,11 @@ export default function StaffListPage() {
     )));
   }
 
-  function addMember(department: string) {
-    commitMembers((current) => {
-      const departmentCount = current.filter((member) => member.department === department).length;
-      return [
-        ...current,
-        createBlankDailyPlanStaffMember(projectId, dailyPlanId, department, departmentCount + 1)
-      ];
-    });
+  function addMember() {
+    commitMembers((current) => [
+      ...current,
+      createBlankDailyPlanStaffMember(projectId, dailyPlanId, "기타", current.length + 1)
+    ]);
   }
 
   function deleteMember(member: DailyPlanStaffMember) {
@@ -160,111 +157,102 @@ export default function StaffListPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl pb-24">
-      <section className="relative overflow-hidden rounded-[2.25rem] border border-field-border bg-white px-5 py-5 shadow-sm md:px-7">
-        <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-field-light" />
-        <div className="relative flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-field-primary text-white shadow-sm">
-              <Users className="h-6 w-6" aria-hidden />
+    <main className="mx-auto w-full max-w-7xl pb-20">
+      <section className="rounded-[1.5rem] border border-field-border bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-field-primary text-white">
+              <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
-              <p className="font-display text-2xl font-black text-field-primary">스텝 리스트</p>
-              <p className="mt-1 truncate text-sm font-bold text-field-muted">
-                {project.name} · {formatPlanLabel(plan)}
-              </p>
+              <h1 className="font-display text-xl font-black text-field-primary">스텝 리스트</h1>
+              <p className="truncate text-xs font-bold text-field-muted">{project.name} · {formatPlanLabel(plan)}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}/daily-plans/${plan.id}`}
-              className="inline-flex min-h-10 items-center gap-2 rounded-full border border-field-border bg-white px-4 py-2 text-sm font-black text-field-primary transition hover:bg-field-soft"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-soft"
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden />
-              일촬표로
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+              일촬표
             </Link>
-            <Button onClick={() => void save(members, true)} disabled={isSaving || !isDirty}>
-              {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-4 w-4" aria-hidden />}
+            <button
+              type="button"
+              onClick={addMember}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-field-primary bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              행 추가
+            </button>
+            <button
+              type="button"
+              onClick={() => void save(members, true)}
+              disabled={isSaving || !isDirty}
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
               저장
-            </Button>
+            </button>
           </div>
         </div>
-        <p className="relative mt-4 text-sm font-bold leading-6 text-field-muted">
-          부서 버블의 인원수는 일촬표와 자동으로 맞춰집니다. 빈 행도 인원수에 포함됩니다.
-          {isSaving ? " 저장 중…" : isDirty ? " 변경사항 자동 저장 대기 중" : " 저장됨"}
+        <p className="mt-2 text-[11px] font-bold text-field-muted" aria-live="polite">
+          행을 직접 추가하고 부서를 선택하세요. 일촬표 인원수와 자동으로 연동되지 않습니다.
+          {isSaving ? " 저장 중…" : isDirty ? " 자동 저장 대기 중" : " 저장됨"}
         </p>
       </section>
 
       {errorMessage ? (
-        <p className="mt-4 rounded-2xl border border-field-danger bg-white px-4 py-3 text-sm font-bold text-field-danger">{errorMessage}</p>
+        <p className="mt-3 rounded-xl border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger">{errorMessage}</p>
       ) : null}
       {message ? (
-        <p className="mt-4 rounded-2xl border border-field-primary bg-field-light px-4 py-3 text-sm font-bold text-field-primary">{message}</p>
+        <p className="mt-3 rounded-xl border border-field-primary bg-field-light px-3 py-2 text-xs font-bold text-field-primary">{message}</p>
       ) : null}
-      {warnings.map((warning) => (
-        <p key={warning} className="mt-3 rounded-2xl border border-[#e2c96e] bg-[#fff8dc] px-4 py-3 text-sm font-bold text-field-primary">{warning}</p>
-      ))}
 
-      <div className="mt-5 grid gap-4">
-        {departments.map((department, departmentIndex) => {
-          const departmentMembers = members.filter((member) => member.department === department);
-          return (
-            <section
-              key={department}
-              className="relative grid gap-3 rounded-[2rem] border border-field-border bg-white p-3 shadow-sm md:grid-cols-[9.5rem_minmax(0,1fr)] md:items-start md:p-4"
-            >
-              <div className="relative z-10 flex items-center justify-between gap-2 rounded-full border border-field-primary/20 bg-field-light px-4 py-3 text-field-primary md:min-h-20 md:flex-col md:justify-center md:text-center">
-                <div>
-                  <p className="font-display text-lg font-black">{department}</p>
-                  <p className="text-xs font-black">{departmentMembers.length}명</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => addMember(department)}
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-field-primary bg-field-primary text-white transition active:scale-95"
-                  aria-label={`${department} 인원 추가`}
-                  title={`${department} 인원 추가`}
-                >
-                  <Plus className="h-4 w-4" aria-hidden />
-                </button>
-              </div>
+      <section className="mt-3 overflow-hidden rounded-[1.5rem] border border-field-border bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <div className="min-w-[64rem] p-2">
+            <div className={`${rowGridClassName} px-2 pb-1.5 text-center text-[10px] font-black text-field-muted`}>
+              <span>부서</span>
+              <span>이름</span>
+              <span>연락처</span>
+              <span>도/광역시</span>
+              <span>시/군/구</span>
+              <span>특이사항</span>
+              <span>삭제</span>
+            </div>
 
-              <div className="relative min-w-0">
-                <span className="pointer-events-none absolute -left-7 top-9 hidden h-px w-7 bg-field-primary/25 md:block" aria-hidden />
-                {departmentMembers.length === 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => addMember(department)}
-                    className="flex min-h-20 w-full items-center justify-center rounded-[1.5rem] border border-dashed border-field-border bg-field-soft/50 px-4 text-sm font-bold text-field-muted transition hover:border-field-primary hover:text-field-primary"
-                  >
-                    <Plus className="mr-2 h-4 w-4" aria-hidden />
-                    첫 스텝 추가
-                  </button>
-                ) : (
-                  <div className="grid gap-3 xl:grid-cols-2">
-                    {departmentMembers.map((member, memberIndex) => (
-                      <StaffMemberCard
-                        key={member.id}
-                        member={member}
-                        number={memberIndex + 1}
-                        departmentOptions={departments}
-                        onChange={(patch) => updateMember(member.id, patch)}
-                        onDelete={() => deleteMember(member)}
-                      />
-                    ))}
-                  </div>
-                )}
+            {members.length === 0 ? (
+              <button
+                type="button"
+                onClick={addMember}
+                className="flex h-16 w-full items-center justify-center rounded-2xl border border-dashed border-field-border bg-field-soft/50 text-xs font-bold text-field-muted transition hover:border-field-primary hover:text-field-primary"
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                첫 행 추가
+              </button>
+            ) : (
+              <div className="grid gap-1">
+                {members.map((member, index) => (
+                  <StaffMemberRow
+                    key={member.id}
+                    member={member}
+                    number={index + 1}
+                    departmentOptions={departmentOptions}
+                    onChange={(patch) => updateMember(member.id, patch)}
+                    onDelete={() => deleteMember(member)}
+                  />
+                ))}
               </div>
-              <span className="sr-only">부서 순서 {departmentIndex + 1}</span>
-            </section>
-          );
-        })}
-      </div>
+            )}
+          </div>
+        </div>
+      </section>
     </main>
   );
 }
 
-function StaffMemberCard({
+function StaffMemberRow({
   member,
   number,
   departmentOptions,
@@ -278,95 +266,71 @@ function StaffMemberCard({
   onDelete: () => void;
 }) {
   const districts = member.province ? koreanWeatherRegions[member.province] ?? [] : [];
-  return (
-    <article className="relative rounded-[1.75rem] border border-field-border bg-field-soft/45 p-3">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-field-primary">#{number}</span>
-        <button
-          type="button"
-          onClick={onDelete}
-          className="grid h-8 w-8 place-items-center rounded-full border border-field-danger bg-white text-field-danger transition hover:bg-field-danger hover:text-white"
-          aria-label={`${member.name || `${member.department} ${number}번`} 삭제`}
-        >
-          <Trash2 className="h-3.5 w-3.5" aria-hidden />
-        </button>
-      </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <LabeledField label="부서 분류">
-          <select
-            className={inputClassName}
-            value={member.department}
-            onChange={(event) => onChange({ department: event.target.value })}
-            aria-label={`${number}번 부서 분류`}
-          >
-            {departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}
-          </select>
-        </LabeledField>
-        <LabeledField label="이름">
-          <input
-            className={inputClassName}
-            value={member.name}
-            onChange={(event) => onChange({ name: event.target.value })}
-            maxLength={100}
-            placeholder="이름"
-            aria-label={`${member.department} ${number}번 이름`}
-          />
-        </LabeledField>
-        <LabeledField label="연락처">
-          <input
-            className={inputClassName}
-            type="tel"
-            inputMode="tel"
-            value={member.phone}
-            onChange={(event) => onChange({ phone: formatKoreanPhoneNumber(event.target.value) })}
-            maxLength={13}
-            placeholder="010-0000-0000"
-            aria-label={`${member.department} ${number}번 연락처`}
-          />
-        </LabeledField>
-        <LabeledField label="도/광역시">
-          <select
-            className={inputClassName}
-            value={member.province}
-            onChange={(event) => onChange({ province: event.target.value, cityDistrict: "" })}
-            aria-label={`${member.department} ${number}번 도 또는 광역시`}
-          >
-            <option value="">지역 선택</option>
-            {koreanWeatherProvinces.map((province) => <option key={province} value={province}>{province}</option>)}
-          </select>
-        </LabeledField>
-        <LabeledField label="시/군/구">
-          <select
-            className={inputClassName}
-            value={member.cityDistrict}
-            disabled={!member.province}
-            onChange={(event) => onChange({ cityDistrict: event.target.value })}
-            aria-label={`${member.department} ${number}번 시 군 구`}
-          >
-            <option value="">상세 지역 선택</option>
-            {districts.map((district) => <option key={district} value={district}>{district}</option>)}
-          </select>
-        </LabeledField>
-        <LabeledField label="특이사항">
-          <MemoPopoverField
-            value={member.notes}
-            placeholder="특이사항"
-            ariaLabel={`${member.department} ${number}번 특이사항 수정`}
-            onChange={(notes) => onChange({ notes })}
-          />
-        </LabeledField>
+  return (
+    <article className={`${rowGridClassName} rounded-2xl border border-field-border bg-field-soft/40 p-1.5`} aria-label={`${number}번 스텝`}>
+      <select
+        className={inputClassName}
+        value={member.department}
+        onChange={(event) => onChange({ department: event.target.value })}
+        aria-label={`${number}번 부서`}
+      >
+        {departmentOptions.map((department) => <option key={department} value={department}>{department}</option>)}
+      </select>
+      <input
+        className={inputClassName}
+        value={member.name}
+        onChange={(event) => onChange({ name: event.target.value })}
+        maxLength={100}
+        placeholder="이름"
+        aria-label={`${number}번 이름`}
+      />
+      <input
+        className={inputClassName}
+        type="tel"
+        inputMode="tel"
+        value={member.phone}
+        onChange={(event) => onChange({ phone: formatKoreanPhoneNumber(event.target.value) })}
+        maxLength={13}
+        placeholder="010-0000-0000"
+        aria-label={`${number}번 연락처`}
+      />
+      <select
+        className={inputClassName}
+        value={member.province}
+        onChange={(event) => onChange({ province: event.target.value, cityDistrict: "" })}
+        aria-label={`${number}번 도 또는 광역시`}
+      >
+        <option value="">지역 선택</option>
+        {koreanWeatherProvinces.map((province) => <option key={province} value={province}>{province}</option>)}
+      </select>
+      <select
+        className={inputClassName}
+        value={member.cityDistrict}
+        disabled={!member.province}
+        onChange={(event) => onChange({ cityDistrict: event.target.value })}
+        aria-label={`${number}번 시 군 구`}
+      >
+        <option value="">상세 지역</option>
+        {districts.map((district) => <option key={district} value={district}>{district}</option>)}
+      </select>
+      <div className="min-w-0 [&>button]:h-8 [&>button]:min-h-8 [&>button]:rounded-xl [&>button]:px-2 [&>button]:py-1 [&>button]:text-xs">
+        <MemoPopoverField
+          value={member.notes}
+          placeholder="특이사항"
+          ariaLabel={`${number}번 특이사항 수정`}
+          onChange={(notes) => onChange({ notes })}
+        />
       </div>
+      <button
+        type="button"
+        onClick={onDelete}
+        className="grid h-8 w-8 place-items-center justify-self-center rounded-full border border-field-danger bg-white text-field-danger transition hover:bg-field-danger hover:text-white active:scale-90"
+        aria-label={`${member.name || `${number}번 스텝`} 삭제`}
+      >
+        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+      </button>
     </article>
-  );
-}
-
-function LabeledField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="grid min-w-0 gap-1 text-center">
-      <span className="text-[11px] font-black text-field-muted">{label}</span>
-      {children}
-    </div>
   );
 }
 

@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  applyStaffCountsToPrintMeta,
-  getStaffCountsFromMembers,
-  normalizeStaffDepartment
-} from "@/lib/dailyPlan/staffList";
-import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
-import { syncDailyPlanStaffRows } from "@/lib/dailyPlan/staffSync.server";
+import { normalizeStaffDepartment } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
@@ -25,9 +19,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
   try {
     const scope = await requireAdminScope(request, context);
     if (scope instanceof NextResponse) return scope;
-    const { projectId, dailyPlanId, supabase, plan } = scope;
-    const synced = await syncDailyPlanStaffRows(supabase, projectId, dailyPlanId, String(plan.memo ?? ""));
-    return NextResponse.json({ members: synced.rows, warnings: synced.warnings });
+    const { projectId, dailyPlanId, supabase } = scope;
+    const { data: rows, error } = await supabase
+      .from("daily_plan_staff_members")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("daily_plan_id", dailyPlanId)
+      .order("sort_order")
+      .order("created_at");
+    if (error) throw error;
+    return NextResponse.json({ members: rows ?? [], warnings: [] });
   } catch (error) {
     return staffRouteError(error, "스텝 리스트를 불러오지 못했습니다.");
   }
@@ -37,7 +38,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
   try {
     const scope = await requireAdminScope(request, context);
     if (scope instanceof NextResponse) return scope;
-    const { projectId, dailyPlanId, supabase, plan } = scope;
+    const { projectId, dailyPlanId, supabase } = scope;
     const body = (await request.json()) as { members?: StaffMemberInput[] };
     if (!Array.isArray(body.members) || body.members.length > 500) {
       return NextResponse.json({ error: "스텝 목록 데이터가 올바르지 않습니다." }, { status: 400 });
@@ -66,7 +67,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
 
     const { data: existingRows, error: existingError } = await supabase
       .from("daily_plan_staff_members")
-      .select("id,department")
+      .select("id")
       .eq("project_id", projectId)
       .eq("daily_plan_id", dailyPlanId);
     if (existingError) throw existingError;
@@ -100,22 +101,6 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       if (error) throw error;
     }
 
-    const counts = getStaffCountsFromMembers(normalizedMembers);
-    const affectedDepartments = new Set<string>([
-      ...normalizedMembers.map((member) => member.department),
-      ...(existingRows ?? []).map((row) => normalizeStaffDepartment(row.department)),
-      ...deletedRows.map((row) => normalizeStaffDepartment(row.department))
-    ]);
-    const nextMemo = encodeDailyPlanMemo(
-      applyStaffCountsToPrintMeta(decodeDailyPlanMemo(String(plan.memo ?? "")), counts, affectedDepartments)
-    );
-    const { error: planError } = await supabase
-      .from("daily_plans")
-      .update({ memo: nextMemo })
-      .eq("project_id", projectId)
-      .eq("id", dailyPlanId);
-    if (planError) throw planError;
-
     const { data: savedRows, error: savedError } = await supabase
       .from("daily_plan_staff_members")
       .select("*")
@@ -147,7 +132,7 @@ async function requireAdminScope(
   const supabase = requireProjectAccessDb();
   const { data: plan, error } = await supabase
     .from("daily_plans")
-    .select("id,memo")
+    .select("id")
     .eq("project_id", projectId)
     .eq("id", dailyPlanId)
     .maybeSingle();

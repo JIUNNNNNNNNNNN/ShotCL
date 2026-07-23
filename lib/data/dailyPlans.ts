@@ -6,7 +6,6 @@ import {
   normalizeDailyPlanShotStatus
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
-import { listDailyPlanStaffMembers } from "@/lib/data/staffMembers";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
@@ -396,9 +395,7 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
     input.projectId
   );
 
-  await listDailyPlanStaffMembers(input.projectId, plan.id);
-  const syncedPlan = readLocalBuckets().dailyPlans.find((item) => item.id === plan.id) ?? plan;
-  return { plan: syncedPlan, shots, saveStatus: "saved", message: "일촬표가 저장되었습니다." };
+  return { plan, shots, saveStatus: "saved", message: "일촬표가 저장되었습니다." };
 }
 
 async function findSupabaseDuplicateDailyPlan(projectId: string, draft: DailyPlanDraft): Promise<DailyPlanWithShots | null> {
