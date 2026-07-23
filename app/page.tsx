@@ -47,28 +47,36 @@ const wheelItems = [
   {
     id: "new",
     label: "New Project",
-    path: "M180 180 L180 24 A156 156 0 0 1 315.1 258 Z",
-    textX: 250,
-    textY: 116,
-    fillClass: "fill-field-primary group-hover:fill-[#174d3b]"
+    angle: 0,
+    colorClass: "bg-field-primary"
   },
   {
     id: "join",
     label: "Join Project",
-    path: "M180 180 L44.9 258 A156 156 0 0 1 180 24 Z",
-    textX: 110,
-    textY: 116,
-    fillClass: "fill-[#557d6d] group-hover:fill-[#628b7a]"
+    angle: 120,
+    colorClass: "bg-[#557d6d]"
   },
   {
     id: "progress",
     label: "Go",
-    path: "M180 180 L315.1 258 A156 156 0 0 1 44.9 258 Z",
-    textX: 180,
-    textY: 272,
-    fillClass: "fill-[#416f5d] group-hover:fill-[#4c7b68]"
+    angle: 240,
+    colorClass: "bg-[#416f5d]"
   }
 ] as const;
+
+const SPINNER_SETTLE_DELAY_MS = 180;
+const SPINNER_SNAP_DURATION_MS = 260;
+
+function normalizeAngle(angle: number) {
+  return ((angle + 180) % 360 + 360) % 360 - 180;
+}
+
+function getNearestWheelItem(rotation: number) {
+  return wheelItems.reduce((nearest, item) => {
+    const distance = Math.abs(normalizeAngle(item.angle + rotation));
+    return distance < nearest.distance ? { id: item.id, distance } : nearest;
+  }, { id: wheelItems[0].id as WheelItemId, distance: Number.POSITIVE_INFINITY });
+}
 
 /** 빈 종이 위 원형 메뉴만 제공하는 앱 진입 화면입니다. */
 export default function HomePage() {
@@ -85,10 +93,23 @@ export default function HomePage() {
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
+  const [wheelRotation, setWheelRotation] = useState(0);
+  const [previewItem, setPreviewItem] = useState<WheelItemId>("new");
+  const [isDraggingWheel, setIsDraggingWheel] = useState(false);
   const wheelRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
+  const compositionRef = useRef<HTMLDivElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelRotationRef = useRef(0);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    lastAngle: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -113,6 +134,8 @@ export default function HomePage() {
 
   useEffect(() => () => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -122,11 +145,19 @@ export default function HomePage() {
       if (!(event.target instanceof Node)) return;
       const clickedWheel = wheelRef.current?.contains(event.target);
       const clickedSubmenu = clusterRef.current?.contains(event.target);
-      if (!clickedWheel && !clickedSubmenu) setPickerMode(null);
+      if (!clickedWheel && !clickedSubmenu) {
+        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+        if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+        setPickerMode(null);
+      }
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setPickerMode(null);
+      if (event.key === "Escape") {
+        if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+        if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+        setPickerMode(null);
+      }
     }
 
     document.addEventListener("pointerdown", closeOnOutsideClick);
@@ -142,7 +173,7 @@ export default function HomePage() {
     let secondAnimationFrame = 0;
     const firstAnimationFrame = window.requestAnimationFrame(() => {
       secondAnimationFrame = window.requestAnimationFrame(() => {
-        clusterRef.current?.scrollIntoView({
+        compositionRef.current?.scrollIntoView({
           block: "center",
           inline: "center",
           behavior: "smooth"
@@ -161,15 +192,11 @@ export default function HomePage() {
     feedbackTimerRef.current = setTimeout(() => setFeedback(null), 1500);
   }
 
-  function activateWheelItem(id: WheelItemId) {
+  function commitWheelItem(id: WheelItemId) {
+    if (pickerMode === id) return;
     setFeedback(null);
     setNewProjectError("");
     setIsCreatingProject(false);
-
-    if (pickerMode === id) {
-      setPickerMode(null);
-      return;
-    }
 
     if (id === "new" || id === "join") {
       setPickerMode(id);
@@ -187,6 +214,94 @@ export default function HomePage() {
     }
 
     setPickerMode(id);
+  }
+
+  function updateWheelRotation(nextRotation: number) {
+    wheelRotationRef.current = nextRotation;
+    setWheelRotation(nextRotation);
+    setPreviewItem(getNearestWheelItem(nextRotation).id);
+  }
+
+  function snapToWheelItem(id: WheelItemId) {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+
+    const item = wheelItems.find((candidate) => candidate.id === id) ?? wheelItems[0];
+    const snappedRotation = wheelRotationRef.current - normalizeAngle(item.angle + wheelRotationRef.current);
+    updateWheelRotation(snappedRotation);
+    setPreviewItem(id);
+
+    snapTimerRef.current = setTimeout(() => {
+      commitWheelItem(id);
+    }, SPINNER_SNAP_DURATION_MS);
+  }
+
+  function scheduleWheelSettle() {
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => {
+      snapToWheelItem(getNearestWheelItem(wheelRotationRef.current).id);
+    }, SPINNER_SETTLE_DELAY_MS);
+  }
+
+  function getPointerAngle(event: React.PointerEvent<HTMLDivElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    return Math.atan2(event.clientY - centerY, event.clientX - centerX) * (180 / Math.PI);
+  }
+
+  function handleWheelPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 && event.pointerType === "mouse") return;
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      lastAngle: getPointerAngle(event),
+      moved: false
+    };
+    suppressClickRef.current = false;
+    setIsDraggingWheel(true);
+  }
+
+  function handleWheelPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    const nextPointerAngle = getPointerAngle(event);
+    const delta = normalizeAngle(nextPointerAngle - dragState.lastAngle);
+    if (Math.abs(delta) < 0.15) return;
+
+    dragState.lastAngle = nextPointerAngle;
+    dragState.moved = true;
+    suppressClickRef.current = true;
+    updateWheelRotation(wheelRotationRef.current + delta);
+  }
+
+  function finishWheelPointer(event: React.PointerEvent<HTMLDivElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    dragStateRef.current = null;
+    setIsDraggingWheel(false);
+    scheduleWheelSettle();
+    if (dragState.moved) {
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+  }
+
+  function handleSpinnerWheel(event: React.WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (snapTimerRef.current) clearTimeout(snapTimerRef.current);
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    updateWheelRotation(wheelRotationRef.current + Math.max(-72, Math.min(72, delta * 0.35)));
+    scheduleWheelSettle();
   }
 
   function closeInputSubmenu(mode: "new" | "join") {
@@ -212,10 +327,19 @@ export default function HomePage() {
     if (projects.length === 1) setPickerMode(null);
   }
 
-  function handleWheelKeyDown(event: React.KeyboardEvent<SVGGElement>, id: (typeof wheelItems)[number]["id"]) {
-    if (event.key !== "Enter" && event.key !== " ") return;
+  function handleWheelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      snapToWheelItem(previewItem);
+      return;
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+
     event.preventDefault();
-    activateWheelItem(id);
+    const currentIndex = wheelItems.findIndex((item) => item.id === previewItem);
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const nextIndex = (currentIndex + direction + wheelItems.length) % wheelItems.length;
+    snapToWheelItem(wheelItems[nextIndex].id);
   }
 
   function openProject(project: Project) {
@@ -339,79 +463,82 @@ export default function HomePage() {
 
   return (
     <div className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <div ref={canvasRef} className="h-full w-full overflow-auto overscroll-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+      <div ref={canvasRef} className="flex h-full w-full overflow-auto overscroll-contain px-4 py-6 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden md:px-8">
         <div
-          className={`relative mx-auto transition-[width,height] duration-200 ${
-            pickerMode ? "h-[48rem] w-[50rem]" : "h-[min(82vw,21rem)] w-[min(82vw,21rem)]"
+          ref={compositionRef}
+          className={`relative m-auto flex w-full items-center justify-center transition-[gap] duration-300 ${
+            pickerMode ? "max-w-[42rem] flex-col gap-7 md:flex-row md:gap-12" : "max-w-[24rem]"
           }`}
         >
-        <div ref={wheelRef} className={`absolute z-20 ${pickerMode ? "left-[14.5rem] top-[11rem] w-[21rem]" : "inset-0 w-full"}`}>
-        <svg viewBox="0 0 360 360" className="block h-auto w-full drop-shadow-[0_12px_24px_rgba(15,61,46,0.12)]" role="group" aria-label="첫 화면 기능 메뉴">
-          <circle cx="180" cy="180" r="160" className="fill-white stroke-field-border" strokeWidth="2" />
-          {wheelItems.map((item) => {
-            const isSelected = pickerMode === item.id;
-            return (
-              <g
-                key={item.id}
-                role="button"
-                tabIndex={0}
-                aria-label={item.label}
-                aria-pressed={isSelected}
-                className="group cursor-pointer outline-none"
-                onClick={() => activateWheelItem(item.id)}
-                onKeyDown={(event) => handleWheelKeyDown(event, item.id)}
-              >
-                <path
-                  d={item.path}
-                  className={`${item.fillClass} stroke-field-bg transition-[filter,transform,fill,stroke] duration-150 [transform-box:fill-box] [transform-origin:center] group-hover:brightness-110 group-active:scale-[0.985] group-active:brightness-90 group-focus-visible:stroke-[#d7b95f] group-focus-visible:drop-shadow-[0_0_5px_rgba(215,185,95,0.8)]`}
-                  style={isSelected ? { fill: "#092f23", stroke: "#d7b95f", filter: "drop-shadow(0 0 5px rgba(15, 61, 46, 0.35))" } : undefined}
-                  strokeWidth={isSelected ? "7" : "5"}
-                />
-                <text
-                  x={item.textX}
-                  y={item.textY}
-                  textAnchor="middle"
-                  className="font-display-strong pointer-events-none select-none fill-white text-[14px] font-black transition-opacity duration-150 group-active:opacity-80"
+          <div
+            ref={wheelRef}
+            role="group"
+            tabIndex={0}
+            aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
+            className="relative z-20 aspect-square w-[min(82vw,22rem)] shrink-0 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
+            onPointerDown={handleWheelPointerDown}
+            onPointerMove={handleWheelPointerMove}
+            onPointerUp={finishWheelPointer}
+            onPointerCancel={finishWheelPointer}
+            onWheel={handleSpinnerWheel}
+            onKeyDown={handleWheelKeyDown}
+          >
+            <div className="absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
+            <div className="absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
+            <div className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)]" aria-hidden />
+            <div
+              className="pointer-events-none absolute left-[85%] top-1/2 h-[6.25rem] w-[6.25rem] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)]"
+              aria-hidden
+            />
+            {wheelItems.map((item) => {
+              const angle = (item.angle + wheelRotation) * (Math.PI / 180);
+              const left = Number((50 + Math.cos(angle) * 35).toFixed(4));
+              const top = Number((50 + Math.sin(angle) * 35).toFixed(4));
+              const isSelected = previewItem === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  aria-label={item.label}
+                  aria-pressed={isSelected}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    snapToWheelItem(item.id);
+                  }}
+                  className={`absolute flex h-20 w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] sm:h-24 sm:w-24 ${item.colorClass} ${
+                    isDraggingWheel
+                      ? "transition-none"
+                      : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
+                  } ${
+                    isSelected
+                      ? "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
+                      : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
+                  } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                  style={{
+                    left: `${left}%`,
+                    top: `${top}%`
+                  }}
                 >
-                  <tspan x={item.textX} dy="0">{item.label}</tspan>
-                </text>
-              </g>
-            );
-          })}
-          <circle cx="180" cy="180" r="16" className="fill-field-bg stroke-field-border" strokeWidth="2" aria-hidden />
-        </svg>
-        </div>
+                  <span className="font-display-strong text-[12px] font-black leading-[1.35] sm:text-sm">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
         {pickerMode ? (
           <>
-          <svg className="pointer-events-none absolute inset-0 z-0 h-full w-full motion-safe:animate-[branch-reveal_180ms_ease-out]" viewBox="0 0 800 768" aria-hidden>
-            {pickerMode === "new" ? (
-              <>
-                <path d="M526 244 C560 228 562 178 604 150" fill="none" stroke="#8ca99d" strokeWidth="2" />
-                <path d="M604 150 C626 136 644 132 666 134" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
-              </>
-            ) : pickerMode === "join" ? (
-              <>
-                <path d="M274 244 C236 224 226 180 190 150" fill="none" stroke="#8ca99d" strokeWidth="2" />
-                <path d="M190 150 C168 136 150 132 128 134" fill="none" stroke="#c9d6d0" strokeWidth="1.5" />
-              </>
-            ) : (
-              <path d="M292 470 C254 500 226 528 208 558" fill="none" stroke="#8ca99d" strokeWidth="2" />
-            )}
-          </svg>
+          <div className="h-8 w-px shrink-0 bg-field-secondary/60 motion-safe:animate-[branch-reveal_180ms_ease-out] md:h-px md:w-12" aria-hidden />
           <div
             ref={clusterRef}
             role="region"
             aria-label={pickerTitle}
-            className={`absolute z-10 motion-safe:animate-[branch-reveal_180ms_ease-out] ${
-              pickerMode === "new"
-                ? "left-[36.5rem] top-[4.5rem] w-[12.5rem]"
-                : pickerMode === "join"
-                  ? "left-2 top-[4.5rem] w-[12.5rem]"
-                : "left-2 top-[31rem] w-[12.5rem]"
-            }`}
+            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_180ms_ease-out] md:w-[14rem]"
           >
-            <div className={`mb-2 flex items-center gap-1.5 ${pickerMode === "new" ? "justify-start" : "justify-end"}`}>
+            <div className="mb-2 flex items-center justify-center gap-1.5">
               <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
                 <span className="font-display">{pickerTitle}</span>
               </h1>
