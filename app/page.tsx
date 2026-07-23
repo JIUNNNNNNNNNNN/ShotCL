@@ -415,7 +415,7 @@ export default function HomePage() {
               className={`absolute h-[4.25rem] w-[4.25rem] will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
                 projectSpinner.isDragging
                   ? "transition-none"
-                  : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
+                  : "transition-[left,top,transform,opacity] duration-[220ms] ease-out"
               }`}
               style={{
                 left: `${left}%`,
@@ -551,7 +551,7 @@ export default function HomePage() {
                     } ${
                       mainSpinner.isDragging
                         ? "transition-none"
-                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
+                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[220ms] ease-out"
                     } ${
                       isSelected
                         ? isProjectRingOpen
