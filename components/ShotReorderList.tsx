@@ -62,12 +62,27 @@ export function ShotReorderList({
   onReorder,
   renderShot
 }: ShotReorderListProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
   const cleanupPointerSessionRef = useRef<(() => void) | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [dragState, setDragState] = useState<DragState | null>(null);
 
   useEffect(() => () => cleanupPointerSessionRef.current?.(), []);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+
+    const preventTextSelection = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) return;
+      event.preventDefault();
+    };
+
+    list.addEventListener("selectstart", preventTextSelection);
+    return () => list.removeEventListener("selectstart", preventTextSelection);
+  }, []);
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>, shotId: string) {
     if (disabled || event.button !== 0 || isDragExcludedTarget(event.target)) return;
@@ -143,6 +158,7 @@ export function ShotReorderList({
       suppressClickUntilRef.current = Date.now() + 700;
       document.body.style.userSelect = "none";
       document.body.style.webkitUserSelect = "none";
+      window.getSelection()?.removeAllRanges();
       if (event.pointerType !== "mouse") {
         window.addEventListener("touchmove", preventTouchScroll, { passive: false });
       }
@@ -223,7 +239,7 @@ export function ShotReorderList({
   }
 
   return (
-    <div className="grid gap-2 pb-24">
+    <div ref={listRef} className="grid gap-2 pb-24">
       {visibleShots.map((shot) => {
         const isDragging = dragState?.shotId === shot.id;
         const isDropTarget = dragState?.targetId === shot.id && !isDragging;
@@ -235,6 +251,7 @@ export function ShotReorderList({
               else cardRefs.current.delete(shot.id);
             }}
             onPointerDown={(event) => handlePointerDown(event, shot.id)}
+            onDragStart={(event) => event.preventDefault()}
             onContextMenu={(event) => {
               if (!disabled && !isDragExcludedTarget(event.target)) event.preventDefault();
             }}
@@ -245,7 +262,7 @@ export function ShotReorderList({
             }}
             aria-grabbed={isDragging}
             className={cn(
-              "relative rounded-[1.5rem]",
+              "relative select-none rounded-[1.5rem] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
               !disabled && "cursor-grab",
               isDragging && "z-50 cursor-grabbing opacity-95",
               isDropTarget

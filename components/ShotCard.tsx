@@ -72,7 +72,12 @@ export function ShotCard({
           title="콘티 크게 보기"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={shot.storyboardImageUrl} alt={`${shot.title} 콘티`} className="h-full w-full object-contain" />
+          <img
+            src={shot.storyboardImageUrl}
+            alt={`${shot.title} 콘티`}
+            draggable={false}
+            className="h-full w-full select-none object-contain [-webkit-user-drag:none]"
+          />
         </button>
       ) : (
         <div className="flex h-[72px] w-24 shrink-0 items-center justify-center rounded-[1.1rem] border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
