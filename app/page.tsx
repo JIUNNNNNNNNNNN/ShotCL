@@ -254,7 +254,7 @@ export default function HomePage() {
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
       unhideProject(project.id);
-      window.location.assign(`/projects/${project.id}`);
+      window.location.assign(`/projects/${project.id}/daily-plans/new/basic`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
       setIsCreatingProject(false);

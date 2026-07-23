@@ -37,7 +37,7 @@ export default function NewProjectPage() {
         shootDate,
         description: description.trim()
       });
-      router.push(`/projects/${project.id}`);
+      router.push(`/projects/${project.id}/daily-plans/new/basic`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
       setIsSaving(false);

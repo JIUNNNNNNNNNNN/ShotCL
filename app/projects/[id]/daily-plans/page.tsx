@@ -105,7 +105,7 @@ export default function DailyPlansPage() {
       <PageHeader
         title="저장된 일촬표"
         description={project.name}
-        actions={<ButtonLink href={`/projects/${project.id}/daily-plans/new`}><Plus className="h-5 w-5" aria-hidden />새 일촬표 만들기</ButtonLink>}
+        actions={<ButtonLink href={`/projects/${project.id}/daily-plans/new/basic`}><Plus className="h-5 w-5" aria-hidden />새 일촬표 만들기</ButtonLink>}
       />
 
       <div className="mb-4 grid gap-1">
@@ -121,7 +121,7 @@ export default function DailyPlansPage() {
           <h2 className="text-xl font-black text-field-primary">아직 저장된 일촬표가 없습니다</h2>
           <p className="mt-2 text-base leading-6 text-field-muted">웹 편집기에서 새 일촬표를 만들어 시작하세요.</p>
           <div className="mt-5 md:max-w-xs">
-            <ButtonLink href={`/projects/${project.id}/daily-plans/new`}>
+            <ButtonLink href={`/projects/${project.id}/daily-plans/new/basic`}>
               <Plus className="h-5 w-5" aria-hidden />
               새 일촬표 만들기
             </ButtonLink>
