@@ -314,16 +314,14 @@ function PanelContent({
             <p className="mb-2 px-1 font-display text-sm font-black text-field-primary">관리</p>
             <div className="grid gap-2">
               {currentPlanId ? (
-                <>
-                  <SideActionLink href={`${projectBasePath}/daily-plans/${currentPlanId}`} icon={FilePenLine}>
-                    현재 일촬표 수정
-                  </SideActionLink>
-                  <SideActionLink href={`${projectBasePath}/daily-plans/${currentPlanId}/basic`} icon={FilePenLine}>
-                    기본 정보 수정
-                  </SideActionLink>
-                </>
+                <SideActionLink href={`${projectBasePath}/daily-plans/${currentPlanId}`} icon={FilePenLine}>
+                  현재 일촬표 수정
+                </SideActionLink>
               ) : null}
-              <SideActionLink href={`${projectBasePath}/daily-plans/new/basic`} icon={CalendarPlus}>
+              <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>
+                기본정보 수정
+              </SideActionLink>
+              <SideActionLink href={`${projectBasePath}/daily-plans/new`} icon={CalendarPlus}>
                 새 일촬표 만들기
               </SideActionLink>
               <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>

@@ -242,19 +242,17 @@ export default function HomePage() {
     setNewProjectError("");
     setIsCreatingProject(true);
     try {
-      const now = new Date();
-      const localToday = new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
       const response = await fetch("/api/projects/create", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectName: name, adminPassword, progressPassword, shootDate: localToday })
+        body: JSON.stringify({ projectName: name, adminPassword, progressPassword })
       });
       const payload = (await response.json()) as { project?: Record<string, unknown>; error?: string };
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
       unhideProject(project.id);
-      window.location.assign(`/projects/${project.id}/daily-plans/new/basic`);
+      window.location.assign(`/projects/${project.id}/basic-info`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
       setIsCreatingProject(false);

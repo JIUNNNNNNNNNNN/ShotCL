@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { DailyPlanEditor } from "@/components/DailyPlanEditor";
 import { Card } from "@/components/ui/Card";
 import { getProject } from "@/lib/data/projects";
-import { readNewDailyPlanBasicDraft } from "@/lib/dailyPlan/basicDraft";
-import type { DailyPlanDraft, Project } from "@/lib/types";
+import type { Project } from "@/lib/types";
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -18,9 +17,7 @@ function useProjectId() {
 /** 새 웹 일촬표를 빈 양식으로 시작합니다. */
 export default function NewDailyPlanPage() {
   const projectId = useProjectId();
-  const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
-  const [initialDraft, setInitialDraft] = useState<DailyPlanDraft | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -29,19 +26,11 @@ export default function NewDailyPlanPage() {
     getProject(projectId)
       .then((data) => {
         setProject(data);
-        if (data) {
-          const draft = readNewDailyPlanBasicDraft(data.id);
-          if (!draft) {
-            router.replace(`/projects/${data.id}/daily-plans/new/basic`);
-            return;
-          }
-          setInitialDraft(draft);
-        }
         setErrorMessage("");
       })
       .catch((error) => setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다."))
       .finally(() => setIsLoading(false));
-  }, [projectId, router]);
+  }, [projectId]);
 
   if (isLoading) {
     return <PixelDogLoader size="lg" />;
@@ -51,9 +40,5 @@ export default function NewDailyPlanPage() {
     return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
-  if (!initialDraft) {
-    return <PixelDogLoader size="lg" />;
-  }
-
-  return <DailyPlanEditor project={project} initialDraft={initialDraft} />;
+  return <DailyPlanEditor project={project} />;
 }

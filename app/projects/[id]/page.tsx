@@ -295,7 +295,7 @@ export default function ProjectDetailPage() {
             <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-left text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
               <span className="font-display"><span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden /> 새 컷 추가</span></span>
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new/basic`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
               <span className="font-display"><span className="inline-flex items-center gap-2"><CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표</span></span>
             </Link>
             <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-full px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
@@ -462,8 +462,8 @@ function EpisodeSelection({
       {plans.length === 0 ? (
         <section className="rounded-[2rem] border border-field-border bg-white px-6 py-10 text-center">
           <CalendarDays className="mx-auto h-9 w-9 text-field-secondary" aria-hidden />
-          <h1 className="mt-3 text-lg font-black text-field-primary">아직 저장된 일촬표가 없습니다</h1>
-          <p className="mt-2 text-sm font-bold leading-6 text-field-muted">관리자가 일촬표를 저장하면 회차별 진행보기가 생성됩니다.</p>
+          <h1 className="mt-3 text-lg font-black text-field-primary">아직 오늘의 진행표가 없습니다</h1>
+          <p className="mt-2 text-sm font-bold leading-6 text-field-muted">일촬표를 작성하면 회차별 진행률이 생성됩니다.</p>
         </section>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

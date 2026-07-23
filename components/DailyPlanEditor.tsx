@@ -27,11 +27,6 @@ import {
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
-import {
-  clearNewDailyPlanBasicDraft,
-  dailyPlanToDraft,
-  mergeDailyPlanBasicDraft
-} from "@/lib/dailyPlan/basicDraft";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project } from "@/lib/types";
@@ -197,7 +192,7 @@ let daumPostcodeScriptPromise: Promise<void> | null = null;
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
 export function DailyPlanEditor({ project, initialPlan, initialShots = [], initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
-  const initialPlanDraft = initialDraft ?? (initialPlan ? dailyPlanToDraft(initialPlan) : createBlankDailyPlanDraft(project));
+  const initialPlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
   const initialPrintMeta = decodeDailyPlanMemo(initialPlanDraft.memo);
   const initialEditablePlanDraft = { ...initialPlanDraft, memo: initialPrintMeta.memoText };
   const initialLocations = buildInitialLocations(initialPlanDraft);
@@ -267,15 +262,8 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
         const restored = JSON.parse(stored) as Partial<DailyPlanEditorSnapshot>;
         if (restored.version === 1 && restored.plan && restored.printMeta && restored.locations && restored.mealTimes && restored.scenes) {
           setDailyPlanId(restored.dailyPlanId ?? initialPlan?.id ?? null);
-          const restoredMeta = normalizeDailyPlanPrintMeta(restored.printMeta);
-          if (initialDraft) {
-            const merged = mergeDailyPlanBasicDraft(restored.plan, restoredMeta, initialDraft);
-            setPlan(merged.plan);
-            setPrintMeta(merged.printMeta);
-          } else {
-            setPlan(restored.plan);
-            setPrintMeta(restoredMeta);
-          }
+          setPlan(restored.plan);
+          setPrintMeta(normalizeDailyPlanPrintMeta(restored.printMeta));
           setLocations(restored.locations);
           setMealTimes(restored.mealTimes);
           setScenes(restored.scenes.map(normalizeDraftScene));
@@ -288,7 +276,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
     } finally {
       setIsDraftReady(true);
     }
-  }, [initialDraft, initialPlan?.id, project.id]);
+  }, [initialPlan?.id, project.id]);
 
   useEffect(() => {
     if (!isDraftReady) return;
@@ -804,7 +792,7 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       }
 
       const didSyncShots = await completeShotBoardSync(saved);
-      const savedDraft = dailyPlanToDraft(saved.plan);
+      const savedDraft = planToDraft(saved.plan);
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
       const nextMeals = buildInitialMeals(savedDraft);
@@ -816,7 +804,6 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
       setScenes(shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations));
       window.localStorage.removeItem(getDailyPlanDraftStorageKey(project.id, dailyPlanId));
       window.localStorage.removeItem(getDailyPlanDraftStorageKey(project.id, saved.plan.id));
-      clearNewDailyPlanBasicDraft(project.id);
       hasPendingChangesRef.current = false;
       setAutoSaveStatus("자동 저장됨");
 
@@ -894,29 +881,57 @@ export function DailyPlanEditor({ project, initialPlan, initialShots = [], initi
             </Link>
         </div>
 
-        <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-field-border bg-white px-3 py-2 text-left">
-          <p className="min-w-0 truncate text-xs font-bold text-field-muted">
-            <span className="font-black text-field-primary">{plan.title || "새 일촬표"}</span>
-            {" · "}
-            {printMeta.day ? `${printMeta.day}회차` : "회차 미정"}
-            {" · "}
-            {plan.shootingDate || "촬영일 미정"}
-            {" · "}
-            {plan.callTime || "집합시간 미정"}
-          </p>
-          <Link
-            href={dailyPlanId
-              ? `/projects/${project.id}/daily-plans/${dailyPlanId}/basic`
-              : `/projects/${project.id}/daily-plans/new/basic`}
-            className="inline-flex min-h-9 shrink-0 items-center justify-center rounded-full border border-field-border bg-field-soft px-3 py-1.5 text-xs font-black text-field-primary"
-          >
-            기본 정보 수정
-          </Link>
-        </div>
-
         <section className="field-section mt-3 overflow-hidden p-2 md:mt-5 md:p-5">
+          <div className="grid gap-3">
+            <div className="grid min-w-0 gap-1.5 md:hidden">
+              <div className="grid grid-cols-[0.72fr_1.56fr_0.72fr] gap-1.5">
+                <MobileInfoField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
+                <MobileInfoField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
+                <MobileInfoField label="총 인원" value={printMeta.totalCrew} numeric onChange={(value) => updatePrintMetaField("totalCrew", value)} />
+              </div>
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 overflow-hidden">
+                <MobileInfoField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+                <MobileInfoTimeField label="집합시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} />
+              </div>
+            </div>
+            <div className="hidden gap-3 md:grid">
+              <div className="grid items-center gap-3 md:grid-cols-2">
+                <CompactField label="회차" value={printMeta.day} onChange={(value) => updatePrintMetaField("day", value)} />
+                <CompactField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
+              </div>
+              <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_16rem]">
+                <CompactField label="촬영일" type="date" value={plan.shootingDate} onChange={(value) => updatePlanField("shootingDate", value)} />
+                <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
+                <CompactNumericField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
+              </div>
+            </div>
+            <div className="hidden items-stretch gap-3 md:grid lg:grid-cols-3">
+              <RoleContactGroup
+                role="감독"
+                name={plan.director}
+                contact={printMeta.directorContact}
+                onNameChange={(value) => updatePlanField("director", value)}
+                onContactChange={(value) => updatePrintMetaField("directorContact", value)}
+              />
+              <RoleContactGroup
+                role="조감독"
+                name={plan.assistantDirector}
+                contact={printMeta.assistantDirectorContact}
+                onNameChange={(value) => updatePlanField("assistantDirector", value)}
+                onContactChange={(value) => updatePrintMetaField("assistantDirectorContact", value)}
+              />
+              <RoleContactGroup
+                role="제작"
+                name={plan.production}
+                contact={printMeta.producerContact}
+                onNameChange={(value) => updatePlanField("production", value)}
+                onContactChange={(value) => updatePrintMetaField("producerContact", value)}
+              />
+            </div>
+          </div>
+
           <div className="flex flex-col">
-          <section className="field-subsection order-1 p-2 md:p-3">
+          <section className="field-subsection order-1 mt-3 p-2 md:mt-5 md:p-3">
             <h3 className="text-sm font-black text-field-primary">날씨 정보</h3>
             <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <WeatherRegionPicker
@@ -1468,6 +1483,75 @@ function Field({ label, value, type = "text", onChange }: { label: string; value
   );
 }
 
+function CompactField({ label, value, type = "text", className = "", onChange }: { label: string; value: string; type?: string; className?: string; onChange: (value: string) => void }) {
+  return (
+    <label className={`grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 ${className}`}>
+      <span className="text-xs font-black text-field-primary">{label}</span>
+      <DraftInput className={compactInputClass} type={type} value={value} onCommit={onChange} />
+    </label>
+  );
+}
+
+function CompactNumericField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-xs font-black text-field-primary">{label}</span>
+      <DraftInput
+        className={compactInputClass}
+        value={sanitizeNumericInput(value, 4)}
+        onCommit={onChange}
+        sanitize={(nextValue) => sanitizeNumericInput(nextValue, 4)}
+        numericOnly
+        inputMode="numeric"
+        pattern="[0-9]*"
+        aria-label={label}
+      />
+    </label>
+  );
+}
+
+function MobileInfoField({
+  label,
+  value,
+  type = "text",
+  numeric = false,
+  onChange
+}: {
+  label: string;
+  value: string;
+  type?: string;
+  numeric?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
+  return (
+    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
+      <DraftInput
+        className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
+        type={type}
+        value={numeric ? sanitizeNumericInput(value, 4) : value}
+        onCommit={(nextValue) => onChange(sanitize ? sanitize(nextValue) : nextValue)}
+        sanitize={sanitize}
+        numericOnly={numeric}
+        inputMode={numeric ? "numeric" : undefined}
+        pattern={numeric ? "[0-9]*" : undefined}
+        aria-label={label}
+        title={value}
+      />
+    </label>
+  );
+}
+
+function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
+      <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
+    </div>
+  );
+}
+
 function EditableWeatherCard({
   label,
   value,
@@ -1683,6 +1767,45 @@ function WeatherRegionPicker({
           </label>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RoleContactGroup({
+  role,
+  name,
+  contact,
+  onNameChange,
+  onContactChange
+}: {
+  role: string;
+  name: string;
+  contact: string;
+  onNameChange: (value: string) => void;
+  onContactChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-md border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+      <span className="whitespace-nowrap text-xs font-black text-field-primary">{role}</span>
+      <DraftInput
+        className={`${compactInputClass} min-w-0`}
+        value={name}
+        onCommit={onNameChange}
+        placeholder="이름"
+        aria-label={`${role} 이름`}
+      />
+      <DraftInput
+        className={`${compactInputClass} min-w-0 whitespace-nowrap`}
+        value={contact}
+        onCommit={onContactChange}
+        transform={formatKoreanPhoneNumber}
+        sanitize={formatKoreanPhoneNumber}
+        numericOnly
+        inputMode="numeric"
+        pattern="[0-9]*"
+        placeholder="연락처"
+        aria-label={`${role} 연락처`}
+      />
     </div>
   );
 }
@@ -2854,6 +2977,30 @@ function chunkRows(rows: string[][], size: number) {
 function formatTimeRange(startTime: string, endTime: string) {
   if (startTime && endTime) return `${startTime} - ${endTime}`;
   return startTime || endTime || "";
+}
+
+function planToDraft(plan: DailyPlan): DailyPlanDraft {
+  return {
+    title: plan.title,
+    sourceType: plan.sourceType,
+    sourceFileName: plan.sourceFileName,
+    shootingDate: plan.shootingDate,
+    episode: plan.episode,
+    director: plan.director,
+    dop: plan.dop,
+    assistantDirector: plan.assistantDirector,
+    production: plan.production,
+    callTime: plan.callTime,
+    shootStartTime: plan.shootStartTime,
+    shootEndTime: plan.shootEndTime,
+    meetingLocation: plan.meetingLocation,
+    shootingLocation: plan.shootingLocation,
+    shootingLocations: plan.shootingLocations ?? [],
+    mealTime: plan.mealTime,
+    mealTimes: plan.mealTimes ?? [],
+    safetyNotice: plan.safetyNotice,
+    memo: plan.memo
+  };
 }
 
 function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], mealTimes: DailyPlanMealTime[], meta: DailyPlanPrintMeta): DailyPlanDraft {
