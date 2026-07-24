@@ -8,12 +8,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Save } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneReorderList } from "@/components/SceneReorderList";
@@ -41,7 +42,9 @@ type SceneValueColumn =
 
 type SceneActorColumn = `actor:${string}`;
 type SceneCellColumn = SceneValueColumn | SceneActorColumn;
-type SceneFillColumn = Exclude<SceneValueColumn, "sceneNo" | "sceneContent">;
+type SceneFillColumn =
+  | Exclude<SceneValueColumn, "sceneNo" | "sceneContent">
+  | SceneActorColumn;
 
 type SelectedSceneCell = {
   rowId: string;
@@ -67,6 +70,22 @@ type CellDragState = SceneCellRange & {
 
 type MergePosition = "single" | "start" | "middle" | "end";
 
+type PaletteStyle = {
+  background: string;
+  color: string;
+};
+
+type ActorPaletteStyle = PaletteStyle & {
+  headerBackground: string;
+};
+
+type DeletePopoverState = {
+  itemId: string;
+  label: string;
+  left: number;
+  top: number;
+};
+
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
   return Array.isArray(params.id) ? params.id[0] : params.id;
@@ -87,6 +106,7 @@ export default function ProjectSceneListPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [selectedCell, setSelectedCell] = useState<SelectedSceneCell | null>(null);
   const [selectedRange, setSelectedRange] = useState<SceneCellRange | null>(null);
+  const [deletePopover, setDeletePopover] = useState<DeletePopoverState | null>(null);
   const itemsRef = useRef(items);
   const selectedCellRef = useRef(selectedCell);
   const selectedRangeRef = useRef(selectedRange);
@@ -94,6 +114,8 @@ export default function ProjectSceneListPage() {
   const copiedValueRef = useRef("");
   const cellDragRef = useRef<CellDragState | null>(null);
   const cellDragCleanupRef = useRef<(() => void) | null>(null);
+  const sceneLongPressCleanupRef = useRef<(() => void) | null>(null);
+  const deletePopoverRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -146,9 +168,35 @@ export default function ProjectSceneListPage() {
 
   useEffect(() => () => {
     cellDragCleanupRef.current?.();
+    sceneLongPressCleanupRef.current?.();
     document.body.style.removeProperty("user-select");
     document.body.style.removeProperty("cursor");
   }, []);
+
+  useEffect(() => {
+    if (!deletePopover) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && deletePopoverRef.current?.contains(event.target)) return;
+      setDeletePopover(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [deletePopover]);
+
+  const cellColumns = useMemo<SceneCellColumn[]>(
+    () => [
+      "sceneNo",
+      "mainLocation",
+      "subLocation",
+      "dayLabel",
+      "dayNight",
+      "interiorExterior",
+      "sceneContent",
+      ...actorRoles.map((role): SceneActorColumn => `actor:${role}`),
+      "props"
+    ],
+    [actorRoles]
+  );
 
   const gridTemplateColumns = useMemo(
     () => [
@@ -160,11 +208,35 @@ export default function ProjectSceneListPage() {
       "minmax(0,.36fr)",
       "minmax(0,2.8fr)",
       ...actorRoles.map(() => "minmax(0,.42fr)"),
-      "minmax(0,1.05fr)",
-      "2.25rem"
+      "minmax(0,1.05fr)"
     ].join(" "),
     [actorRoles]
   );
+
+  const locationStyles = useMemo(() => {
+    const locations = Array.from(new Set(
+      items
+        .map((item) => item.mainLocation.trim())
+        .filter(Boolean)
+    )).sort((first, second) => first.localeCompare(second, "ko"));
+    const usedPaletteIndexes = new Set<number>();
+    return new Map(locations.map((location) => {
+      let paletteIndex = getLocationPaletteIndex(location);
+      let attempts = 0;
+      while (
+        usedPaletteIndexes.has(paletteIndex) &&
+        attempts < locationPalette.length
+      ) {
+        paletteIndex = (paletteIndex + 1) % locationPalette.length;
+        attempts += 1;
+      }
+      usedPaletteIndexes.add(paletteIndex);
+      return [
+        location.toLocaleLowerCase(),
+        locationPalette[paletteIndex] ?? neutralPaletteStyle
+      ];
+    }));
+  }, [items]);
 
   const commitItems = useCallback((nextItems: ProjectSceneItem[]) => {
     setItems(nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 })));
@@ -195,6 +267,124 @@ export default function ProjectSceneListPage() {
     setSelectedCell(nextCell);
     setSelectedRange(nextRange);
   }, []);
+
+  const findCellElement = useCallback((rowId: string, column: SceneCellColumn) => {
+    const cells = sceneGridRef.current?.querySelectorAll<HTMLElement>(
+      "[data-scene-row-id][data-scene-cell-column]"
+    );
+    return Array.from(cells ?? []).find((cell) => (
+      cell.dataset.sceneRowId === rowId &&
+      cell.dataset.sceneCellColumn === column
+    )) ?? null;
+  }, []);
+
+  const focusCell = useCallback((
+    rowIndex: number,
+    columnIndex: number,
+    focusEditor = false
+  ) => {
+    if (itemsRef.current.length === 0 || cellColumns.length === 0) return;
+    const safeRowIndex = Math.max(0, Math.min(rowIndex, itemsRef.current.length - 1));
+    const safeColumnIndex = Math.max(0, Math.min(columnIndex, cellColumns.length - 1));
+    const item = itemsRef.current[safeRowIndex];
+    const column = cellColumns[safeColumnIndex];
+    selectCell(item.id, column, safeRowIndex);
+    window.requestAnimationFrame(() => {
+      const cell = findCellElement(item.id, column);
+      if (!cell) return;
+      if (focusEditor && canEdit) {
+        const editor = cell.querySelector<HTMLElement>("input, textarea, select, button");
+        if (editor) {
+          editor.focus({ preventScroll: true });
+          return;
+        }
+      }
+      cell.focus({ preventScroll: true });
+      cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }, [canEdit, cellColumns, findCellElement, selectCell]);
+
+  const handleGridKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    const activeCell = selectedCellRef.current;
+    if (!activeCell) return;
+
+    const activeRowIndex = itemsRef.current.findIndex((item) => item.id === activeCell.rowId);
+    const activeColumnIndex = cellColumns.indexOf(activeCell.column);
+    if (activeRowIndex < 0 || activeColumnIndex < 0) return;
+
+    const target = event.target;
+    const isTextEditor = target instanceof HTMLInputElement
+      || target instanceof HTMLTextAreaElement
+      || target instanceof HTMLSelectElement
+      || (target instanceof HTMLElement && target.isContentEditable);
+    if (isTextEditor) {
+      if (event.key === "Escape" || (event.key === "Enter" && !(target instanceof HTMLTextAreaElement))) {
+        event.preventDefault();
+        (target as HTMLElement).blur();
+        findCellElement(activeCell.rowId, activeCell.column)?.focus({ preventScroll: true });
+      }
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && ["c", "v", "x"].includes(event.key.toLowerCase())) {
+      return;
+    }
+    if (target instanceof HTMLButtonElement && (event.key === "Enter" || event.key === " ")) {
+      return;
+    }
+
+    const activeRange = selectedRangeRef.current;
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusCell((activeRange?.startIndex ?? activeRowIndex) - 1, activeColumnIndex);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusCell((activeRange?.endIndex ?? activeRowIndex) + 1, activeColumnIndex);
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      focusCell(activeRowIndex, activeColumnIndex - 1);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      focusCell(activeRowIndex, activeColumnIndex + 1);
+      return;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const currentFlatIndex = activeRowIndex * cellColumns.length + activeColumnIndex;
+      const nextFlatIndex = Math.max(
+        0,
+        Math.min(
+          currentFlatIndex + (event.shiftKey ? -1 : 1),
+          itemsRef.current.length * cellColumns.length - 1
+        )
+      );
+      focusCell(
+        Math.floor(nextFlatIndex / cellColumns.length),
+        nextFlatIndex % cellColumns.length
+      );
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      focusCell(activeRowIndex, activeColumnIndex, true);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      selectedCellRef.current = null;
+      selectedRangeRef.current = null;
+      setSelectedCell(null);
+      setSelectedRange(null);
+      (event.currentTarget.ownerDocument.activeElement as HTMLElement | null)?.blur();
+    }
+  }, [cellColumns, findCellElement, focusCell]);
 
   const applyCellValueRange = useCallback((
     column: SceneCellColumn,
@@ -375,6 +565,71 @@ export default function ProjectSceneListPage() {
     window.addEventListener("pointercancel", handleCancel);
   }, [canEdit, selectCell]);
 
+  const startSceneDeleteLongPress = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    item: ProjectSceneItem
+  ) => {
+    if (!canEdit || event.button !== 0) return;
+    event.stopPropagation();
+    sceneLongPressCleanupRef.current?.();
+    setDeletePopover(null);
+
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const pressedElement = event.target instanceof HTMLElement ? event.target : null;
+    let didOpen = false;
+    let timer: number | null = null;
+
+    const cleanup = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+      sceneLongPressCleanupRef.current = null;
+      document.body.style.removeProperty("user-select");
+    };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId || didOpen) return;
+      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 8) {
+        cleanup();
+      }
+    };
+
+    const handleEnd = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== pointerId) return;
+      cleanup();
+    };
+
+    timer = window.setTimeout(() => {
+      didOpen = true;
+      window.getSelection()?.removeAllRanges();
+      pressedElement?.blur();
+      document.body.style.userSelect = "none";
+      const popoverWidth = 96;
+      const left = Math.min(
+        window.innerWidth - popoverWidth - 8,
+        Math.max(8, startX - popoverWidth / 2)
+      );
+      const preferredTop = startY + 14;
+      const top = preferredTop + 48 < window.innerHeight
+        ? preferredTop
+        : Math.max(8, startY - 52);
+      setDeletePopover({
+        itemId: item.id,
+        label: item.sceneNo || "이 씬",
+        left,
+        top
+      });
+    }, 550);
+
+    sceneLongPressCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+  }, [canEdit]);
+
   function addItem() {
     if (!canEdit || !projectId) return;
     commitItems([
@@ -385,18 +640,6 @@ export default function ProjectSceneListPage() {
 
   const deleteItem = useCallback((item: ProjectSceneItem) => {
     if (!canEdit) return;
-    const hasContent = [
-      item.sceneNo,
-      item.mainLocation,
-      item.subLocation,
-      item.dayLabel,
-      item.dayNight,
-      item.interiorExterior,
-      item.sceneContent,
-      item.characters,
-      item.props
-    ].some(Boolean);
-    if (hasContent && !window.confirm(`${item.sceneNo || "이"} 씬 행을 삭제할까요?`)) return;
     commitItems(items.filter((currentItem) => currentItem.id !== item.id));
   }, [canEdit, commitItems, items]);
 
@@ -477,6 +720,8 @@ export default function ProjectSceneListPage() {
           ref={sceneGridRef}
           role="grid"
           aria-label={`${project.name} 씬리스트`}
+          onContextMenu={(event) => event.preventDefault()}
+          onKeyDown={handleGridKeyDown}
           className="scene-list-landscape min-w-0 select-none [&_input]:select-text [&_textarea]:select-text"
           style={{
             WebkitUserSelect: "none",
@@ -493,18 +738,24 @@ export default function ProjectSceneListPage() {
                 {label}
               </div>
             ))}
-            {actorRoles.map((role) => (
+            {actorRoles.map((role, actorIndex) => {
+              const actorStyle = getActorStyle(actorIndex);
+              return (
               <div
                 key={role}
                 title={role}
                 role="columnheader"
                 className="min-w-0 truncate border-r border-[#bfc5bf] px-0.5 py-1.5"
+                style={{
+                  backgroundColor: actorStyle.headerBackground,
+                  color: actorStyle.color
+                }}
               >
                 {role}
               </div>
-            ))}
-            <div role="columnheader" className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">주요 소품</div>
-            <div role="columnheader" aria-label="행 작업" />
+              );
+            })}
+            <div role="columnheader" className="min-w-0 px-1 py-1.5">주요 소품</div>
           </div>
 
           <SceneReorderList
@@ -519,11 +770,12 @@ export default function ProjectSceneListPage() {
                 actorRoles={actorRoles}
                 gridTemplateColumns={gridTemplateColumns}
                 allItems={items}
+                locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
                 selectedRange={selectedRange}
                 onCellSelect={selectCell}
                 onCellPointerDown={startCellDrag}
+                onSceneLongPress={startSceneDeleteLongPress}
                 onUpdate={updateItem}
-                onDelete={deleteItem}
               />
             )}
           />
@@ -542,6 +794,29 @@ export default function ProjectSceneListPage() {
           ) : null}
         </div>
       </section>
+
+      {canEdit && deletePopover ? (
+        <div
+          ref={deletePopoverRef}
+          role="dialog"
+          aria-label={`${deletePopover.label} 삭제 메뉴`}
+          className="fixed z-[80] min-w-24 overflow-hidden rounded-xl border border-red-200 bg-white p-1 shadow-[0_8px_24px_rgba(75,20,20,0.18)]"
+          style={{ left: deletePopover.left, top: deletePopover.top }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex min-h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-black text-field-danger transition hover:bg-red-50 active:scale-[0.97]"
+            onClick={() => {
+              const item = items.find((candidate) => candidate.id === deletePopover.itemId);
+              setDeletePopover(null);
+              if (item) deleteItem(item);
+            }}
+          >
+            삭제
+          </button>
+        </div>
+      ) : null}
 
       {(canEdit || scenarioReference) ? (
         <details className="mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
@@ -579,11 +854,12 @@ const SceneTableRow = memo(function SceneTableRow({
   actorRoles,
   gridTemplateColumns,
   allItems,
+  locationStyle,
   selectedRange,
   onCellSelect,
   onCellPointerDown,
+  onSceneLongPress,
   onUpdate,
-  onDelete
 }: {
   item: ProjectSceneItem;
   index: number;
@@ -591,6 +867,7 @@ const SceneTableRow = memo(function SceneTableRow({
   actorRoles: string[];
   gridTemplateColumns: string;
   allItems: ProjectSceneItem[];
+  locationStyle: PaletteStyle;
   selectedRange: SceneCellRange | null;
   onCellSelect: (rowId: string, column: SceneCellColumn, rowIndex: number) => void;
   onCellPointerDown: (
@@ -600,10 +877,12 @@ const SceneTableRow = memo(function SceneTableRow({
     rowIndex: number,
     value: string
   ) => void;
+  onSceneLongPress: (
+    event: ReactPointerEvent<HTMLDivElement>,
+    item: ProjectSceneItem
+  ) => void;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
-  onDelete: (item: ProjectSceneItem) => void;
 }) {
-  const locationStyle = getLocationStyle(item.mainLocation);
   const selectedCharacters = useMemo(
     () => parseCharacters(item.characters),
     [item.characters]
@@ -627,7 +906,10 @@ const SceneTableRow = memo(function SceneTableRow({
       mergeRange,
       mergePosition: getMergePosition(index, mergeRange),
       onSelect: onCellSelect,
-      onPointerDown: onCellPointerDown
+      onPointerDown: onCellPointerDown,
+      onLongPress: canEdit && column === "sceneNo"
+        ? (event: ReactPointerEvent<HTMLDivElement>) => onSceneLongPress(event, item)
+        : undefined
     };
   };
   const sceneNoInteraction = getCellInteraction("sceneNo");
@@ -655,6 +937,7 @@ const SceneTableRow = memo(function SceneTableRow({
   return (
     <div
       role="row"
+      data-scene-row-handle={canEdit ? "" : undefined}
       className="grid h-9 bg-white text-[12px]"
       style={{ gridTemplateColumns }}
     >
@@ -764,17 +1047,22 @@ const SceneTableRow = memo(function SceneTableRow({
         )}
       </SceneCellFrame>
 
-      {actorRoles.map((role) => {
+      {actorRoles.map((role, actorIndex) => {
         const selected = selectedCharacters.some(
           (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
         );
         const actorInteraction = getCellInteraction(`actor:${role}`);
+        const actorStyle = getActorStyle(actorIndex);
+        const concealActorValue = isVisuallyMerged(actorInteraction);
         return (
           <SceneCellFrame
             key={role}
             interaction={actorInteraction}
             value={selected ? "O" : ""}
             className="grid place-items-center"
+            style={selected
+              ? { backgroundColor: actorStyle.background, color: actorStyle.color }
+              : undefined}
           >
             {canEdit ? (
               <button
@@ -782,16 +1070,21 @@ const SceneTableRow = memo(function SceneTableRow({
                 onClick={() => toggleCharacter(role)}
                 aria-label={`${item.sceneNo || index + 1} 씬 ${role} ${selected ? "제외" : "포함"}`}
                 aria-pressed={selected}
-                className={`grid h-6 w-6 place-items-center rounded-full text-[11px] font-black transition active:scale-90 ${
+                className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
                   selected
-                    ? "bg-field-primary text-white"
+                    ? concealActorValue
+                      ? "text-transparent"
+                      : ""
                     : "text-transparent hover:bg-field-soft"
                 }`}
+                style={selected && !concealActorValue ? { color: actorStyle.color } : undefined}
               >
                 O
               </button>
             ) : (
-              <span className="font-black text-field-primary">{selected ? "O" : ""}</span>
+              <span className="font-black" style={{ color: actorStyle.color }}>
+                {selected && !concealActorValue ? "O" : ""}
+              </span>
             )}
           </SceneCellFrame>
         );
@@ -805,26 +1098,6 @@ const SceneTableRow = memo(function SceneTableRow({
         textAlign="left"
         onChange={(props) => onUpdate(item.id, { props })}
       />
-
-      <div
-        role="gridcell"
-        data-scene-row-handle={canEdit ? "" : undefined}
-        title={canEdit ? "셀 바깥의 이 영역을 드래그해 행 순서 변경" : undefined}
-        className={`grid place-items-center border-b border-[#cbd0cb] ${
-          canEdit ? "cursor-grab active:cursor-grabbing" : ""
-        }`}
-      >
-        {canEdit ? (
-          <button
-            type="button"
-            onClick={() => onDelete(item)}
-            aria-label={`${item.sceneNo || index + 1} 씬 삭제`}
-            className="grid h-6 w-6 place-items-center rounded-full text-field-danger transition hover:bg-red-50 active:scale-90"
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-          </button>
-        ) : null}
-      </div>
     </div>
   );
 });
@@ -847,6 +1120,7 @@ type SceneCellInteraction = {
     rowIndex: number,
     value: string
   ) => void;
+  onLongPress?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 };
 
 function SceneCell({
@@ -930,11 +1204,14 @@ function SceneCellFrame({
       aria-selected={interaction?.isInRange || undefined}
       onPointerDown={interaction
         ? (event) => {
-            event.stopPropagation();
+            if (interaction.canDrag || interaction.onLongPress) {
+              event.stopPropagation();
+            }
             interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
             if (!isInteractiveTarget(event.target)) {
               event.currentTarget.focus({ preventScroll: true });
             }
+            interaction.onLongPress?.(event);
             if (interaction.canDrag) {
               interaction.onPointerDown(
                 event,
@@ -952,10 +1229,13 @@ function SceneCellFrame({
         interaction?.isInRange ? "z-10" : ""
       } ${
         interaction?.mergePosition === "start" ? "z-[5]" : ""
+      } ${
+        interaction?.onLongPress ? "[&_input]:select-none" : ""
       } ${className}`}
       style={{
         ...style,
-        touchAction: interaction?.canDrag ? "none" : style?.touchAction,
+        touchAction: interaction?.canDrag || interaction?.onLongPress ? "none" : style?.touchAction,
+        WebkitTouchCallout: interaction?.onLongPress ? "none" : style?.WebkitTouchCallout,
         boxShadow: interaction?.isInRange
           ? getSelectionBoxShadow(interaction.selectionPosition)
           : style?.boxShadow
@@ -1044,7 +1324,7 @@ function getDraggedRange(drag: CellDragState, targetIndex: number) {
 }
 
 function isVisualMergeColumn(column: SceneCellColumn): column is SceneFillColumn {
-  return [
+  return isActorColumn(column) || [
     "mainLocation",
     "subLocation",
     "dayLabel",
@@ -1054,7 +1334,7 @@ function isVisualMergeColumn(column: SceneCellColumn): column is SceneFillColumn
 }
 
 function isFillColumn(column: SceneCellColumn): column is SceneFillColumn {
-  return [
+  return isActorColumn(column) || [
     "mainLocation",
     "subLocation",
     "dayLabel",
@@ -1142,22 +1422,74 @@ function parseCharacters(value: string) {
   ));
 }
 
-const locationPalette = [
-  { background: "#f6ebbd", color: "#4d4109" },
-  { background: "#d8ead8", color: "#184520" },
-  { background: "#f5dac9", color: "#5b2b18" },
-  { background: "#d8ebee", color: "#17434a" },
-  { background: "#e3ddef", color: "#36264e" },
-  { background: "#f0dce4", color: "#552438" },
-  { background: "#e2ebc9", color: "#374a13" }
+const neutralPaletteStyle: PaletteStyle = {
+  background: "#ffffff",
+  color: "#1c1c1a"
+};
+
+const actorPalette: ActorPaletteStyle[] = [
+  { background: "#fce4ec", headerBackground: "#f8bbd0", color: "#6b1835" },
+  { background: "#e3f2fd", headerBackground: "#bbdefb", color: "#17486b" },
+  { background: "#e8f5e9", headerBackground: "#c8e6c9", color: "#24532a" },
+  { background: "#fff8e1", headerBackground: "#ffecb3", color: "#66510b" },
+  { background: "#f3e5f5", headerBackground: "#e1bee7", color: "#53305d" },
+  { background: "#fff3e0", headerBackground: "#ffe0b2", color: "#6a3b10" },
+  { background: "#e0f7fa", headerBackground: "#b2ebf2", color: "#15515a" },
+  { background: "#fbe9e7", headerBackground: "#ffccbc", color: "#683126" },
+  { background: "#f1f8e9", headerBackground: "#dcedc8", color: "#3b5720" },
+  { background: "#ede7f6", headerBackground: "#d1c4e9", color: "#423565" }
 ];
 
-function getLocationStyle(location: string) {
-  const normalized = location.trim();
-  if (!normalized) return { background: "#fff", color: "#1c1c1a" };
+const locationPalette: PaletteStyle[] = [
+  { background: "#fff4c7", color: "#584607" },
+  { background: "#dff1df", color: "#224d29" },
+  { background: "#f8dfd1", color: "#62311d" },
+  { background: "#dcedf2", color: "#204955" },
+  { background: "#e8e0f2", color: "#45325b" },
+  { background: "#f4dfe8", color: "#5e2b40" },
+  { background: "#e8efcf", color: "#41521c" },
+  { background: "#dce8fb", color: "#28466d" },
+  { background: "#f5e5c9", color: "#60461c" },
+  { background: "#d9efea", color: "#1e5048" },
+  { background: "#f1dfd8", color: "#64392c" },
+  { background: "#e4ebd8", color: "#40502b" },
+  { background: "#e9dded", color: "#50345a" },
+  { background: "#dce9e2", color: "#294b3a" },
+  { background: "#fae1df", color: "#6a302d" },
+  { background: "#e1e5f3", color: "#36405f" },
+  { background: "#f4ead6", color: "#5e4a25" },
+  { background: "#d8eff4", color: "#20515c" },
+  { background: "#e8e2d4", color: "#50452d" },
+  { background: "#f1e1f0", color: "#5c345a" },
+  { background: "#dff0d3", color: "#345524" },
+  { background: "#f7e6d7", color: "#633f25" },
+  { background: "#dce5ef", color: "#304a62" },
+  { background: "#efe1cc", color: "#5b4324" },
+  { background: "#e0ede7", color: "#2c4d40" },
+  { background: "#f0dfe4", color: "#5b3340" },
+  { background: "#e5e8ce", color: "#4a4e1e" },
+  { background: "#e1e0f0", color: "#403b60" },
+  { background: "#f6e3cb", color: "#64421f" },
+  { background: "#dcebea", color: "#28504d" }
+];
+
+function getActorStyle(index: number) {
+  return actorPalette[index % actorPalette.length] ?? actorPalette[0];
+}
+
+function getMappedLocationStyle(
+  location: string,
+  styles: Map<string, PaletteStyle>
+): PaletteStyle {
+  const normalized = location.trim().toLocaleLowerCase();
+  return normalized ? styles.get(normalized) ?? neutralPaletteStyle : neutralPaletteStyle;
+}
+
+function getLocationPaletteIndex(location: string) {
+  const normalized = location.trim().toLocaleLowerCase();
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
     hash = ((hash << 5) - hash + normalized.charCodeAt(index)) | 0;
   }
-  return locationPalette[Math.abs(hash) % locationPalette.length];
+  return Math.abs(hash) % locationPalette.length;
 }
