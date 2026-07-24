@@ -1,7 +1,8 @@
 "use client";
 
 import { memo } from "react";
-import { ImageIcon, Map } from "lucide-react";
+import { Map } from "lucide-react";
+import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { type Shot, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,8 @@ export const ShotCard = memo(function ShotCard({
   const isProcessed = isOk || isOmit;
   const hasOverhead = hasShotOverheadContent(shot.overheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
+  const hasMedia = Boolean(shot.storyboardImageUrl || hasOverhead);
+  const displayText = getShotDisplayText(shot);
 
   function shouldIgnoreCardOpen(target: EventTarget | null) {
     return target instanceof HTMLElement && Boolean(target.closest("button, a, input, textarea, select, [data-no-drag]"));
@@ -58,42 +61,52 @@ export const ShotCard = memo(function ShotCard({
       onClick={handleCardOpen}
       aria-label={progressOnly ? `${shot.title} 컷 진행 상태` : `${shot.title} 컷 수정`}
       className={cn(
-        "grid grid-cols-[96px_minmax(0,1fr)] items-center gap-2 rounded-[1.5rem] border bg-white p-1.5 transition-[background-color,border-color,transform] active:scale-[0.995] sm:grid-cols-[96px_minmax(0,1fr)_6.5rem]",
+        "grid gap-2 rounded-[1.5rem] border bg-white p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
         !progressOnly && "cursor-pointer",
         isOk && "border-field-primary bg-field-light",
         isOmit && "border-field-danger bg-white opacity-75",
         !isOk && !isOmit && "border-field-border hover:border-field-secondary"
       )}
     >
-      {shot.storyboardImageUrl ? (
-        <button
-          type="button"
-          onClick={handleImageClick}
-          className="flex h-[72px] w-24 shrink-0 items-center justify-center overflow-hidden rounded-[1.1rem] border border-field-border bg-field-soft text-xs font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
-          title="콘티 크게 보기"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={shot.storyboardImageUrl}
-            alt={`${shot.title} 콘티`}
-            draggable={false}
-            className="h-full w-full select-none object-contain [-webkit-user-drag:none]"
-          />
-        </button>
-      ) : (
-        <div className="flex h-[72px] w-24 shrink-0 items-center justify-center rounded-[1.1rem] border border-field-border bg-field-soft text-[10px] font-black text-field-muted">
-          <span className="grid place-items-center gap-1">
-            <ImageIcon className="mx-auto h-4 w-4" aria-hidden />
-            콘티 없음
-          </span>
-        </div>
-      )}
+      <div className={cn("grid min-w-0 gap-2", hasMedia && "sm:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] sm:items-center")}>
+        {hasMedia ? (
+          <div className={cn("grid h-36 min-w-0 gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
+            {shot.storyboardImageUrl ? (
+              <button
+                type="button"
+                onClick={handleImageClick}
+                data-no-drag="true"
+                className="flex min-w-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                title="콘티 크게 보기"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={shot.storyboardImageUrl}
+                  alt={`${displayText} 콘티`}
+                  draggable={false}
+                  className="h-full w-full select-none object-contain [-webkit-user-drag:none]"
+                />
+              </button>
+            ) : null}
+            {hasOverhead && shot.overheadDiagram ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenOverhead(shot);
+                }}
+                data-no-drag="true"
+                className="min-w-0 overflow-hidden rounded-[1.05rem] border border-field-border bg-[#fbfaf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                title={progressOnly ? "부감도 보기" : "부감도 편집"}
+              >
+                <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
-      <div className="min-w-0">
+        <div className="min-w-0 px-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className="rounded-full bg-field-light px-2 py-1 text-[10px] font-black leading-[1.35] text-field-primary">
-            S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}
-          </p>
           <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
@@ -117,7 +130,7 @@ export const ShotCard = memo(function ShotCard({
         </div>
 
         <h2 className={cn("mt-1 truncate text-sm font-black leading-5 text-field-text", isProcessed && "underline decoration-2 underline-offset-4")}>
-          {shot.description || shot.title}
+          {displayText}
         </h2>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted">
           {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
@@ -125,8 +138,9 @@ export const ShotCard = memo(function ShotCard({
           {!shot.location && shot.memo ? <p className="min-w-0 flex-1 truncate">{shot.memo}</p> : null}
         </div>
       </div>
+      </div>
 
-        <div className={cn("col-span-2 grid gap-2 sm:col-span-1", progressOnly ? "grid-cols-1" : "grid-cols-2")}>
+        <div className={cn("grid gap-2", progressOnly ? "grid-cols-1" : "grid-cols-2 md:grid-cols-1")}>
           <button
             type="button"
             data-no-drag="true"
@@ -159,3 +173,23 @@ export const ShotCard = memo(function ShotCard({
     </article>
   );
 });
+
+function getShotDisplayText(shot: Shot) {
+  const description = shot.description.trim();
+  if (description) return description;
+  const title = shot.title.trim();
+  if (!title || isAutomaticSceneCutLabel(title, shot.sceneNumber, shot.cutNumber)) return "촬영 내용 없음";
+  return title;
+}
+
+function isAutomaticSceneCutLabel(value: string, sceneNumber: string, cutNumber: string) {
+  const compact = value.replace(/\s+/g, "").toLowerCase();
+  const scene = sceneNumber.trim().toLowerCase();
+  const cut = cutNumber.trim().toLowerCase();
+  return new Set([
+    `씬${scene}컷${cut}`,
+    `scene${scene}cut${cut}`,
+    `s#${scene}/c#${cut}`,
+    `s#${scene}c#${cut}`
+  ]).has(compact);
+}

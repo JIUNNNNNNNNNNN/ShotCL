@@ -5,22 +5,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
-import { FilterTabs, type ShotFilter } from "@/components/FilterTabs";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { ProgressSummary } from "@/components/ProgressSummary";
+import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import { ShotCard } from "@/components/ShotCard";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
-import { loadShotOverheadDiagram, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
+import { loadShotOverheadDiagram, loadShotOverheadDiagrams, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
 import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
+import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { DailyPlan, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
+import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
 
 const ShotEditorModal = dynamic(
   () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
@@ -50,12 +50,54 @@ function parseCharacters(value: string) {
     .filter(Boolean);
 }
 
-/** 카드 필터에 맞는 컷만 남깁니다. */
-function filterShots(shots: Shot[], filter: ShotFilter) {
-  if (filter === "ok") return shots.filter((shot) => shot.status === "ok");
-  if (filter === "omit") return shots.filter((shot) => shot.status === "omit");
-  if (filter === "remaining") return shots.filter((shot) => shot.status === "pending");
-  return shots;
+/** 일촬표에 저장된 씬/기타 일정 순서를 진행 컷 배열의 삽입 위치로 바꿉니다. */
+function placeScheduleRows(
+  shots: Shot[],
+  rows: DailyPlanMealTime[],
+  rowOrder: Array<"scene" | "event">
+) {
+  const placements = new Map<number, DailyPlanMealTime[]>();
+  const scheduleRows = rows.filter(isMeaningfulScheduleRow);
+  const sceneOrder = [...new Set(shots.map((shot) => shot.sceneNumber.trim()))];
+  const sceneCounts = new Map<string, number>();
+  shots.forEach((shot) => {
+    const scene = shot.sceneNumber.trim();
+    sceneCounts.set(scene, (sceneCounts.get(scene) ?? 0) + 1);
+  });
+
+  let shotIndex = 0;
+  let sceneIndex = 0;
+  let scheduleIndex = 0;
+  rowOrder.forEach((type) => {
+    if (type === "scene") {
+      const scene = sceneOrder[sceneIndex];
+      sceneIndex += 1;
+      shotIndex += scene ? sceneCounts.get(scene) ?? 0 : 0;
+      return;
+    }
+
+    const schedule = scheduleRows[scheduleIndex];
+    scheduleIndex += 1;
+    if (!schedule) return;
+    const targetIndex = Math.min(shotIndex, shots.length);
+    placements.set(targetIndex, [...(placements.get(targetIndex) ?? []), schedule]);
+  });
+
+  scheduleRows.slice(scheduleIndex).forEach((schedule) => {
+    placements.set(shots.length, [...(placements.get(shots.length) ?? []), schedule]);
+  });
+  return placements;
+}
+
+function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
+  return Boolean(
+    row.startTime.trim()
+    || row.endTime.trim()
+    || row.runtimeMinutes
+    || row.runtime?.trim()
+    || row.locationId?.trim()
+    || row.memo.trim()
+  );
 }
 
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
@@ -68,7 +110,6 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
-  const [filter, setFilter] = useState<ShotFilter>("all");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
@@ -97,8 +138,20 @@ export default function ProjectDetailPage() {
         listDailyPlans(projectData.id),
         dailyPlanId ? listShots(projectData.id, dailyPlanId) : Promise.resolve([])
       ]);
+      let shotsWithDiagrams = selectedShots;
+      if (selectedShots.length > 0) {
+        try {
+          const diagrams = await loadShotOverheadDiagrams(selectedShots);
+          shotsWithDiagrams = selectedShots.map((shot) => ({
+            ...shot,
+            overheadDiagram: diagrams.get(shot.id) ?? null
+          }));
+        } catch {
+          // 부감도 미리보기 실패가 컷 진행표 자체를 막지 않도록 카드 데이터는 그대로 표시합니다.
+        }
+      }
       setDailyPlans(planData);
-      setShots(selectedShots);
+      setShots(shotsWithDiagrams);
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -114,7 +167,11 @@ export default function ProjectDetailPage() {
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
     try {
-      setShots(await listShots(projectId, dailyPlanId));
+      const refreshedShots = await listShots(projectId, dailyPlanId);
+      setShots((current) => refreshedShots.map((shot) => ({
+        ...shot,
+        overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null
+      })));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Staff 화면을 갱신하지 못했습니다.");
     }
@@ -125,9 +182,13 @@ export default function ProjectDetailPage() {
     return subscribeToShotChanges(projectId, refreshSelectedShots, dailyPlanId);
   }, [dailyPlanId, projectId, refreshSelectedShots]);
 
-  const filteredShots = useMemo(() => filterShots(shots, filter), [filter, shots]);
   const nextOrderIndex = shots.length + 1;
   const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
+  const scheduleRowsByIndex = useMemo(
+    () => selectedPlan ? placeScheduleRows(shots, selectedPlan.mealTimes, decodeDailyPlanMemo(selectedPlan.memo).timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
+    [selectedPlan, shots]
+  );
+  const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title });
   }, []);
@@ -399,18 +460,12 @@ export default function ProjectDetailPage() {
               <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
             </Link>
           </nav>
-        </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">Staff</span>}
+        </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도</span>}
       </div>
 
-      <section className="mb-3">
-        <Link href={`/projects/${project.id}`} className="mb-2 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
-          <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
-        </Link>
-        <ProgressSummary shots={shots} />
-        <div className="mt-2">
-          <FilterTabs value={filter} onChange={setFilter} />
-        </div>
-      </section>
+      <Link href={`/projects/${project.id}`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+        <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
+      </Link>
 
       {errorMessage ? (
         <div className="mb-3 rounded-[1.25rem] border border-field-danger bg-white p-3 text-sm font-bold text-field-danger">
@@ -425,11 +480,10 @@ export default function ProjectDetailPage() {
       ) : null}
 
       <div id="cut-board" className="scroll-mt-28">
-      <div className="mb-2 flex items-center justify-between px-1">
+      <div className="mb-2 px-1">
         <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
-        <p className="text-xs font-bold text-field-muted">{filteredShots.length}개 표시</p>
       </div>
-      {shots.length === 0 ? (
+      {shots.length === 0 && scheduleRowCount === 0 ? (
         <Card className="rounded-[1.5rem]">
           <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
           <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
@@ -440,15 +494,16 @@ export default function ProjectDetailPage() {
             </Button> : null}
           </div>
         </Card>
-      ) : filteredShots.length === 0 ? (
-        <Card className="rounded-[1.5rem] text-field-muted">선택한 필터에 해당하는 컷이 없습니다.</Card>
       ) : (
         <ShotReorderList
           allShots={shots}
-          visibleShots={filteredShots}
+          visibleShots={shots}
           disabled={role !== "admin" || isReordering}
           onReorder={handleReorderShots}
           renderShot={renderShot}
+          renderRowsBeforeIndex={(index) => scheduleRowsByIndex.get(index)?.map((item) => (
+            <ProgressScheduleCard key={item.id} item={item} />
+          ))}
         />
       )}
       </div>

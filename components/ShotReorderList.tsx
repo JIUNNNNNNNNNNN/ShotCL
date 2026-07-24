@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type { Shot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,7 @@ type ShotReorderListProps = {
   disabled?: boolean;
   onReorder: (shots: Shot[]) => Promise<void> | void;
   renderShot: (shot: Shot) => ReactNode;
+  renderRowsBeforeIndex?: (index: number) => ReactNode;
 };
 
 const MOUSE_LONG_PRESS_MS = 220;
@@ -60,7 +61,8 @@ export function ShotReorderList({
   visibleShots,
   disabled = false,
   onReorder,
-  renderShot
+  renderShot,
+  renderRowsBeforeIndex
 }: ShotReorderListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
@@ -259,47 +261,50 @@ export function ShotReorderList({
 
   return (
     <div ref={listRef} className="grid gap-2 pb-24">
-      {visibleShots.map((shot) => {
+      {visibleShots.map((shot, index) => {
         const isDragging = dragState?.shotId === shot.id;
         const isDropTarget = dragState?.targetId === shot.id && !isDragging;
         return (
-          <div
-            key={shot.id}
-            ref={(element) => {
-              if (element) cardRefs.current.set(shot.id, element);
-              else cardRefs.current.delete(shot.id);
-            }}
-            onPointerDown={(event) => handlePointerDown(event, shot.id)}
-            onDragStart={(event) => event.preventDefault()}
-            onContextMenu={(event) => {
-              if (!disabled && !isDragExcludedTarget(event.target)) event.preventDefault();
-            }}
-            onClickCapture={(event) => {
-              if (Date.now() >= suppressClickUntilRef.current) return;
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            aria-grabbed={isDragging}
-            className={cn(
-              "relative select-none rounded-[1.5rem] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
-              !disabled && "cursor-grab",
-              isDragging && "z-50 cursor-grabbing opacity-95",
-              isDropTarget
-                && (dragState?.insertAfter
-                  ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:rounded-full after:bg-[#d77b32]"
-                  : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:rounded-full before:bg-[#d77b32]")
-            )}
-            style={isDragging ? {
-              transform: `translate3d(0, ${dragState.currentY - dragState.startY}px, 0) scale(1.015)`,
-              boxShadow: "0 16px 32px rgba(35, 42, 37, 0.18)",
-              touchAction: "none",
-              willChange: "transform"
-            } : undefined}
-          >
-            {renderShot(shot)}
-          </div>
+          <Fragment key={shot.id}>
+            {renderRowsBeforeIndex?.(index)}
+            <div
+              ref={(element) => {
+                if (element) cardRefs.current.set(shot.id, element);
+                else cardRefs.current.delete(shot.id);
+              }}
+              onPointerDown={(event) => handlePointerDown(event, shot.id)}
+              onDragStart={(event) => event.preventDefault()}
+              onContextMenu={(event) => {
+                if (!disabled && !isDragExcludedTarget(event.target)) event.preventDefault();
+              }}
+              onClickCapture={(event) => {
+                if (Date.now() >= suppressClickUntilRef.current) return;
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              aria-grabbed={isDragging}
+              className={cn(
+                "relative select-none rounded-[1.5rem] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
+                !disabled && "cursor-grab",
+                isDragging && "z-50 cursor-grabbing opacity-95",
+                isDropTarget
+                  && (dragState?.insertAfter
+                    ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:rounded-full after:bg-[#d77b32]"
+                    : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:rounded-full before:bg-[#d77b32]")
+              )}
+              style={isDragging ? {
+                transform: `translate3d(0, ${dragState.currentY - dragState.startY}px, 0) scale(1.015)`,
+                boxShadow: "0 16px 32px rgba(35, 42, 37, 0.18)",
+                touchAction: "none",
+                willChange: "transform"
+              } : undefined}
+            >
+              {renderShot(shot)}
+            </div>
+          </Fragment>
         );
       })}
+      {renderRowsBeforeIndex?.(visibleShots.length)}
     </div>
   );
 }

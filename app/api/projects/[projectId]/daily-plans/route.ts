@@ -16,7 +16,7 @@ type DailyPlanSaveBody = {
 
 const SAVED_MESSAGE = "일촬표가 저장되었습니다.";
 const DUPLICATE_MESSAGE = "이미 저장된 일촬표입니다.";
-const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at";
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,meal_times,memo,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {

@@ -23,11 +23,29 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const dailyPlanId = normalizeKeyPart(request.nextUrl.searchParams.get("dailyPlanId"));
     const shotRef = normalizeKeyPart(request.nextUrl.searchParams.get("shotRef"));
-    if (!dailyPlanId || !shotRef) {
-      return NextResponse.json({ error: "회차와 컷 식별값이 필요합니다." }, { status: 400 });
+    if (!dailyPlanId) {
+      return NextResponse.json({ error: "회차 식별값이 필요합니다." }, { status: 400 });
     }
 
     const supabase = requireProjectAccessDb();
+    if (!shotRef) {
+      const { data, error } = await supabase
+        .from("shot_diagrams")
+        .select("shot_ref,data")
+        .eq("project_id", projectId)
+        .eq("daily_plan_id", dailyPlanId)
+        .eq("diagram_type", DIAGRAM_TYPE);
+      if (error) throw error;
+
+      return NextResponse.json({
+        ok: true,
+        diagrams: (data ?? []).map((row) => ({
+          shotRef: row.shot_ref,
+          diagram: normalizeShotOverheadDiagram(row.data)
+        }))
+      });
+    }
+
     const { data, error } = await supabase
       .from("shot_diagrams")
       .select(SELECT_COLUMNS)

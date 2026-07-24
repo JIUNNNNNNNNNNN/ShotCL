@@ -35,7 +35,7 @@ export type DailyPlanListItem = DailyPlan & {
 };
 
 const dailyPlanListRequests = new Map<string, Promise<DailyPlanListItem[]>>();
-const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,created_at,updated_at";
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,meal_times,memo,created_at,updated_at";
 
 export type SaveDailyPlanResult = DailyPlanWithShots & {
   saveStatus: "saved" | "duplicate";
