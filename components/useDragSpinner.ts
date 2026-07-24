@@ -4,6 +4,13 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { PointerEvent as ReactPointerEvent } from "react";
 
 export type SpinnerTargetState = "outside" | "magnet" | "inside";
+export type SpinnerMotionState =
+  | "idle"
+  | "dragging"
+  | "inertia"
+  | "snapping"
+  | "bouncing"
+  | "activating";
 
 export type SpinnerTargetMeasurement = {
   state: SpinnerTargetState;
@@ -39,6 +46,8 @@ export const SPINNER_INERTIA_STOP_VELOCITY = 0.012;
 export const SPINNER_INERTIA_MAX_VELOCITY = 0.32;
 export const SPINNER_INERTIA_SAMPLE_WINDOW_MS = 120;
 export const SPINNER_INERTIA_MAX_DURATION_MS = 700;
+export const SPINNER_TARGET_DAMPING_START_RATIO = 0.3;
+export const SPINNER_TARGET_PROXIMITY_FRICTION = 0.84;
 
 type SpinnerMovementSample = {
   rotation: number;
@@ -247,6 +256,7 @@ export function useDragSpinner({
   const [activationState, setActivationState] = useState<SpinnerTargetState>(itemCount > 0 ? "inside" : "outside");
   const [isDragging, setIsDragging] = useState(false);
   const [isInertiaActive, setIsInertiaActive] = useState(false);
+  const [motionState, setMotionStateValue] = useState<SpinnerMotionState>("idle");
   const rotationRef = useRef(0);
   const activeIndexRef = useRef(0);
   const onCommitRef = useRef(onCommit);
@@ -257,6 +267,7 @@ export function useDragSpinner({
   const animationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rotationFrameRef = useRef<number | null>(null);
   const inertiaFrameRef = useRef<number | null>(null);
+  const magnetFrameRef = useRef<number | null>(null);
   const isAnimatingRef = useRef(false);
   const dragStateRef = useRef<{
     pointerId: number;
@@ -286,18 +297,25 @@ export function useDragSpinner({
     onRotationFrameRef.current = onRotationFrame;
   }, [onRotationFrame]);
 
+  const setMotionState = useCallback((nextState: SpinnerMotionState) => {
+    setMotionStateValue(nextState);
+  }, []);
+
   const cancelPending = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     if (animationTimerRef.current) clearTimeout(animationTimerRef.current);
     if (rotationFrameRef.current !== null) window.cancelAnimationFrame(rotationFrameRef.current);
     if (inertiaFrameRef.current !== null) window.cancelAnimationFrame(inertiaFrameRef.current);
+    if (magnetFrameRef.current !== null) window.cancelAnimationFrame(magnetFrameRef.current);
     settleTimerRef.current = null;
     animationTimerRef.current = null;
     rotationFrameRef.current = null;
     inertiaFrameRef.current = null;
+    magnetFrameRef.current = null;
     isAnimatingRef.current = false;
     setIsInertiaActive(false);
-  }, []);
+    setMotionState("idle");
+  }, [setMotionState]);
 
   const applyRotationFrame = useCallback((
     nextRotation: number,
@@ -398,10 +416,40 @@ export function useDragSpinner({
     return next;
   }, [measureActivation]);
 
+  const measureInertiaTarget = useCallback(() => {
+    if (itemCount <= 0) {
+      return { index: null, measurement: emptyTargetMeasurement() };
+    }
+
+    const index = getNearestItemIndex(rotationRef.current, itemCount);
+    const measure = measureTargetRef.current;
+    if (!measure) {
+      const isInside = getSpinnerActivationIndex(
+        rotationRef.current,
+        itemCount,
+        activationThresholdDegrees
+      ) === index;
+      return {
+        index: isInside ? index : null,
+        measurement: {
+          ...emptyTargetMeasurement(),
+          state: isInside ? "inside" as const : "outside" as const
+        }
+      };
+    }
+
+    const measurement = measure(index);
+    return {
+      index: measurement.state === "outside" ? null : index,
+      measurement
+    };
+  }, [activationThresholdDegrees, itemCount]);
+
   const snapToIndex = useCallback((requestedIndex: number, options: SnapOptions = {}) => {
     cancelPending();
     if (itemCount <= 0) return;
 
+    setMotionState("snapping");
     const index = Math.max(0, Math.min(requestedIndex, itemCount - 1));
     const snappedRotation = rotationRef.current
       - normalizeSpinnerAngle(getSpinnerItemAngle(index, itemCount) + rotationRef.current);
@@ -411,14 +459,44 @@ export function useDragSpinner({
     setActivationIndex(index);
     setActivationState("inside");
 
-    if (options.commit === false) return;
+    if (options.commit === false) {
+      setMotionState("idle");
+      return;
+    }
     isAnimatingRef.current = true;
     animationTimerRef.current = setTimeout(() => {
       animationTimerRef.current = null;
+      setMotionState("activating");
       isAnimatingRef.current = false;
       commitIndex(index);
+      setMotionState("idle");
     }, snapDurationMs);
-  }, [cancelPending, commitIndex, itemCount, snapDurationMs, updateRotation]);
+  }, [cancelPending, commitIndex, itemCount, setMotionState, snapDurationMs, updateRotation]);
+
+  const startMagnetSnap = useCallback((index: number) => {
+    if (inertiaFrameRef.current !== null) {
+      window.cancelAnimationFrame(inertiaFrameRef.current);
+      inertiaFrameRef.current = null;
+    }
+    if (magnetFrameRef.current !== null) {
+      window.cancelAnimationFrame(magnetFrameRef.current);
+    }
+
+    isAnimatingRef.current = true;
+    setIsInertiaActive(false);
+    setMotionState("snapping");
+    setActivationIndex(index);
+    setActivationState("magnet");
+
+    // inertia의 transition-none 상태를 먼저 해제한 다음, 다음 paint에서
+    // 기존 260ms ease-out transform transition으로 타겟 중심에 정렬합니다.
+    magnetFrameRef.current = window.requestAnimationFrame(() => {
+      magnetFrameRef.current = window.requestAnimationFrame(() => {
+        magnetFrameRef.current = null;
+        snapToIndex(index);
+      });
+    });
+  }, [setMotionState, snapToIndex]);
 
   const activateIndex = useCallback((requestedIndex: number) => {
     if (isAnimatingRef.current) return false;
@@ -429,10 +507,11 @@ export function useDragSpinner({
       return false;
     }
     if (activation.state === "magnet") {
-      snapToIndex(activation.index, { commit: false });
+      startMagnetSnap(activation.index);
+      return true;
     }
     return commitIndex(activation.index);
-  }, [cancelPending, commitIndex, measureActivation, snapToIndex]);
+  }, [cancelPending, commitIndex, measureActivation, startMagnetSnap]);
 
   const bounceOut = useCallback((index: number, measurement: SpinnerTargetMeasurement) => {
     cancelPending();
@@ -444,15 +523,17 @@ export function useDragSpinner({
       index,
       measurement
     ));
+    setMotionState("bouncing");
     setActivationIndex(null);
     setActivationState("outside");
     isAnimatingRef.current = true;
     animationTimerRef.current = setTimeout(() => {
       animationTimerRef.current = null;
       isAnimatingRef.current = false;
+      setMotionState("idle");
       onRejectRef.current?.();
     }, bounceDurationMs);
-  }, [bounceDurationMs, cancelPending, itemCount, updateRotation]);
+  }, [bounceDurationMs, cancelPending, itemCount, setMotionState, updateRotation]);
 
   const scheduleSettle = useCallback(() => {
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
@@ -468,14 +549,21 @@ export function useDragSpinner({
           return;
         }
         isAnimatingRef.current = false;
+        setMotionState("idle");
         onRejectRef.current?.();
         return;
       }
       snapToIndex(activation.index);
     }, settleDelayMs);
-  }, [bounceOut, measureActivation, settleDelayMs, snapToIndex]);
+  }, [bounceOut, measureActivation, setMotionState, settleDelayMs, snapToIndex]);
 
   const startInertia = useCallback((requestedVelocity: number) => {
+    const startingTarget = measureInertiaTarget();
+    if (startingTarget.index !== null) {
+      startMagnetSnap(startingTarget.index);
+      return;
+    }
+
     const initialVelocity = clampSpinnerVelocity(requestedVelocity);
     if (Math.abs(initialVelocity) < SPINNER_INERTIA_MIN_START_VELOCITY) {
       updateRotation(rotationRef.current);
@@ -488,6 +576,7 @@ export function useDragSpinner({
     }
     isAnimatingRef.current = true;
     setIsInertiaActive(true);
+    setMotionState("inertia");
 
     let velocity = initialVelocity;
     let startedAt = 0;
@@ -500,8 +589,25 @@ export function useDragSpinner({
       const elapsedSinceFrame = Math.min(32, Math.max(1, frameTime - previousFrameAt));
       previousFrameAt = frameTime;
       applyRotationFrame(rotationRef.current + velocity * elapsedSinceFrame, itemCount, false);
+      const inertiaTarget = measureInertiaTarget();
+      if (inertiaTarget.index !== null) {
+        startMagnetSnap(inertiaTarget.index);
+        return;
+      }
+
+      const overlapRatio = inertiaTarget.measurement.overlapRatio;
+      const dampingProgress = Math.min(
+        1,
+        Math.max(
+          0,
+          (overlapRatio - SPINNER_TARGET_DAMPING_START_RATIO)
+            / (SPINNER_TARGET_OVERLAP_THRESHOLD - SPINNER_TARGET_DAMPING_START_RATIO)
+        )
+      );
+      const frameFriction = SPINNER_INERTIA_FRICTION
+        - (SPINNER_INERTIA_FRICTION - SPINNER_TARGET_PROXIMITY_FRICTION) * dampingProgress;
       velocity *= Math.pow(
-        SPINNER_INERTIA_FRICTION,
+        frameFriction,
         elapsedSinceFrame / (1000 / 60)
       );
 
@@ -510,6 +616,7 @@ export function useDragSpinner({
         inertiaFrameRef.current = null;
         setIsInertiaActive(false);
         isAnimatingRef.current = false;
+        setMotionState("idle");
         updateRotation(rotationRef.current);
         scheduleSettle();
         return;
@@ -518,7 +625,15 @@ export function useDragSpinner({
     };
 
     inertiaFrameRef.current = window.requestAnimationFrame(tick);
-  }, [applyRotationFrame, itemCount, scheduleSettle, updateRotation]);
+  }, [
+    applyRotationFrame,
+    itemCount,
+    measureInertiaTarget,
+    scheduleSettle,
+    setMotionState,
+    startMagnetSnap,
+    updateRotation
+  ]);
 
   useEffect(() => {
     cancelPending();
@@ -588,6 +703,7 @@ export function useDragSpinner({
       dragState.moved = true;
       suppressClickRef.current = true;
       setIsDragging(true);
+      setMotionState("dragging");
     }
 
     const nextPointerAngle = getPointerAngle(event);
@@ -615,6 +731,7 @@ export function useDragSpinner({
     }
     dragStateRef.current = null;
     setIsDragging(false);
+    setMotionState("idle");
 
     if (dragState.moved) {
       flushRotationFrame();
@@ -639,6 +756,7 @@ export function useDragSpinner({
     activeIndex,
     activationIndex,
     activationState,
+    motionState,
     isDragging,
     isInertiaActive,
     isMoving: isDragging || isInertiaActive,
