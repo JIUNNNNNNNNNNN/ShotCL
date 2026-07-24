@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Save, Trash2, Users } from "lucide-react";
-import { MemoPopoverField } from "@/components/MemoPopoverField";
+import { ArrowLeft, Plus, Save, Users, X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
@@ -18,7 +17,7 @@ import { getProject } from "@/lib/data/projects";
 import type { Project, ProjectStaffMember } from "@/lib/types";
 
 const inputClassName =
-  "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-xs font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.75rem,0.85fr)_minmax(4.75rem,0.6fr)_minmax(7.75rem,1fr)_minmax(8rem,1.15fr)_minmax(10rem,2fr)]";
 
@@ -185,7 +184,7 @@ export default function StaffListPage() {
       ) : null}
 
       <section className="mt-3 rounded-[1.5rem] border border-field-border bg-white p-2 shadow-sm">
-        <div className={`hidden ${desktopGridClassName} gap-1.5 px-3 pb-1.5 pr-9 text-center text-[10px] font-black text-field-muted md:grid`}>
+        <div className={`hidden ${desktopGridClassName} gap-1.5 px-3 pb-1.5 text-center text-[10px] font-black text-field-muted md:grid`}>
           <span>부서</span>
           <span>이름</span>
           <span>연락처</span>
@@ -233,7 +232,7 @@ function StaffMemberRow({
 }) {
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 rounded-2xl border border-field-border bg-field-soft/40 p-1.5 pr-7 ${desktopGridClassName} md:pr-8`}
+      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible rounded-2xl border border-field-border bg-field-soft/40 p-1.5 text-center ${desktopGridClassName}`}
       aria-label={`${number}번 스탭`}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
@@ -249,7 +248,7 @@ function StaffMemberRow({
       <label className="col-span-1 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 이름</span>
         <input
-          className={`${inputClassName} text-center`}
+          className={inputClassName}
           value={member.name}
           onChange={(event) => onChange({ name: event.target.value })}
           placeholder="이름"
@@ -259,7 +258,7 @@ function StaffMemberRow({
       <label className="col-span-3 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 연락처</span>
         <input
-          className={`${inputClassName} text-center`}
+          className={inputClassName}
           type="tel"
           inputMode="tel"
           value={member.phone}
@@ -278,21 +277,27 @@ function StaffMemberRow({
           aria-label={`${number}번 사는곳`}
         />
       </label>
-      <div className="col-span-4 min-w-0 md:col-auto [&>button]:h-8 [&>button]:min-h-8 [&>button]:rounded-xl [&>button]:px-2 [&>button]:py-1 [&>button]:text-xs">
-        <MemoPopoverField
+      <label className="col-span-4 min-w-0 md:col-auto">
+        <span className="sr-only">{number}번 특이사항</span>
+        <input
+          className={inputClassName}
           value={member.notes}
           placeholder="특이사항"
-          ariaLabel={`${number}번 특이사항 수정`}
-          onChange={(notes) => onChange({ notes })}
+          aria-label={`${number}번 특이사항`}
+          onChange={(event) => onChange({ notes: event.target.value })}
         />
-      </div>
+      </label>
       <button
         type="button"
-        onClick={onDelete}
-        className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full border border-field-danger/60 bg-white text-field-danger shadow-sm transition hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="absolute -right-1.5 -top-1.5 z-10 grid h-7 w-7 place-items-center rounded-full border border-field-danger/60 bg-white text-field-danger shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
         aria-label={`${member.name || `${number}번 스탭`} 삭제`}
       >
-        <Trash2 className="h-3 w-3" aria-hidden />
+        <X className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
       </button>
     </article>
   );
