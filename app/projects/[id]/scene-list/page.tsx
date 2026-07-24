@@ -1,6 +1,16 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
+} from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save, Trash2 } from "lucide-react";
@@ -18,6 +28,35 @@ import type { Project, ProjectSceneItem } from "@/lib/types";
 const inputClassName =
   "min-h-8 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary";
 const selectClassName = `${inputClassName} appearance-none`;
+
+type SceneFillColumn =
+  | "mainLocation"
+  | "subLocation"
+  | "dayLabel"
+  | "dayNight"
+  | "interiorExterior"
+  | "props";
+
+type SelectedSceneCell = {
+  rowId: string;
+  column: SceneFillColumn;
+};
+
+type SceneCellRange = {
+  column: SceneFillColumn;
+  startIndex: number;
+  endIndex: number;
+};
+
+type CellDragState = SceneCellRange & {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  sourceValue: string;
+  didDrag: boolean;
+};
+
+type MergePosition = "single" | "start" | "middle" | "end";
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -37,6 +76,11 @@ export default function ProjectSceneListPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [selectedCell, setSelectedCell] = useState<SelectedSceneCell | null>(null);
+  const [selectedRange, setSelectedRange] = useState<SceneCellRange | null>(null);
+  const itemsRef = useRef(items);
+  const cellDragRef = useRef<CellDragState | null>(null);
+  const cellDragCleanupRef = useRef<(() => void) | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -52,6 +96,8 @@ export default function ProjectSceneListPage() {
       setActorRoles(sceneList.actorRoles);
       setIsDirty(false);
       setErrorMessage("");
+      setSelectedCell(null);
+      setSelectedRange(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "씬리스트를 불러오지 못했습니다.");
     } finally {
@@ -62,6 +108,16 @@ export default function ProjectSceneListPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
+  useEffect(() => () => {
+    cellDragCleanupRef.current?.();
+    document.body.style.removeProperty("user-select");
+    document.body.style.removeProperty("cursor");
+  }, []);
 
   const gridTemplateColumns = useMemo(
     () => [
@@ -74,7 +130,7 @@ export default function ProjectSceneListPage() {
       "minmax(0,2.8fr)",
       ...actorRoles.map(() => "minmax(0,.42fr)"),
       "minmax(0,1.05fr)",
-      "1.8rem"
+      "2.25rem"
     ].join(" "),
     [actorRoles]
   );
@@ -83,6 +139,8 @@ export default function ProjectSceneListPage() {
     setItems(nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 })));
     setIsDirty(true);
     setErrorMessage("");
+    setSelectedCell(null);
+    setSelectedRange(null);
   }, []);
 
   const updateItem = useCallback((id: string, patch: Partial<ProjectSceneItem>) => {
@@ -93,6 +151,133 @@ export default function ProjectSceneListPage() {
     setIsDirty(true);
     setErrorMessage("");
   }, [canEdit]);
+
+  const selectCell = useCallback((
+    rowId: string,
+    column: SceneFillColumn,
+    rowIndex: number
+  ) => {
+    if (!canEdit) return;
+    setSelectedCell({ rowId, column });
+    setSelectedRange({ column, startIndex: rowIndex, endIndex: rowIndex });
+  }, [canEdit]);
+
+  const fillCellRange = useCallback((
+    column: SceneFillColumn,
+    startIndex: number,
+    endIndex: number,
+    value: string
+  ) => {
+    if (!canEdit || startIndex === endIndex) return;
+    const lower = Math.min(startIndex, endIndex);
+    const upper = Math.max(startIndex, endIndex);
+    setItems((current) => current.map((item, index) => (
+      index >= lower && index <= upper ? { ...item, [column]: value } : item
+    )));
+    setIsDirty(true);
+    setErrorMessage("");
+  }, [canEdit]);
+
+  const startCellDrag = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    rowId: string,
+    column: SceneFillColumn,
+    rowIndex: number,
+    value: string
+  ) => {
+    if (!canEdit || event.button !== 0) return;
+    event.stopPropagation();
+    cellDragCleanupRef.current?.();
+    selectCell(rowId, column, rowIndex);
+
+    const drag: CellDragState = {
+      pointerId: event.pointerId,
+      column,
+      startIndex: rowIndex,
+      endIndex: rowIndex,
+      startX: event.clientX,
+      startY: event.clientY,
+      sourceValue: value,
+      didDrag: false
+    };
+    cellDragRef.current = drag;
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+      cellDragCleanupRef.current = null;
+      document.body.style.removeProperty("user-select");
+      document.body.style.removeProperty("cursor");
+    };
+
+    const findTargetIndex = (clientX: number, clientY: number) => {
+      const element = document.elementFromPoint(clientX, clientY);
+      const cell = element?.closest("[data-scene-fill-column]") as HTMLElement | null;
+      if (!cell || cell.dataset.sceneFillColumn !== column) return null;
+      const targetRowId = cell.dataset.sceneRowId;
+      const targetIndex = itemsRef.current.findIndex((item) => item.id === targetRowId);
+      return targetIndex >= 0 ? targetIndex : null;
+    };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      const current = cellDragRef.current;
+      if (!current || moveEvent.pointerId !== current.pointerId) return;
+      const horizontalDistance = Math.abs(moveEvent.clientX - current.startX);
+      const verticalDistance = Math.abs(moveEvent.clientY - current.startY);
+      const targetIndex = findTargetIndex(moveEvent.clientX, moveEvent.clientY);
+      if (!current.didDrag) {
+        if (
+          verticalDistance < 8 ||
+          verticalDistance <= horizontalDistance * 1.2 ||
+          targetIndex === null ||
+          targetIndex === current.startIndex
+        ) {
+          return;
+        }
+        current.didDrag = true;
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "cell";
+      }
+      moveEvent.preventDefault();
+      if (targetIndex === null || targetIndex === current.endIndex) return;
+      current.endIndex = targetIndex;
+      setSelectedRange({
+        column: current.column,
+        startIndex: current.startIndex,
+        endIndex: targetIndex
+      });
+    };
+
+    const finish = (commit: boolean) => {
+      const current = cellDragRef.current;
+      cellDragRef.current = null;
+      cleanup();
+      if (commit && current?.didDrag) {
+        fillCellRange(
+          current.column,
+          current.startIndex,
+          current.endIndex,
+          current.sourceValue
+        );
+      }
+    };
+
+    const handleEnd = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId !== drag.pointerId) return;
+      finish(true);
+    };
+
+    const handleCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== drag.pointerId) return;
+      finish(false);
+    };
+
+    cellDragCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleCancel);
+  }, [canEdit, fillCellRange, selectCell]);
 
   function addItem() {
     if (!canEdit || !projectId) return;
@@ -194,11 +379,12 @@ export default function ProjectSceneListPage() {
 
         <div className="scene-list-landscape min-w-0">
           <div
-            className="grid border-b border-field-border bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
+            role="row"
+            className="grid border-b border-[#bfc5bf] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
             style={{ gridTemplateColumns }}
           >
             {["씬", "대장소", "세부장소", "Day", "D/N", "I/E", "씬 내용"].map((label) => (
-              <div key={label} className="min-w-0 border-r border-field-border px-1 py-1.5 last:border-r-0">
+              <div role="columnheader" key={label} className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5 last:border-r-0">
                 {label}
               </div>
             ))}
@@ -206,13 +392,14 @@ export default function ProjectSceneListPage() {
               <div
                 key={role}
                 title={role}
-                className="min-w-0 truncate border-r border-field-border px-0.5 py-1.5"
+                role="columnheader"
+                className="min-w-0 truncate border-r border-[#bfc5bf] px-0.5 py-1.5"
               >
                 {role}
               </div>
             ))}
-            <div className="min-w-0 border-r border-field-border px-1 py-1.5">주요 소품</div>
-            <div aria-hidden />
+            <div role="columnheader" className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">주요 소품</div>
+            <div role="columnheader" aria-label="행 작업" />
           </div>
 
           <SceneReorderList
@@ -226,6 +413,12 @@ export default function ProjectSceneListPage() {
                 canEdit={canEdit}
                 actorRoles={actorRoles}
                 gridTemplateColumns={gridTemplateColumns}
+                previousItem={items[index - 1]}
+                nextItem={items[index + 1]}
+                selectedCell={selectedCell}
+                selectedRange={selectedRange}
+                onCellSelect={selectCell}
+                onCellPointerDown={startCellDrag}
                 onUpdate={updateItem}
                 onDelete={deleteItem}
               />
@@ -282,6 +475,12 @@ const SceneTableRow = memo(function SceneTableRow({
   canEdit,
   actorRoles,
   gridTemplateColumns,
+  previousItem,
+  nextItem,
+  selectedCell,
+  selectedRange,
+  onCellSelect,
+  onCellPointerDown,
   onUpdate,
   onDelete
 }: {
@@ -290,6 +489,18 @@ const SceneTableRow = memo(function SceneTableRow({
   canEdit: boolean;
   actorRoles: string[];
   gridTemplateColumns: string;
+  previousItem?: ProjectSceneItem;
+  nextItem?: ProjectSceneItem;
+  selectedCell: SelectedSceneCell | null;
+  selectedRange: SceneCellRange | null;
+  onCellSelect: (rowId: string, column: SceneFillColumn, rowIndex: number) => void;
+  onCellPointerDown: (
+    event: ReactPointerEvent<HTMLDivElement>,
+    rowId: string,
+    column: SceneFillColumn,
+    rowIndex: number,
+    value: string
+  ) => void;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
   onDelete: (item: ProjectSceneItem) => void;
 }) {
@@ -298,6 +509,27 @@ const SceneTableRow = memo(function SceneTableRow({
     () => parseCharacters(item.characters),
     [item.characters]
   );
+  const getCellInteraction = (column: SceneFillColumn): SceneCellInteraction => ({
+    rowId: item.id,
+    rowIndex: index,
+    column,
+    canEdit,
+    isSelected: selectedCell?.rowId === item.id && selectedCell.column === column,
+    isInRange: Boolean(
+      selectedRange?.column === column &&
+      index >= Math.min(selectedRange.startIndex, selectedRange.endIndex) &&
+      index <= Math.max(selectedRange.startIndex, selectedRange.endIndex)
+    ),
+    mergePosition: getVisualMergePosition(item, previousItem, nextItem, column),
+    onSelect: onCellSelect,
+    onPointerDown: onCellPointerDown
+  });
+  const mainLocationInteraction = getCellInteraction("mainLocation");
+  const concealMainLocation = isMergeContinuation(mainLocationInteraction) && !mainLocationInteraction.isSelected;
+  const dayNightInteraction = getCellInteraction("dayNight");
+  const concealDayNight = isMergeContinuation(dayNightInteraction) && !dayNightInteraction.isSelected;
+  const interiorExteriorInteraction = getCellInteraction("interiorExterior");
+  const concealInteriorExterior = isMergeContinuation(interiorExteriorInteraction) && !interiorExteriorInteraction.isSelected;
 
   function toggleCharacter(role: string) {
     const normalizedRole = role.trim();
@@ -314,7 +546,8 @@ const SceneTableRow = memo(function SceneTableRow({
 
   return (
     <div
-      className="grid min-h-9 border-b border-field-border bg-white text-[12px] last:border-b-0"
+      role="row"
+      className="grid min-h-9 bg-white text-[12px]"
       style={{ gridTemplateColumns }}
     >
       <SceneCell
@@ -324,17 +557,21 @@ const SceneTableRow = memo(function SceneTableRow({
         onChange={(sceneNo) => onUpdate(item.id, { sceneNo })}
       />
 
-      <div
-        className="min-w-0 border-r border-field-border"
+      <SceneCellFrame
+        interaction={mainLocationInteraction}
+        value={item.mainLocation}
         style={{ backgroundColor: locationStyle.background }}
       >
         {canEdit ? (
           <input
             value={item.mainLocation}
             onChange={(event) => onUpdate(item.id, { mainLocation: event.target.value })}
+            onFocus={() => onCellSelect(item.id, "mainLocation", index)}
             aria-label={`${item.sceneNo || index + 1} 씬 대장소`}
-            className={`${inputClassName} font-bold`}
-            style={{ color: locationStyle.color }}
+            className={`${inputClassName} font-bold ${
+              concealMainLocation ? "text-transparent" : ""
+            }`}
+            style={{ color: concealMainLocation ? "transparent" : locationStyle.color }}
           />
         ) : (
           <span
@@ -342,59 +579,67 @@ const SceneTableRow = memo(function SceneTableRow({
             style={{ color: locationStyle.color }}
             title={item.mainLocation}
           >
-            {item.mainLocation}
+            {isMergeContinuation(mainLocationInteraction) ? "" : item.mainLocation}
           </span>
         )}
-      </div>
+      </SceneCellFrame>
 
       <SceneCell
         value={item.subLocation}
         ariaLabel={`${item.sceneNo || index + 1} 씬 세부장소`}
         canEdit={canEdit}
+        interaction={getCellInteraction("subLocation")}
         onChange={(subLocation) => onUpdate(item.id, { subLocation })}
       />
       <SceneCell
         value={item.dayLabel}
         ariaLabel={`${item.sceneNo || index + 1} 씬 Day`}
         canEdit={canEdit}
+        interaction={getCellInteraction("dayLabel")}
         onChange={(dayLabel) => onUpdate(item.id, { dayLabel })}
       />
 
-      <div className="border-r border-field-border">
+      <SceneCellFrame interaction={dayNightInteraction} value={item.dayNight}>
         {canEdit ? (
           <select
             value={item.dayNight}
             onChange={(event) => onUpdate(item.id, { dayNight: event.target.value })}
+            onFocus={() => onCellSelect(item.id, "dayNight", index)}
             aria-label={`${item.sceneNo || index + 1} 씬 D/N`}
-            className={selectClassName}
+            className={`${selectClassName} ${concealDayNight ? "text-transparent" : ""}`}
           >
             <option value="" />
             <option value="D">D</option>
             <option value="N">N</option>
           </select>
         ) : (
-          <span className="block px-1 py-2 text-center font-bold">{item.dayNight}</span>
+          <span className="block px-1 py-2 text-center font-bold">
+            {isMergeContinuation(dayNightInteraction) ? "" : item.dayNight}
+          </span>
         )}
-      </div>
+      </SceneCellFrame>
 
-      <div className="border-r border-field-border">
+      <SceneCellFrame interaction={interiorExteriorInteraction} value={item.interiorExterior}>
         {canEdit ? (
           <select
             value={item.interiorExterior}
             onChange={(event) => onUpdate(item.id, { interiorExterior: event.target.value })}
+            onFocus={() => onCellSelect(item.id, "interiorExterior", index)}
             aria-label={`${item.sceneNo || index + 1} 씬 I/E`}
-            className={selectClassName}
+            className={`${selectClassName} ${concealInteriorExterior ? "text-transparent" : ""}`}
           >
             <option value="" />
             <option value="I">I</option>
             <option value="E">E</option>
           </select>
         ) : (
-          <span className="block px-1 py-2 text-center font-bold">{item.interiorExterior}</span>
+          <span className="block px-1 py-2 text-center font-bold">
+            {isMergeContinuation(interiorExteriorInteraction) ? "" : item.interiorExterior}
+          </span>
         )}
-      </div>
+      </SceneCellFrame>
 
-      <div className="min-w-0 border-r border-field-border">
+      <div role="gridcell" className="min-w-0 border-b border-r border-[#cbd0cb]">
         {canEdit ? (
           <input
             value={item.sceneContent}
@@ -414,7 +659,7 @@ const SceneTableRow = memo(function SceneTableRow({
           (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
         );
         return (
-          <div key={role} className="grid min-w-0 place-items-center border-r border-field-border">
+          <div key={role} role="gridcell" className="grid min-w-0 place-items-center border-b border-r border-[#cbd0cb]">
             {canEdit ? (
               <button
                 type="button"
@@ -440,17 +685,25 @@ const SceneTableRow = memo(function SceneTableRow({
         value={item.props}
         ariaLabel={`${item.sceneNo || index + 1} 씬 주요 소품`}
         canEdit={canEdit}
+        interaction={getCellInteraction("props")}
         textAlign="left"
         onChange={(props) => onUpdate(item.id, { props })}
       />
 
-      <div className="grid place-items-center">
+      <div
+        role="gridcell"
+        data-scene-row-handle={canEdit ? "" : undefined}
+        title={canEdit ? "셀 바깥의 이 영역을 드래그해 행 순서 변경" : undefined}
+        className={`grid place-items-center border-b border-[#cbd0cb] ${
+          canEdit ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
+      >
         {canEdit ? (
           <button
             type="button"
             onClick={() => onDelete(item)}
             aria-label={`${item.sceneNo || index + 1} 씬 삭제`}
-            className="grid h-7 w-7 place-items-center rounded-full text-field-danger transition hover:bg-red-50 active:scale-90"
+            className="grid h-6 w-6 place-items-center rounded-full text-field-danger transition hover:bg-red-50 active:scale-90"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
           </button>
@@ -460,27 +713,60 @@ const SceneTableRow = memo(function SceneTableRow({
   );
 });
 
+type SceneCellInteraction = {
+  rowId: string;
+  rowIndex: number;
+  column: SceneFillColumn;
+  canEdit: boolean;
+  isSelected: boolean;
+  isInRange: boolean;
+  mergePosition: MergePosition;
+  onSelect: (rowId: string, column: SceneFillColumn, rowIndex: number) => void;
+  onPointerDown: (
+    event: ReactPointerEvent<HTMLDivElement>,
+    rowId: string,
+    column: SceneFillColumn,
+    rowIndex: number,
+    value: string
+  ) => void;
+};
+
 function SceneCell({
   value,
   ariaLabel,
   canEdit,
+  interaction,
   textAlign = "center",
   onChange
 }: {
   value: string;
   ariaLabel: string;
   canEdit: boolean;
+  interaction?: SceneCellInteraction;
   textAlign?: "left" | "center";
   onChange: (value: string) => void;
 }) {
+  const concealRepeatedValue = Boolean(
+    interaction &&
+    isMergeContinuation(interaction) &&
+    !interaction.isSelected
+  );
+
   return (
-    <div className="min-w-0 border-r border-field-border">
+    <SceneCellFrame interaction={interaction} value={value}>
       {canEdit ? (
         <input
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onFocus={() => {
+            if (interaction) {
+              interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
+            }
+          }}
           aria-label={ariaLabel}
-          className={`${inputClassName} ${textAlign === "left" ? "text-left" : ""}`}
+          className={`${inputClassName} ${textAlign === "left" ? "text-left" : ""} ${
+            concealRepeatedValue ? "text-transparent" : ""
+          }`}
         />
       ) : (
         <span
@@ -489,11 +775,80 @@ function SceneCell({
           }`}
           title={value}
         >
-          {value}
+          {concealRepeatedValue ? "" : value}
         </span>
       )}
+    </SceneCellFrame>
+  );
+}
+
+function SceneCellFrame({
+  interaction,
+  value,
+  className = "",
+  style,
+  children
+}: {
+  interaction?: SceneCellInteraction;
+  value: string;
+  className?: string;
+  style?: CSSProperties;
+  children: ReactNode;
+}) {
+  const mergesWithNext = interaction?.mergePosition === "start" || interaction?.mergePosition === "middle";
+  return (
+    <div
+      role="gridcell"
+      data-scene-row-id={interaction?.rowId}
+      data-scene-fill-column={interaction?.column}
+      aria-selected={interaction?.isSelected || undefined}
+      onPointerDown={interaction
+        ? (event) => interaction.onPointerDown(
+            event,
+            interaction.rowId,
+            interaction.column,
+            interaction.rowIndex,
+            value
+          )
+        : undefined}
+      className={`relative min-w-0 border-r border-[#cbd0cb] ${
+        mergesWithNext ? "border-b border-b-transparent" : "border-b border-b-[#cbd0cb]"
+      } ${interaction?.canEdit ? "cursor-cell" : ""} ${
+        interaction?.isInRange ? "shadow-[inset_0_0_0_1px_rgba(15,61,46,0.38)]" : ""
+      } ${
+        interaction?.isSelected ? "z-10 shadow-[inset_0_0_0_2px_#0f3d2e]" : ""
+      } ${className}`}
+      style={{
+        ...style,
+        touchAction: interaction?.canEdit ? "none" : style?.touchAction
+      }}
+    >
+      {children}
     </div>
   );
+}
+
+function isMergeContinuation(interaction: Pick<SceneCellInteraction, "mergePosition">) {
+  return interaction.mergePosition === "middle" || interaction.mergePosition === "end";
+}
+
+function getVisualMergePosition(
+  item: ProjectSceneItem,
+  previousItem: ProjectSceneItem | undefined,
+  nextItem: ProjectSceneItem | undefined,
+  column: SceneFillColumn
+): MergePosition {
+  if (!["mainLocation", "subLocation", "dayLabel", "dayNight", "interiorExterior"].includes(column)) {
+    return "single";
+  }
+  const value = item[column].trim();
+  if (!value) return "single";
+  const matchesPrevious = previousItem?.[column].trim() === value;
+  const matchesNext = nextItem?.[column].trim() === value;
+  if (matchesPrevious && matchesNext) return "middle";
+  if (matchesPrevious) return "end";
+  if (matchesNext) return "start";
+  return "single";
 }
 
 function parseCharacters(value: string) {

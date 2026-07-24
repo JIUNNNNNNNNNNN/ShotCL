@@ -131,6 +131,7 @@ export function SceneReorderList({
   ) {
     if (disabled || event.button !== 0) return;
     const target = event.target as HTMLElement;
+    if (!target.closest("[data-scene-row-handle]")) return;
     if (target.closest(interactiveSelector)) return;
 
     const pending: PendingDrag = {
@@ -201,7 +202,7 @@ export function SceneReorderList({
                 event.stopPropagation();
               }
             }}
-            className={`relative ${disabled ? "" : "cursor-grab active:cursor-grabbing"}`}
+            className="relative"
             style={{
               transform: isDragging
                 ? `translateY(${(drag?.currentY ?? 0) - (drag?.startY ?? 0)}px)`
