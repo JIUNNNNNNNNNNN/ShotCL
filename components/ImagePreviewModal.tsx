@@ -24,7 +24,7 @@ export function ImagePreviewModal({ imageUrl, title, onClose }: ImagePreviewModa
           </Button>
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageUrl} alt={`${title} 콘티`} className="max-h-[78vh] w-full rounded-md bg-white object-contain" />
+        <img src={imageUrl} alt={`${title} 콘티`} className="max-h-[78vh] w-full bg-white object-contain" />
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, ImageIcon, Save, Trash2, X } from "lucide-react";
+import { ImageIcon, Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { Shot, ShotStatus } from "@/lib/types";
 
@@ -25,10 +25,10 @@ type ShotEditorModalProps = {
   shot: Shot | null;
   defaultOrderIndex: number;
   isSaving: boolean;
+  readOnly?: boolean;
   onClose: () => void;
-  onSave: (values: ShotEditorValues) => void;
+  onSave?: (values: ShotEditorValues) => void;
   onDelete?: (shot: Shot) => void;
-  onMove?: (shot: Shot, direction: "up" | "down") => void;
 };
 
 const fieldClass =
@@ -74,10 +74,10 @@ export function ShotEditorModal({
   shot,
   defaultOrderIndex,
   isSaving,
+  readOnly = false,
   onClose,
   onSave,
-  onDelete,
-  onMove
+  onDelete
 }: ShotEditorModalProps) {
   const [values, setValues] = useState<ShotEditorValues>(() => emptyValues(defaultOrderIndex));
 
@@ -85,6 +85,15 @@ export function ShotEditorModal({
     if (!open) return;
     setValues(shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex));
   }, [defaultOrderIndex, open, shot]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onClose, open]);
 
   if (!open) return null;
 
@@ -103,18 +112,29 @@ export function ShotEditorModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave(values);
+    if (!readOnly) onSave?.(values);
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/35" role="dialog" aria-modal="true">
-      <form onSubmit={handleSubmit} className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-field-soft p-4 shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-end bg-black/35 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={mode === "add" ? "새 컷 추가" : readOnly ? "컷 내용 보기" : "컷 내용 수정"}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-field-soft p-4 shadow-2xl sm:mx-auto sm:max-w-3xl sm:rounded-2xl"
+      >
         <div className="mx-auto max-w-3xl">
           <div className="mb-4 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-black text-field-muted">{mode === "add" ? "새 컷 추가" : "컷 수정"}</p>
-              <h2 className="mt-1 text-xl font-black text-field-primary">{values.title || "제목 없음"}</h2>
-            </div>
+            <h2 className="text-lg font-black text-field-primary">
+              {mode === "add" ? "새 컷 추가" : readOnly ? "컷 내용 보기" : "컷 내용 수정"}
+            </h2>
             <Button variant="ghost" onClick={onClose} className="px-3">
               <X className="h-4 w-4" aria-hidden />
               닫기
@@ -125,7 +145,7 @@ export function ShotEditorModal({
             <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">콘티 이미지</span>
               <div className="grid grid-cols-[96px_1fr] gap-3">
-                <div className="flex aspect-[4/3] w-24 items-center justify-center overflow-hidden rounded-md border border-field-border bg-white text-xs font-black text-field-muted">
+                <div className="flex aspect-[4/3] w-24 items-center justify-center border border-field-border bg-white text-xs font-black text-field-muted">
                   {values.storyboardImageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="h-full w-full object-cover" />
@@ -136,7 +156,7 @@ export function ShotEditorModal({
                     </span>
                   )}
                 </div>
-                <div className="grid gap-2">
+                {!readOnly ? <div className="grid gap-2">
                   <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary">
                     이미지 선택
                     <input type="file" accept="image/*,.heic,.heif" className="sr-only" onChange={handleImageChange} />
@@ -146,20 +166,30 @@ export function ShotEditorModal({
                       이미지 삭제
                     </Button>
                   ) : null}
-                </div>
+                </div> : <div />}
               </div>
             </label>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className={mode === "add" ? "grid grid-cols-3 gap-3" : "grid grid-cols-2 gap-3"}>
               <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">씬 번호</span>
-                <input value={values.sceneNumber} onChange={(event) => updateField("sceneNumber", event.target.value)} className={fieldClass} />
+                <input
+                  value={values.sceneNumber}
+                  readOnly={readOnly}
+                  onChange={(event) => updateField("sceneNumber", event.target.value)}
+                  className={fieldClass}
+                />
               </label>
               <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">컷 번호</span>
-                <input value={values.cutNumber} onChange={(event) => updateField("cutNumber", event.target.value)} className={fieldClass} />
+                <input
+                  value={values.cutNumber}
+                  readOnly={readOnly}
+                  onChange={(event) => updateField("cutNumber", event.target.value)}
+                  className={fieldClass}
+                />
               </label>
-              <label className="grid gap-2">
+              {mode === "add" ? <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">순서</span>
                 <input
                   type="number"
@@ -168,40 +198,52 @@ export function ShotEditorModal({
                   onChange={(event) => updateField("orderIndex", Number(event.target.value) || 1)}
                   className={fieldClass}
                 />
-              </label>
+              </label> : null}
             </div>
 
-            <label className="grid gap-2">
+            {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">제목</span>
               <input required value={values.title} onChange={(event) => updateField("title", event.target.value)} className={fieldClass} />
-            </label>
+            </label> : null}
 
             <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">설명</span>
-              <textarea value={values.description} rows={3} onChange={(event) => updateField("description", event.target.value)} className={textareaClass} />
+              <span className="text-xs font-black text-field-muted">컷 내용</span>
+              <textarea
+                value={values.description}
+                readOnly={readOnly}
+                rows={5}
+                onChange={(event) => updateField("description", event.target.value)}
+                className={textareaClass}
+              />
             </label>
 
             <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">장소</span>
-              <input value={values.location} onChange={(event) => updateField("location", event.target.value)} className={fieldClass} />
+              <input
+                value={values.location}
+                readOnly={readOnly}
+                onChange={(event) => updateField("location", event.target.value)}
+                className={fieldClass}
+              />
             </label>
 
             <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">등장 인물</span>
               <input
                 value={values.charactersText}
+                readOnly={readOnly}
                 onChange={(event) => updateField("charactersText", event.target.value)}
                 placeholder="주인공, 상대역"
                 className={fieldClass}
               />
             </label>
 
-            <label className="grid gap-2">
+            {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">메모</span>
               <textarea value={values.memo} rows={2} onChange={(event) => updateField("memo", event.target.value)} className={textareaClass} />
-            </label>
+            </label> : null}
 
-            <div className="grid gap-2">
+            {mode === "add" ? <div className="grid gap-2">
               <span className="text-xs font-black text-field-muted">상태</span>
               <div className="grid grid-cols-3 gap-2">
                 {(["pending", "ok", "omit"] as ShotStatus[]).map((status) => (
@@ -219,24 +261,15 @@ export function ShotEditorModal({
                   </button>
                 ))}
               </div>
-            </div>
+            </div> : null}
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            {mode === "edit" && shot && onMove ? (
-              <>
-                <Button variant="ghost" onClick={() => onMove(shot, "up")}>
-                  <ArrowUp className="h-4 w-4" aria-hidden />
-                  위로
-                </Button>
-                <Button variant="ghost" onClick={() => onMove(shot, "down")}>
-                  <ArrowDown className="h-4 w-4" aria-hidden />
-                  아래로
-                </Button>
-              </>
-            ) : null}
-
-            <Button type="submit" disabled={isSaving || !values.title.trim()} className={mode === "edit" ? "" : "col-span-2"}>
+          {!readOnly ? <div className="mt-5 grid grid-cols-2 gap-2">
+            <Button
+              type="submit"
+              disabled={isSaving || (mode === "add" && !values.title.trim())}
+              className={mode === "edit" && shot && onDelete ? "" : "col-span-2"}
+            >
               <Save className="h-4 w-4" aria-hidden />
               저장
             </Button>
@@ -247,7 +280,7 @@ export function ShotEditorModal({
                 삭제
               </Button>
             ) : null}
-          </div>
+          </div> : null}
         </div>
       </form>
     </div>

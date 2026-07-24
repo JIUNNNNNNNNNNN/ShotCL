@@ -12,7 +12,7 @@ import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, moveShot, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
+import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
 import { loadShotOverheadDiagram, loadShotOverheadDiagrams, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
 import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
@@ -189,8 +189,9 @@ export default function ProjectDetailPage() {
     [selectedPlan, shots]
   );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
+  const meetingLocation = selectedPlan ? getProgressMeetingLocation(selectedPlan) : "";
   const handleImagePreview = useCallback((url: string, title: string) => {
-    setPreview({ url, title });
+    setPreview({ url, title: title.trim() || "콘티" });
   }, []);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
@@ -263,13 +264,13 @@ export default function ProjectDetailPage() {
       await updateShot(editingShot.id, {
         sceneNumber: values.sceneNumber.trim() || "1",
         cutNumber: values.cutNumber.trim() || "1",
-        title: values.title.trim() || "제목 없음",
+        title: editingShot.title,
         description: values.description.trim(),
         location: values.location.trim(),
         characters: parseCharacters(values.charactersText),
-        memo: values.memo.trim(),
-        orderIndex: values.orderIndex,
-        status: values.status,
+        memo: editingShot.memo,
+        orderIndex: editingShot.orderIndex,
+        status: editingShot.status,
         storyboardImageUrl: imageUrl
       }, projectId);
 
@@ -353,17 +354,6 @@ export default function ProjectDetailPage() {
       progressOnly={progressOnly}
     />
   ), [handleImagePreview, handleOpenOverhead, handleStatusChange, overheadLoadingShotId, progressOnly]);
-
-  async function handleMoveShot(shot: Shot, direction: "up" | "down") {
-    if (!projectId || !dailyPlanId) return;
-
-    try {
-      await moveShot(projectId, shot.id, direction, dailyPlanId);
-      await refresh();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "순서를 바꾸지 못했습니다.");
-    }
-  }
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -480,32 +470,38 @@ export default function ProjectDetailPage() {
       ) : null}
 
       <div id="cut-board" className="scroll-mt-28">
-      <div className="mb-2 px-1">
-        <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
-      </div>
-      {shots.length === 0 && scheduleRowCount === 0 ? (
-        <Card className="rounded-[1.5rem]">
-          <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
-          <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
-          <div className="mt-5 max-w-xs">
-            {!progressOnly ? <Button onClick={() => setIsAddOpen(true)} className="rounded-full">
-              <Plus className="h-5 w-5" aria-hidden />
-              새 컷 추가
-            </Button> : null}
-          </div>
-        </Card>
-      ) : (
-        <ShotReorderList
-          allShots={shots}
-          visibleShots={shots}
-          disabled={role !== "admin" || isReordering}
-          onReorder={handleReorderShots}
-          renderShot={renderShot}
-          renderRowsBeforeIndex={(index) => scheduleRowsByIndex.get(index)?.map((item) => (
-            <ProgressScheduleCard key={item.id} item={item} />
-          ))}
-        />
-      )}
+        <section className="mb-3 rounded-[1.35rem] border border-field-border bg-white px-4 py-3">
+          <p className="text-[11px] font-black text-field-muted">집합 장소</p>
+          <p className="mt-1 min-h-5 break-words text-sm font-black leading-5 text-field-primary">
+            {meetingLocation}
+          </p>
+        </section>
+        <div className="mb-2 px-1">
+          <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
+        </div>
+        {shots.length === 0 && scheduleRowCount === 0 ? (
+          <Card className="rounded-[1.5rem]">
+            <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
+            <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
+            <div className="mt-5 max-w-xs">
+              {!progressOnly ? <Button onClick={() => setIsAddOpen(true)} className="rounded-full">
+                <Plus className="h-5 w-5" aria-hidden />
+                새 컷 추가
+              </Button> : null}
+            </div>
+          </Card>
+        ) : (
+          <ShotReorderList
+            allShots={shots}
+            visibleShots={shots}
+            disabled={role !== "admin" || isReordering}
+            onReorder={handleReorderShots}
+            renderShot={renderShot}
+            renderRowsBeforeIndex={(index) => scheduleRowsByIndex.get(index)?.map((item) => (
+              <ProgressScheduleCard key={item.id} item={item} />
+            ))}
+          />
+        )}
       </div>
 
       {process.env.NODE_ENV !== "production" && !progressOnly ? (
@@ -540,16 +536,16 @@ export default function ProjectDetailPage() {
         onSave={handleSaveNewShot}
       /> : null}
 
-      {!progressOnly && editingShot ? <ShotEditorModal
+      {editingShot ? <ShotEditorModal
         mode="edit"
         open
         shot={editingShot}
         defaultOrderIndex={nextOrderIndex}
         isSaving={isSaving}
+        readOnly={progressOnly}
         onClose={() => setEditingShot(null)}
         onSave={handleSaveExistingShot}
-        onDelete={handleDeleteShot}
-        onMove={handleMoveShot}
+        onDelete={progressOnly ? undefined : handleDeleteShot}
       /> : null}
 
       {overheadShot ? (
@@ -667,4 +663,34 @@ function formatEpisodeLabel(plan: Pick<DailyPlan, "episode" | "shootingDate">, i
   const episode = plan.episode.trim();
   if (episode) return episode.includes("회차") ? episode : `${episode}회차`;
   return plan.shootingDate || `${index + 1}회차`;
+}
+
+function getProgressMeetingLocation(plan: DailyPlan) {
+  const explicitMeetingLocation = plan.meetingLocation?.trim() ?? "";
+  if (explicitMeetingLocation) return explicitMeetingLocation;
+
+  const meta = decodeDailyPlanMemo(plan.memo);
+  const callLocations = [
+    ...meta.starring.map((person) => person.callLocation.trim()),
+    ...meta.teams.map((team) => team.callLocation.trim())
+  ].filter(Boolean);
+  if (callLocations.length > 0) {
+    const counts = new Map<string, number>();
+    callLocations.forEach((location) => {
+      counts.set(location, (counts.get(location) ?? 0) + 1);
+    });
+    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
+  }
+
+  const firstLocation = plan.shootingLocations?.[0];
+  if (firstLocation) {
+    return [
+      firstLocation.name,
+      firstLocation.roadAddress,
+      firstLocation.address,
+      firstLocation.detail
+    ].find((value) => value?.trim())?.trim() ?? "";
+  }
+
+  return plan.shootingLocation?.trim() ?? "";
 }

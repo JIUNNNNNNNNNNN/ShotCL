@@ -29,7 +29,6 @@ export const ShotCard = memo(function ShotCard({
 }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
-  const isProcessed = isOk || isOmit;
   const hasOverhead = hasShotOverheadContent(shot.overheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
   const hasMedia = Boolean(shot.storyboardImageUrl || hasOverhead);
@@ -40,7 +39,7 @@ export const ShotCard = memo(function ShotCard({
   }
 
   function handleCardOpen(event: React.MouseEvent<HTMLElement>) {
-    if (progressOnly || shouldIgnoreCardOpen(event.target)) return;
+    if (shouldIgnoreCardOpen(event.target)) return;
     onOpen(shot);
   }
 
@@ -59,12 +58,12 @@ export const ShotCard = memo(function ShotCard({
   return (
     <article
       onClick={handleCardOpen}
-      aria-label={progressOnly ? `${shot.title} 컷 진행 상태` : `${shot.title} 컷 수정`}
+      aria-label={progressOnly ? `${shot.title} 컷 상세 보기` : `${shot.title} 컷 수정`}
       className={cn(
         "grid gap-2 rounded-[1.5rem] border bg-white p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
-        !progressOnly && "cursor-pointer",
-        isOk && "border-field-primary bg-field-light",
-        isOmit && "border-field-danger bg-white opacity-75",
+        "cursor-pointer",
+        isOk && "border-[#8da99a] bg-[#e7eee9]",
+        isOmit && "border-field-danger bg-[#fff7f5] opacity-75",
         !isOk && !isOmit && "border-field-border hover:border-field-secondary"
       )}
     >
@@ -76,7 +75,7 @@ export const ShotCard = memo(function ShotCard({
                 type="button"
                 onClick={handleImageClick}
                 data-no-drag="true"
-                className="flex min-w-0 items-center justify-center overflow-hidden rounded-[1.05rem] border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                className="flex min-w-0 items-center justify-center border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                 title="콘티 크게 보기"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -96,7 +95,7 @@ export const ShotCard = memo(function ShotCard({
                   onOpenOverhead(shot);
                 }}
                 data-no-drag="true"
-                className="min-w-0 overflow-hidden rounded-[1.05rem] border border-field-border bg-[#fbfaf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                className="min-w-0 border border-field-border bg-[#fbfaf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                 title={progressOnly ? "부감도 보기" : "부감도 편집"}
               >
                 <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
@@ -129,10 +128,19 @@ export const ShotCard = memo(function ShotCard({
           </button>
         </div>
 
-        <h2 className={cn("mt-1 truncate text-sm font-black leading-5 text-field-text", isProcessed && "underline decoration-2 underline-offset-4")}>
-          {displayText}
-        </h2>
-        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted">
+        {displayText ? (
+          <h2 className={cn(
+            "mt-1 truncate text-sm font-black leading-5 text-field-text",
+            isOk && "line-through decoration-2 decoration-field-primary/65",
+            isOmit && "underline decoration-2 underline-offset-4"
+          )}>
+            {displayText}
+          </h2>
+        ) : null}
+        <div className={cn(
+          "mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted",
+          isOk && "line-through decoration-1 decoration-field-primary/55"
+        )}>
           {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
           {shot.location ? <p className="min-w-0 flex-1 truncate text-field-secondary">장소 {shot.location}</p> : null}
           {!shot.location && shot.memo ? <p className="min-w-0 flex-1 truncate">{shot.memo}</p> : null}
@@ -140,22 +148,19 @@ export const ShotCard = memo(function ShotCard({
       </div>
       </div>
 
-        <div className={cn("grid gap-2", progressOnly ? "grid-cols-1" : "grid-cols-2 md:grid-cols-1")}>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-1">
           <button
             type="button"
             data-no-drag="true"
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
-            disabled={progressOnly && shot.status !== "pending"}
             className={cn(
               "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
-              isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary",
-              progressOnly && shot.status !== "pending" && "cursor-not-allowed opacity-60"
+              isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
             )}
           >
             <span className="font-display">OK</span>
           </button>
-          {!progressOnly ? (
           <button
             type="button"
             data-no-drag="true"
@@ -168,7 +173,6 @@ export const ShotCard = memo(function ShotCard({
           >
             <span className="font-display">omit</span>
           </button>
-          ) : null}
         </div>
     </article>
   );
@@ -178,7 +182,7 @@ function getShotDisplayText(shot: Shot) {
   const description = shot.description.trim();
   if (description) return description;
   const title = shot.title.trim();
-  if (!title || isAutomaticSceneCutLabel(title, shot.sceneNumber, shot.cutNumber)) return "촬영 내용 없음";
+  if (!title || isAutomaticSceneCutLabel(title, shot.sceneNumber, shot.cutNumber)) return "";
   return title;
 }
 
