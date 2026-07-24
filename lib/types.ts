@@ -276,3 +276,12 @@ export type ProjectStaffMember = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ProjectStaffDepartment = {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};

@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Plus, Save, Users, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
+  createBlankProjectStaffDepartment,
   createBlankProjectStaffMember,
   listProjectStaffMembers,
   saveProjectStaffMembers
@@ -14,7 +15,7 @@ import {
 import { isStaffMemberEmpty } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
-import type { Project, ProjectStaffMember } from "@/lib/types";
+import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const inputClassName =
   "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
@@ -32,6 +33,9 @@ export default function StaffListPage() {
   const projectId = useProjectId();
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectStaffMember[]>([]);
+  const [departments, setDepartments] = useState<ProjectStaffDepartment[]>([]);
+  const [isDepartmentsOpen, setIsDepartmentsOpen] = useState(false);
+  const [newDepartmentName, setNewDepartmentName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -48,6 +52,7 @@ export default function StaffListPage() {
       ]);
       setProject(projectData);
       setMembers(staffData.members);
+      setDepartments(staffData.departments);
       setIsDirty(false);
       setErrorMessage("");
     } catch (error) {
@@ -61,15 +66,20 @@ export default function StaffListPage() {
     load();
   }, [load]);
 
-  const save = useCallback(async (sourceMembers: ProjectStaffMember[], showMessage = false) => {
+  const save = useCallback(async (
+    sourceMembers: ProjectStaffMember[],
+    sourceDepartments: ProjectStaffDepartment[],
+    showMessage = false
+  ) => {
     if (!projectId || role === "progress") return;
     const version = editVersionRef.current;
     setIsSaving(true);
     setErrorMessage("");
     try {
-      const result = await saveProjectStaffMembers(projectId, sourceMembers);
+      const result = await saveProjectStaffMembers(projectId, sourceMembers, sourceDepartments);
       if (editVersionRef.current === version) {
         setMembers(result.members);
+        setDepartments(result.departments);
         setIsDirty(false);
       }
       if (showMessage) setMessage("스탭 리스트를 저장했습니다.");
@@ -95,6 +105,52 @@ export default function StaffListPage() {
     commitMembers((current) => current.map((member) => (
       member.id === id ? { ...member, ...patch } : member
     )));
+  }
+
+  function commitDepartments(
+    updater: (current: ProjectStaffDepartment[]) => ProjectStaffDepartment[]
+  ) {
+    editVersionRef.current += 1;
+    setDepartments((current) => updater(current).map((department, index) => ({
+      ...department,
+      sortOrder: index + 1
+    })));
+    setIsDirty(true);
+    setMessage("");
+    setErrorMessage("");
+  }
+
+  function addDepartment() {
+    const name = normalizeDepartmentName(newDepartmentName);
+    if (!name) return;
+    if (hasDepartmentName(departments, name)) {
+      setErrorMessage("같은 이름의 부서가 이미 등록되어 있습니다.");
+      return;
+    }
+    commitDepartments((current) => [
+      ...current,
+      createBlankProjectStaffDepartment(projectId, name, current.length + 1)
+    ]);
+    setNewDepartmentName("");
+  }
+
+  function updateDepartment(id: string, nextName: string) {
+    const name = normalizeDepartmentName(nextName);
+    if (!name) return false;
+    if (hasDepartmentName(departments, name, id)) {
+      setErrorMessage("같은 이름의 부서가 이미 등록되어 있습니다.");
+      return false;
+    }
+    const currentDepartment = departments.find((department) => department.id === id);
+    if (!currentDepartment || currentDepartment.name === name) return true;
+    commitDepartments((current) => current.map((department) => (
+      department.id === id ? { ...department, name } : department
+    )));
+    return true;
+  }
+
+  function deleteDepartment(id: string) {
+    commitDepartments((current) => current.filter((department) => department.id !== id));
   }
 
   function addMember() {
@@ -161,7 +217,7 @@ export default function StaffListPage() {
             </button>
             <button
               type="button"
-              onClick={() => void save(members, true)}
+              onClick={() => void save(members, departments, true)}
               disabled={isSaving || !isDirty}
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -183,7 +239,70 @@ export default function StaffListPage() {
         <p className="mt-3 rounded-xl border border-field-primary bg-field-light px-3 py-2 text-xs font-bold text-field-primary">{message}</p>
       ) : null}
 
+      <section className="mt-3 rounded-2xl border border-field-border bg-white px-2.5 py-2 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setIsDepartmentsOpen((current) => !current)}
+          className="flex min-h-8 w-full items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
+          aria-expanded={isDepartmentsOpen}
+          aria-controls="staff-departments-panel"
+        >
+          <span>부서 입력</span>
+          <ChevronDown
+            className={`h-4 w-4 transition-transform ${isDepartmentsOpen ? "rotate-180" : ""}`}
+            aria-hidden
+          />
+        </button>
+        {isDepartmentsOpen ? (
+          <div
+            id="staff-departments-panel"
+            className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-border px-1 pt-2"
+          >
+            {departments.map((department) => (
+              <DepartmentChip
+                key={department.id}
+                department={department}
+                onCommit={(name) => updateDepartment(department.id, name)}
+                onDelete={() => deleteDepartment(department.id)}
+              />
+            ))}
+            <div className="flex h-8 items-center rounded-full border border-dashed border-field-border bg-field-soft/50 pl-2">
+              <input
+                type="text"
+                value={newDepartmentName}
+                onChange={(event) => {
+                  setNewDepartmentName(event.target.value);
+                  setErrorMessage("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  addDepartment();
+                }}
+                className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-field-text outline-none placeholder:text-center"
+                placeholder="+ 부서 추가"
+                aria-label="새 부서 이름"
+                maxLength={100}
+              />
+              <button
+                type="button"
+                onClick={addDepartment}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-field-primary transition hover:bg-field-light active:scale-90"
+                aria-label="부서 추가"
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
       <section className="mt-3 rounded-[1.5rem] border border-field-border bg-white p-2 shadow-sm">
+        <datalist id={`staff-departments-${project.id}`}>
+          {departments.map((department) => (
+            <option key={department.id} value={department.name} />
+          ))}
+        </datalist>
         <div className={`hidden ${desktopGridClassName} gap-1.5 px-3 pb-1.5 text-center text-[10px] font-black text-field-muted md:grid`}>
           <span>부서</span>
           <span>이름</span>
@@ -208,6 +327,7 @@ export default function StaffListPage() {
                 key={member.id}
                 member={member}
                 number={index + 1}
+                departmentListId={`staff-departments-${project.id}`}
                 onChange={(patch) => updateMember(member.id, patch)}
                 onDelete={() => deleteMember(member)}
               />
@@ -222,11 +342,13 @@ export default function StaffListPage() {
 function StaffMemberRow({
   member,
   number,
+  departmentListId,
   onChange,
   onDelete
 }: {
   member: ProjectStaffMember;
   number: number;
+  departmentListId: string;
   onChange: (patch: Partial<ProjectStaffMember>) => void;
   onDelete: () => void;
 }) {
@@ -239,6 +361,7 @@ function StaffMemberRow({
         <span className="sr-only">{number}번 부서</span>
         <input
           className={inputClassName}
+          list={departmentListId}
           value={member.department}
           onChange={(event) => onChange({ department: event.target.value })}
           placeholder="부서"
@@ -301,4 +424,85 @@ function StaffMemberRow({
       </button>
     </article>
   );
+}
+
+function DepartmentChip({
+  department,
+  onCommit,
+  onDelete
+}: {
+  department: ProjectStaffDepartment;
+  onCommit: (name: string) => boolean;
+  onDelete: () => void;
+}) {
+  const [draftName, setDraftName] = useState(department.name);
+
+  useEffect(() => {
+    setDraftName(department.name);
+  }, [department.name]);
+
+  function commitDraft() {
+    const name = normalizeDepartmentName(draftName);
+    if (!name || !onCommit(name)) {
+      setDraftName(department.name);
+      return;
+    }
+    setDraftName(name);
+  }
+
+  return (
+    <div className="flex h-8 items-center rounded-full border border-field-border bg-white pl-2 shadow-sm">
+      <input
+        type="text"
+        value={draftName}
+        onChange={(event) => setDraftName(event.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            setDraftName(department.name);
+            event.currentTarget.blur();
+          }
+        }}
+        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-field-text outline-none"
+        aria-label={`${department.name} 부서명 수정`}
+        maxLength={100}
+      />
+      <button
+        type="button"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-field-muted transition hover:bg-field-danger hover:text-white active:scale-90"
+        aria-label={`${department.name} 부서 삭제`}
+      >
+        <X className="h-3 w-3" aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+function normalizeDepartmentName(value: string) {
+  return value.trim().slice(0, 100);
+}
+
+function hasDepartmentName(
+  departments: ProjectStaffDepartment[],
+  name: string,
+  exceptId?: string
+) {
+  const normalizedName = normalizeDepartmentName(name).toLocaleLowerCase("ko-KR");
+  return departments.some((department) => (
+    department.id !== exceptId &&
+    normalizeDepartmentName(department.name).toLocaleLowerCase("ko-KR") === normalizedName
+  ));
 }

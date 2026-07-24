@@ -3,7 +3,7 @@ import { normalizeStaffDepartment } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
-import type { ProjectStaffMember } from "@/lib/types";
+import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 type StaffMemberInput = {
   id?: unknown;
@@ -12,6 +12,11 @@ type StaffMemberInput = {
   phone?: unknown;
   location?: unknown;
   notes?: unknown;
+};
+
+type StaffDepartmentInput = {
+  id?: unknown;
+  name?: unknown;
 };
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
@@ -26,7 +31,18 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
       .order("sort_order")
       .order("created_at");
     if (error) throw error;
-    return NextResponse.json({ members: rows ?? [], warnings: [] });
+    const { data: departmentRows, error: departmentError } = await supabase
+      .from("project_staff_departments")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("sort_order")
+      .order("created_at");
+    if (departmentError) throw departmentError;
+    return NextResponse.json({
+      members: rows ?? [],
+      departments: departmentRows ?? [],
+      warnings: []
+    });
   } catch (error) {
     return staffRouteError(error, "스탭 리스트를 불러오지 못했습니다.");
   }
@@ -37,9 +53,15 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     const scope = await requireAdminScope(request, context);
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
-    const body = (await request.json()) as { members?: StaffMemberInput[] };
+    const body = (await request.json()) as {
+      members?: StaffMemberInput[];
+      departments?: StaffDepartmentInput[];
+    };
     if (!Array.isArray(body.members) || body.members.length > 500) {
       return NextResponse.json({ error: "스탭 목록 데이터가 올바르지 않습니다." }, { status: 400 });
+    }
+    if (!Array.isArray(body.departments) || body.departments.length > 100) {
+      return NextResponse.json({ error: "부서 목록 데이터가 올바르지 않습니다." }, { status: 400 });
     }
 
     const members = body.members.map((member, index) => normalizeMemberInput(member, projectId, index));
@@ -49,6 +71,20 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     const normalizedMembers = members as ProjectStaffMember[];
     if (new Set(normalizedMembers.map((member) => member.id)).size !== normalizedMembers.length) {
       return NextResponse.json({ error: "중복된 스탭 행이 있습니다." }, { status: 400 });
+    }
+    const departments = body.departments.map((department, index) => (
+      normalizeDepartmentInput(department, projectId, index)
+    ));
+    if (departments.some((department) => !department)) {
+      return NextResponse.json({ error: "부서 옵션 ID 또는 입력값이 올바르지 않습니다." }, { status: 400 });
+    }
+    const normalizedDepartments = departments as ProjectStaffDepartment[];
+    if (new Set(normalizedDepartments.map((department) => department.id)).size !== normalizedDepartments.length) {
+      return NextResponse.json({ error: "중복된 부서 옵션이 있습니다." }, { status: 400 });
+    }
+    const departmentNames = normalizedDepartments.map((department) => department.name.toLocaleLowerCase("ko-KR"));
+    if (new Set(departmentNames).size !== departmentNames.length) {
+      return NextResponse.json({ error: "같은 이름의 부서는 한 번만 등록할 수 있습니다." }, { status: 400 });
     }
 
     const ids = normalizedMembers.map((member) => member.id);
@@ -62,12 +98,41 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
         return NextResponse.json({ error: "다른 프로젝트의 스탭 행은 수정할 수 없습니다." }, { status: 409 });
       }
     }
+    const departmentIds = normalizedDepartments.map((department) => department.id);
+    if (departmentIds.length > 0) {
+      const { data: departmentIdRows, error: departmentIdError } = await supabase
+        .from("project_staff_departments")
+        .select("id,project_id")
+        .in("id", departmentIds);
+      if (departmentIdError) throw departmentIdError;
+      if ((departmentIdRows ?? []).some((row) => row.project_id !== projectId)) {
+        return NextResponse.json({ error: "다른 프로젝트의 부서 옵션은 수정할 수 없습니다." }, { status: 409 });
+      }
+    }
 
     const { data: existingRows, error: existingError } = await supabase
       .from("project_staff_members")
       .select("id")
       .eq("project_id", projectId);
     if (existingError) throw existingError;
+    const { data: existingDepartmentRows, error: existingDepartmentError } = await supabase
+      .from("project_staff_departments")
+      .select("id")
+      .eq("project_id", projectId);
+    if (existingDepartmentError) throw existingDepartmentError;
+
+    const departmentRows = normalizedDepartments.map((department, index) => ({
+      id: department.id,
+      project_id: projectId,
+      name: department.name,
+      sort_order: index + 1
+    }));
+    if (departmentRows.length > 0) {
+      const { error } = await supabase
+        .from("project_staff_departments")
+        .upsert(departmentRows, { onConflict: "id" });
+      if (error) throw error;
+    }
 
     const rows = normalizedMembers.map((member, index) => ({
       id: member.id,
@@ -81,6 +146,19 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     }));
     if (rows.length > 0) {
       const { error } = await supabase.from("project_staff_members").upsert(rows, { onConflict: "id" });
+      if (error) throw error;
+    }
+
+    const submittedDepartmentIds = new Set(departmentIds);
+    const deletedDepartmentRows = (existingDepartmentRows ?? []).filter((
+      row
+    ) => !submittedDepartmentIds.has(row.id));
+    if (deletedDepartmentRows.length > 0) {
+      const { error } = await supabase
+        .from("project_staff_departments")
+        .delete()
+        .eq("project_id", projectId)
+        .in("id", deletedDepartmentRows.map((row) => row.id));
       if (error) throw error;
     }
 
@@ -102,8 +180,19 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       .order("sort_order")
       .order("created_at");
     if (savedError) throw savedError;
+    const { data: savedDepartmentRows, error: savedDepartmentError } = await supabase
+      .from("project_staff_departments")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("sort_order")
+      .order("created_at");
+    if (savedDepartmentError) throw savedDepartmentError;
 
-    return NextResponse.json({ members: savedRows ?? [], warnings: [] });
+    return NextResponse.json({
+      members: savedRows ?? [],
+      departments: savedDepartmentRows ?? [],
+      warnings: []
+    });
   } catch (error) {
     return staffRouteError(error, "스탭 리스트를 저장하지 못했습니다.");
   }
@@ -147,6 +236,25 @@ function normalizeMemberInput(
   };
 }
 
+function normalizeDepartmentInput(
+  department: StaffDepartmentInput,
+  projectId: string,
+  index: number
+): ProjectStaffDepartment | null {
+  const id = String(department.id ?? "").trim();
+  const name = normalizeText(department.name, 100).trim();
+  if (!isUuid(id) || !name) return null;
+  const now = new Date().toISOString();
+  return {
+    id,
+    projectId,
+    name,
+    sortOrder: index + 1,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 function normalizeText(value: unknown, maxLength: number) {
   return String(value ?? "").slice(0, maxLength);
 }
@@ -157,10 +265,28 @@ function isUuid(value: string) {
 
 function staffRouteError(error: unknown, fallback: string) {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-  const message = error instanceof Error ? error.message : "";
-  const migrationMissing = code === "42P01" || code === "PGRST205" || /project_staff_members/i.test(message);
+  const message = error && typeof error === "object" && "message" in error
+    ? String(error.message)
+    : error instanceof Error
+      ? error.message
+      : "";
+  const departmentMigrationMissing = (
+    code === "42P01" ||
+    code === "PGRST205"
+  ) && /project_staff_departments/i.test(message);
+  const memberMigrationMissing = (
+    code === "42P01" ||
+    code === "PGRST205"
+  ) && /project_staff_members/i.test(message);
+  const migrationMissing = departmentMigrationMissing || memberMigrationMissing;
   return NextResponse.json(
-    { error: migrationMissing ? "프로젝트 스탭 리스트 migration을 먼저 적용해주세요." : fallback },
+    {
+      error: departmentMigrationMissing
+        ? "프로젝트 부서 목록 migration을 먼저 적용해주세요."
+        : memberMigrationMissing
+          ? "프로젝트 스탭 리스트 migration을 먼저 적용해주세요."
+          : fallback
+    },
     { status: error instanceof ProjectAccessUnavailableError || migrationMissing ? 503 : 500 }
   );
 }
