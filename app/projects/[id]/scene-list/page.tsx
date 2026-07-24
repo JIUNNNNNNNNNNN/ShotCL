@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  forwardRef,
   memo,
   useCallback,
   useEffect,
@@ -96,6 +97,24 @@ type DeletePopoverState = {
   top: number;
 };
 
+type HeaderHelpPopoverState = {
+  description: string;
+  left: number;
+  top: number;
+};
+
+type CharacterNotesPopoverState = {
+  itemId: string;
+  left: number;
+  top: number;
+  readOnly: boolean;
+};
+
+type HeaderLongPressHandler = (
+  event: ReactPointerEvent<HTMLElement>,
+  description: string
+) => void;
+
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
   return Array.isArray(params.id) ? params.id[0] : params.id;
@@ -118,6 +137,9 @@ export default function ProjectSceneListPage() {
   const [selectedRange, setSelectedRange] = useState<SceneCellRange | null>(null);
   const [editingCell, setEditingCell] = useState<SelectedSceneCell | null>(null);
   const [deletePopover, setDeletePopover] = useState<DeletePopoverState | null>(null);
+  const [headerHelpPopover, setHeaderHelpPopover] = useState<HeaderHelpPopoverState | null>(null);
+  const [characterNotesPopover, setCharacterNotesPopover] =
+    useState<CharacterNotesPopoverState | null>(null);
   const itemsRef = useRef(items);
   const selectedCellRef = useRef(selectedCell);
   const selectedRangeRef = useRef(selectedRange);
@@ -126,7 +148,12 @@ export default function ProjectSceneListPage() {
   const cellDragRef = useRef<CellDragState | null>(null);
   const cellDragCleanupRef = useRef<(() => void) | null>(null);
   const sceneLongPressCleanupRef = useRef<(() => void) | null>(null);
+  const headerLongPressCleanupRef = useRef<(() => void) | null>(null);
+  const characterLongPressCleanupRef = useRef<(() => void) | null>(null);
+  const suppressCharacterClickRef = useRef<string | null>(null);
   const deletePopoverRef = useRef<HTMLDivElement | null>(null);
+  const headerHelpPopoverRef = useRef<HTMLDivElement | null>(null);
+  const characterNotesPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -181,6 +208,8 @@ export default function ProjectSceneListPage() {
   useEffect(() => () => {
     cellDragCleanupRef.current?.();
     sceneLongPressCleanupRef.current?.();
+    headerLongPressCleanupRef.current?.();
+    characterLongPressCleanupRef.current?.();
     document.body.style.removeProperty("user-select");
     document.body.style.removeProperty("cursor");
   }, []);
@@ -194,6 +223,25 @@ export default function ProjectSceneListPage() {
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [deletePopover]);
+
+  useEffect(() => {
+    if (!headerHelpPopover && !characterNotesPopover) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        (
+          headerHelpPopoverRef.current?.contains(event.target) ||
+          characterNotesPopoverRef.current?.contains(event.target)
+        )
+      ) {
+        return;
+      }
+      setHeaderHelpPopover(null);
+      setCharacterNotesPopover(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [characterNotesPopover, headerHelpPopover]);
 
   const cellColumns = useMemo<SceneCellColumn[]>(
     () => [
@@ -806,6 +854,44 @@ export default function ProjectSceneListPage() {
     window.addEventListener("pointercancel", handleEnd);
   }, [canEdit]);
 
+  const startHeaderHelpLongPress = useCallback<HeaderLongPressHandler>((event, description) => {
+    headerLongPressCleanupRef.current?.();
+    setHeaderHelpPopover(null);
+    headerLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
+      const width = 150;
+      setHeaderHelpPopover({
+        description,
+        left: clampPopoverLeft(x, width),
+        top: getPopoverTop(y, 44)
+      });
+    });
+  }, []);
+
+  const startCharacterNotesLongPress = useCallback((
+    event: ReactPointerEvent<HTMLElement>,
+    item: ProjectSceneItem,
+    readOnly: boolean
+  ) => {
+    characterLongPressCleanupRef.current?.();
+    setCharacterNotesPopover(null);
+    characterLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
+      suppressCharacterClickRef.current = item.id;
+      const width = 280;
+      setCharacterNotesPopover({
+        itemId: item.id,
+        left: clampPopoverLeft(x, width),
+        top: getPopoverTop(y, 210),
+        readOnly
+      });
+    });
+  }, []);
+
+  const consumeCharacterClickSuppression = useCallback((itemId: string) => {
+    if (suppressCharacterClickRef.current !== itemId) return false;
+    suppressCharacterClickRef.current = null;
+    return true;
+  }, []);
+
   function addItem() {
     if (!canEdit || !projectId) return;
     commitItems([
@@ -892,6 +978,8 @@ export default function ProjectSceneListPage() {
           items={items}
           actorRoles={actorRoles}
           locationStyles={locationStyles}
+          onHeaderLongPress={startHeaderHelpLongPress}
+          onCharacterNotesLongPress={startCharacterNotesLongPress}
         />
 
         <div
@@ -911,52 +999,76 @@ export default function ProjectSceneListPage() {
             className="grid border-b border-[#bfc5bf] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
             style={{ gridTemplateColumns }}
           >
-            <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
-              Scene
-            </div>
+            <SceneHeaderCell
+              label="Scene"
+              description="씬"
+              className="border-r border-[#bfc5bf]"
+              onLongPress={startHeaderHelpLongPress}
+            />
             {compactLocationLayout ? (
-              <div
-                role="columnheader"
-                className="col-span-2 flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center"
-              >
-                Location
-              </div>
+              <SceneHeaderCell
+                label="Location"
+                description="대장소"
+                className="col-span-2 border-r border-[#bfc5bf]"
+                onLongPress={startHeaderHelpLongPress}
+              />
             ) : (
               <>
-                <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
-                  Location
-                </div>
-                <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
-                  Sub-Location
-                </div>
+                <SceneHeaderCell
+                  label="Location"
+                  description="대장소"
+                  className="border-r border-[#bfc5bf]"
+                  onLongPress={startHeaderHelpLongPress}
+                />
+                <SceneHeaderCell
+                  label="Sub-Location"
+                  description="세부장소"
+                  className="border-r border-[#bfc5bf]"
+                  onLongPress={startHeaderHelpLongPress}
+                />
               </>
             )}
-            {["Day", "Time", "Int/Ext", "Content"].map((label) => (
-              <div role="columnheader" key={label} className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
-                {label}
-              </div>
+            <SceneHeaderCell
+              label="Day"
+              className="border-r border-[#bfc5bf]"
+              onLongPress={startHeaderHelpLongPress}
+            />
+            {([
+              ["Time", "D/N"],
+              ["Int/Ext", "I/E"],
+              ["Content", "씬 내용"]
+            ] as const).map(([label, description]) => (
+              <SceneHeaderCell
+                key={label}
+                label={label}
+                description={description}
+                className="border-r border-[#bfc5bf]"
+                onLongPress={startHeaderHelpLongPress}
+              />
             ))}
             {actorRoles.map((role, actorIndex) => {
               const actorStyle = getActorStyle(actorIndex);
               return (
-              <div
-                key={role}
-                title={role}
-                role="columnheader"
-                aria-label={`Characters: ${role}`}
-                className="flex min-w-0 items-center justify-center truncate border-r border-[#bfc5bf] px-0.5 py-1.5 text-center"
-                style={{
-                  backgroundColor: actorStyle.headerBackground,
-                  color: actorStyle.color
-                }}
-              >
-                {role}
-              </div>
+                <SceneHeaderCell
+                  key={role}
+                  label={role}
+                  title={role}
+                  ariaLabel={`Characters: ${role}`}
+                  description="등장인물"
+                  className="border-r border-[#bfc5bf] px-0.5"
+                  style={{
+                    backgroundColor: actorStyle.headerBackground,
+                    color: actorStyle.color
+                  }}
+                  onLongPress={startHeaderHelpLongPress}
+                />
               );
             })}
-            <div role="columnheader" className="flex min-w-0 items-center justify-center px-1 py-1.5 text-center">
-              Memo
-            </div>
+            <SceneHeaderCell
+              label="Memo"
+              description="소품&특이사항"
+              onLongPress={startHeaderHelpLongPress}
+            />
           </div>
 
           <SceneReorderList
@@ -979,6 +1091,8 @@ export default function ProjectSceneListPage() {
                 onCellEditStart={startEditingCell}
                 onCellEditEnd={stopEditingCell}
                 onSceneLongPress={startSceneDeleteLongPress}
+                onCharacterNotesLongPress={startCharacterNotesLongPress}
+                onConsumeCharacterClickSuppression={consumeCharacterClickSuppression}
                 onUpdate={updateItem}
               />
             )}
@@ -1020,6 +1134,31 @@ export default function ProjectSceneListPage() {
             삭제
           </button>
         </div>
+      ) : null}
+
+      {headerHelpPopover ? (
+        <div
+          ref={headerHelpPopoverRef}
+          role="tooltip"
+          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center rounded-xl border border-field-border bg-white px-3 py-2 text-center text-xs font-bold text-field-primary shadow-[0_8px_22px_rgba(15,61,46,0.14)]"
+          style={{ left: headerHelpPopover.left, top: headerHelpPopover.top }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          {headerHelpPopover.description}
+        </div>
+      ) : null}
+
+      {characterNotesPopover ? (
+        <CharacterNotesPopover
+          ref={characterNotesPopoverRef}
+          item={items.find((item) => item.id === characterNotesPopover.itemId)}
+          canEdit={canEdit && !characterNotesPopover.readOnly}
+          left={characterNotesPopover.left}
+          top={characterNotesPopover.top}
+          onChange={(characterNotes) => {
+            updateItem(characterNotesPopover.itemId, { characterNotes });
+          }}
+        />
       ) : null}
 
       {(canEdit || scenarioReference) ? (
@@ -1067,11 +1206,19 @@ const mobileSceneGridTemplate = ".44fr .82fr .46fr .48fr 1.55fr 1.05fr 1.05fr";
 function MobileSceneList({
   items,
   actorRoles,
-  locationStyles
+  locationStyles,
+  onHeaderLongPress,
+  onCharacterNotesLongPress
 }: {
   items: ProjectSceneItem[];
   actorRoles: string[];
   locationStyles: Map<string, PaletteStyle>;
+  onHeaderLongPress: HeaderLongPressHandler;
+  onCharacterNotesLongPress: (
+    event: ReactPointerEvent<HTMLElement>,
+    item: ProjectSceneItem,
+    readOnly: boolean
+  ) => void;
 }) {
   return (
     <div
@@ -1081,19 +1228,37 @@ function MobileSceneList({
       <div className="grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
-        <MobileSceneHeader>Scene</MobileSceneHeader>
-        <MobileSceneHeader>
-          <span>Location</span>
-          <span>Sub-Location</span>
-        </MobileSceneHeader>
-        <MobileSceneHeader>Day</MobileSceneHeader>
-        <MobileSceneHeader>
-          <span>Time</span>
-          <span>Int/Ext</span>
-        </MobileSceneHeader>
-        <MobileSceneHeader>Content</MobileSceneHeader>
-        <MobileSceneHeader>Characters</MobileSceneHeader>
-        <MobileSceneHeader>Memo</MobileSceneHeader>
+        <MobileSceneHeader
+          entries={[["Scene", "씬"]]}
+          onLongPress={onHeaderLongPress}
+        />
+        <MobileSceneHeader
+          entries={[
+            ["Location", "대장소"],
+            ["Sub-Location", "세부장소"]
+          ]}
+          onLongPress={onHeaderLongPress}
+        />
+        <MobileSceneHeader entries={[["Day"]]} onLongPress={onHeaderLongPress} />
+        <MobileSceneHeader
+          entries={[
+            ["Time", "D/N"],
+            ["Int/Ext", "I/E"]
+          ]}
+          onLongPress={onHeaderLongPress}
+        />
+        <MobileSceneHeader
+          entries={[["Content", "씬 내용"]]}
+          onLongPress={onHeaderLongPress}
+        />
+        <MobileSceneHeader
+          entries={[["Characters", "등장인물"]]}
+          onLongPress={onHeaderLongPress}
+        />
+        <MobileSceneHeader
+          entries={[["Memo", "소품&특이사항"]]}
+          onLongPress={onHeaderLongPress}
+        />
       </div>
 
       {items.length > 0 ? items.map((item, index) => (
@@ -1103,6 +1268,7 @@ function MobileSceneList({
           index={index}
           actorRoles={actorRoles}
           locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+          onCharacterNotesLongPress={onCharacterNotesLongPress}
         />
       )) : (
         <p className="border-x border-b border-[#bfc5bf] px-3 py-8 text-center text-xs font-semibold text-field-muted">
@@ -1117,12 +1283,18 @@ function MobileSceneRow({
   item,
   index,
   actorRoles,
-  locationStyle
+  locationStyle,
+  onCharacterNotesLongPress
 }: {
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
   locationStyle: PaletteStyle;
+  onCharacterNotesLongPress: (
+    event: ReactPointerEvent<HTMLElement>,
+    item: ProjectSceneItem,
+    readOnly: boolean
+  ) => void;
 }) {
   const selectedCharacters = parseCharacters(item.characters);
   const mergedLocation = isSameHorizontalLocation(item);
@@ -1152,8 +1324,13 @@ function MobileSceneRow({
       <MobileSceneCell className="row-span-2" align="left">
         {item.sceneContent}
       </MobileSceneCell>
-      <MobileSceneCell className="row-span-2" align="left">
-        <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+      <MobileSceneCell
+        className="row-span-2"
+        align="left"
+        onLongPress={(event) => onCharacterNotesLongPress(event, item, true)}
+      >
+        <span className="flex min-w-0 flex-col items-start gap-0.5">
+          <span className="flex min-w-0 flex-wrap items-center gap-0.5">
           {selectedCharacters.map((role) => {
             const actorIndex = actorRoles.findIndex(
               (candidate) => candidate.toLocaleLowerCase() === role.toLocaleLowerCase()
@@ -1169,6 +1346,12 @@ function MobileSceneRow({
               </span>
             );
           })}
+          </span>
+          {item.characterNotes ? (
+            <span className="whitespace-pre-wrap text-[8px] font-medium text-field-muted [overflow-wrap:anywhere]">
+              {item.characterNotes}
+            </span>
+          ) : null}
         </span>
       </MobileSceneCell>
       <MobileSceneCell className="row-span-2" align="left">
@@ -1187,13 +1370,29 @@ function MobileSceneRow({
   );
 }
 
-function MobileSceneHeader({ children }: { children: ReactNode }) {
+function MobileSceneHeader({
+  entries,
+  onLongPress
+}: {
+  entries: ReadonlyArray<readonly [label: string, description?: string]>;
+  onLongPress: HeaderLongPressHandler;
+}) {
   return (
     <div
       role="columnheader"
-      className="flex min-w-0 flex-col items-center justify-center border-b border-r border-[#bfc5bf] px-0.5 py-1.5 text-center [overflow-wrap:anywhere]"
+      className="flex min-w-0 flex-col items-stretch justify-center border-b border-r border-[#bfc5bf] text-center [overflow-wrap:anywhere]"
     >
-      {children}
+      {entries.map(([label, description]) => (
+        <span
+          key={label}
+          className="flex min-h-5 flex-1 touch-none select-none items-center justify-center px-0.5 py-0.5 text-center"
+          onPointerDown={description
+            ? (event) => onLongPress(event, description)
+            : undefined}
+        >
+          {label}
+        </span>
+      ))}
     </div>
   );
 }
@@ -1202,12 +1401,14 @@ function MobileSceneCell({
   children,
   className = "",
   align = "left",
-  style
+  style,
+  onLongPress
 }: {
   children: ReactNode;
   className?: string;
   align?: "left" | "center";
   style?: CSSProperties;
+  onLongPress?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
@@ -1216,11 +1417,90 @@ function MobileSceneCell({
         align === "center" ? "justify-center text-center" : "justify-start whitespace-pre-wrap text-left"
       } ${className}`}
       style={style}
+      onPointerDown={onLongPress}
     >
       {children}
     </div>
   );
 }
+
+function SceneHeaderCell({
+  label,
+  description,
+  className = "",
+  style,
+  title,
+  ariaLabel,
+  onLongPress
+}: {
+  label: string;
+  description?: string;
+  className?: string;
+  style?: CSSProperties;
+  title?: string;
+  ariaLabel?: string;
+  onLongPress: HeaderLongPressHandler;
+}) {
+  return (
+    <div
+      role="columnheader"
+      title={title}
+      aria-label={ariaLabel}
+      className={`flex min-w-0 touch-none select-none items-center justify-center truncate px-1 py-1.5 text-center ${className}`}
+      style={style}
+      onPointerDown={description
+        ? (event) => onLongPress(event, description)
+        : undefined}
+    >
+      {label}
+    </div>
+  );
+}
+
+const CharacterNotesPopover = forwardRef<HTMLDivElement, {
+  item: ProjectSceneItem | undefined;
+  canEdit: boolean;
+  left: number;
+  top: number;
+  onChange: (value: string) => void;
+}>(function CharacterNotesPopover({
+  item,
+  canEdit,
+  left,
+  top,
+  onChange
+}, ref) {
+  if (!item) return null;
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label={`${item.sceneNo || "현재"} Scene Characters 세부 메모`}
+      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden rounded-xl border border-field-border bg-white shadow-[0_10px_28px_rgba(15,61,46,0.16)]"
+      style={{ left, top }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <p className="border-b border-field-border bg-field-soft px-3 py-2 text-xs font-black text-field-primary">
+        Characters · Scene {item.sceneNo || "—"}
+      </p>
+      {canEdit ? (
+        <textarea
+          value={item.characterNotes}
+          onChange={(event) => onChange(event.target.value)}
+          rows={5}
+          maxLength={4000}
+          aria-label="Characters 세부 메모"
+          placeholder="예: 상아 V.O, 수연 실루엣"
+          className="block w-full resize-y bg-white px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
+        />
+      ) : (
+        <p className="max-h-44 min-h-16 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
+          {item.characterNotes || "등록된 세부 메모가 없습니다."}
+        </p>
+      )}
+    </div>
+  );
+});
 
 const SceneTableRow = memo(function SceneTableRow({
   item,
@@ -1237,6 +1517,8 @@ const SceneTableRow = memo(function SceneTableRow({
   onCellEditStart,
   onCellEditEnd,
   onSceneLongPress,
+  onCharacterNotesLongPress,
+  onConsumeCharacterClickSuppression,
   onUpdate,
 }: {
   item: ProjectSceneItem;
@@ -1262,6 +1544,12 @@ const SceneTableRow = memo(function SceneTableRow({
     event: ReactPointerEvent<HTMLDivElement>,
     item: ProjectSceneItem
   ) => void;
+  onCharacterNotesLongPress: (
+    event: ReactPointerEvent<HTMLElement>,
+    item: ProjectSceneItem,
+    readOnly: boolean
+  ) => void;
+  onConsumeCharacterClickSuppression: (itemId: string) => boolean;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
 }) {
   const selectedCharacters = useMemo(
@@ -1315,6 +1603,7 @@ const SceneTableRow = memo(function SceneTableRow({
   const interiorExteriorInteraction = getCellInteraction("interiorExterior");
   const concealInteriorExterior = isVisuallyMerged(interiorExteriorInteraction);
   const sceneContentInteraction = getCellInteraction("sceneContent");
+  const propsInteraction = getCellInteraction("props");
 
   function toggleCharacter(role: string) {
     const normalizedRole = role.trim();
@@ -1500,7 +1789,11 @@ const SceneTableRow = memo(function SceneTableRow({
         const selected = selectedCharacters.some(
           (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
         );
-        const actorInteraction = getCellInteraction(`actor:${role}`);
+        const baseActorInteraction = getCellInteraction(`actor:${role}`);
+        const actorInteraction: SceneCellInteraction = {
+          ...baseActorInteraction,
+          onLongPress: (event) => onCharacterNotesLongPress(event, item, !canEdit)
+        };
         const actorStyle = getActorStyle(actorIndex);
         const concealActorValue = isVisuallyMerged(actorInteraction);
         return (
@@ -1516,7 +1809,10 @@ const SceneTableRow = memo(function SceneTableRow({
             {canEdit ? (
               <button
                 type="button"
-                onClick={() => toggleCharacter(role)}
+                onClick={() => {
+                  if (onConsumeCharacterClickSuppression(item.id)) return;
+                  toggleCharacter(role);
+                }}
                 aria-label={`${item.sceneNo || index + 1} Scene Character ${role} ${selected ? "제외" : "포함"}`}
                 aria-pressed={selected}
                 className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
@@ -1535,18 +1831,37 @@ const SceneTableRow = memo(function SceneTableRow({
                 {selected && !concealActorValue ? "O" : ""}
               </span>
             )}
+            {actorIndex === 0 && item.characterNotes ? (
+              <span
+                aria-label="Characters 세부 메모 있음"
+                title={item.characterNotes}
+                className="pointer-events-none absolute right-0.5 top-0 text-[10px] font-black leading-none text-field-muted"
+              >
+                ···
+              </span>
+            ) : null}
           </SceneCellFrame>
         );
       })}
 
-      <SceneCell
-        value={item.props}
-        ariaLabel={`${item.sceneNo || index + 1} Scene Memo`}
-        canEdit={canEdit}
-        interaction={getCellInteraction("props")}
-        textAlign="left"
-        onChange={(props) => onUpdate(item.id, { props })}
-      />
+      <SceneCellFrame interaction={propsInteraction} value={item.props}>
+        {canEdit ? (
+          <AutoGrowSceneTextarea
+            value={item.props}
+            onChange={(props) => onUpdate(item.id, { props })}
+            onFocus={() => {
+              onCellSelect(item.id, "props", index);
+              onCellEditStart(item.id, "props");
+            }}
+            onBlur={() => onCellEditEnd(item.id, "props")}
+            aria-label={`${item.sceneNo || index + 1} Scene Memo`}
+          />
+        ) : (
+          <p className="whitespace-pre-wrap px-1.5 py-2 text-left font-medium leading-5 [overflow-wrap:anywhere]">
+            {item.props}
+          </p>
+        )}
+      </SceneCellFrame>
     </div>
   );
 });
@@ -2150,6 +2465,57 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(
     target.closest("input, textarea, select, button, a, [role='button']")
   );
+}
+
+function beginLongPress(
+  event: ReactPointerEvent<HTMLElement>,
+  onTrigger: (point: { x: number; y: number }) => void
+) {
+  if (event.button !== 0) return () => undefined;
+  const pointerId = event.pointerId;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let timer: number | null = null;
+
+  const cleanup = () => {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleEnd);
+    window.removeEventListener("pointercancel", handleEnd);
+  };
+  const handleMove = (moveEvent: PointerEvent) => {
+    if (moveEvent.pointerId !== pointerId) return;
+    if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 8) {
+      cleanup();
+    }
+  };
+  const handleEnd = (endEvent: PointerEvent) => {
+    if (endEvent.pointerId === pointerId) cleanup();
+  };
+
+  timer = window.setTimeout(() => {
+    window.getSelection()?.removeAllRanges();
+    onTrigger({ x: startX, y: startY });
+  }, 520);
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleEnd);
+  window.addEventListener("pointercancel", handleEnd);
+  return cleanup;
+}
+
+function clampPopoverLeft(pointerX: number, width: number) {
+  return Math.min(
+    window.innerWidth - width - 8,
+    Math.max(8, pointerX - width / 2)
+  );
+}
+
+function getPopoverTop(pointerY: number, height: number) {
+  const preferredTop = pointerY + 14;
+  return preferredTop + height < window.innerHeight
+    ? preferredTop
+    : Math.max(8, pointerY - height - 14);
 }
 
 function parseCharacters(value: string) {

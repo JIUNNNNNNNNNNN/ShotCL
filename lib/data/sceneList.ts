@@ -32,6 +32,7 @@ export function createBlankProjectSceneItem(
     interiorExterior: "",
     sceneContent: "",
     characters: "",
+    characterNotes: "",
     props: "",
     sortOrder,
     createdAt: now,
@@ -112,6 +113,7 @@ function normalizeSceneList(
       interiorExterior: item.interiorExterior.slice(0, 10),
       sceneContent: item.sceneContent.slice(0, 4000),
       characters: item.characters.slice(0, 1000),
+      characterNotes: String(item.characterNotes ?? "").slice(0, 4000),
       props: String(item.props ?? "").slice(0, 1000),
       sortOrder: index + 1,
       updatedAt: new Date().toISOString()
@@ -132,6 +134,7 @@ function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
     interiorExterior: String(row.interior_exterior ?? ""),
     sceneContent: String(row.scene_content ?? ""),
     characters: String(row.characters ?? ""),
+    characterNotes: String(row.character_notes ?? ""),
     props: String(row.props ?? ""),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
@@ -165,6 +168,7 @@ function readLocalSceneList(projectId: string): ProjectSceneList {
       ? {
           items: sortSceneItems((current.items ?? []).map((item) => ({
             ...item,
+            characterNotes: String(item.characterNotes ?? ""),
             props: String(item.props ?? "")
           }))),
           scenarioReference: current.scenarioReference ?? ""

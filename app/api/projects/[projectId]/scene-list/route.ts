@@ -19,6 +19,7 @@ type SceneItemInput = {
   interiorExterior?: unknown;
   sceneContent?: unknown;
   characters?: unknown;
+  characterNotes?: unknown;
   props?: unknown;
 };
 
@@ -33,6 +34,7 @@ const SCENE_COLUMNS = [
   "interior_exterior",
   "scene_content",
   "characters",
+  "character_notes",
   "props",
   "sort_order",
   "created_at",
@@ -224,7 +226,8 @@ function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
     interior_exterior: normalizeText(item.interiorExterior, 10),
     scene_content: normalizeText(item.sceneContent, 4000),
     characters: normalizeText(item.characters, 1000),
-    props: normalizeText(item.props, 1000),
+    character_notes: normalizeMultilineText(item.characterNotes, 4000),
+    props: normalizeMultilineText(item.props, 1000),
     sort_order: index + 1
   };
 }
@@ -244,6 +247,10 @@ function extractActorRoles(value: unknown): string[] {
 
 function normalizeText(value: unknown, maxLength: number) {
   return String(value ?? "").trim().slice(0, maxLength);
+}
+
+function normalizeMultilineText(value: unknown, maxLength: number) {
+  return String(value ?? "").replace(/\r\n?/g, "\n").slice(0, maxLength);
 }
 
 function isUuid(value: string) {
@@ -277,6 +284,16 @@ function sceneListError(error: unknown, fallback: string) {
   if (propsColumnMissing) {
     return NextResponse.json(
       { error: "씬리스트 주요 소품 migration을 먼저 적용해주세요." },
+      { status: 503 }
+    );
+  }
+  const characterNotesColumnMissing = (
+    code === "42703" ||
+    code === "PGRST204"
+  ) && /character_notes/i.test(message);
+  if (characterNotesColumnMissing) {
+    return NextResponse.json(
+      { error: "씬리스트 Characters 메모 migration을 먼저 적용해주세요." },
       { status: 503 }
     );
   }
