@@ -19,6 +19,7 @@ type SceneItemInput = {
   interiorExterior?: unknown;
   sceneContent?: unknown;
   characters?: unknown;
+  props?: unknown;
 };
 
 const SCENE_COLUMNS = [
@@ -32,6 +33,7 @@ const SCENE_COLUMNS = [
   "interior_exterior",
   "scene_content",
   "characters",
+  "props",
   "sort_order",
   "created_at",
   "updated_at"
@@ -43,7 +45,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
 
-    const [{ data: rows, error }, { data: note, error: noteError }] = await Promise.all([
+    const [
+      { data: rows, error },
+      { data: note, error: noteError },
+      { data: basicInfo, error: basicInfoError }
+    ] = await Promise.all([
       supabase
         .from("project_scene_items")
         .select(SCENE_COLUMNS)
@@ -54,14 +60,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
         .from("project_scene_notes")
         .select("scenario_reference")
         .eq("project_id", projectId)
+        .maybeSingle(),
+      supabase
+        .from("project_basic_info")
+        .select("actors")
+        .eq("project_id", projectId)
         .maybeSingle()
     ]);
     if (error) throw error;
     if (noteError) throw noteError;
+    if (basicInfoError) {
+      console.error("[project-scene-list] actor roles", {
+        code: basicInfoError.code,
+        message: basicInfoError.message
+      });
+    }
 
     return NextResponse.json({
       items: rows ?? [],
-      scenarioReference: note?.scenario_reference ?? ""
+      scenarioReference: note?.scenario_reference ?? "",
+      actorRoles: extractActorRoles(basicInfo?.actors)
     });
   } catch (error) {
     return sceneListError(error, "씬리스트를 불러오지 못했습니다.");
@@ -206,8 +224,22 @@ function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
     interior_exterior: normalizeText(item.interiorExterior, 10),
     scene_content: normalizeText(item.sceneContent, 4000),
     characters: normalizeText(item.characters, 1000),
+    props: normalizeText(item.props, 1000),
     sort_order: index + 1
   };
+}
+
+function extractActorRoles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((actor) => {
+        if (!actor || typeof actor !== "object") return "";
+        const record = actor as Record<string, unknown>;
+        return normalizeText(record.role, 120) || normalizeText(record.name, 120);
+      })
+      .filter(Boolean)
+  ));
 }
 
 function normalizeText(value: unknown, maxLength: number) {
@@ -235,6 +267,16 @@ function sceneListError(error: unknown, fallback: string) {
   if (migrationMissing) {
     return NextResponse.json(
       { error: "프로젝트 씬리스트 migration을 먼저 적용해주세요." },
+      { status: 503 }
+    );
+  }
+  const propsColumnMissing = (
+    code === "42703" ||
+    code === "PGRST204"
+  ) && /props/i.test(message);
+  if (propsColumnMissing) {
+    return NextResponse.json(
+      { error: "씬리스트 주요 소품 migration을 먼저 적용해주세요." },
       { status: 503 }
     );
   }

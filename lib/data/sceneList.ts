@@ -6,7 +6,12 @@ const LOCAL_SCENE_LIST_KEY = "today-storyboard-project-scene-lists";
 type SceneListPayload = {
   items?: Record<string, unknown>[];
   scenarioReference?: unknown;
+  actorRoles?: unknown;
   error?: string;
+};
+
+export type ProjectSceneListResult = ProjectSceneList & {
+  actorRoles: string[];
 };
 
 type LocalSceneListBuckets = Record<string, ProjectSceneList>;
@@ -27,6 +32,7 @@ export function createBlankProjectSceneItem(
     interiorExterior: "",
     sceneContent: "",
     characters: "",
+    props: "",
     sortOrder,
     createdAt: now,
     updatedAt: now
@@ -34,7 +40,7 @@ export function createBlankProjectSceneItem(
 }
 
 /** 일촬표와 무관한 프로젝트 공통 씬리스트를 불러옵니다. */
-export async function getProjectSceneList(projectId: string): Promise<ProjectSceneList> {
+export async function getProjectSceneList(projectId: string): Promise<ProjectSceneListResult> {
   try {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
@@ -44,7 +50,8 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
     if (response.ok && Array.isArray(payload.items)) {
       return {
         items: sortSceneItems(payload.items.map(sceneItemFromRow)),
-        scenarioReference: String(payload.scenarioReference ?? "")
+        scenarioReference: String(payload.scenarioReference ?? ""),
+        actorRoles: normalizeActorRoles(payload.actorRoles)
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
@@ -54,7 +61,7 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
 
-  return readLocalSceneList(projectId);
+  return { ...readLocalSceneList(projectId), actorRoles: [] };
 }
 
 /** 저장 버튼을 누른 시점의 씬 행과 시나리오 참고만 한 번에 반영합니다. */
@@ -105,6 +112,7 @@ function normalizeSceneList(
       interiorExterior: item.interiorExterior.slice(0, 10),
       sceneContent: item.sceneContent.slice(0, 4000),
       characters: item.characters.slice(0, 1000),
+      props: String(item.props ?? "").slice(0, 1000),
       sortOrder: index + 1,
       updatedAt: new Date().toISOString()
     })),
@@ -124,6 +132,7 @@ function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
     interiorExterior: String(row.interior_exterior ?? ""),
     sceneContent: String(row.scene_content ?? ""),
     characters: String(row.characters ?? ""),
+    props: String(row.props ?? ""),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
@@ -136,6 +145,16 @@ function sortSceneItems(items: ProjectSceneItem[]) {
   ));
 }
 
+function normalizeActorRoles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .filter((role): role is string => typeof role === "string")
+      .map((role) => role.trim())
+      .filter(Boolean)
+  ));
+}
+
 function readLocalSceneList(projectId: string): ProjectSceneList {
   if (typeof window === "undefined") return { items: [], scenarioReference: "" };
   try {
@@ -144,7 +163,10 @@ function readLocalSceneList(projectId: string): ProjectSceneList {
     const current = buckets[projectId];
     return current
       ? {
-          items: sortSceneItems(current.items ?? []),
+          items: sortSceneItems((current.items ?? []).map((item) => ({
+            ...item,
+            props: String(item.props ?? "")
+          }))),
           scenarioReference: current.scenarioReference ?? ""
         }
       : { items: [], scenarioReference: "" };

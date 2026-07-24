@@ -299,6 +299,7 @@ export type ProjectSceneItem = {
   interiorExterior: string;
   sceneContent: string;
   characters: string;
+  props: string;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
