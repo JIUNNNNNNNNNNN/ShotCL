@@ -12,6 +12,7 @@ import {
   PanelRight,
   Printer,
   Save,
+  Table2,
   Users,
   X
 } from "lucide-react";
@@ -237,6 +238,13 @@ function PanelContent({
       <div className="max-h-[calc(100dvh-10rem)] overflow-y-auto p-3">
         {progressOnly ? (
           <>
+            <nav className="mb-3 grid gap-2" aria-label="Staff 페이지 이동">
+              {pageType === "sceneList" ? (
+                <SideActionLink href={projectBasePath} icon={ListChecks}>진행도</SideActionLink>
+              ) : (
+                <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
+              )}
+            </nav>
             <div className="mb-2 flex items-center justify-between px-1">
               <p className="font-display text-sm font-black text-field-primary">회차</p>
               <span className="text-xs font-bold text-field-muted">{plans.length}개</span>
@@ -306,7 +314,14 @@ function PanelContent({
   );
 }
 
-type ProjectPageType = "progress" | "dailyPlan" | "staffList" | "basicInfo" | "other";
+type ProjectPageType =
+  | "progress"
+  | "dailyPlan"
+  | "dailyPlanList"
+  | "staffList"
+  | "sceneList"
+  | "basicInfo"
+  | "other";
 
 function KeyStaffPageActions({
   pageType,
@@ -329,6 +344,7 @@ function KeyStaffPageActions({
         <>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
           <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
         </>
       ) : null}
@@ -337,6 +353,7 @@ function KeyStaffPageActions({
         <>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
           <SideActionButton
             icon={Printer}
             onClick={() => {
@@ -359,10 +376,20 @@ function KeyStaffPageActions({
         </>
       ) : null}
 
+      {pageType === "dailyPlanList" ? (
+        <>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
+        </>
+      ) : null}
+
       {pageType === "staffList" ? (
         <>
           <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
           <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
         </>
       ) : null}
@@ -370,8 +397,18 @@ function KeyStaffPageActions({
       {pageType === "basicInfo" ? (
         <>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
           <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
           <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
+        </>
+      ) : null}
+
+      {pageType === "sceneList" ? (
+        <>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
         </>
       ) : null}
 
@@ -424,6 +461,8 @@ function getProjectPageType(pathname: string, projectBasePath: string): ProjectP
   if (pathname === projectBasePath) return "progress";
   if (pathname === `${projectBasePath}/basic-info`) return "basicInfo";
   if (pathname === `${projectBasePath}/staff-list`) return "staffList";
+  if (pathname === `${projectBasePath}/scene-list`) return "sceneList";
+  if (pathname === `${projectBasePath}/daily-plans`) return "dailyPlanList";
   if (new RegExp(`^${escapeRegExp(projectBasePath)}/daily-plans/(new|[^/]+)$`).test(pathname)) return "dailyPlan";
   return "other";
 }

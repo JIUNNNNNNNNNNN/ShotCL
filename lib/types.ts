@@ -285,3 +285,24 @@ export type ProjectStaffDepartment = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ProjectSceneItem = {
+  id: string;
+  projectId: string;
+  sceneNo: string;
+  mainLocation: string;
+  subLocation: string;
+  dayLabel: string;
+  dayNight: string;
+  interiorExterior: string;
+  sceneContent: string;
+  characters: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectSceneList = {
+  items: ProjectSceneItem[];
+  scenarioReference: string;
+};
