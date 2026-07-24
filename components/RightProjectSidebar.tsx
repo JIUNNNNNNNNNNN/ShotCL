@@ -210,7 +210,7 @@ function PanelContent({
       <div className="flex items-start gap-3 border-b border-field-border bg-field-soft px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-display truncate text-lg font-black text-field-primary">{project?.name || "프로젝트"}</p>
-          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "Staff" : "Key staff"}</p>
+          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "진행도" : "Key staff"}</p>
         </div>
         {onCollapse ? (
           <button
@@ -306,7 +306,7 @@ function PanelContent({
   );
 }
 
-type ProjectPageType = "staff" | "dailyPlan" | "staffList" | "basicInfo" | "other";
+type ProjectPageType = "progress" | "dailyPlan" | "staffList" | "basicInfo" | "other";
 
 function KeyStaffPageActions({
   pageType,
@@ -319,13 +319,13 @@ function KeyStaffPageActions({
   currentPlanId: string;
   onAction?: () => void;
 }) {
-  const staffPath = currentPlanId
+  const progressPath = currentPlanId
     ? `${projectBasePath}?dailyPlanId=${encodeURIComponent(currentPlanId)}`
     : projectBasePath;
 
   return (
     <nav className="grid gap-2" aria-label="Key staff 페이지 이동">
-      {pageType === "staff" ? (
+      {pageType === "progress" ? (
         <>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
@@ -335,7 +335,7 @@ function KeyStaffPageActions({
 
       {pageType === "dailyPlan" ? (
         <>
-          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보 수정</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
           <SideActionButton
             icon={Printer}
@@ -346,6 +346,7 @@ function KeyStaffPageActions({
           >
             PDF 내보내기
           </SideActionButton>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
           <SideActionButton
             icon={Save}
             onClick={() => {
@@ -360,7 +361,7 @@ function KeyStaffPageActions({
 
       {pageType === "staffList" ? (
         <>
-          <SideActionLink href={staffPath} icon={ListChecks}>Staff</SideActionLink>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
           <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
         </>
@@ -369,8 +370,8 @@ function KeyStaffPageActions({
       {pageType === "basicInfo" ? (
         <>
           <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
-          <SideActionLink href={staffPath} icon={ListChecks}>Staff</SideActionLink>
           <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
         </>
       ) : null}
 
@@ -420,7 +421,7 @@ function SideActionButton({
 }
 
 function getProjectPageType(pathname: string, projectBasePath: string): ProjectPageType {
-  if (pathname === projectBasePath) return "staff";
+  if (pathname === projectBasePath) return "progress";
   if (pathname === `${projectBasePath}/basic-info`) return "basicInfo";
   if (pathname === `${projectBasePath}/staff-list`) return "staffList";
   if (new RegExp(`^${escapeRegExp(projectBasePath)}/daily-plans/(new|[^/]+)$`).test(pathname)) return "dailyPlan";
