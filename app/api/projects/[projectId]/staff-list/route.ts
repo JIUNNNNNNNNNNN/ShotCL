@@ -24,19 +24,24 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     const scope = await requireAdminScope(request, context);
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
-    const { data: rows, error } = await supabase
-      .from("project_staff_members")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order")
-      .order("created_at");
+    const [
+      { data: rows, error },
+      { data: departmentRows, error: departmentError }
+    ] = await Promise.all([
+      supabase
+        .from("project_staff_members")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at"),
+      supabase
+        .from("project_staff_departments")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at")
+    ]);
     if (error) throw error;
-    const { data: departmentRows, error: departmentError } = await supabase
-      .from("project_staff_departments")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order")
-      .order("created_at");
     if (departmentError) throw departmentError;
     return NextResponse.json({
       members: rows ?? [],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 import {
@@ -47,48 +47,64 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
   const currentPlanId = routePlanId || searchParams.get("dailyPlanId") || "";
   const progressOnly = role === "progress";
   const pageType = getProjectPageType(pathname, `/projects/${projectId}`);
+  const shouldShowSidebar = progressOnly || pageType !== "other";
   const [project, setProject] = useState<Project | null>(null);
   const [plans, setPlans] = useState<PlanWithCount[]>([]);
-  const [progressByPlan, setProgressByPlan] = useState<Record<string, EpisodeProgress>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const progressByPlan = useMemo<Record<string, EpisodeProgress>>(
+    () => Object.fromEntries(plans.map((plan) => [plan.id, summarizePlanProgress(plan)])),
+    [plans]
+  );
 
   const loadPanelData = useCallback(async () => {
+    if (!shouldShowSidebar) {
+      setIsLoading(false);
+      return;
+    }
+
     try {
-      const projectData = await getProject(projectId);
+      const [projectData, planData] = await Promise.all([
+        getProject(projectId),
+        progressOnly ? listDailyPlans(projectId).then(sortDailyPlans) : Promise.resolve([])
+      ]);
       if (!projectData) {
         setProject(null);
         setPlans([]);
-        setProgressByPlan({});
         setErrorMessage("");
         return;
       }
 
-      const planData = sortDailyPlans(await listDailyPlans(projectData.id));
-
       setProject(projectData);
       setPlans(planData);
-      setProgressByPlan(Object.fromEntries(
-        planData.map((plan) => [plan.id, summarizePlanProgress(plan)])
-      ));
       setErrorMessage("");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "회차 정보를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [progressOnly, projectId, shouldShowSidebar]);
+
+  const refreshPlanData = useCallback(async () => {
+    if (!progressOnly || !project?.id) return;
+    try {
+      setPlans(sortDailyPlans(await listDailyPlans(project.id)));
+      setErrorMessage("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "회차 정보를 불러오지 못했습니다.");
+    }
+  }, [progressOnly, project?.id]);
 
   useEffect(() => {
     loadPanelData();
   }, [loadPanelData]);
 
   useEffect(() => {
-    if (!project?.id) return undefined;
-    return subscribeToShotChanges(project.id, loadPanelData);
-  }, [loadPanelData, project?.id]);
+    if (!progressOnly || !project?.id) return undefined;
+    return subscribeToShotChanges(project.id, refreshPlanData);
+  }, [progressOnly, project?.id, refreshPlanData]);
 
   useEffect(() => {
     setIsMobileOpen(false);
@@ -103,8 +119,11 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isMobileOpen]);
 
+  const collapsePanel = useCallback(() => setIsCollapsed(true), []);
+  const closeMobilePanel = useCallback(() => setIsMobileOpen(false), []);
+
   if (!project && !isLoading) return null;
-  if (!progressOnly && pageType === "other") return null;
+  if (!shouldShowSidebar) return null;
 
   return (
     <>
@@ -134,7 +153,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
             isLoading={isLoading}
             errorMessage={errorMessage}
             pageType={pageType}
-            onCollapse={() => setIsCollapsed(true)}
+            onCollapse={collapsePanel}
           />
         )}
       </aside>
@@ -168,7 +187,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
               isLoading={isLoading}
               errorMessage={errorMessage}
               pageType={pageType}
-              onClose={() => setIsMobileOpen(false)}
+              onClose={closeMobilePanel}
             />
           </div>
         </div>
@@ -191,7 +210,7 @@ type PanelContentProps = {
   onClose?: () => void;
 };
 
-function PanelContent({
+const PanelContent = memo(function PanelContent({
   project,
   plans,
   progressByPlan,
@@ -238,7 +257,7 @@ function PanelContent({
       <div className="max-h-[calc(100dvh-10rem)] overflow-y-auto p-3">
         {progressOnly ? (
           <>
-            <nav className="mb-3 grid gap-2" aria-label="Staff 페이지 이동">
+            <nav className="mb-3 grid gap-2" aria-label="진행도 페이지 이동">
               {pageType === "sceneList" ? (
                 <SideActionLink href={projectBasePath} icon={ListChecks}>진행도</SideActionLink>
               ) : (
@@ -312,7 +331,7 @@ function PanelContent({
       </div>
     </div>
   );
-}
+});
 
 type ProjectPageType =
   | "progress"

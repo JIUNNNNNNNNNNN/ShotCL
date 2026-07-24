@@ -126,7 +126,11 @@ export default function ProjectDetailPage() {
     if (!projectId) return;
 
     try {
-      const projectData = await getProject(projectId);
+      const [projectData, planData, selectedShots] = await Promise.all([
+        getProject(projectId),
+        listDailyPlans(projectId),
+        dailyPlanId ? listShots(projectId, dailyPlanId) : Promise.resolve([])
+      ]);
       setProject(projectData);
       if (!projectData) {
         setDailyPlans([]);
@@ -134,10 +138,6 @@ export default function ProjectDetailPage() {
         setErrorMessage("");
         return;
       }
-      const [planData, selectedShots] = await Promise.all([
-        listDailyPlans(projectData.id),
-        dailyPlanId ? listShots(projectData.id, dailyPlanId) : Promise.resolve([])
-      ]);
       let shotsWithDiagrams = selectedShots;
       if (selectedShots.length > 0) {
         try {
@@ -173,7 +173,7 @@ export default function ProjectDetailPage() {
         overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null
       })));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Staff 화면을 갱신하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
     }
   }, [dailyPlanId, projectId]);
 

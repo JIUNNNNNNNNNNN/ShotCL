@@ -36,7 +36,11 @@ export default function DailyPlanDetailPage() {
 
     async function loadDailyPlan() {
       try {
-        const projectData = await getProject(projectId);
+        const [projectData, planData, basicInfo] = await Promise.all([
+          getProject(projectId),
+          getDailyPlanWithShots(projectId, dailyPlanId),
+          getProjectBasicInfo(projectId).catch(() => null)
+        ]);
         setProject(projectData);
         if (!projectData) {
           setDailyPlan(null);
@@ -44,10 +48,6 @@ export default function DailyPlanDetailPage() {
           setErrorMessage("");
           return;
         }
-        const [planData, basicInfo] = await Promise.all([
-          getDailyPlanWithShots(projectData.id, dailyPlanId),
-          getProjectBasicInfo(projectData.id).catch(() => null)
-        ]);
         setDailyPlan(planData);
         setProjectBasicInfo(basicInfo);
         setErrorMessage("");

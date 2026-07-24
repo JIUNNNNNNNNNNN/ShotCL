@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -179,32 +179,58 @@ const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:round
 
 const maxRuntimeMinutes = 1440;
 const showDailyPlanMainStaffInputs = false;
+const emptyInitialShots: DailyPlanShot[] = [];
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initialShots = [], initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
-  const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
-  const sourcePlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
-  const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
-  const initialDefaults = applyProjectBasicInfoDefaults(sourcePlanDraft, sourcePrintMeta, activeProjectBasicInfo);
-  const initialPlanDraft = initialDefaults.plan;
-  const initialPrintMeta = initialDefaults.printMeta;
-  const initialEditablePlanDraft = { ...initialPlanDraft, memo: initialPrintMeta.memoText };
-  const initialLocations = buildInitialLocations(initialPlanDraft);
-  const initialMeals = buildInitialMeals(initialPlanDraft);
-  const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
+  const initialEditorState = useMemo(() => {
+    const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
+    const sourcePlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
+    const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
+    const initialDefaults = applyProjectBasicInfoDefaults(sourcePlanDraft, sourcePrintMeta, activeProjectBasicInfo);
+    const initialPlanDraft = initialDefaults.plan;
+    const initialPrintMeta = initialDefaults.printMeta;
+    const initialLocations = buildInitialLocations(initialPlanDraft);
+    const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
+    const initialScenes = shotsToScenes(initialSourceShots, initialLocations);
+    const managedShotKeys = new Set(
+      initialSourceShots.length > 0
+        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(initialScenes)).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
+        : []
+    );
+    return {
+      activeProjectBasicInfo,
+      initialPrintMeta,
+      initialEditablePlanDraft: { ...initialPlanDraft, memo: initialPrintMeta.memoText },
+      initialLocations,
+      initialMeals: buildInitialMeals(initialPlanDraft),
+      initialScenes,
+      managedShotKeys
+    };
+  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo]);
+  const {
+    activeProjectBasicInfo,
+    initialPrintMeta,
+    initialEditablePlanDraft,
+    initialLocations,
+    initialMeals,
+    initialScenes,
+    managedShotKeys
+  } = initialEditorState;
 
   const [dailyPlanId, setDailyPlanId] = useState(initialPlan?.id ?? null);
   const [plan, setPlan] = useState<DailyPlanDraft>(initialEditablePlanDraft);
   const [printMeta, setPrintMeta] = useState<DailyPlanPrintMeta>(initialPrintMeta);
   const [locations, setLocations] = useState<DailyPlanLocation[]>(initialLocations);
   const [mealTimes, setMealTimes] = useState<DailyPlanMealTime[]>(initialMeals);
-  const [scenes, setScenes] = useState<SceneBlockInput[]>(() => shotsToScenes(initialSourceShots, initialLocations));
+  const [scenes, setScenes] = useState<SceneBlockInput[]>(initialScenes);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+  const [printPreviewData, setPrintPreviewData] = useState<DailyPlanPreviewData | null>(null);
+  const [printData, setPrintData] = useState<DailyPlanPreviewData | null>(null);
   const [isStaffOpen, setIsStaffOpen] = useState(false);
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
@@ -214,11 +240,25 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
   const [weatherStatus, setWeatherStatus] = useState("");
   const isSavingRef = useRef(false);
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
+  const sidebarPrintRequestRef = useRef<() => void>(() => {});
+  const printFrameRef = useRef<number | null>(null);
 
   const flattenedShots = useMemo(() => scenesToShotDrafts(scenes), [scenes]);
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
-  const printablePlan = useMemo(() => buildPlanForSave(plan, locations, mealTimes, printMeta), [plan, locations, mealTimes, printMeta]);
-  const previewData = useMemo(() => buildDailyPlanPreviewData(printablePlan, scenes, printMeta), [printablePlan, scenes, printMeta]);
+  const previewSource = useMemo(
+    () => ({ plan, locations, mealTimes, scenes, printMeta }),
+    [locations, mealTimes, plan, printMeta, scenes]
+  );
+  const deferredPreviewSource = useDeferredValue(previewSource);
+  const previewData = useMemo(() => {
+    const printablePlan = buildPlanForSave(
+      deferredPreviewSource.plan,
+      deferredPreviewSource.locations,
+      deferredPreviewSource.mealTimes,
+      deferredPreviewSource.printMeta
+    );
+    return buildDailyPlanPreviewData(printablePlan, deferredPreviewSource.scenes, deferredPreviewSource.printMeta);
+  }, [deferredPreviewSource]);
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
     [mealTimes, printMeta.timetableRowOrder, scenes]
@@ -234,13 +274,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
     plan.assistantDirector.trim() ? `조감독 ${plan.assistantDirector.trim()}` : "",
     plan.production.trim() ? `제작 ${plan.production.trim()}` : ""
   ].filter(Boolean).join(" / ");
-  const managedShotKeysRef = useRef<Set<string>>(
-    new Set(
-      initialSourceShots.length > 0
-        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(shotsToScenes(initialSourceShots, initialLocations))).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
-        : []
-    )
-  );
+  const managedShotKeysRef = useRef<Set<string>>(managedShotKeys);
   function updatePlanField(field: PlanTextField, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
@@ -752,34 +786,54 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
     }
   }
 
+  function getCurrentPreviewData() {
+    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, printMeta);
+    return buildDailyPlanPreviewData(currentPrintablePlan, scenes, printMeta);
+  }
+
   function handleOpenPrintPreview() {
-    if (!canPrint) {
+    const currentPreviewData = getCurrentPreviewData();
+    if (currentPreviewData.scenes.length === 0 || currentPreviewData.totalCutCount === 0) {
       setErrorMessage("출력할 씬 또는 컷이 없습니다.");
       return;
     }
     setErrorMessage("");
-    setIsPrintPreviewOpen(true);
+    setPrintPreviewData(currentPreviewData);
   }
 
   function handlePrint() {
-    if (!canPrint) {
+    const currentPreviewData = getCurrentPreviewData();
+    if (currentPreviewData.scenes.length === 0 || currentPreviewData.totalCutCount === 0) {
       setErrorMessage("출력할 씬 또는 컷이 없습니다.");
       return;
     }
     setErrorMessage("");
-    window.print();
+    setPrintData(currentPreviewData);
+    if (printFrameRef.current !== null) window.cancelAnimationFrame(printFrameRef.current);
+    printFrameRef.current = window.requestAnimationFrame(() => {
+      printFrameRef.current = window.requestAnimationFrame(() => {
+        printFrameRef.current = null;
+        window.print();
+      });
+    });
   }
 
+  sidebarPrintRequestRef.current = handlePrint;
+
   useEffect(() => {
-    const handleSidebarPrintRequest = () => handlePrint();
+    const handleSidebarPrintRequest = () => sidebarPrintRequestRef.current();
     const handleSidebarSaveRequest = () => sidebarSaveRequestRef.current();
+    const releasePrintView = () => setPrintData(null);
     window.addEventListener("daily-plan:request-print", handleSidebarPrintRequest);
     window.addEventListener("daily-plan:request-save", handleSidebarSaveRequest);
+    window.addEventListener("afterprint", releasePrintView);
     return () => {
       window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
       window.removeEventListener("daily-plan:request-save", handleSidebarSaveRequest);
+      window.removeEventListener("afterprint", releasePrintView);
+      if (printFrameRef.current !== null) window.cancelAnimationFrame(printFrameRef.current);
     };
-  }, [canPrint]);
+  }, []);
 
   return (
     <div className="print-daily-plan">
@@ -1334,8 +1388,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
       </section>
       </div>
 
-      {isPrintPreviewOpen ? <PrintPreviewModal data={previewData} onClose={() => setIsPrintPreviewOpen(false)} onPrint={handlePrint} /> : null}
-      <PrintDailyPlanView data={previewData} />
+      {printPreviewData ? <PrintPreviewModal data={printPreviewData} onClose={() => setPrintPreviewData(null)} onPrint={handlePrint} /> : null}
+      {printData ? <PrintDailyPlanView data={printData} /> : null}
     </div>
   );
 }
@@ -2462,7 +2516,8 @@ function MoveMenu({
   );
 }
 
-function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
+const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
+  const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
     <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
       <div className="grid gap-1">
@@ -2473,17 +2528,18 @@ function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
         plan={data.plan}
         locations={data.locations}
         meta={data.meta}
-        timetableRows={getPrintTimetableRows(data)}
+        timetableRows={timetableRows}
       />
     </section>
   );
-}
+});
 
-function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
+const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState(0);
+  const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -2505,7 +2561,7 @@ function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
     observer.observe(documentElement);
     updateSize();
     return () => observer.disconnect();
-  }, [data]);
+  }, []);
 
   return (
     <div ref={containerRef} className="mt-4 hidden w-full overflow-hidden rounded-md bg-white md:block">
@@ -2515,13 +2571,13 @@ function ScaledDailyPlanPreview({ data }: { data: DailyPlanPreviewData }) {
             plan={data.plan}
             locations={data.locations}
             meta={data.meta}
-            timetableRows={getPrintTimetableRows(data)}
+            timetableRows={timetableRows}
           />
         </div>
       </div>
     </div>
   );
-}
+});
 
 function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewData; onClose: () => void; onPrint: () => void }) {
   return (

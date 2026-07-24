@@ -20,8 +20,8 @@ type ProjectPickerMode = "new" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
 
 const HIDDEN_PROJECT_IDS_KEY = "shotcl:hiddenProjectIds";
-const MAIN_SELECTION_FEEDBACK_MS = 140;
-const PROJECT_SELECTION_FEEDBACK_MS = 190;
+const MAIN_SELECTION_FEEDBACK_MS = 90;
+const PROJECT_SELECTION_FEEDBACK_MS = 100;
 
 function readHiddenProjectIds() {
   if (typeof window === "undefined") return new Set<string>();
@@ -312,10 +312,12 @@ export default function HomePage() {
     if (!project || pickerMode !== "progress" || projectNavigationRef.current) return;
     projectNavigationRef.current = true;
     setSelectedProjectId(project.id);
+    const projectPath = `/projects/${project.id}`;
+    router.prefetch(projectPath);
     projectSelectionTimerRef.current = setTimeout(() => {
       projectSelectionTimerRef.current = null;
       try {
-        router.push(`/projects/${project.id}`);
+        router.push(projectPath);
       } catch {
         projectNavigationRef.current = false;
         setSelectedProjectId(null);
@@ -368,7 +370,7 @@ export default function HomePage() {
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
       unhideProject(project.id);
-      window.location.assign(`/projects/${project.id}/basic-info`);
+      router.push(`/projects/${project.id}/basic-info`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
       setIsCreatingProject(false);
@@ -394,7 +396,7 @@ export default function HomePage() {
       const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
       if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       unhideProject(payload.projectId);
-      window.location.assign(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
+      router.push(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       setIsCreatingProject(false);
@@ -443,9 +445,6 @@ export default function HomePage() {
         </div>
         {projects.map((project, index) => {
           const itemAngle = getSpinnerItemAngle(index, projects.length) + projectSpinner.rotation;
-          const radians = itemAngle * (Math.PI / 180);
-          const left = Number((50 + Math.cos(radians) * 39.5).toFixed(4));
-          const top = Number((50 + Math.sin(radians) * 39.5).toFixed(4));
           const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
           const proximity = Math.max(0, 1 - distance / 180);
           const isActive = projectSpinner.activationIndex === index;
@@ -456,60 +455,67 @@ export default function HomePage() {
           return (
             <div
               key={project.id}
-              className={`absolute h-[4.25rem] w-[4.25rem] will-change-[left,top,transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
+              className={`pointer-events-none absolute inset-0 will-change-transform ${
                 projectSpinner.isDragging
                   ? "transition-none"
-                  : "transition-[left,top,transform,opacity] duration-[260ms] ease-out"
+                  : "transition-transform duration-[260ms] ease-out"
               }`}
               style={{
-                left: `${left}%`,
-                top: `${top}%`,
-                opacity,
-                transform: `translate(-50%, -50%) scale(${scale})`,
+                transform: `rotate(${itemAngle}deg)`,
                 zIndex: isActive ? 20 : Math.max(1, Math.round(proximity * 10))
               }}
             >
-              <button
-                ref={(element) => {
-                  projectBubbleRefs.current[index] = element;
+              <div
+                className={`pointer-events-auto absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] will-change-[transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
+                  projectSpinner.isDragging ? "transition-none" : "transition-[transform,opacity] duration-[260ms] ease-out"
+                }`}
+                style={{
+                  opacity,
+                  transform: `translate(-50%, -50%) rotate(${-itemAngle}deg) scale(${scale})`
                 }}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (projectSpinner.consumeSuppressedClick()) return;
-                  projectSpinner.activateIndex(index);
-                }}
-                className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] duration-[240ms] ease-out ${
-                  isSelectedProject
-                    ? "border-[#d7b95f] bg-[#fff9df] shadow-[inset_0_5px_10px_rgba(15,61,46,0.12),0_8px_22px_rgba(215,185,95,0.32)] brightness-90 motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
-                    : isActive
-                    ? "border-[#d7b95f] bg-[#fffdf4] shadow-[inset_0_4px_9px_rgba(15,61,46,0.08),0_6px_16px_rgba(15,61,46,0.16)] brightness-95"
-                    : "border-field-secondary/50 shadow-[0_5px_12px_rgba(15,61,46,0.10)] hover:border-field-primary hover:bg-field-light"
-                } active:brightness-90 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
-                aria-label={`${project.name} ${pickerTitle}`}
-                aria-pressed={isActive || isSelectedProject}
               >
-                <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
-                  <span className="font-display">{project.name}</span>
-                </span>
-                <span className="mt-1 hidden max-w-full truncate text-[9px] font-bold text-field-muted md:block md:text-[10px]">
-                  {project.accessRole === "progress" ? "Staff" : project.shareConfigured ? "Key staff" : "공유 설정 필요"}
-                </span>
-              </button>
-              <button
-                type="button"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  hideProjectFromCurrentList(project);
-                }}
-                className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
-                aria-label={`${project.name} 목록에서 숨기기`}
-              >
-                <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
-                  <X className="h-3 w-3" aria-hidden />
-                </span>
-              </button>
+                <button
+                  ref={(element) => {
+                    projectBubbleRefs.current[index] = element;
+                  }}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (projectSpinner.consumeSuppressedClick()) return;
+                    projectSpinner.activateIndex(index);
+                  }}
+                  className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] duration-[240ms] ease-out ${
+                    isSelectedProject
+                      ? "border-[#d7b95f] bg-[#fff9df] shadow-[inset_0_5px_10px_rgba(15,61,46,0.12),0_8px_22px_rgba(215,185,95,0.32)] brightness-90 motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
+                      : isActive
+                      ? "border-[#d7b95f] bg-[#fffdf4] shadow-[inset_0_4px_9px_rgba(15,61,46,0.08),0_6px_16px_rgba(15,61,46,0.16)] brightness-95"
+                      : "border-field-secondary/50 shadow-[0_5px_12px_rgba(15,61,46,0.10)] hover:border-field-primary hover:bg-field-light"
+                  } active:brightness-90 focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                  aria-label={`${project.name} ${pickerTitle}`}
+                  aria-pressed={isActive || isSelectedProject}
+                >
+                  <span className="overflow-hidden text-[11px] font-black leading-[1.4] text-field-primary [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+                    <span className="font-display">{project.name}</span>
+                  </span>
+                  <span className="mt-1 hidden max-w-full truncate text-[9px] font-bold text-field-muted md:block md:text-[10px]">
+                    {project.accessRole === "progress" ? "Staff" : project.shareConfigured ? "Key staff" : "공유 설정 필요"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    hideProjectFromCurrentList(project);
+                  }}
+                  className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  aria-label={`${project.name} 목록에서 숨기기`}
+                >
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                    <X className="h-3 w-3" aria-hidden />
+                  </span>
+                </button>
+              </div>
             </div>
           );
         })}

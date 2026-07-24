@@ -11,31 +11,41 @@ const projectRequests = new Map<string, Promise<Project | null>>();
 
 /** 프로젝트 목록을 최신 생성순으로 가져옵니다. */
 export async function listProjects(): Promise<Project[]> {
-  let sharedProjects: Project[] = [];
-  try {
-    const response = await fetch("/api/projects/access-list", { cache: "no-store" });
-    if (response.ok) {
-      const payload = (await response.json()) as { projects?: Record<string, unknown>[] };
-      sharedProjects = (payload.projects ?? []).map(projectFromRow);
-    }
-  } catch {
-    // 서버 공유 기능이 설정되지 않은 로컬 개발 모드에서는 기존 저장소를 그대로 사용합니다.
-  }
+  const sharedProjectsRequest = loadSharedProjects();
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {
-    await ensureSupabaseDevSession();
-    const { data, error } = await supabase
-      .from("projects")
-      .select("id,name,created_at,share_enabled")
-      .order("created_at", { ascending: false });
+    const directProjectsRequest = (async () => {
+      await ensureSupabaseDevSession();
+      return supabase
+        .from("projects")
+        .select("id,name,created_at,share_enabled")
+        .order("created_at", { ascending: false });
+    })();
+    const [sharedProjects, { data, error }] = await Promise.all([
+      sharedProjectsRequest,
+      directProjectsRequest
+    ]);
     if (error) throw toReadableDataError(error, "프로젝트 목록을 불러오지 못했습니다.");
     const directProjects = data.map(projectFromRow);
     return mergeProjects(sharedProjects, directProjects);
   }
 
+  const sharedProjects = await sharedProjectsRequest;
   const { projects } = readLocalBuckets();
   return mergeProjects(sharedProjects, projects);
+}
+
+async function loadSharedProjects(): Promise<Project[]> {
+  try {
+    const response = await fetch("/api/projects/access-list", { cache: "no-store" });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as { projects?: Record<string, unknown>[] };
+    return (payload.projects ?? []).map(projectFromRow);
+  } catch {
+    // 서버 공유 기능이 설정되지 않은 로컬 개발 모드에서는 기존 저장소를 그대로 사용합니다.
+    return [];
+  }
 }
 
 /** 단일 프로젝트를 ID로 조회합니다. */

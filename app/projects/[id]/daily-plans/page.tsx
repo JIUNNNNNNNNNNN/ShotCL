@@ -35,14 +35,16 @@ export default function DailyPlansPage() {
     if (!projectId) return;
 
     try {
-      const projectData = await getProject(projectId);
+      const [projectData, planData] = await Promise.all([
+        getProject(projectId),
+        listDailyPlans(projectId)
+      ]);
       setProject(projectData);
       if (!projectData) {
         setPlans([]);
         setErrorMessage("");
         return;
       }
-      const planData = await listDailyPlans(projectData.id);
       setPlans(planData);
       setErrorMessage("");
     } catch (error) {
@@ -80,12 +82,14 @@ export default function DailyPlansPage() {
     setIsBusy(true);
     setErrorMessage("");
     setMessage("");
+    const previousPlans = plans;
+    setPlans((current) => current.filter((item) => item.id !== plan.id));
 
     try {
       await deleteDailyPlan(projectId, plan.id);
       setMessage("일촬표를 삭제했습니다.");
-      await refresh();
     } catch (error) {
+      setPlans(previousPlans);
       setErrorMessage(error instanceof Error ? error.message : "일촬표를 삭제하지 못했습니다.");
     } finally {
       setIsBusy(false);

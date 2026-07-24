@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -82,7 +82,7 @@ export default function ProjectSceneListPage() {
     return [...new Set(names)];
   }, [basicInfo?.actors]);
 
-  function commitItems(updater: (current: ProjectSceneItem[]) => ProjectSceneItem[]) {
+  const commitItems = useCallback((updater: (current: ProjectSceneItem[]) => ProjectSceneItem[]) => {
     setItems((current) => updater(current).map((item, index) => ({
       ...item,
       sortOrder: index + 1
@@ -90,14 +90,17 @@ export default function ProjectSceneListPage() {
     setIsDirty(true);
     setMessage("");
     setErrorMessage("");
-  }
+  }, []);
 
-  function updateItem(id: string, patch: Partial<ProjectSceneItem>) {
+  const updateItem = useCallback((id: string, patch: Partial<ProjectSceneItem>) => {
     if (!canEdit) return;
-    commitItems((current) => current.map((item) => (
+    setItems((current) => current.map((item) => (
       item.id === id ? { ...item, ...patch } : item
     )));
-  }
+    setIsDirty(true);
+    setMessage("");
+    setErrorMessage("");
+  }, [canEdit]);
 
   function addItem() {
     if (!canEdit || !projectId) return;
@@ -107,18 +110,19 @@ export default function ProjectSceneListPage() {
     ]);
   }
 
-  function moveItem(index: number, direction: -1 | 1) {
+  const moveItem = useCallback((id: string, direction: -1 | 1) => {
     if (!canEdit) return;
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= items.length) return;
     commitItems((current) => {
+      const index = current.findIndex((item) => item.id === id);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
       const next = [...current];
       [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
       return next;
     });
-  }
+  }, [canEdit, commitItems]);
 
-  function deleteItem(item: ProjectSceneItem) {
+  const deleteItem = useCallback((item: ProjectSceneItem) => {
     if (!canEdit) return;
     const hasContent = [
       item.sceneNo,
@@ -132,7 +136,7 @@ export default function ProjectSceneListPage() {
     ].some(Boolean);
     if (hasContent && !window.confirm(`${item.sceneNo || "이"} 씬 행을 삭제할까요?`)) return;
     commitItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
-  }
+  }, [canEdit, commitItems]);
 
   async function save() {
     if (!canEdit || !projectId) return;
@@ -249,9 +253,9 @@ export default function ProjectSceneListPage() {
                 itemCount={items.length}
                 canEdit={canEdit}
                 actorSuggestions={actorSuggestions}
-                onUpdate={(patch) => updateItem(item.id, patch)}
-                onMove={(direction) => moveItem(index, direction)}
-                onDelete={() => deleteItem(item)}
+                onUpdate={updateItem}
+                onMove={moveItem}
+                onDelete={deleteItem}
               />
             ))}
 
@@ -309,7 +313,7 @@ export default function ProjectSceneListPage() {
   );
 }
 
-function SceneTableRow({
+const SceneTableRow = memo(function SceneTableRow({
   item,
   index,
   itemCount,
@@ -324,9 +328,9 @@ function SceneTableRow({
   itemCount: number;
   canEdit: boolean;
   actorSuggestions: string[];
-  onUpdate: (patch: Partial<ProjectSceneItem>) => void;
-  onMove: (direction: -1 | 1) => void;
-  onDelete: () => void;
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onMove: (id: string, direction: -1 | 1) => void;
+  onDelete: (item: ProjectSceneItem) => void;
 }) {
   const locationStyle = getLocationStyle(item.mainLocation);
 
@@ -337,7 +341,7 @@ function SceneTableRow({
           <>
             <input
               value={item.sceneNo}
-              onChange={(event) => onUpdate({ sceneNo: event.target.value })}
+              onChange={(event) => onUpdate(item.id, { sceneNo: event.target.value })}
               aria-label={`${index + 1}행 씬`}
               className={`${inputClassName} min-w-0 flex-1 px-1`}
               placeholder="S#"
@@ -345,7 +349,7 @@ function SceneTableRow({
             <div className="flex w-5 shrink-0 flex-col border-l border-black/30">
               <button
                 type="button"
-                onClick={() => onMove(-1)}
+                onClick={() => onMove(item.id, -1)}
                 disabled={index === 0}
                 aria-label={`${item.sceneNo || index + 1} 씬 위로 이동`}
                 className="grid h-[18px] place-items-center rounded-none border-b border-black/20 text-[#333] hover:bg-[#ddd] disabled:opacity-20"
@@ -354,7 +358,7 @@ function SceneTableRow({
               </button>
               <button
                 type="button"
-                onClick={() => onMove(1)}
+                onClick={() => onMove(item.id, 1)}
                 disabled={index === itemCount - 1}
                 aria-label={`${item.sceneNo || index + 1} 씬 아래로 이동`}
                 className="grid h-[18px] place-items-center rounded-none text-[#333] hover:bg-[#ddd] disabled:opacity-20"
@@ -372,7 +376,7 @@ function SceneTableRow({
         {canEdit ? (
           <input
             value={item.mainLocation}
-            onChange={(event) => onUpdate({ mainLocation: event.target.value })}
+            onChange={(event) => onUpdate(item.id, { mainLocation: event.target.value })}
             aria-label={`${item.sceneNo || index + 1} 씬 대장소`}
             className={`${inputClassName} font-bold`}
             style={{ color: locationStyle.color }}
@@ -390,21 +394,21 @@ function SceneTableRow({
         placeholder="세부장소"
         ariaLabel={`${item.sceneNo || index + 1} 씬 세부장소`}
         canEdit={canEdit}
-        onChange={(subLocation) => onUpdate({ subLocation })}
+        onChange={(subLocation) => onUpdate(item.id, { subLocation })}
       />
       <SceneCell
         value={item.dayLabel}
         placeholder="DAY1"
         ariaLabel={`${item.sceneNo || index + 1} 씬 Day`}
         canEdit={canEdit}
-        onChange={(dayLabel) => onUpdate({ dayLabel })}
+        onChange={(dayLabel) => onUpdate(item.id, { dayLabel })}
       />
 
       <div className="border-r border-black">
         {canEdit ? (
           <select
             value={item.dayNight}
-            onChange={(event) => onUpdate({ dayNight: event.target.value })}
+            onChange={(event) => onUpdate(item.id, { dayNight: event.target.value })}
             aria-label={`${item.sceneNo || index + 1} 씬 D/N`}
             className={selectClassName}
           >
@@ -421,7 +425,7 @@ function SceneTableRow({
         {canEdit ? (
           <select
             value={item.interiorExterior}
-            onChange={(event) => onUpdate({ interiorExterior: event.target.value })}
+            onChange={(event) => onUpdate(item.id, { interiorExterior: event.target.value })}
             aria-label={`${item.sceneNo || index + 1} 씬 I/E`}
             className={selectClassName}
           >
@@ -438,7 +442,7 @@ function SceneTableRow({
         {canEdit ? (
           <textarea
             value={item.sceneContent}
-            onChange={(event) => onUpdate({ sceneContent: event.target.value })}
+            onChange={(event) => onUpdate(item.id, { sceneContent: event.target.value })}
             aria-label={`${item.sceneNo || index + 1} 씬 내용`}
             rows={1}
             className={`${inputClassName} block resize-none overflow-hidden py-2 text-left`}
@@ -456,7 +460,7 @@ function SceneTableRow({
           <>
             <input
               value={item.characters}
-              onChange={(event) => onUpdate({ characters: event.target.value })}
+              onChange={(event) => onUpdate(item.id, { characters: event.target.value })}
               aria-label={`${item.sceneNo || index + 1} 씬 등장인물`}
               className={`${inputClassName} min-w-0 flex-1`}
               placeholder="쉼표로 구분"
@@ -464,7 +468,7 @@ function SceneTableRow({
             />
             <button
               type="button"
-              onClick={onDelete}
+              onClick={() => onDelete(item)}
               aria-label={`${item.sceneNo || index + 1} 씬 삭제`}
               className="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-field-danger transition hover:bg-red-50 active:scale-90"
             >
@@ -479,7 +483,7 @@ function SceneTableRow({
       </div>
     </div>
   );
-}
+});
 
 function SceneCell({
   value,

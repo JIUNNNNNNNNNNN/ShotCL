@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
@@ -90,7 +90,7 @@ export default function StaffListPage() {
     }
   }, [projectId, role]);
 
-  function commitMembers(updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) {
+  const commitMembers = useCallback((updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) => {
     editVersionRef.current += 1;
     setMembers((current) => updater(current).map((member, index) => ({
       ...member,
@@ -99,13 +99,17 @@ export default function StaffListPage() {
     setIsDirty(true);
     setMessage("");
     setErrorMessage("");
-  }
+  }, []);
 
-  function updateMember(id: string, patch: Partial<ProjectStaffMember>) {
-    commitMembers((current) => current.map((member) => (
+  const updateMember = useCallback((id: string, patch: Partial<ProjectStaffMember>) => {
+    editVersionRef.current += 1;
+    setMembers((current) => current.map((member) => (
       member.id === id ? { ...member, ...patch } : member
     )));
-  }
+    setIsDirty(true);
+    setMessage("");
+    setErrorMessage("");
+  }, []);
 
   function commitDepartments(
     updater: (current: ProjectStaffDepartment[]) => ProjectStaffDepartment[]
@@ -160,10 +164,10 @@ export default function StaffListPage() {
     ]);
   }
 
-  function deleteMember(member: ProjectStaffMember) {
+  const deleteMember = useCallback((member: ProjectStaffMember) => {
     if (!isStaffMemberEmpty(member) && !window.confirm(`${member.name || member.department} 스탭 정보를 삭제할까요?`)) return;
     commitMembers((current) => current.filter((item) => item.id !== member.id));
-  }
+  }, [commitMembers]);
 
   if (role === "progress") {
     return (
@@ -328,8 +332,8 @@ export default function StaffListPage() {
                 member={member}
                 number={index + 1}
                 departmentListId={`staff-departments-${project.id}`}
-                onChange={(patch) => updateMember(member.id, patch)}
-                onDelete={() => deleteMember(member)}
+                onChange={updateMember}
+                onDelete={deleteMember}
               />
             ))}
           </div>
@@ -339,7 +343,7 @@ export default function StaffListPage() {
   );
 }
 
-function StaffMemberRow({
+const StaffMemberRow = memo(function StaffMemberRow({
   member,
   number,
   departmentListId,
@@ -349,8 +353,8 @@ function StaffMemberRow({
   member: ProjectStaffMember;
   number: number;
   departmentListId: string;
-  onChange: (patch: Partial<ProjectStaffMember>) => void;
-  onDelete: () => void;
+  onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
+  onDelete: (member: ProjectStaffMember) => void;
 }) {
   return (
     <article
@@ -363,7 +367,7 @@ function StaffMemberRow({
           className={inputClassName}
           list={departmentListId}
           value={member.department}
-          onChange={(event) => onChange({ department: event.target.value })}
+          onChange={(event) => onChange(member.id, { department: event.target.value })}
           placeholder="부서"
           aria-label={`${number}번 부서`}
         />
@@ -373,7 +377,7 @@ function StaffMemberRow({
         <input
           className={inputClassName}
           value={member.name}
-          onChange={(event) => onChange({ name: event.target.value })}
+          onChange={(event) => onChange(member.id, { name: event.target.value })}
           placeholder="이름"
           aria-label={`${number}번 이름`}
         />
@@ -385,7 +389,7 @@ function StaffMemberRow({
           type="tel"
           inputMode="tel"
           value={member.phone}
-          onChange={(event) => onChange({ phone: formatKoreanPhoneNumber(event.target.value) })}
+          onChange={(event) => onChange(member.id, { phone: formatKoreanPhoneNumber(event.target.value) })}
           placeholder="010-0000-0000"
           aria-label={`${number}번 연락처`}
         />
@@ -395,7 +399,7 @@ function StaffMemberRow({
         <input
           className={inputClassName}
           value={member.location}
-          onChange={(event) => onChange({ location: event.target.value })}
+          onChange={(event) => onChange(member.id, { location: event.target.value })}
           placeholder="서울특별시 강남구"
           aria-label={`${number}번 사는곳`}
         />
@@ -407,7 +411,7 @@ function StaffMemberRow({
           value={member.notes}
           placeholder="특이사항"
           aria-label={`${number}번 특이사항`}
-          onChange={(event) => onChange({ notes: event.target.value })}
+          onChange={(event) => onChange(member.id, { notes: event.target.value })}
         />
       </label>
       <button
@@ -415,7 +419,7 @@ function StaffMemberRow({
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          onDelete();
+          onDelete(member);
         }}
         className="absolute -right-1.5 -top-1.5 z-10 grid h-7 w-7 place-items-center rounded-full border border-field-danger/60 bg-white text-field-danger shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
         aria-label={`${member.name || `${number}번 스탭`} 삭제`}
@@ -424,7 +428,7 @@ function StaffMemberRow({
       </button>
     </article>
   );
-}
+});
 
 function DepartmentChip({
   department,

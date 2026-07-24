@@ -32,9 +32,12 @@ export default function NewDailyPlanPage() {
 
     async function loadProject() {
       try {
-        const data = await getProject(projectId);
+        const [data, basicInfo] = await Promise.all([
+          getProject(projectId),
+          getProjectBasicInfo(projectId).catch(() => null)
+        ]);
         setProject(data);
-        setProjectBasicInfo(data ? await getProjectBasicInfo(data.id).catch(() => null) : null);
+        setProjectBasicInfo(data ? basicInfo : null);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");

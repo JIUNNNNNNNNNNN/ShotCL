@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, memo, useCallback, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
@@ -34,7 +34,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  function updateStaff(role: keyof ProjectBasicInfo["mainStaff"], field: "name" | "phone", nextValue: string) {
+  const updateStaff = useCallback((role: keyof ProjectBasicInfo["mainStaff"], field: "name" | "phone", nextValue: string) => {
     setValue((current) => ({
       ...current,
       mainStaff: {
@@ -45,16 +45,25 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         }
       }
     }));
-  }
+  }, []);
 
-  function updateActor(index: number, field: keyof ProjectActor, nextValue: string) {
+  const updateActor = useCallback((index: number, field: keyof ProjectActor, nextValue: string) => {
     setValue((current) => ({
       ...current,
       actors: current.actors.map((actor, actorIndex) => (
         actorIndex === index ? { ...actor, [field]: nextValue } : actor
       ))
     }));
-  }
+  }, []);
+
+  const deleteActor = useCallback((index: number) => {
+    setValue((current) => ({
+      ...current,
+      actors: current.actors.length === 1
+        ? [{ role: "", name: "" }]
+        : current.actors.filter((_, actorIndex) => actorIndex !== index)
+    }));
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -125,25 +134,25 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         <h2 className="mb-3 text-sm font-black text-field-primary">메인 스태프</h2>
         <div className="grid gap-3 lg:grid-cols-3">
           <StaffFields
+            role="director"
             label="감독"
             name={value.mainStaff.director.name}
             phone={value.mainStaff.director.phone}
-            onNameChange={(nextValue) => updateStaff("director", "name", nextValue)}
-            onPhoneChange={(nextValue) => updateStaff("director", "phone", nextValue)}
+            onChange={updateStaff}
           />
           <StaffFields
+            role="assistantDirector"
             label="조감독"
             name={value.mainStaff.assistantDirector.name}
             phone={value.mainStaff.assistantDirector.phone}
-            onNameChange={(nextValue) => updateStaff("assistantDirector", "name", nextValue)}
-            onPhoneChange={(nextValue) => updateStaff("assistantDirector", "phone", nextValue)}
+            onChange={updateStaff}
           />
           <StaffFields
+            role="producer"
             label="제작"
             name={value.mainStaff.producer.name}
             phone={value.mainStaff.producer.phone}
-            onNameChange={(nextValue) => updateStaff("producer", "name", nextValue)}
-            onPhoneChange={(nextValue) => updateStaff("producer", "phone", nextValue)}
+            onChange={updateStaff}
           />
         </div>
       </section>
@@ -164,35 +173,13 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
 
         <div className="grid gap-2">
           {value.actors.map((actor, index) => (
-            <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-xl border border-field-border bg-field-soft/50 p-2">
-              <input
-                className={fieldClass}
-                value={actor.role}
-                placeholder="역할"
-                aria-label={`배우 ${index + 1} 역할`}
-                onChange={(event) => updateActor(index, "role", event.currentTarget.value)}
-              />
-              <input
-                className={fieldClass}
-                value={actor.name}
-                placeholder="배우이름"
-                aria-label={`배우 ${index + 1} 이름`}
-                onChange={(event) => updateActor(index, "name", event.currentTarget.value)}
-              />
-              <button
-                type="button"
-                className="grid h-10 w-10 place-items-center rounded-full border border-field-danger bg-white text-field-danger transition active:scale-95"
-                aria-label={`배우 ${index + 1} 삭제`}
-                onClick={() => setValue((current) => ({
-                  ...current,
-                  actors: current.actors.length === 1
-                    ? [{ role: "", name: "" }]
-                    : current.actors.filter((_, actorIndex) => actorIndex !== index)
-                }))}
-              >
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
+            <ActorFields
+              key={index}
+              actor={actor}
+              index={index}
+              onChange={updateActor}
+              onDelete={deleteActor}
+            />
           ))}
         </div>
       </section>
@@ -222,23 +209,23 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
-function StaffFields({
+const StaffFields = memo(function StaffFields({
+  role,
   label,
   name,
   phone,
-  onNameChange,
-  onPhoneChange
+  onChange
 }: {
+  role: keyof ProjectBasicInfo["mainStaff"];
   label: string;
   name: string;
   phone: string;
-  onNameChange: (value: string) => void;
-  onPhoneChange: (value: string) => void;
+  onChange: (role: keyof ProjectBasicInfo["mainStaff"], field: "name" | "phone", value: string) => void;
 }) {
   return (
     <div className="grid gap-2 rounded-xl border border-field-border bg-field-soft/50 p-2">
       <p className="text-center text-xs font-black text-field-primary">{label}</p>
-      <input className={fieldClass} value={name} placeholder={`${label} 이름`} onChange={(event) => onNameChange(event.currentTarget.value)} />
+      <input className={fieldClass} value={name} placeholder={`${label} 이름`} onChange={(event) => onChange(role, "name", event.currentTarget.value)} />
       <input
         className={fieldClass}
         type="tel"
@@ -247,8 +234,47 @@ function StaffFields({
         value={phone}
         placeholder={`${label} 연락처`}
         aria-label={`${label} 연락처`}
-        onChange={(event) => onPhoneChange(event.currentTarget.value)}
+        onChange={(event) => onChange(role, "phone", event.currentTarget.value)}
       />
     </div>
   );
-}
+});
+
+const ActorFields = memo(function ActorFields({
+  actor,
+  index,
+  onChange,
+  onDelete
+}: {
+  actor: ProjectActor;
+  index: number;
+  onChange: (index: number, field: keyof ProjectActor, value: string) => void;
+  onDelete: (index: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-xl border border-field-border bg-field-soft/50 p-2">
+      <input
+        className={fieldClass}
+        value={actor.role}
+        placeholder="역할"
+        aria-label={`배우 ${index + 1} 역할`}
+        onChange={(event) => onChange(index, "role", event.currentTarget.value)}
+      />
+      <input
+        className={fieldClass}
+        value={actor.name}
+        placeholder="배우이름"
+        aria-label={`배우 ${index + 1} 이름`}
+        onChange={(event) => onChange(index, "name", event.currentTarget.value)}
+      />
+      <button
+        type="button"
+        className="grid h-10 w-10 place-items-center rounded-full border border-field-danger bg-white text-field-danger transition active:scale-95"
+        aria-label={`배우 ${index + 1} 삭제`}
+        onClick={() => onDelete(index)}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  );
+});
