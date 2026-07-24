@@ -911,28 +911,28 @@ export default function ProjectSceneListPage() {
             className="grid border-b border-[#bfc5bf] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
             style={{ gridTemplateColumns }}
           >
-            <div role="columnheader" className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">
-              씬
+            <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
+              Scene
             </div>
             {compactLocationLayout ? (
               <div
                 role="columnheader"
-                className="col-span-2 min-w-0 border-r border-[#bfc5bf] px-1 py-1.5"
+                className="col-span-2 flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center"
               >
-                장소
+                Location
               </div>
             ) : (
               <>
-                <div role="columnheader" className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">
-                  대장소
+                <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
+                  Location
                 </div>
-                <div role="columnheader" className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">
-                  세부장소
+                <div role="columnheader" className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
+                  Sub-Location
                 </div>
               </>
             )}
-            {["Day", "D/N", "I/E", "씬 내용"].map((label) => (
-              <div role="columnheader" key={label} className="min-w-0 border-r border-[#bfc5bf] px-1 py-1.5">
+            {["Day", "Time", "Int/Ext", "Content"].map((label) => (
+              <div role="columnheader" key={label} className="flex min-w-0 items-center justify-center border-r border-[#bfc5bf] px-1 py-1.5 text-center">
                 {label}
               </div>
             ))}
@@ -943,7 +943,8 @@ export default function ProjectSceneListPage() {
                 key={role}
                 title={role}
                 role="columnheader"
-                className="min-w-0 truncate border-r border-[#bfc5bf] px-0.5 py-1.5"
+                aria-label={`Characters: ${role}`}
+                className="flex min-w-0 items-center justify-center truncate border-r border-[#bfc5bf] px-0.5 py-1.5 text-center"
                 style={{
                   backgroundColor: actorStyle.headerBackground,
                   color: actorStyle.color
@@ -953,7 +954,9 @@ export default function ProjectSceneListPage() {
               </div>
               );
             })}
-            <div role="columnheader" className="min-w-0 px-1 py-1.5">주요 소품</div>
+            <div role="columnheader" className="flex min-w-0 items-center justify-center px-1 py-1.5 text-center">
+              Memo
+            </div>
           </div>
 
           <SceneReorderList
@@ -1078,14 +1081,19 @@ function MobileSceneList({
       <div className="grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
-        {["씬", "장소", "Day", "D/N·I/E", "씬내용", "등장인물", "주요소품"].map((label) => (
-          <div
-            key={label}
-            className="min-w-0 border-b border-r border-[#bfc5bf] px-0.5 py-1.5 [overflow-wrap:anywhere]"
-          >
-            {label}
-          </div>
-        ))}
+        <MobileSceneHeader>Scene</MobileSceneHeader>
+        <MobileSceneHeader>
+          <span>Location</span>
+          <span>Sub-Location</span>
+        </MobileSceneHeader>
+        <MobileSceneHeader>Day</MobileSceneHeader>
+        <MobileSceneHeader>
+          <span>Time</span>
+          <span>Int/Ext</span>
+        </MobileSceneHeader>
+        <MobileSceneHeader>Content</MobileSceneHeader>
+        <MobileSceneHeader>Characters</MobileSceneHeader>
+        <MobileSceneHeader>Memo</MobileSceneHeader>
       </div>
 
       {items.length > 0 ? items.map((item, index) => (
@@ -1117,6 +1125,7 @@ function MobileSceneRow({
   locationStyle: PaletteStyle;
 }) {
   const selectedCharacters = parseCharacters(item.characters);
+  const mergedLocation = isSameHorizontalLocation(item);
   return (
     <div
       role="row"
@@ -1130,6 +1139,7 @@ function MobileSceneRow({
         {item.sceneNo || index + 1}
       </MobileSceneCell>
       <MobileSceneCell
+        className={mergedLocation ? "row-span-2" : ""}
         align="center"
         style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
       >
@@ -1164,13 +1174,26 @@ function MobileSceneRow({
       <MobileSceneCell className="row-span-2" align="left">
         {item.props}
       </MobileSceneCell>
-      <MobileSceneCell
-        align="center"
-        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-      >
-        {item.subLocation}
-      </MobileSceneCell>
+      {!mergedLocation ? (
+        <MobileSceneCell
+          align="center"
+          style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+        >
+          {item.subLocation}
+        </MobileSceneCell>
+      ) : null}
       <MobileSceneCell align="center">{item.interiorExterior}</MobileSceneCell>
+    </div>
+  );
+}
+
+function MobileSceneHeader({ children }: { children: ReactNode }) {
+  return (
+    <div
+      role="columnheader"
+      className="flex min-w-0 flex-col items-center justify-center border-b border-r border-[#bfc5bf] px-0.5 py-1.5 text-center [overflow-wrap:anywhere]"
+    >
+      {children}
     </div>
   );
 }
@@ -1315,7 +1338,7 @@ const SceneTableRow = memo(function SceneTableRow({
     >
       <SceneCell
         value={item.sceneNo}
-        ariaLabel={`${index + 1}행 씬`}
+        ariaLabel={`${index + 1} row Scene`}
         canEdit={canEdit}
         interaction={sceneNoInteraction}
         onChange={(sceneNo) => onUpdate(item.id, { sceneNo })}
@@ -1340,7 +1363,7 @@ const SceneTableRow = memo(function SceneTableRow({
                 onCellEditStart(item.id, "mainLocation");
               }}
               onBlur={() => onCellEditEnd(item.id, "mainLocation")}
-              aria-label={`${item.sceneNo || index + 1} 씬 장소`}
+              aria-label={`${item.sceneNo || index + 1} Scene Location`}
               className={`${inputClassName} font-bold ${
                 concealMainLocation ? "text-transparent" : ""
               }`}
@@ -1372,7 +1395,7 @@ const SceneTableRow = memo(function SceneTableRow({
                   onCellEditStart(item.id, "mainLocation");
                 }}
                 onBlur={() => onCellEditEnd(item.id, "mainLocation")}
-                aria-label={`${item.sceneNo || index + 1} 씬 대장소`}
+                aria-label={`${item.sceneNo || index + 1} Scene Location`}
                 className={`${inputClassName} font-bold ${
                   concealMainLocation ? "text-transparent" : ""
                 }`}
@@ -1391,7 +1414,7 @@ const SceneTableRow = memo(function SceneTableRow({
 
           <SceneCell
             value={item.subLocation}
-            ariaLabel={`${item.sceneNo || index + 1} 씬 세부장소`}
+            ariaLabel={`${item.sceneNo || index + 1} Scene Sub-Location`}
             canEdit={canEdit}
             interaction={getCellInteraction("subLocation")}
             onChange={(subLocation) => onUpdate(item.id, { subLocation })}
@@ -1400,7 +1423,7 @@ const SceneTableRow = memo(function SceneTableRow({
       )}
       <SceneCell
         value={item.dayLabel}
-        ariaLabel={`${item.sceneNo || index + 1} 씬 Day`}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Day`}
         canEdit={canEdit}
         interaction={getCellInteraction("dayLabel")}
         onChange={(dayLabel) => onUpdate(item.id, { dayLabel })}
@@ -1416,7 +1439,7 @@ const SceneTableRow = memo(function SceneTableRow({
               onCellEditStart(item.id, "dayNight");
             }}
             onBlur={() => onCellEditEnd(item.id, "dayNight")}
-            aria-label={`${item.sceneNo || index + 1} 씬 D/N`}
+            aria-label={`${item.sceneNo || index + 1} Scene Time`}
             className={`${selectClassName} ${concealDayNight ? "text-transparent" : ""}`}
           >
             <option value="" />
@@ -1440,7 +1463,7 @@ const SceneTableRow = memo(function SceneTableRow({
               onCellEditStart(item.id, "interiorExterior");
             }}
             onBlur={() => onCellEditEnd(item.id, "interiorExterior")}
-            aria-label={`${item.sceneNo || index + 1} 씬 I/E`}
+            aria-label={`${item.sceneNo || index + 1} Scene Int/Ext`}
             className={`${selectClassName} ${concealInteriorExterior ? "text-transparent" : ""}`}
           >
             <option value="" />
@@ -1464,7 +1487,7 @@ const SceneTableRow = memo(function SceneTableRow({
               onCellEditStart(item.id, "sceneContent");
             }}
             onBlur={() => onCellEditEnd(item.id, "sceneContent")}
-            aria-label={`${item.sceneNo || index + 1} 씬 내용`}
+            aria-label={`${item.sceneNo || index + 1} Scene Content`}
           />
         ) : (
           <p className="whitespace-normal break-words px-1.5 py-2 text-left font-medium leading-5 [overflow-wrap:anywhere]">
@@ -1494,7 +1517,7 @@ const SceneTableRow = memo(function SceneTableRow({
               <button
                 type="button"
                 onClick={() => toggleCharacter(role)}
-                aria-label={`${item.sceneNo || index + 1} 씬 ${role} ${selected ? "제외" : "포함"}`}
+                aria-label={`${item.sceneNo || index + 1} Scene Character ${role} ${selected ? "제외" : "포함"}`}
                 aria-pressed={selected}
                 className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
                   selected
@@ -1518,7 +1541,7 @@ const SceneTableRow = memo(function SceneTableRow({
 
       <SceneCell
         value={item.props}
-        ariaLabel={`${item.sceneNo || index + 1} 씬 주요 소품`}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Memo`}
         canEdit={canEdit}
         interaction={getCellInteraction("props")}
         textAlign="left"
