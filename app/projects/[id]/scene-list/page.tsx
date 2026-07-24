@@ -26,29 +26,38 @@ import { getProject } from "@/lib/data/projects";
 import type { Project, ProjectSceneItem } from "@/lib/types";
 
 const inputClassName =
-  "min-h-8 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary";
+  "min-h-8 w-full min-w-0 select-text border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none [-webkit-touch-callout:default] focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary";
 const selectClassName = `${inputClassName} appearance-none`;
 
-type SceneFillColumn =
+type SceneValueColumn =
+  | "sceneNo"
   | "mainLocation"
   | "subLocation"
   | "dayLabel"
   | "dayNight"
   | "interiorExterior"
+  | "sceneContent"
   | "props";
+
+type SceneActorColumn = `actor:${string}`;
+type SceneCellColumn = SceneValueColumn | SceneActorColumn;
+type SceneFillColumn = Exclude<SceneValueColumn, "sceneNo" | "sceneContent">;
 
 type SelectedSceneCell = {
   rowId: string;
-  column: SceneFillColumn;
+  column: SceneCellColumn;
 };
 
 type SceneCellRange = {
-  column: SceneFillColumn;
+  column: SceneCellColumn;
   startIndex: number;
   endIndex: number;
 };
 
 type CellDragState = SceneCellRange & {
+  initialStartIndex: number;
+  initialEndIndex: number;
+  originIndex: number;
   pointerId: number;
   startX: number;
   startY: number;
@@ -79,6 +88,10 @@ export default function ProjectSceneListPage() {
   const [selectedCell, setSelectedCell] = useState<SelectedSceneCell | null>(null);
   const [selectedRange, setSelectedRange] = useState<SceneCellRange | null>(null);
   const itemsRef = useRef(items);
+  const selectedCellRef = useRef(selectedCell);
+  const selectedRangeRef = useRef(selectedRange);
+  const sceneGridRef = useRef<HTMLDivElement | null>(null);
+  const copiedValueRef = useRef("");
   const cellDragRef = useRef<CellDragState | null>(null);
   const cellDragCleanupRef = useRef<(() => void) | null>(null);
 
@@ -111,7 +124,25 @@ export default function ProjectSceneListPage() {
 
   useEffect(() => {
     itemsRef.current = items;
+    const activeCell = selectedCellRef.current;
+    if (!activeCell) return;
+    const rowIndex = items.findIndex((item) => item.id === activeCell.rowId);
+    if (rowIndex < 0) {
+      selectedCellRef.current = null;
+      selectedRangeRef.current = null;
+      setSelectedCell(null);
+      setSelectedRange(null);
+      return;
+    }
+    const nextRange = getVisualMergeRange(items, rowIndex, activeCell.column);
+    selectedRangeRef.current = nextRange;
+    setSelectedRange(nextRange);
   }, [items]);
+
+  useEffect(() => {
+    selectedCellRef.current = selectedCell;
+    selectedRangeRef.current = selectedRange;
+  }, [selectedCell, selectedRange]);
 
   useEffect(() => () => {
     cellDragCleanupRef.current?.();
@@ -154,47 +185,91 @@ export default function ProjectSceneListPage() {
 
   const selectCell = useCallback((
     rowId: string,
-    column: SceneFillColumn,
+    column: SceneCellColumn,
     rowIndex: number
   ) => {
-    if (!canEdit) return;
-    setSelectedCell({ rowId, column });
-    setSelectedRange({ column, startIndex: rowIndex, endIndex: rowIndex });
-  }, [canEdit]);
+    const nextCell = { rowId, column };
+    const nextRange = getVisualMergeRange(itemsRef.current, rowIndex, column);
+    selectedCellRef.current = nextCell;
+    selectedRangeRef.current = nextRange;
+    setSelectedCell(nextCell);
+    setSelectedRange(nextRange);
+  }, []);
 
-  const fillCellRange = useCallback((
-    column: SceneFillColumn,
+  const applyCellValueRange = useCallback((
+    column: SceneCellColumn,
     startIndex: number,
     endIndex: number,
     value: string
   ) => {
-    if (!canEdit || startIndex === endIndex) return;
+    if (!canEdit) return;
     const lower = Math.min(startIndex, endIndex);
     const upper = Math.max(startIndex, endIndex);
     setItems((current) => current.map((item, index) => (
-      index >= lower && index <= upper ? { ...item, [column]: value } : item
+      index >= lower && index <= upper ? setSceneCellValue(item, column, value) : item
     )));
     setIsDirty(true);
     setErrorMessage("");
   }, [canEdit]);
 
+  useEffect(() => {
+    const shouldHandleGridClipboard = (target: EventTarget | null) => {
+      const grid = sceneGridRef.current;
+      return target instanceof Node && Boolean(grid?.contains(target));
+    };
+
+    const handleCopy = (event: ClipboardEvent) => {
+      const activeCell = selectedCellRef.current;
+      if (!activeCell || !shouldHandleGridClipboard(event.target)) return;
+      if (hasEditableTextSelection(event.target)) return;
+      const item = itemsRef.current.find((candidate) => candidate.id === activeCell.rowId);
+      if (!item) return;
+      const value = getSceneCellValue(item, activeCell.column);
+      copiedValueRef.current = value;
+      event.preventDefault();
+      event.clipboardData?.setData("text/plain", value);
+    };
+
+    const handlePaste = (event: ClipboardEvent) => {
+      const activeCell = selectedCellRef.current;
+      const range = selectedRangeRef.current;
+      if (!canEdit || !activeCell || !range || !shouldHandleGridClipboard(event.target)) return;
+      const rangeSize = Math.abs(range.endIndex - range.startIndex) + 1;
+      if (isTextEditingTarget(event.target) && rangeSize === 1) return;
+      const value = event.clipboardData?.getData("text/plain") ?? copiedValueRef.current;
+      event.preventDefault();
+      applyCellValueRange(activeCell.column, range.startIndex, range.endIndex, value);
+    };
+
+    window.addEventListener("copy", handleCopy);
+    window.addEventListener("paste", handlePaste);
+    return () => {
+      window.removeEventListener("copy", handleCopy);
+      window.removeEventListener("paste", handlePaste);
+    };
+  }, [applyCellValueRange, canEdit]);
+
   const startCellDrag = useCallback((
     event: ReactPointerEvent<HTMLDivElement>,
     rowId: string,
-    column: SceneFillColumn,
+    column: SceneCellColumn,
     rowIndex: number,
     value: string
   ) => {
-    if (!canEdit || event.button !== 0) return;
+    if (!canEdit || event.button !== 0 || !isFillColumn(column)) return;
     event.stopPropagation();
     cellDragCleanupRef.current?.();
     selectCell(rowId, column, rowIndex);
+    const initialRange = getVisualMergeRange(itemsRef.current, rowIndex, column);
 
     const drag: CellDragState = {
       pointerId: event.pointerId,
       column,
-      startIndex: rowIndex,
-      endIndex: rowIndex,
+      startIndex: initialRange.startIndex,
+      endIndex: initialRange.endIndex,
+      initialStartIndex: initialRange.startIndex,
+      initialEndIndex: initialRange.endIndex,
+      originIndex: rowIndex,
       startX: event.clientX,
       startY: event.clientY,
       sourceValue: value,
@@ -213,8 +288,8 @@ export default function ProjectSceneListPage() {
 
     const findTargetIndex = (clientX: number, clientY: number) => {
       const element = document.elementFromPoint(clientX, clientY);
-      const cell = element?.closest("[data-scene-fill-column]") as HTMLElement | null;
-      if (!cell || cell.dataset.sceneFillColumn !== column) return null;
+      const cell = element?.closest("[data-scene-cell-column]") as HTMLElement | null;
+      if (!cell || cell.dataset.sceneCellColumn !== column) return null;
       const targetRowId = cell.dataset.sceneRowId;
       const targetIndex = itemsRef.current.findIndex((item) => item.id === targetRowId);
       return targetIndex >= 0 ? targetIndex : null;
@@ -231,21 +306,28 @@ export default function ProjectSceneListPage() {
           verticalDistance < 8 ||
           verticalDistance <= horizontalDistance * 1.2 ||
           targetIndex === null ||
-          targetIndex === current.startIndex
+          targetIndex === current.originIndex
         ) {
           return;
         }
         current.didDrag = true;
+        window.getSelection()?.removeAllRanges();
         document.body.style.userSelect = "none";
         document.body.style.cursor = "cell";
       }
       moveEvent.preventDefault();
-      if (targetIndex === null || targetIndex === current.endIndex) return;
-      current.endIndex = targetIndex;
+      if (targetIndex === null) return;
+      const nextRange = getDraggedRange(current, targetIndex);
+      if (
+        nextRange.startIndex === current.startIndex &&
+        nextRange.endIndex === current.endIndex
+      ) return;
+      current.startIndex = nextRange.startIndex;
+      current.endIndex = nextRange.endIndex;
       setSelectedRange({
         column: current.column,
-        startIndex: current.startIndex,
-        endIndex: targetIndex
+        startIndex: nextRange.startIndex,
+        endIndex: nextRange.endIndex
       });
     };
 
@@ -254,12 +336,26 @@ export default function ProjectSceneListPage() {
       cellDragRef.current = null;
       cleanup();
       if (commit && current?.didDrag) {
-        fillCellRange(
-          current.column,
-          current.startIndex,
-          current.endIndex,
-          current.sourceValue
-        );
+        const nextLower = Math.min(current.startIndex, current.endIndex);
+        const nextUpper = Math.max(current.startIndex, current.endIndex);
+        const initialLower = Math.min(current.initialStartIndex, current.initialEndIndex);
+        const initialUpper = Math.max(current.initialStartIndex, current.initialEndIndex);
+        setItems((items) => items.map((item, index) => {
+          if (index >= nextLower && index <= nextUpper) {
+            return setSceneCellValue(item, current.column, current.sourceValue);
+          }
+          if (
+            initialLower !== initialUpper &&
+            index >= initialLower &&
+            index <= initialUpper &&
+            (index < nextLower || index > nextUpper)
+          ) {
+            return setSceneCellValue(item, current.column, "");
+          }
+          return item;
+        }));
+        setIsDirty(true);
+        setErrorMessage("");
       }
     };
 
@@ -277,7 +373,7 @@ export default function ProjectSceneListPage() {
     window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleEnd);
     window.addEventListener("pointercancel", handleCancel);
-  }, [canEdit, fillCellRange, selectCell]);
+  }, [canEdit, selectCell]);
 
   function addItem() {
     if (!canEdit || !projectId) return;
@@ -377,7 +473,16 @@ export default function ProjectSceneListPage() {
           씬리스트는 가로 화면에 최적화되어 있습니다. 화면을 돌려서 확인해주세요.
         </div>
 
-        <div className="scene-list-landscape min-w-0">
+        <div
+          ref={sceneGridRef}
+          role="grid"
+          aria-label={`${project.name} 씬리스트`}
+          className="scene-list-landscape min-w-0 select-none [&_input]:select-text [&_textarea]:select-text"
+          style={{
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none"
+          } as CSSProperties}
+        >
           <div
             role="row"
             className="grid border-b border-[#bfc5bf] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
@@ -413,9 +518,7 @@ export default function ProjectSceneListPage() {
                 canEdit={canEdit}
                 actorRoles={actorRoles}
                 gridTemplateColumns={gridTemplateColumns}
-                previousItem={items[index - 1]}
-                nextItem={items[index + 1]}
-                selectedCell={selectedCell}
+                allItems={items}
                 selectedRange={selectedRange}
                 onCellSelect={selectCell}
                 onCellPointerDown={startCellDrag}
@@ -475,9 +578,7 @@ const SceneTableRow = memo(function SceneTableRow({
   canEdit,
   actorRoles,
   gridTemplateColumns,
-  previousItem,
-  nextItem,
-  selectedCell,
+  allItems,
   selectedRange,
   onCellSelect,
   onCellPointerDown,
@@ -489,15 +590,13 @@ const SceneTableRow = memo(function SceneTableRow({
   canEdit: boolean;
   actorRoles: string[];
   gridTemplateColumns: string;
-  previousItem?: ProjectSceneItem;
-  nextItem?: ProjectSceneItem;
-  selectedCell: SelectedSceneCell | null;
+  allItems: ProjectSceneItem[];
   selectedRange: SceneCellRange | null;
-  onCellSelect: (rowId: string, column: SceneFillColumn, rowIndex: number) => void;
+  onCellSelect: (rowId: string, column: SceneCellColumn, rowIndex: number) => void;
   onCellPointerDown: (
     event: ReactPointerEvent<HTMLDivElement>,
     rowId: string,
-    column: SceneFillColumn,
+    column: SceneCellColumn,
     rowIndex: number,
     value: string
   ) => void;
@@ -509,27 +608,36 @@ const SceneTableRow = memo(function SceneTableRow({
     () => parseCharacters(item.characters),
     [item.characters]
   );
-  const getCellInteraction = (column: SceneFillColumn): SceneCellInteraction => ({
-    rowId: item.id,
-    rowIndex: index,
-    column,
-    canEdit,
-    isSelected: selectedCell?.rowId === item.id && selectedCell.column === column,
-    isInRange: Boolean(
-      selectedRange?.column === column &&
-      index >= Math.min(selectedRange.startIndex, selectedRange.endIndex) &&
-      index <= Math.max(selectedRange.startIndex, selectedRange.endIndex)
-    ),
-    mergePosition: getVisualMergePosition(item, previousItem, nextItem, column),
-    onSelect: onCellSelect,
-    onPointerDown: onCellPointerDown
-  });
+  const getCellInteraction = (column: SceneCellColumn): SceneCellInteraction => {
+    const mergeRange = getVisualMergeRange(allItems, index, column);
+    const rangeStart = selectedRange ? Math.min(selectedRange.startIndex, selectedRange.endIndex) : -1;
+    const rangeEnd = selectedRange ? Math.max(selectedRange.startIndex, selectedRange.endIndex) : -1;
+    const isInRange = selectedRange?.column === column && index >= rangeStart && index <= rangeEnd;
+    const selectionRange = isInRange && selectedRange
+      ? { ...selectedRange, startIndex: rangeStart, endIndex: rangeEnd }
+      : { column, startIndex: index, endIndex: index };
+    return {
+      rowId: item.id,
+      rowIndex: index,
+      column,
+      canEdit,
+      canDrag: canEdit && isFillColumn(column),
+      isInRange,
+      selectionPosition: getMergePosition(index, selectionRange),
+      mergeRange,
+      mergePosition: getMergePosition(index, mergeRange),
+      onSelect: onCellSelect,
+      onPointerDown: onCellPointerDown
+    };
+  };
+  const sceneNoInteraction = getCellInteraction("sceneNo");
   const mainLocationInteraction = getCellInteraction("mainLocation");
-  const concealMainLocation = isMergeContinuation(mainLocationInteraction) && !mainLocationInteraction.isSelected;
+  const concealMainLocation = isVisuallyMerged(mainLocationInteraction);
   const dayNightInteraction = getCellInteraction("dayNight");
-  const concealDayNight = isMergeContinuation(dayNightInteraction) && !dayNightInteraction.isSelected;
+  const concealDayNight = isVisuallyMerged(dayNightInteraction);
   const interiorExteriorInteraction = getCellInteraction("interiorExterior");
-  const concealInteriorExterior = isMergeContinuation(interiorExteriorInteraction) && !interiorExteriorInteraction.isSelected;
+  const concealInteriorExterior = isVisuallyMerged(interiorExteriorInteraction);
+  const sceneContentInteraction = getCellInteraction("sceneContent");
 
   function toggleCharacter(role: string) {
     const normalizedRole = role.trim();
@@ -547,20 +655,21 @@ const SceneTableRow = memo(function SceneTableRow({
   return (
     <div
       role="row"
-      className="grid min-h-9 bg-white text-[12px]"
+      className="grid h-9 bg-white text-[12px]"
       style={{ gridTemplateColumns }}
     >
       <SceneCell
         value={item.sceneNo}
         ariaLabel={`${index + 1}행 씬`}
         canEdit={canEdit}
+        interaction={sceneNoInteraction}
         onChange={(sceneNo) => onUpdate(item.id, { sceneNo })}
       />
 
       <SceneCellFrame
         interaction={mainLocationInteraction}
         value={item.mainLocation}
-        style={{ backgroundColor: locationStyle.background }}
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
       >
         {canEdit ? (
           <input
@@ -579,7 +688,7 @@ const SceneTableRow = memo(function SceneTableRow({
             style={{ color: locationStyle.color }}
             title={item.mainLocation}
           >
-            {isMergeContinuation(mainLocationInteraction) ? "" : item.mainLocation}
+            {concealMainLocation ? "" : item.mainLocation}
           </span>
         )}
       </SceneCellFrame>
@@ -614,7 +723,7 @@ const SceneTableRow = memo(function SceneTableRow({
           </select>
         ) : (
           <span className="block px-1 py-2 text-center font-bold">
-            {isMergeContinuation(dayNightInteraction) ? "" : item.dayNight}
+            {concealDayNight ? "" : item.dayNight}
           </span>
         )}
       </SceneCellFrame>
@@ -634,16 +743,17 @@ const SceneTableRow = memo(function SceneTableRow({
           </select>
         ) : (
           <span className="block px-1 py-2 text-center font-bold">
-            {isMergeContinuation(interiorExteriorInteraction) ? "" : item.interiorExterior}
+            {concealInteriorExterior ? "" : item.interiorExterior}
           </span>
         )}
       </SceneCellFrame>
 
-      <div role="gridcell" className="min-w-0 border-b border-r border-[#cbd0cb]">
+      <SceneCellFrame interaction={sceneContentInteraction} value={item.sceneContent}>
         {canEdit ? (
           <input
             value={item.sceneContent}
             onChange={(event) => onUpdate(item.id, { sceneContent: event.target.value })}
+            onFocus={() => onCellSelect(item.id, "sceneContent", index)}
             aria-label={`${item.sceneNo || index + 1} 씬 내용`}
             className={`${inputClassName} text-left`}
           />
@@ -652,14 +762,20 @@ const SceneTableRow = memo(function SceneTableRow({
             {item.sceneContent}
           </p>
         )}
-      </div>
+      </SceneCellFrame>
 
       {actorRoles.map((role) => {
         const selected = selectedCharacters.some(
           (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
         );
+        const actorInteraction = getCellInteraction(`actor:${role}`);
         return (
-          <div key={role} role="gridcell" className="grid min-w-0 place-items-center border-b border-r border-[#cbd0cb]">
+          <SceneCellFrame
+            key={role}
+            interaction={actorInteraction}
+            value={selected ? "O" : ""}
+            className="grid place-items-center"
+          >
             {canEdit ? (
               <button
                 type="button"
@@ -677,7 +793,7 @@ const SceneTableRow = memo(function SceneTableRow({
             ) : (
               <span className="font-black text-field-primary">{selected ? "O" : ""}</span>
             )}
-          </div>
+          </SceneCellFrame>
         );
       })}
 
@@ -716,16 +832,18 @@ const SceneTableRow = memo(function SceneTableRow({
 type SceneCellInteraction = {
   rowId: string;
   rowIndex: number;
-  column: SceneFillColumn;
+  column: SceneCellColumn;
   canEdit: boolean;
-  isSelected: boolean;
+  canDrag: boolean;
   isInRange: boolean;
+  selectionPosition: MergePosition;
+  mergeRange: SceneCellRange;
   mergePosition: MergePosition;
-  onSelect: (rowId: string, column: SceneFillColumn, rowIndex: number) => void;
+  onSelect: (rowId: string, column: SceneCellColumn, rowIndex: number) => void;
   onPointerDown: (
     event: ReactPointerEvent<HTMLDivElement>,
     rowId: string,
-    column: SceneFillColumn,
+    column: SceneCellColumn,
     rowIndex: number,
     value: string
   ) => void;
@@ -748,8 +866,7 @@ function SceneCell({
 }) {
   const concealRepeatedValue = Boolean(
     interaction &&
-    isMergeContinuation(interaction) &&
-    !interaction.isSelected
+    isVisuallyMerged(interaction)
   );
 
   return (
@@ -796,59 +913,224 @@ function SceneCellFrame({
   children: ReactNode;
 }) {
   const mergesWithNext = interaction?.mergePosition === "start" || interaction?.mergePosition === "middle";
+  const mergeSpan = interaction
+    ? Math.abs(interaction.mergeRange.endIndex - interaction.mergeRange.startIndex) + 1
+    : 1;
+  const showsMergedValue = Boolean(
+    interaction?.mergePosition === "start" &&
+    mergeSpan > 1 &&
+    value.trim()
+  );
   return (
     <div
       role="gridcell"
+      tabIndex={-1}
       data-scene-row-id={interaction?.rowId}
-      data-scene-fill-column={interaction?.column}
-      aria-selected={interaction?.isSelected || undefined}
+      data-scene-cell-column={interaction?.column}
+      aria-selected={interaction?.isInRange || undefined}
       onPointerDown={interaction
-        ? (event) => interaction.onPointerDown(
-            event,
-            interaction.rowId,
-            interaction.column,
-            interaction.rowIndex,
-            value
-          )
+        ? (event) => {
+            event.stopPropagation();
+            interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
+            if (!isInteractiveTarget(event.target)) {
+              event.currentTarget.focus({ preventScroll: true });
+            }
+            if (interaction.canDrag) {
+              interaction.onPointerDown(
+                event,
+                interaction.rowId,
+                interaction.column,
+                interaction.rowIndex,
+                value
+              );
+            }
+          }
         : undefined}
       className={`relative min-w-0 border-r border-[#cbd0cb] ${
         mergesWithNext ? "border-b border-b-transparent" : "border-b border-b-[#cbd0cb]"
-      } ${interaction?.canEdit ? "cursor-cell" : ""} ${
-        interaction?.isInRange ? "shadow-[inset_0_0_0_1px_rgba(15,61,46,0.38)]" : ""
+      } ${interaction ? "cursor-cell outline-none" : ""} ${
+        interaction?.isInRange ? "z-10" : ""
       } ${
-        interaction?.isSelected ? "z-10 shadow-[inset_0_0_0_2px_#0f3d2e]" : ""
+        interaction?.mergePosition === "start" ? "z-[5]" : ""
       } ${className}`}
       style={{
         ...style,
-        touchAction: interaction?.canEdit ? "none" : style?.touchAction
+        touchAction: interaction?.canDrag ? "none" : style?.touchAction,
+        boxShadow: interaction?.isInRange
+          ? getSelectionBoxShadow(interaction.selectionPosition)
+          : style?.boxShadow
       }}
     >
       {children}
+      {showsMergedValue ? (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center truncate px-1 text-center font-bold"
+          style={{
+            height: `calc(${mergeSpan} * 2.25rem)`,
+            color: style?.color
+          }}
+        >
+          {value}
+        </span>
+      ) : null}
     </div>
   );
 }
 
-function isMergeContinuation(interaction: Pick<SceneCellInteraction, "mergePosition">) {
-  return interaction.mergePosition === "middle" || interaction.mergePosition === "end";
+function isVisuallyMerged(interaction: Pick<SceneCellInteraction, "mergeRange">) {
+  return interaction.mergeRange.startIndex !== interaction.mergeRange.endIndex;
 }
 
-function getVisualMergePosition(
-  item: ProjectSceneItem,
-  previousItem: ProjectSceneItem | undefined,
-  nextItem: ProjectSceneItem | undefined,
-  column: SceneFillColumn
-): MergePosition {
-  if (!["mainLocation", "subLocation", "dayLabel", "dayNight", "interiorExterior"].includes(column)) {
-    return "single";
+function getMergePosition(rowIndex: number, range: SceneCellRange): MergePosition {
+  if (range.startIndex === range.endIndex) return "single";
+  if (rowIndex === range.startIndex) return "start";
+  if (rowIndex === range.endIndex) return "end";
+  return "middle";
+}
+
+function getSelectionBoxShadow(position: MergePosition) {
+  const left = "inset 2px 0 0 #0f3d2e";
+  const right = "inset -2px 0 0 #0f3d2e";
+  const top = "inset 0 2px 0 #0f3d2e";
+  const bottom = "inset 0 -2px 0 #0f3d2e";
+  if (position === "start") return `${left}, ${right}, ${top}`;
+  if (position === "middle") return `${left}, ${right}`;
+  if (position === "end") return `${left}, ${right}, ${bottom}`;
+  return "inset 0 0 0 2px #0f3d2e";
+}
+
+function getVisualMergeRange(
+  items: ProjectSceneItem[],
+  rowIndex: number,
+  column: SceneCellColumn
+): SceneCellRange {
+  const single = { column, startIndex: rowIndex, endIndex: rowIndex };
+  if (!isVisualMergeColumn(column)) return single;
+  const value = getSceneCellValue(items[rowIndex], column).trim();
+  if (!value) return single;
+
+  let startIndex = rowIndex;
+  let endIndex = rowIndex;
+  while (
+    startIndex > 0 &&
+    getSceneCellValue(items[startIndex - 1], column).trim() === value
+  ) {
+    startIndex -= 1;
   }
-  const value = item[column].trim();
-  if (!value) return "single";
-  const matchesPrevious = previousItem?.[column].trim() === value;
-  const matchesNext = nextItem?.[column].trim() === value;
-  if (matchesPrevious && matchesNext) return "middle";
-  if (matchesPrevious) return "end";
-  if (matchesNext) return "start";
-  return "single";
+  while (
+    endIndex < items.length - 1 &&
+    getSceneCellValue(items[endIndex + 1], column).trim() === value
+  ) {
+    endIndex += 1;
+  }
+  return { column, startIndex, endIndex };
+}
+
+function getDraggedRange(drag: CellDragState, targetIndex: number) {
+  if (targetIndex < drag.initialStartIndex) {
+    return { startIndex: targetIndex, endIndex: drag.initialEndIndex };
+  }
+  if (targetIndex > drag.initialEndIndex) {
+    return { startIndex: drag.initialStartIndex, endIndex: targetIndex };
+  }
+  if (drag.initialStartIndex === drag.initialEndIndex) {
+    return { startIndex: drag.originIndex, endIndex: targetIndex };
+  }
+  const midpoint = (drag.initialStartIndex + drag.initialEndIndex) / 2;
+  return drag.originIndex <= midpoint
+    ? { startIndex: drag.initialStartIndex, endIndex: targetIndex }
+    : { startIndex: targetIndex, endIndex: drag.initialEndIndex };
+}
+
+function isVisualMergeColumn(column: SceneCellColumn): column is SceneFillColumn {
+  return [
+    "mainLocation",
+    "subLocation",
+    "dayLabel",
+    "dayNight",
+    "interiorExterior"
+  ].includes(column);
+}
+
+function isFillColumn(column: SceneCellColumn): column is SceneFillColumn {
+  return [
+    "mainLocation",
+    "subLocation",
+    "dayLabel",
+    "dayNight",
+    "interiorExterior",
+    "props"
+  ].includes(column);
+}
+
+function isActorColumn(column: SceneCellColumn): column is SceneActorColumn {
+  return column.startsWith("actor:");
+}
+
+function getSceneCellValue(item: ProjectSceneItem | undefined, column: SceneCellColumn) {
+  if (!item) return "";
+  if (!isActorColumn(column)) return item[column];
+  const role = column.slice("actor:".length);
+  const selected = parseCharacters(item.characters).some(
+    (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
+  );
+  return selected ? "O" : "";
+}
+
+function setSceneCellValue(
+  item: ProjectSceneItem,
+  column: SceneCellColumn,
+  rawValue: string
+): ProjectSceneItem {
+  if (isActorColumn(column)) {
+    const role = column.slice("actor:".length).trim();
+    if (!role) return item;
+    const selectedCharacters = parseCharacters(item.characters);
+    const hasRole = selectedCharacters.some(
+      (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
+    );
+    const shouldSelect = /^(o|1|true)$/i.test(rawValue.trim());
+    const nextCharacters = shouldSelect
+      ? (hasRole ? selectedCharacters : [...selectedCharacters, role])
+      : selectedCharacters.filter(
+          (character) => character.toLocaleLowerCase() !== role.toLocaleLowerCase()
+        );
+    return { ...item, characters: nextCharacters.join(", ") };
+  }
+
+  let value = rawValue.replace(/\r?\n/g, " ");
+  if (column === "dayNight") {
+    const normalized = value.trim().toUpperCase();
+    value = normalized === "D" || normalized === "N" ? normalized : "";
+  } else if (column === "interiorExterior") {
+    const normalized = value.trim().toUpperCase();
+    value = normalized === "I" || normalized === "E" ? normalized : "";
+  }
+  return { ...item, [column]: value };
+}
+
+function isTextEditingTarget(target: EventTarget | null) {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function hasEditableTextSelection(target: EventTarget | null) {
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+    return (
+      target.selectionStart !== null &&
+      target.selectionEnd !== null &&
+      target.selectionStart !== target.selectionEnd
+    );
+  }
+  return target instanceof HTMLElement && target.isContentEditable && !window.getSelection()?.isCollapsed;
+}
+
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(
+    target.closest("input, textarea, select, button, a, [role='button']")
+  );
 }
 
 function parseCharacters(value: string) {

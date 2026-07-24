@@ -66,6 +66,7 @@ export function SceneReorderList({
     dragRef.current = next;
     setDrag(next);
     suppressClickRef.current = true;
+    window.getSelection()?.removeAllRanges();
     document.body.style.userSelect = "none";
     document.body.style.cursor = "grabbing";
   }
@@ -208,7 +209,7 @@ export function SceneReorderList({
                 ? `translateY(${(drag?.currentY ?? 0) - (drag?.startY ?? 0)}px)`
                 : undefined,
               opacity: isDragging ? 0.82 : 1,
-              zIndex: isDragging ? 20 : 1,
+              zIndex: isDragging ? 20 : undefined,
               touchAction: isDragging ? "none" : "pan-y"
             }}
           >
