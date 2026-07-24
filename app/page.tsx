@@ -98,7 +98,11 @@ export default function HomePage() {
   const mainTargetRef = useRef<HTMLDivElement | null>(null);
   const projectTargetRef = useRef<HTMLDivElement | null>(null);
   const mainBubbleRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const mainOrbitRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const mainAnchorRefs = useRef<Array<HTMLDivElement | null>>([]);
   const projectBubbleRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const projectOrbitRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const projectAnchorRefs = useRef<Array<HTMLDivElement | null>>([]);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const compositionRef = useRef<HTMLDivElement | null>(null);
@@ -115,11 +119,38 @@ export default function HomePage() {
     (index: number) => getBubbleTargetMeasurement(projectBubbleRefs.current[index], projectTargetRef.current),
     []
   );
+  const applyMainRotationFrame = useCallback((rotation: number) => {
+    mainOrbitRefs.current.forEach((orbit, index) => {
+      if (!orbit) return;
+      const itemAngle = getSpinnerItemAngle(index, wheelItems.length) + rotation;
+      orbit.style.transform = `rotate(${itemAngle}deg)`;
+      const anchor = mainAnchorRefs.current[index];
+      if (anchor) {
+        anchor.style.transform = `translate(-50%, -50%) rotate(${-itemAngle}deg)`;
+      }
+    });
+  }, []);
+  const applyProjectRotationFrame = useCallback((rotation: number) => {
+    projectOrbitRefs.current.forEach((orbit, index) => {
+      if (!orbit || projects.length === 0) return;
+      const itemAngle = getSpinnerItemAngle(index, projects.length) + rotation;
+      const distance = Math.abs(normalizeSpinnerAngle(itemAngle));
+      const proximity = Math.max(0, 1 - distance / 180);
+      orbit.style.transform = `rotate(${itemAngle}deg)`;
+      orbit.style.zIndex = `${Math.max(1, Math.round(proximity * 10))}`;
+      const anchor = projectAnchorRefs.current[index];
+      if (anchor) {
+        anchor.style.opacity = `${0.2 + proximity * 0.52}`;
+        anchor.style.transform = `translate(-50%, -50%) rotate(${-itemAngle}deg) scale(${0.52 + proximity * 0.24})`;
+      }
+    });
+  }, [projects.length]);
   const mainSpinner = useDragSpinner({
     itemCount: wheelItems.length,
     onCommit: (index) => commitWheelItem(wheelItems[index]?.id ?? "new"),
     onReject: () => closeProjectRing(),
     measureTarget: measureMainTarget,
+    onRotationFrame: applyMainRotationFrame,
     activationKey: isProjectRingOpen
   });
   const projectSpinner = useDragSpinner({
@@ -127,6 +158,7 @@ export default function HomePage() {
     onCommit: (index) => openProject(projects[index]),
     onReject: () => closeProjectRing(),
     measureTarget: measureProjectTarget,
+    onRotationFrame: applyProjectRotationFrame,
     activationKey: isProjectRingOpen
   });
   const previewItem = wheelItems[mainSpinner.activeIndex]?.id ?? "new";
@@ -414,7 +446,7 @@ export default function HomePage() {
         role="group"
         tabIndex={0}
         aria-label="프로젝트 원형 메뉴. 좌우 방향키 또는 드래그로 회전"
-        className="absolute inset-0 z-10 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
+        className="absolute inset-0 z-10 touch-none select-none rounded-full outline-none cursor-grab active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
         {...projectSpinner.pointerHandlers}
         onClick={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -455,8 +487,11 @@ export default function HomePage() {
           return (
             <div
               key={project.id}
+              ref={(element) => {
+                projectOrbitRefs.current[index] = element;
+              }}
               className={`pointer-events-none absolute inset-0 will-change-transform ${
-                projectSpinner.isDragging
+                projectSpinner.isMoving
                   ? "transition-none"
                   : "transition-transform duration-[260ms] ease-out"
               }`}
@@ -466,8 +501,11 @@ export default function HomePage() {
               }}
             >
               <div
+                ref={(element) => {
+                  projectAnchorRefs.current[index] = element;
+                }}
                 className={`pointer-events-auto absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] will-change-[transform,opacity] md:h-[5.5rem] md:w-[5.5rem] ${
-                  projectSpinner.isDragging ? "transition-none" : "transition-[transform,opacity] duration-[260ms] ease-out"
+                  projectSpinner.isMoving ? "transition-none" : "transition-[transform,opacity] duration-[260ms] ease-out"
                 }`}
                 style={{
                   opacity,
@@ -551,7 +589,7 @@ export default function HomePage() {
               role="group"
               tabIndex={0}
               aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
-              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
+              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none cursor-grab active:cursor-grabbing transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
                 isProjectRingOpen
                   ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
                   : "w-[min(90vw,21rem)] md:w-[min(82vw,22rem)]"
@@ -577,63 +615,83 @@ export default function HomePage() {
                 aria-hidden
               />
               {wheelItems.map((item, index) => {
-                const angle = (getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation) * (Math.PI / 180);
-                const radius = isProjectRingOpen ? 29 : 33;
-                const left = Number((50 + Math.cos(angle) * radius).toFixed(4));
-                const top = Number((50 + Math.sin(angle) * radius).toFixed(4));
+                const itemAngle = getSpinnerItemAngle(index, wheelItems.length) + mainSpinner.rotation;
                 const isTargeted = activatedWheelItem === item.id;
                 const isSelected = selectedMainId === item.id || pickerMode === item.id;
                 const isEmphasized = isTargeted || isSelected;
                 return (
-                  <button
+                  <div
                     key={item.id}
                     ref={(element) => {
-                      mainBubbleRefs.current[index] = element;
+                      mainOrbitRefs.current[index] = element;
                     }}
-                    type="button"
-                    aria-label={item.ariaLabel}
-                    aria-pressed={isTargeted || isSelected}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      if (mainSpinner.consumeSuppressedClick()) return;
-                      mainSpinner.activateIndex(index);
-                    }}
-                    className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border px-2 text-center text-white outline-none will-change-[left,top,transform] ${item.colorClass} ${
-                      isProjectRingOpen
-                        ? "h-14 w-14 md:h-20 md:w-20"
-                        : "h-[4.25rem] w-[4.25rem] sm:h-24 sm:w-24"
-                    } ${
-                      mainSpinner.isDragging
+                    className={`pointer-events-none absolute inset-0 will-change-transform ${
+                      mainSpinner.isMoving
                         ? "transition-none"
-                        : "transition-[left,top,transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out"
-                    } ${
-                      isEmphasized
-                        ? isProjectRingOpen
-                          ? "z-20 scale-[0.86] border-[#d7b95f] opacity-85 shadow-[inset_0_4px_8px_rgba(0,0,0,0.18),0_5px_12px_rgba(15,61,46,0.13)] brightness-95 md:scale-[0.94] md:opacity-100"
-                          : "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
-                        : isProjectRingOpen
-                          ? "z-10 scale-[0.7] border-white/70 opacity-55 shadow-[0_4px_10px_rgba(15,61,46,0.08)] hover:opacity-75 md:scale-[0.82] md:opacity-70"
-                          : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
-                    } ${isSelected ? "motion-safe:animate-[main-selection-confirm_260ms_ease-out]" : ""} active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                        : "transition-transform duration-[260ms] ease-out"
+                    }`}
                     style={{
-                      left: `${left}%`,
-                      top: `${top}%`
+                      transform: `rotate(${itemAngle}deg)`,
+                      zIndex: isEmphasized ? 20 : 10
                     }}
                   >
-                    <span
-                      className={`font-display-strong font-black leading-[1.2] transition-[font-size,font-weight,transform] duration-[240ms] ease-out ${
-                        isEmphasized
-                          ? isProjectRingOpen
-                            ? "text-[11px] md:text-sm"
-                            : "text-[15px] sm:text-lg"
-                          : isProjectRingOpen
-                            ? "text-[8px] md:text-[10px]"
-                            : "text-[11px] sm:text-[13px]"
+                    <div
+                      ref={(element) => {
+                        mainAnchorRefs.current[index] = element;
+                      }}
+                      className={`pointer-events-auto absolute top-1/2 will-change-transform ${
+                        isProjectRingOpen ? "left-[79%]" : "left-[83%]"
+                      } ${
+                        mainSpinner.isMoving
+                          ? "transition-none"
+                          : "transition-transform duration-[260ms] ease-out"
                       }`}
+                      style={{
+                        transform: `translate(-50%, -50%) rotate(${-itemAngle}deg)`
+                      }}
                     >
-                      {item.label}
-                    </span>
-                  </button>
+                      <button
+                        ref={(element) => {
+                          mainBubbleRefs.current[index] = element;
+                        }}
+                        type="button"
+                        aria-label={item.ariaLabel}
+                        aria-pressed={isTargeted || isSelected}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (mainSpinner.consumeSuppressedClick()) return;
+                          mainSpinner.activateIndex(index);
+                        }}
+                        className={`flex items-center justify-center rounded-full border px-2 text-center text-white outline-none transition-[transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out ${item.colorClass} ${
+                          isProjectRingOpen
+                            ? "h-14 w-14 md:h-20 md:w-20"
+                            : "h-[4.25rem] w-[4.25rem] sm:h-24 sm:w-24"
+                        } ${
+                          isEmphasized
+                            ? isProjectRingOpen
+                              ? "z-20 scale-[0.86] border-[#d7b95f] opacity-85 shadow-[inset_0_4px_8px_rgba(0,0,0,0.18),0_5px_12px_rgba(15,61,46,0.13)] brightness-95 md:scale-[0.94] md:opacity-100"
+                              : "z-20 scale-[0.94] border-[#d7b95f] opacity-100 shadow-[inset_0_5px_10px_rgba(0,0,0,0.22),0_6px_15px_rgba(15,61,46,0.18)] brightness-95"
+                            : isProjectRingOpen
+                              ? "z-10 scale-[0.7] border-white/70 opacity-55 shadow-[0_4px_10px_rgba(15,61,46,0.08)] hover:opacity-75 md:scale-[0.82] md:opacity-70"
+                              : "z-10 scale-[0.82] border-white/70 opacity-70 shadow-[0_5px_14px_rgba(15,61,46,0.12)] hover:opacity-90"
+                        } ${isSelected ? "motion-safe:animate-[main-selection-confirm_260ms_ease-out]" : ""} active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2`}
+                      >
+                        <span
+                          className={`font-display-strong font-black leading-[1.2] transition-[font-size,font-weight,transform] duration-[240ms] ease-out ${
+                            isEmphasized
+                              ? isProjectRingOpen
+                                ? "text-[11px] md:text-sm"
+                                : "text-[15px] sm:text-lg"
+                              : isProjectRingOpen
+                                ? "text-[8px] md:text-[10px]"
+                                : "text-[11px] sm:text-[13px]"
+                          }`}
+                        >
+                          {item.label}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
