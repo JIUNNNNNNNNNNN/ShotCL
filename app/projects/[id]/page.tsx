@@ -195,20 +195,21 @@ export default function ProjectDetailPage() {
   }, []);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
-    if (progressOnly && !(targetShot.status === "pending" && status === "ok")) {
-      setErrorMessage("Staff 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다.");
-      return;
-    }
+    setErrorMessage("");
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
 
     try {
       const savedShot = await updateShotStatus(targetShot, status);
-      setShots((current) => current.map((shot) => (shot.id === savedShot.id ? savedShot : shot)));
+      setShots((current) => current.map((shot) => (
+        shot.id === savedShot.id
+          ? { ...savedShot, overheadDiagram: shot.overheadDiagram }
+          : shot
+      )));
     } catch (error) {
       setShots((current) => current.map((shot) => (shot.id === targetShot.id ? targetShot : shot)));
       setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
     }
-  }, [progressOnly]);
+  }, []);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;

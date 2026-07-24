@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { ImageIcon, Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { Shot, ShotStatus } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export type ShotEditorValues = {
   sceneNumber: string;
@@ -67,7 +68,7 @@ function valuesFromShot(shot: Shot): ShotEditorValues {
   };
 }
 
-/** 컷 추가와 수정에 함께 쓰는 모바일 bottom sheet입니다. */
+/** 컷 추가 화면과 진행 카드 위의 작은 내용 편집 팝업을 함께 제공합니다. */
 export function ShotEditorModal({
   mode,
   open,
@@ -117,7 +118,12 @@ export function ShotEditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end bg-black/35 sm:items-center sm:p-4"
+      className={cn(
+        "fixed inset-0 z-50 flex p-3",
+        mode === "add"
+          ? "items-end bg-black/35 sm:items-center sm:p-4"
+          : "items-center justify-center bg-black/15"
+      )}
       role="dialog"
       aria-modal="true"
       aria-label={mode === "add" ? "새 컷 추가" : readOnly ? "컷 내용 보기" : "컷 내용 수정"}
@@ -128,27 +134,44 @@ export function ShotEditorModal({
       <form
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
-        className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-field-soft p-4 shadow-2xl sm:mx-auto sm:max-w-3xl sm:rounded-2xl"
+        className={cn(
+          "w-full overflow-y-auto bg-field-soft shadow-[0_12px_32px_rgba(20,32,27,0.16)]",
+          mode === "add"
+            ? "max-h-[92dvh] rounded-t-2xl p-4 sm:mx-auto sm:max-w-3xl sm:rounded-2xl"
+            : "mx-auto max-h-[72dvh] max-w-[26rem] rounded-[1rem] p-3"
+        )}
       >
-        <div className="mx-auto max-w-3xl">
-          <div className="mb-4 flex items-start justify-between gap-3">
-            <h2 className="text-lg font-black text-field-primary">
-              {mode === "add" ? "새 컷 추가" : readOnly ? "컷 내용 보기" : "컷 내용 수정"}
-            </h2>
-            <Button variant="ghost" onClick={onClose} className="px-3">
+        <div className={cn("mx-auto", mode === "add" && "max-w-3xl")}>
+          <div className={cn("flex items-center justify-between gap-2", mode === "add" ? "mb-4" : "mb-1")}>
+            {mode === "add" ? (
+              <h2 className="text-lg font-black text-field-primary">새 컷 추가</h2>
+            ) : (
+              <span className="sr-only">{readOnly ? "컷 내용 보기" : "컷 내용 수정"}</span>
+            )}
+            <Button
+              variant="ghost"
+              onClick={onClose}
+              aria-label="팝업 닫기"
+              className="ml-auto !h-8 !min-h-8 !w-8 !border-0 !px-0 !py-0"
+            >
               <X className="h-4 w-4" aria-hidden />
-              닫기
             </Button>
           </div>
 
-          <div className="grid gap-3">
-            <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">콘티 이미지</span>
-              <div className="grid grid-cols-[96px_1fr] gap-3">
-                <div className="flex aspect-[4/3] w-24 items-center justify-center border border-field-border bg-white text-xs font-black text-field-muted">
+          <div className={cn("grid", mode === "add" ? "gap-3" : "gap-2")}>
+            <div className={cn("grid gap-1.5", mode === "edit" && readOnly && !values.storyboardImageUrl && "hidden")}>
+              <span className="text-[11px] font-black text-field-muted">콘티</span>
+              <div className={cn(
+                "grid items-center gap-2",
+                readOnly ? "grid-cols-1" : mode === "add" ? "grid-cols-[96px_1fr]" : "grid-cols-[80px_1fr]"
+              )}>
+                <div className={cn(
+                  "flex aspect-[4/3] items-center justify-center text-[11px] font-black text-field-muted",
+                  readOnly ? "w-full max-w-[11rem] justify-self-center" : mode === "add" ? "w-24" : "w-20"
+                )}>
                   {values.storyboardImageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="h-full w-full object-cover" />
+                    <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="block h-full max-h-full w-full max-w-full object-contain" />
                   ) : (
                     <span className="grid place-items-center gap-1">
                       <ImageIcon className="h-5 w-5" aria-hidden />
@@ -156,21 +179,21 @@ export function ShotEditorModal({
                     </span>
                   )}
                 </div>
-                {!readOnly ? <div className="grid gap-2">
-                  <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-field-border bg-white px-3 text-sm font-black text-field-primary">
+                {!readOnly ? <div className="grid gap-1.5">
+                  <label className="flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-field-border bg-white px-2 text-xs font-black text-field-primary">
                     이미지 선택
                     <input type="file" accept="image/*,.heic,.heif" className="sr-only" onChange={handleImageChange} />
                   </label>
                   {values.storyboardImageUrl ? (
-                    <Button variant="ghost" onClick={() => updateField("storyboardImageUrl", null)} className="min-h-10">
+                    <Button variant="ghost" onClick={() => updateField("storyboardImageUrl", null)} className="!min-h-9 py-1 text-xs">
                       이미지 삭제
                     </Button>
                   ) : null}
-                </div> : <div />}
+                </div> : null}
               </div>
-            </label>
+            </div>
 
-            <div className={mode === "add" ? "grid grid-cols-3 gap-3" : "grid grid-cols-2 gap-3"}>
+            {mode === "add" ? <div className="grid grid-cols-3 gap-3">
               <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">씬 번호</span>
                 <input
@@ -189,7 +212,7 @@ export function ShotEditorModal({
                   className={fieldClass}
                 />
               </label>
-              {mode === "add" ? <label className="grid gap-2">
+              <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">순서</span>
                 <input
                   type="number"
@@ -198,8 +221,8 @@ export function ShotEditorModal({
                   onChange={(event) => updateField("orderIndex", Number(event.target.value) || 1)}
                   className={fieldClass}
                 />
-              </label> : null}
-            </div>
+              </label>
+            </div> : null}
 
             {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">제목</span>
@@ -211,13 +234,13 @@ export function ShotEditorModal({
               <textarea
                 value={values.description}
                 readOnly={readOnly}
-                rows={5}
+                rows={mode === "add" ? 5 : 4}
                 onChange={(event) => updateField("description", event.target.value)}
-                className={textareaClass}
+                className={cn(textareaClass, mode === "edit" && "min-h-28 py-2 text-sm leading-5")}
               />
             </label>
 
-            <label className="grid gap-2">
+            {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">장소</span>
               <input
                 value={values.location}
@@ -225,9 +248,9 @@ export function ShotEditorModal({
                 onChange={(event) => updateField("location", event.target.value)}
                 className={fieldClass}
               />
-            </label>
+            </label> : null}
 
-            <label className="grid gap-2">
+            {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">등장 인물</span>
               <input
                 value={values.charactersText}
@@ -236,7 +259,7 @@ export function ShotEditorModal({
                 placeholder="주인공, 상대역"
                 className={fieldClass}
               />
-            </label>
+            </label> : null}
 
             {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">메모</span>
@@ -264,7 +287,7 @@ export function ShotEditorModal({
             </div> : null}
           </div>
 
-          {!readOnly ? <div className="mt-5 grid grid-cols-2 gap-2">
+          {!readOnly ? <div className={cn("grid grid-cols-2 gap-2", mode === "add" ? "mt-5" : "mt-3")}>
             <Button
               type="submit"
               disabled={isSaving || (mode === "add" && !values.title.trim())}

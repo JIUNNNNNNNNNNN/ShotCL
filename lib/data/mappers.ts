@@ -18,8 +18,9 @@ type AnyRow = Record<string, any>;
 
 /** 예전 MVP 상태값을 새 현장용 상태값으로 안전하게 변환합니다. */
 export function normalizeShotStatus(status: unknown): ShotStatus {
-  if (status === "ok" || status === "done") return "ok";
-  if (status === "omit" || status === "skipped") return "omit";
+  const normalized = String(status ?? "").trim().toLowerCase();
+  if (["ok", "done", "complete", "completed"].includes(normalized)) return "ok";
+  if (["omit", "skipped", "skip"].includes(normalized)) return "omit";
   return "pending";
 }
 

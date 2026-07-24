@@ -60,22 +60,23 @@ export const ShotCard = memo(function ShotCard({
       onClick={handleCardOpen}
       aria-label={progressOnly ? `${shot.title} 컷 상세 보기` : `${shot.title} 컷 수정`}
       className={cn(
-        "grid gap-2 rounded-[1.5rem] border bg-white p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
-        "cursor-pointer",
-        isOk && "border-[#8da99a] bg-[#e7eee9]",
-        isOmit && "border-field-danger bg-[#fff7f5] opacity-75",
-        !isOk && !isOmit && "border-field-border hover:border-field-secondary"
+        "grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[1.5rem] border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
+        isOk
+          ? "border-[#7f9e8e] bg-[#dfeae3]"
+          : isOmit
+            ? "border-[#d7aaa4] bg-[#f8e9e6]"
+            : "border-field-border bg-white hover:border-field-secondary"
       )}
     >
-      <div className={cn("grid min-w-0 gap-2", hasMedia && "sm:grid-cols-[minmax(15rem,19rem)_minmax(0,1fr)] sm:items-center")}>
+      <div className={cn("grid min-w-0 max-w-full gap-2 overflow-hidden", hasMedia && "sm:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] sm:items-center")}>
         {hasMedia ? (
-          <div className={cn("grid h-36 min-w-0 gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
+          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-hidden gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
             {shot.storyboardImageUrl ? (
               <button
                 type="button"
                 onClick={handleImageClick}
                 data-no-drag="true"
-                className="flex min-w-0 items-center justify-center border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                className="flex h-full w-full max-w-full min-w-0 items-center justify-center overflow-hidden p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="콘티 크게 보기"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -83,7 +84,7 @@ export const ShotCard = memo(function ShotCard({
                   src={shot.storyboardImageUrl}
                   alt={`${displayText} 콘티`}
                   draggable={false}
-                  className="h-full w-full select-none object-contain [-webkit-user-drag:none]"
+                  className="block h-full max-h-full w-full max-w-full select-none object-contain [-webkit-user-drag:none]"
                 />
               </button>
             ) : null}
@@ -95,7 +96,7 @@ export const ShotCard = memo(function ShotCard({
                   onOpenOverhead(shot);
                 }}
                 data-no-drag="true"
-                className="min-w-0 border border-field-border bg-[#fbfaf6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                className="h-full w-full max-w-full min-w-0 overflow-hidden p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title={progressOnly ? "부감도 보기" : "부감도 편집"}
               >
                 <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
