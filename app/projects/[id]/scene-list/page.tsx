@@ -345,7 +345,7 @@ export default function ProjectSceneListPage() {
   }, [canEdit, findCellElement, selectCell]);
 
   const handleGridKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.nativeEvent.isComposing) return;
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     const activeCell = selectedCellRef.current;
     if (!activeCell) return;
 
@@ -358,10 +358,35 @@ export default function ProjectSceneListPage() {
       || target instanceof HTMLSelectElement
       || (target instanceof HTMLElement && target.isContentEditable);
     if (isTextEditor) {
-      if (event.key === "Escape" || (event.key === "Enter" && !(target instanceof HTMLTextAreaElement))) {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        (target as HTMLElement).blur();
+        focusCell(
+          activeRowIndex + (event.key === "ArrowUp" ? -1 : 1),
+          activeCell.column,
+          canEdit
+        );
+        return;
+      }
+      if (event.key === "Escape") {
         event.preventDefault();
         (target as HTMLElement).blur();
         findCellElement(activeCell.rowId, activeCell.column)?.focus({ preventScroll: true });
+        return;
+      }
+      if (
+        event.key === "Enter" &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        event.preventDefault();
+        (target as HTMLElement).blur();
+        focusCell(
+          activeRowIndex + (event.shiftKey ? -1 : 1),
+          activeCell.column,
+          canEdit
+        );
       }
       return;
     }
@@ -440,7 +465,11 @@ export default function ProjectSceneListPage() {
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      focusCell(activeRowIndex, activeCell.column, true);
+      focusCell(
+        activeRowIndex + (event.shiftKey ? -1 : 1),
+        activeCell.column,
+        canEdit
+      );
       return;
     }
     if (event.key === "Escape") {
@@ -842,7 +871,7 @@ export default function ProjectSceneListPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={isSaving || !isDirty}
-                className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving
                   ? <PixelDogLoader size="xs" compact />
@@ -859,9 +888,11 @@ export default function ProjectSceneListPage() {
           </p>
         ) : null}
 
-        <div className="scene-list-portrait-notice min-h-52 items-center justify-center px-6 text-center text-sm font-bold leading-6 text-field-primary">
-          씬리스트는 가로 화면에 최적화되어 있습니다. 화면을 돌려서 확인해주세요.
-        </div>
+        <MobileSceneList
+          items={items}
+          actorRoles={actorRoles}
+          locationStyles={locationStyles}
+        />
 
         <div
           ref={sceneGridRef}
@@ -989,7 +1020,7 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {(canEdit || scenarioReference) ? (
-        <details className="mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
+        <details className="scene-list-landscape mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
           <summary className="cursor-pointer px-3 py-2 text-sm font-black text-field-primary">
             시나리오 참고
           </summary>
@@ -1013,7 +1044,158 @@ export default function ProjectSceneListPage() {
           </div>
         </details>
       ) : null}
+
+      {scenarioReference ? (
+        <details className="scene-list-mobile mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-black text-field-primary">
+            시나리오 참고
+          </summary>
+          <p className="whitespace-pre-wrap border-t border-field-border p-3 text-sm font-medium leading-6 text-field-text">
+            {scenarioReference}
+          </p>
+        </details>
+      ) : null}
     </main>
+  );
+}
+
+const mobileSceneGridTemplate = ".44fr .82fr .46fr .48fr 1.55fr 1.05fr 1.05fr";
+
+function MobileSceneList({
+  items,
+  actorRoles,
+  locationStyles
+}: {
+  items: ProjectSceneItem[];
+  actorRoles: string[];
+  locationStyles: Map<string, PaletteStyle>;
+}) {
+  return (
+    <div
+      className="scene-list-mobile min-w-0"
+      aria-label="모바일 읽기 전용 씬리스트"
+    >
+      <div className="grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary"
+        style={{ gridTemplateColumns: mobileSceneGridTemplate }}
+      >
+        {["씬", "장소", "Day", "D/N·I/E", "씬내용", "등장인물", "주요소품"].map((label) => (
+          <div
+            key={label}
+            className="min-w-0 border-b border-r border-[#bfc5bf] px-0.5 py-1.5 [overflow-wrap:anywhere]"
+          >
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {items.length > 0 ? items.map((item, index) => (
+        <MobileSceneRow
+          key={item.id}
+          item={item}
+          index={index}
+          actorRoles={actorRoles}
+          locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+        />
+      )) : (
+        <p className="border-x border-b border-[#bfc5bf] px-3 py-8 text-center text-xs font-semibold text-field-muted">
+          등록된 씬이 없습니다.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MobileSceneRow({
+  item,
+  index,
+  actorRoles,
+  locationStyle
+}: {
+  item: ProjectSceneItem;
+  index: number;
+  actorRoles: string[];
+  locationStyle: PaletteStyle;
+}) {
+  const selectedCharacters = parseCharacters(item.characters);
+  return (
+    <div
+      role="row"
+      className="grid min-w-0 border-l text-[9px] font-semibold leading-[1.35] text-field-text"
+      style={{
+        gridTemplateColumns: mobileSceneGridTemplate,
+        gridTemplateRows: "minmax(2rem, auto) minmax(2rem, auto)"
+      }}
+    >
+      <MobileSceneCell className="row-span-2" align="center">
+        {item.sceneNo || index + 1}
+      </MobileSceneCell>
+      <MobileSceneCell
+        align="center"
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+      >
+        {item.mainLocation}
+      </MobileSceneCell>
+      <MobileSceneCell className="row-span-2" align="center">
+        {item.dayLabel}
+      </MobileSceneCell>
+      <MobileSceneCell align="center">{item.dayNight}</MobileSceneCell>
+      <MobileSceneCell className="row-span-2" align="left">
+        {item.sceneContent}
+      </MobileSceneCell>
+      <MobileSceneCell className="row-span-2" align="left">
+        <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+          {selectedCharacters.map((role) => {
+            const actorIndex = actorRoles.findIndex(
+              (candidate) => candidate.toLocaleLowerCase() === role.toLocaleLowerCase()
+            );
+            const actorStyle = getActorStyle(Math.max(actorIndex, 0));
+            return (
+              <span
+                key={role}
+                className="max-w-full rounded px-0.5 py-px font-bold [overflow-wrap:anywhere]"
+                style={{ backgroundColor: actorStyle.background, color: actorStyle.color }}
+              >
+                {role}
+              </span>
+            );
+          })}
+        </span>
+      </MobileSceneCell>
+      <MobileSceneCell className="row-span-2" align="left">
+        {item.props}
+      </MobileSceneCell>
+      <MobileSceneCell
+        align="center"
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+      >
+        {item.subLocation}
+      </MobileSceneCell>
+      <MobileSceneCell align="center">{item.interiorExterior}</MobileSceneCell>
+    </div>
+  );
+}
+
+function MobileSceneCell({
+  children,
+  className = "",
+  align = "left",
+  style
+}: {
+  children: ReactNode;
+  className?: string;
+  align?: "left" | "center";
+  style?: CSSProperties;
+}) {
+  return (
+    <div
+      role="gridcell"
+      className={`flex min-w-0 items-center border-b border-r border-[#cbd0cb] px-0.5 py-1 [overflow-wrap:anywhere] ${
+        align === "center" ? "justify-center text-center" : "justify-start whitespace-pre-wrap text-left"
+      } ${className}`}
+      style={style}
+    >
+      {children}
+    </div>
   );
 }
 

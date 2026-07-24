@@ -128,16 +128,17 @@
   }
 }
 
-.scene-list-portrait-notice {
+.scene-list-mobile {
   display: none;
 }
 
 @media (max-width: 767px) and (orientation: portrait) {
-  .scene-list-portrait-notice {
-    display: flex;
+  .scene-list-mobile {
+    display: block;
   }
 
-  .scene-list-landscape {
+  .scene-list-landscape,
+  .scene-list-edit-action {
     display: none;
   }
 }
