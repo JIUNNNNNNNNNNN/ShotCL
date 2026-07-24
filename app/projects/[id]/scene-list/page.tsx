@@ -58,6 +58,13 @@ type SceneCellRange = {
   endIndex: number;
 };
 
+type VisualSceneCell = {
+  representative: SceneCellColumn;
+  logicalColumns: SceneCellColumn[];
+};
+
+type CellDragMode = "pending" | "vertical-fill" | "horizontal-location";
+
 type CellDragState = SceneCellRange & {
   initialStartIndex: number;
   initialEndIndex: number;
@@ -67,6 +74,8 @@ type CellDragState = SceneCellRange & {
   startY: number;
   sourceValue: string;
   didDrag: boolean;
+  mode: CellDragMode;
+  horizontalTargetReached: boolean;
 };
 
 type MergePosition = "single" | "start" | "middle" | "end";
@@ -159,7 +168,7 @@ export default function ProjectSceneListPage() {
       setSelectedRange(null);
       return;
     }
-    const nextRange = getVisualMergeRange(items, rowIndex, activeCell.column);
+    const nextRange = getActiveVisualRange(items, rowIndex, activeCell.column);
     selectedRangeRef.current = nextRange;
     setSelectedRange(nextRange);
   }, [items]);
@@ -273,7 +282,7 @@ export default function ProjectSceneListPage() {
     rowIndex: number
   ) => {
     const nextCell = { rowId, column };
-    const nextRange = getVisualMergeRange(itemsRef.current, rowIndex, column);
+    const nextRange = getActiveVisualRange(itemsRef.current, rowIndex, column);
     selectedCellRef.current = nextCell;
     selectedRangeRef.current = nextRange;
     setSelectedCell(nextCell);
@@ -300,19 +309,25 @@ export default function ProjectSceneListPage() {
     )) ?? null;
   }, []);
 
+  useEffect(() => {
+    if (!editingCell || !canEdit) return;
+    const frame = window.requestAnimationFrame(() => {
+      findCellElement(editingCell.rowId, editingCell.column)
+        ?.querySelector<HTMLElement>("input, textarea, select")
+        ?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canEdit, editingCell, findCellElement]);
+
   const focusCell = useCallback((
     rowIndex: number,
-    columnIndex: number,
+    requestedColumn: SceneCellColumn,
     focusEditor = false
   ) => {
-    if (itemsRef.current.length === 0 || cellColumns.length === 0) return;
+    if (itemsRef.current.length === 0) return;
     const safeRowIndex = Math.max(0, Math.min(rowIndex, itemsRef.current.length - 1));
-    const safeColumnIndex = Math.max(0, Math.min(columnIndex, cellColumns.length - 1));
     const item = itemsRef.current[safeRowIndex];
-    const requestedColumn = cellColumns[safeColumnIndex];
-    const column = requestedColumn === "subLocation" && isSameHorizontalLocation(item)
-      ? "mainLocation"
-      : requestedColumn;
+    const column = getVisualRepresentative(item, requestedColumn);
     selectCell(item.id, column, safeRowIndex);
     window.requestAnimationFrame(() => {
       const cell = findCellElement(item.id, column);
@@ -327,7 +342,7 @@ export default function ProjectSceneListPage() {
       cell.focus({ preventScroll: true });
       cell.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
-  }, [canEdit, cellColumns, findCellElement, selectCell]);
+  }, [canEdit, findCellElement, selectCell]);
 
   const handleGridKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -335,8 +350,7 @@ export default function ProjectSceneListPage() {
     if (!activeCell) return;
 
     const activeRowIndex = itemsRef.current.findIndex((item) => item.id === activeCell.rowId);
-    const activeColumnIndex = cellColumns.indexOf(activeCell.column);
-    if (activeRowIndex < 0 || activeColumnIndex < 0) return;
+    if (activeRowIndex < 0 || !cellColumns.includes(activeCell.column)) return;
 
     const target = event.target;
     const isTextEditor = target instanceof HTMLInputElement
@@ -362,61 +376,71 @@ export default function ProjectSceneListPage() {
     const activeRange = selectedRangeRef.current;
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      focusCell((activeRange?.startIndex ?? activeRowIndex) - 1, activeColumnIndex, canEdit);
+      focusCell(
+        (activeRange?.startIndex ?? activeRowIndex) - 1,
+        activeCell.column,
+        canEdit
+      );
       return;
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      focusCell((activeRange?.endIndex ?? activeRowIndex) + 1, activeColumnIndex, canEdit);
+      focusCell(
+        (activeRange?.endIndex ?? activeRowIndex) + 1,
+        activeCell.column,
+        canEdit
+      );
       return;
     }
     if (event.key === "ArrowLeft") {
       event.preventDefault();
+      const nextColumn = getAdjacentVisualColumn(
+        itemsRef.current[activeRowIndex],
+        cellColumns,
+        activeCell.column,
+        -1
+      );
       focusCell(
         activeRowIndex,
-        getAdjacentColumnIndex(
-          itemsRef.current[activeRowIndex],
-          cellColumns,
-          activeColumnIndex,
-          -1
-        ),
+        nextColumn,
         canEdit
       );
       return;
     }
     if (event.key === "ArrowRight") {
       event.preventDefault();
+      const nextColumn = getAdjacentVisualColumn(
+        itemsRef.current[activeRowIndex],
+        cellColumns,
+        activeCell.column,
+        1
+      );
       focusCell(
         activeRowIndex,
-        getAdjacentColumnIndex(
-          itemsRef.current[activeRowIndex],
-          cellColumns,
-          activeColumnIndex,
-          1
-        ),
+        nextColumn,
         canEdit
       );
       return;
     }
     if (event.key === "Tab") {
       event.preventDefault();
-      const currentFlatIndex = activeRowIndex * cellColumns.length + activeColumnIndex;
-      const nextFlatIndex = getAdjacentFlatCellIndex(
+      const nextCell = getAdjacentVisualCell(
         itemsRef.current,
         cellColumns,
-        currentFlatIndex,
+        activeRowIndex,
+        activeCell.column,
         event.shiftKey ? -1 : 1
       );
       focusCell(
-        Math.floor(nextFlatIndex / cellColumns.length),
-        nextFlatIndex % cellColumns.length,
+        nextCell.rowIndex,
+        nextCell.column,
         canEdit
       );
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      focusCell(activeRowIndex, activeColumnIndex, true);
+      focusCell(activeRowIndex, activeCell.column, true);
       return;
     }
     if (event.key === "Escape") {
@@ -439,7 +463,9 @@ export default function ProjectSceneListPage() {
     const lower = Math.min(startIndex, endIndex);
     const upper = Math.max(startIndex, endIndex);
     setItems((current) => current.map((item, index) => (
-      index >= lower && index <= upper ? setSceneCellValue(item, column, value) : item
+      index >= lower && index <= upper
+        ? setVisualSceneCellValue(item, column, value)
+        : item
     )));
     setIsDirty(true);
     setErrorMessage("");
@@ -490,10 +516,18 @@ export default function ProjectSceneListPage() {
     value: string
   ) => {
     if (!canEdit || event.button !== 0 || !isFillColumn(column)) return;
+    if (
+      (event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement) &&
+      document.activeElement === event.target
+    ) {
+      return;
+    }
     event.stopPropagation();
     cellDragCleanupRef.current?.();
     selectCell(rowId, column, rowIndex);
-    const initialRange = getVisualMergeRange(itemsRef.current, rowIndex, column);
+    const initialRange = getActiveVisualRange(itemsRef.current, rowIndex, column);
 
     const drag: CellDragState = {
       pointerId: event.pointerId,
@@ -506,7 +540,9 @@ export default function ProjectSceneListPage() {
       startX: event.clientX,
       startY: event.clientY,
       sourceValue: value,
-      didDrag: false
+      didDrag: false,
+      mode: "pending",
+      horizontalTargetReached: false
     };
     cellDragRef.current = drag;
 
@@ -519,13 +555,26 @@ export default function ProjectSceneListPage() {
       document.body.style.removeProperty("cursor");
     };
 
-    const findTargetIndex = (clientX: number, clientY: number) => {
+    const findTargetCell = (clientX: number, clientY: number) => {
       const element = document.elementFromPoint(clientX, clientY);
       const cell = element?.closest("[data-scene-cell-column]") as HTMLElement | null;
-      if (!cell || cell.dataset.sceneCellColumn !== column) return null;
+      if (!cell) return null;
       const targetRowId = cell.dataset.sceneRowId;
+      const targetColumn = cell.dataset.sceneCellColumn as SceneCellColumn | undefined;
+      if (!targetRowId || !targetColumn) return null;
       const targetIndex = itemsRef.current.findIndex((item) => item.id === targetRowId);
-      return targetIndex >= 0 ? targetIndex : null;
+      return targetIndex >= 0 ? { targetColumn, targetIndex, targetRowId } : null;
+    };
+
+    const reachesOtherLocationCell = (clientX: number, clientY: number) => {
+      if (!isLocationColumn(column)) return false;
+      const target = findTargetCell(clientX, clientY);
+      return Boolean(
+        target &&
+        target.targetRowId === rowId &&
+        isLocationColumn(target.targetColumn) &&
+        target.targetColumn !== column
+      );
     };
 
     const handleMove = (moveEvent: PointerEvent) => {
@@ -533,24 +582,43 @@ export default function ProjectSceneListPage() {
       if (!current || moveEvent.pointerId !== current.pointerId) return;
       const horizontalDistance = Math.abs(moveEvent.clientX - current.startX);
       const verticalDistance = Math.abs(moveEvent.clientY - current.startY);
-      const targetIndex = findTargetIndex(moveEvent.clientX, moveEvent.clientY);
+      const target = findTargetCell(moveEvent.clientX, moveEvent.clientY);
       if (!current.didDrag) {
         if (
-          verticalDistance < 8 ||
-          verticalDistance <= horizontalDistance * 1.2 ||
-          targetIndex === null ||
-          targetIndex === current.originIndex
+          isLocationColumn(column) &&
+          horizontalDistance >= 8 &&
+          horizontalDistance > verticalDistance * 1.2 &&
+          reachesOtherLocationCell(moveEvent.clientX, moveEvent.clientY)
         ) {
+          current.mode = "horizontal-location";
+          current.horizontalTargetReached = true;
+        } else if (
+          verticalDistance >= 8 &&
+          verticalDistance > horizontalDistance * 1.2 &&
+          target?.targetColumn === column &&
+          target.targetIndex !== current.originIndex
+        ) {
+          current.mode = "vertical-fill";
+        } else {
           return;
         }
         current.didDrag = true;
         window.getSelection()?.removeAllRanges();
         document.body.style.userSelect = "none";
-        document.body.style.cursor = "cell";
+        document.body.style.cursor = current.mode === "horizontal-location"
+          ? "col-resize"
+          : "cell";
       }
       moveEvent.preventDefault();
-      if (targetIndex === null) return;
-      const nextRange = getDraggedRange(current, targetIndex);
+      if (current.mode === "horizontal-location") {
+        current.horizontalTargetReached = reachesOtherLocationCell(
+          moveEvent.clientX,
+          moveEvent.clientY
+        );
+        return;
+      }
+      if (target?.targetColumn !== column) return;
+      const nextRange = getDraggedRange(current, target.targetIndex);
       if (
         nextRange.startIndex === current.startIndex &&
         nextRange.endIndex === current.endIndex
@@ -569,13 +637,42 @@ export default function ProjectSceneListPage() {
       cellDragRef.current = null;
       cleanup();
       if (commit && current?.didDrag) {
+        if (current.mode === "horizontal-location") {
+          if (!current.horizontalTargetReached) return;
+          setItems((currentItems) => currentItems.map((item) => (
+            item.id === rowId
+              ? {
+                  ...item,
+                  mainLocation: current.sourceValue,
+                  subLocation: current.sourceValue
+                }
+              : item
+          )));
+          setEditingCell(null);
+          if (document.activeElement instanceof HTMLElement) {
+            document.activeElement.blur();
+          }
+          const nextCell: SelectedSceneCell = { rowId, column: "mainLocation" };
+          const nextRange: SceneCellRange = {
+            column: "mainLocation",
+            startIndex: current.originIndex,
+            endIndex: current.originIndex
+          };
+          selectedCellRef.current = nextCell;
+          selectedRangeRef.current = nextRange;
+          setSelectedCell(nextCell);
+          setSelectedRange(nextRange);
+          setIsDirty(true);
+          setErrorMessage("");
+          return;
+        }
         const nextLower = Math.min(current.startIndex, current.endIndex);
         const nextUpper = Math.max(current.startIndex, current.endIndex);
         const initialLower = Math.min(current.initialStartIndex, current.initialEndIndex);
         const initialUpper = Math.max(current.initialStartIndex, current.initialEndIndex);
         setItems((items) => items.map((item, index) => {
           if (index >= nextLower && index <= nextUpper) {
-            return setSceneCellValue(item, current.column, current.sourceValue);
+            return setVisualSceneCellValue(item, current.column, current.sourceValue);
           }
           if (
             initialLower !== initialUpper &&
@@ -583,7 +680,7 @@ export default function ProjectSceneListPage() {
             index <= initialUpper &&
             (index < nextLower || index > nextUpper)
           ) {
-            return setSceneCellValue(item, current.column, "");
+            return setVisualSceneCellValue(item, current.column, "");
           }
           return item;
         }));
@@ -594,6 +691,13 @@ export default function ProjectSceneListPage() {
 
     const handleEnd = (endEvent: PointerEvent) => {
       if (endEvent.pointerId !== drag.pointerId) return;
+      const current = cellDragRef.current;
+      if (current?.mode === "horizontal-location") {
+        current.horizontalTargetReached = reachesOtherLocationCell(
+          endEvent.clientX,
+          endEvent.clientY
+        );
+      }
       finish(true);
     };
 
@@ -992,7 +1096,10 @@ const SceneTableRow = memo(function SceneTableRow({
     };
   };
   const sceneNoInteraction = getCellInteraction("sceneNo");
-  const horizontallyMergedLocation = isSameHorizontalLocation(item);
+  const horizontallyMergedLocation = (
+    isSameHorizontalLocation(item) &&
+    !isEditingLocationCell(item, editingCell)
+  );
   const horizontalLocationRange = horizontallyMergedLocation
     ? getHorizontalLocationMergeRange(allItems, index, editingCell)
     : undefined;
@@ -1550,6 +1657,20 @@ function getVisualMergeRange(
   return { column, startIndex, endIndex };
 }
 
+function getActiveVisualRange(
+  items: ProjectSceneItem[],
+  rowIndex: number,
+  column: SceneCellColumn
+) {
+  if (
+    isLocationColumn(column) &&
+    isSameHorizontalLocation(items[rowIndex])
+  ) {
+    return getHorizontalLocationMergeRange(items, rowIndex);
+  }
+  return getVisualMergeRange(items, rowIndex, column);
+}
+
 function getHorizontalLocationMergeRange(
   items: ProjectSceneItem[],
   rowIndex: number,
@@ -1615,42 +1736,83 @@ function isEditingCell(
   );
 }
 
-function getAdjacentColumnIndex(
+function getVisualCellsForRow(
   item: ProjectSceneItem | undefined,
-  columns: SceneCellColumn[],
-  currentIndex: number,
-  direction: -1 | 1
-) {
-  let nextIndex = Math.max(0, Math.min(currentIndex + direction, columns.length - 1));
-  if (
-    isSameHorizontalLocation(item) &&
-    columns[nextIndex] === "subLocation"
-  ) {
-    nextIndex = Math.max(0, Math.min(nextIndex + direction, columns.length - 1));
-  }
-  return nextIndex;
+  columns: SceneCellColumn[]
+): VisualSceneCell[] {
+  const mergesLocation = isSameHorizontalLocation(item);
+  return columns.flatMap((column) => {
+    if (mergesLocation && column === "subLocation") return [];
+    if (mergesLocation && column === "mainLocation") {
+      return [{
+        representative: "mainLocation",
+        logicalColumns: ["mainLocation", "subLocation"]
+      }];
+    }
+    return [{ representative: column, logicalColumns: [column] }];
+  });
 }
 
-function getAdjacentFlatCellIndex(
-  items: ProjectSceneItem[],
+function getVisualRepresentative(
+  item: ProjectSceneItem | undefined,
+  column: SceneCellColumn
+) {
+  const visualCells = getVisualCellsForRow(item, [column]);
+  if (visualCells.length > 0) return visualCells[0].representative;
+  return isLocationColumn(column) && isSameHorizontalLocation(item)
+    ? "mainLocation"
+    : column;
+}
+
+function getAdjacentVisualColumn(
+  item: ProjectSceneItem | undefined,
   columns: SceneCellColumn[],
-  currentFlatIndex: number,
+  currentColumn: SceneCellColumn,
   direction: -1 | 1
 ) {
-  const lastIndex = Math.max(0, items.length * columns.length - 1);
-  let nextIndex = Math.max(0, Math.min(currentFlatIndex + direction, lastIndex));
-  while (nextIndex > 0 && nextIndex < lastIndex) {
-    const rowIndex = Math.floor(nextIndex / columns.length);
-    const columnIndex = nextIndex % columns.length;
-    if (
-      !isSameHorizontalLocation(items[rowIndex]) ||
-      columns[columnIndex] !== "subLocation"
-    ) {
-      break;
-    }
-    nextIndex = Math.max(0, Math.min(nextIndex + direction, lastIndex));
+  const visualCells = getVisualCellsForRow(item, columns);
+  if (visualCells.length === 0) return currentColumn;
+  const representative = getVisualRepresentative(item, currentColumn);
+  const currentIndex = visualCells.findIndex(
+    (cell) => cell.representative === representative
+  );
+  const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = Math.max(
+    0,
+    Math.min(safeCurrentIndex + direction, visualCells.length - 1)
+  );
+  return visualCells[nextIndex].representative;
+}
+
+function getAdjacentVisualCell(
+  items: ProjectSceneItem[],
+  columns: SceneCellColumn[],
+  currentRowIndex: number,
+  currentColumn: SceneCellColumn,
+  direction: -1 | 1
+) {
+  const visualGrid = items.flatMap((item, rowIndex) => (
+    getVisualCellsForRow(item, columns).map((cell) => ({
+      rowIndex,
+      column: cell.representative
+    }))
+  ));
+  if (visualGrid.length === 0) {
+    return { rowIndex: currentRowIndex, column: currentColumn };
   }
-  return nextIndex;
+  const representative = getVisualRepresentative(
+    items[currentRowIndex],
+    currentColumn
+  );
+  const currentIndex = visualGrid.findIndex((cell) => (
+    cell.rowIndex === currentRowIndex && cell.column === representative
+  ));
+  const safeCurrentIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = Math.max(
+    0,
+    Math.min(safeCurrentIndex + direction, visualGrid.length - 1)
+  );
+  return visualGrid[nextIndex];
 }
 
 function getDraggedRange(drag: CellDragState, targetIndex: number) {
@@ -1694,6 +1856,12 @@ function isActorColumn(column: SceneCellColumn): column is SceneActorColumn {
   return column.startsWith("actor:");
 }
 
+function isLocationColumn(
+  column: SceneCellColumn
+): column is "mainLocation" | "subLocation" {
+  return column === "mainLocation" || column === "subLocation";
+}
+
 function getSceneCellValue(item: ProjectSceneItem | undefined, column: SceneCellColumn) {
   if (!item) return "";
   if (!isActorColumn(column)) return item[column];
@@ -1734,6 +1902,26 @@ function setSceneCellValue(
     value = normalized === "I" || normalized === "E" ? normalized : "";
   }
   return { ...item, [column]: value };
+}
+
+function setVisualSceneCellValue(
+  item: ProjectSceneItem,
+  column: SceneCellColumn,
+  rawValue: string
+) {
+  const candidateColumns: SceneCellColumn[] = isLocationColumn(column)
+    ? ["mainLocation", "subLocation"]
+    : [column];
+  const visualCell = getVisualCellsForRow(item, candidateColumns).find(
+    (cell) => cell.logicalColumns.includes(column)
+  );
+  const logicalColumns = visualCell?.logicalColumns ?? [column];
+  return logicalColumns.reduce(
+    (currentItem, logicalColumn) => (
+      setSceneCellValue(currentItem, logicalColumn, rawValue)
+    ),
+    item
+  );
 }
 
 function isTextEditingTarget(target: EventTarget | null) {
