@@ -25,7 +25,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     }
     if (!(await canAdministerProject(request, projectId))) {
-      return NextResponse.json({ error: "프로젝트 기본정보는 관리자만 확인할 수 있습니다." }, { status: 403 });
+      return NextResponse.json({ error: "프로젝트 기본정보는 Key staff만 확인할 수 있습니다." }, { status: 403 });
     }
 
     const supabase = requireProjectAccessDb();
@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     }
     if (!(await canAdministerProject(request, projectId))) {
-      return NextResponse.json({ error: "프로젝트 기본정보는 관리자만 수정할 수 있습니다." }, { status: 403 });
+      return NextResponse.json({ error: "프로젝트 기본정보는 Key staff만 수정할 수 있습니다." }, { status: 403 });
     }
 
     const body = (await request.json()) as { basicInfo?: unknown };

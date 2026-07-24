@@ -20,7 +20,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") {
       return NextResponse.json(
-        { error: "관리자 권한이 필요합니다." },
+        { error: "Key staff 권한이 필요합니다." },
         { status: grant ? 403 : 401 }
       );
     }

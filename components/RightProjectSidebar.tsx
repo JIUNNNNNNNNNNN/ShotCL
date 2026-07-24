@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 import {
-  CalendarPlus,
   ChevronLeft,
   ChevronRight,
   FilePenLine,
@@ -12,6 +11,7 @@ import {
   ListChecks,
   PanelRight,
   Printer,
+  Save,
   Users,
   X
 } from "lucide-react";
@@ -45,6 +45,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
   const routePlanId = Array.isArray(params.dailyPlanId) ? params.dailyPlanId[0] : params.dailyPlanId;
   const currentPlanId = routePlanId || searchParams.get("dailyPlanId") || "";
   const progressOnly = role === "progress";
+  const pageType = getProjectPageType(pathname, `/projects/${projectId}`);
   const [project, setProject] = useState<Project | null>(null);
   const [plans, setPlans] = useState<PlanWithCount[]>([]);
   const [progressByPlan, setProgressByPlan] = useState<Record<string, EpisodeProgress>>({});
@@ -101,13 +102,8 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isMobileOpen]);
 
-  const editorPlanPathPattern = useMemo(
-    () => new RegExp(`^/projects/${escapeRegExp(projectId)}/daily-plans/[^/]+$`),
-    [projectId]
-  );
-  const isSavedPlanEditor = Boolean(routePlanId && editorPlanPathPattern.test(pathname));
-
   if (!project && !isLoading) return null;
+  if (!progressOnly && pageType === "other") return null;
 
   return (
     <>
@@ -136,8 +132,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
             progressOnly={progressOnly}
             isLoading={isLoading}
             errorMessage={errorMessage}
-            isSavedPlanEditor={isSavedPlanEditor}
-            pathname={pathname}
+            pageType={pageType}
             onCollapse={() => setIsCollapsed(true)}
           />
         )}
@@ -171,8 +166,7 @@ export function RightProjectSidebar({ projectId, role }: RightProjectSidebarProp
               progressOnly={progressOnly}
               isLoading={isLoading}
               errorMessage={errorMessage}
-              isSavedPlanEditor={isSavedPlanEditor}
-              pathname={pathname}
+              pageType={pageType}
               onClose={() => setIsMobileOpen(false)}
             />
           </div>
@@ -191,8 +185,7 @@ type PanelContentProps = {
   progressOnly: boolean;
   isLoading: boolean;
   errorMessage: string;
-  isSavedPlanEditor: boolean;
-  pathname: string;
+  pageType: ProjectPageType;
   onCollapse?: () => void;
   onClose?: () => void;
 };
@@ -206,20 +199,18 @@ function PanelContent({
   progressOnly,
   isLoading,
   errorMessage,
-  isSavedPlanEditor,
-  pathname,
+  pageType,
   onCollapse,
   onClose
 }: PanelContentProps) {
   const projectBasePath = `/projects/${projectId}`;
-  const inProgressContext = pathname === projectBasePath;
 
   return (
     <div className="overflow-hidden rounded-[1.5rem] border border-field-border bg-white shadow-sm">
       <div className="flex items-start gap-3 border-b border-field-border bg-field-soft px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-display truncate text-lg font-black text-field-primary">{project?.name || "프로젝트"}</p>
-          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "진행 모드" : "관리자"}</p>
+          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "Staff" : "Key staff"}</p>
         </div>
         {onCollapse ? (
           <button
@@ -244,108 +235,146 @@ function PanelContent({
       </div>
 
       <div className="max-h-[calc(100dvh-10rem)] overflow-y-auto p-3">
-        <div className="mb-2 flex items-center justify-between px-1">
-          <p className="font-display text-sm font-black text-field-primary">회차</p>
-          <span className="text-xs font-bold text-field-muted">{plans.length}개</span>
-        </div>
-
-        {isLoading ? <PixelDogLoader size="xs" compact className="py-3" /> : null}
-        {!isLoading && errorMessage ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold leading-5 text-field-danger">{errorMessage}</p>
-        ) : null}
-        {!isLoading && !errorMessage && plans.length === 0 ? (
-          <p className="rounded-xl border border-field-border bg-field-soft px-3 py-3 text-center text-xs font-bold leading-5 text-field-muted">
-            저장된 회차가 없습니다.
-          </p>
-        ) : null}
-
-        <nav className="grid gap-2" aria-label="회차 목록">
-          {plans.map((plan, index) => {
-            const progress = progressByPlan[plan.id] ?? emptyProgress;
-            const selected = plan.id === currentPlanId;
-            const href = progressOnly || inProgressContext
-              ? `${projectBasePath}?dailyPlanId=${encodeURIComponent(plan.id)}`
-              : `${projectBasePath}/daily-plans/${plan.id}`;
-
-            return (
-              <Link
-                key={plan.id}
-                href={href}
-                aria-current={selected ? "page" : undefined}
-                className={`block rounded-2xl border px-3 py-2.5 transition active:scale-[0.99] ${
-                  selected
-                    ? "border-field-primary bg-field-light ring-1 ring-field-primary/20"
-                    : "border-field-border bg-white hover:border-field-primary/60 hover:bg-field-soft"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-display truncate text-sm font-black text-field-primary">{formatEpisodeLabel(plan, index)}</p>
-                    <p className="mt-0.5 truncate text-[11px] font-bold text-field-muted">{plan.shootingDate || "촬영일 미정"}</p>
-                  </div>
-                  {progress.total > 0 ? (
-                    <span className="shrink-0 rounded-full bg-field-soft px-2 py-1 text-[11px] font-black text-field-primary">{progress.percent}%</span>
-                  ) : null}
-                </div>
-                {progress.total > 0 ? (
-                  <div className="mt-2">
-                    <div className="h-1.5 overflow-hidden rounded-full bg-field-soft">
-                      <div className="h-full rounded-full bg-field-primary" style={{ width: `${progress.percent}%` }} />
-                    </div>
-                    <p className="mt-1 text-[11px] font-bold text-field-muted">
-                      완료 {progress.completed} / 총 {progress.total}컷
-                    </p>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-[11px] font-bold leading-4 text-field-muted">컷 없음 · 일촬표에서 컷수를 입력하세요</p>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {!progressOnly ? (
-          <div className="mt-4 border-t border-field-border pt-3">
-            <p className="mb-2 px-1 font-display text-sm font-black text-field-primary">관리</p>
-            <div className="grid gap-2">
-              {currentPlanId ? (
-                <SideActionLink href={`${projectBasePath}/daily-plans/${currentPlanId}`} icon={FilePenLine}>
-                  현재 일촬표 수정
-                </SideActionLink>
-              ) : null}
-              <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>
-                스탭 리스트
-              </SideActionLink>
-              <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>
-                기본정보 수정
-              </SideActionLink>
-              <SideActionLink href={`${projectBasePath}/daily-plans/new`} icon={CalendarPlus}>
-                새 일촬표 만들기
-              </SideActionLink>
-              <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>
-                저장된 일촬표 목록
-              </SideActionLink>
-              {isSavedPlanEditor ? (
-                <button
-                  type="button"
-                  onClick={() => window.dispatchEvent(new Event("daily-plan:request-print"))}
-                  className="flex min-h-10 w-full items-center gap-2 rounded-full border border-field-border bg-white px-3 py-2 text-left text-sm font-black text-field-primary transition hover:bg-field-soft active:scale-[0.99]"
-                >
-                  <Printer className="h-4 w-4 shrink-0" aria-hidden />
-                  PDF 내보내기
-                </button>
-              ) : null}
-              <SideActionLink
-                href={currentPlanId ? `${projectBasePath}?dailyPlanId=${encodeURIComponent(currentPlanId)}` : projectBasePath}
-                icon={ListChecks}
-              >
-                진행도 보기
-              </SideActionLink>
+        {progressOnly ? (
+          <>
+            <div className="mb-2 flex items-center justify-between px-1">
+              <p className="font-display text-sm font-black text-field-primary">회차</p>
+              <span className="text-xs font-bold text-field-muted">{plans.length}개</span>
             </div>
-          </div>
-        ) : null}
+
+            {isLoading ? <PixelDogLoader size="xs" compact className="py-3" /> : null}
+            {!isLoading && errorMessage ? (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold leading-5 text-field-danger">{errorMessage}</p>
+            ) : null}
+            {!isLoading && !errorMessage && plans.length === 0 ? (
+              <p className="rounded-xl border border-field-border bg-field-soft px-3 py-3 text-center text-xs font-bold leading-5 text-field-muted">
+                저장된 회차가 없습니다.
+              </p>
+            ) : null}
+
+            <nav className="grid gap-2" aria-label="회차 목록">
+              {plans.map((plan, index) => {
+                const progress = progressByPlan[plan.id] ?? emptyProgress;
+                const selected = plan.id === currentPlanId;
+                return (
+                  <Link
+                    key={plan.id}
+                    href={`${projectBasePath}?dailyPlanId=${encodeURIComponent(plan.id)}`}
+                    aria-current={selected ? "page" : undefined}
+                    className={`block rounded-2xl border px-3 py-2.5 transition active:scale-[0.99] ${
+                      selected
+                        ? "border-field-primary bg-field-light ring-1 ring-field-primary/20"
+                        : "border-field-border bg-white hover:border-field-primary/60 hover:bg-field-soft"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-display truncate text-sm font-black text-field-primary">{formatEpisodeLabel(plan, index)}</p>
+                        <p className="mt-0.5 truncate text-[11px] font-bold text-field-muted">{plan.shootingDate || "촬영일 미정"}</p>
+                      </div>
+                      {progress.total > 0 ? (
+                        <span className="shrink-0 rounded-full bg-field-soft px-2 py-1 text-[11px] font-black text-field-primary">{progress.percent}%</span>
+                      ) : null}
+                    </div>
+                    {progress.total > 0 ? (
+                      <div className="mt-2">
+                        <div className="h-1.5 overflow-hidden rounded-full bg-field-soft">
+                          <div className="h-full rounded-full bg-field-primary" style={{ width: `${progress.percent}%` }} />
+                        </div>
+                        <p className="mt-1 text-[11px] font-bold text-field-muted">
+                          완료 {progress.completed} / 총 {progress.total}컷
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[11px] font-bold leading-4 text-field-muted">컷 없음 · 일촬표에서 컷수를 입력하세요</p>
+                    )}
+                  </Link>
+                );
+              })}
+            </nav>
+          </>
+        ) : (
+          <KeyStaffPageActions
+            pageType={pageType}
+            projectBasePath={projectBasePath}
+            currentPlanId={currentPlanId}
+            onAction={onClose}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+type ProjectPageType = "staff" | "dailyPlan" | "staffList" | "basicInfo" | "other";
+
+function KeyStaffPageActions({
+  pageType,
+  projectBasePath,
+  currentPlanId,
+  onAction
+}: {
+  pageType: ProjectPageType;
+  projectBasePath: string;
+  currentPlanId: string;
+  onAction?: () => void;
+}) {
+  const staffPath = currentPlanId
+    ? `${projectBasePath}?dailyPlanId=${encodeURIComponent(currentPlanId)}`
+    : projectBasePath;
+
+  return (
+    <nav className="grid gap-2" aria-label="Key staff 페이지 이동">
+      {pageType === "staff" ? (
+        <>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
+        </>
+      ) : null}
+
+      {pageType === "dailyPlan" ? (
+        <>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보 수정</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionButton
+            icon={Printer}
+            onClick={() => {
+              window.dispatchEvent(new Event("daily-plan:request-print"));
+              onAction?.();
+            }}
+          >
+            PDF 내보내기
+          </SideActionButton>
+          <SideActionButton
+            icon={Save}
+            onClick={() => {
+              window.dispatchEvent(new Event("daily-plan:request-save"));
+              onAction?.();
+            }}
+          >
+            일촬표 저장
+          </SideActionButton>
+        </>
+      ) : null}
+
+      {pageType === "staffList" ? (
+        <>
+          <SideActionLink href={staffPath} icon={ListChecks}>Staff</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
+        </>
+      ) : null}
+
+      {pageType === "basicInfo" ? (
+        <>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={staffPath} icon={ListChecks}>Staff</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
+        </>
+      ) : null}
+
+    </nav>
   );
 }
 
@@ -367,6 +396,35 @@ function SideActionLink({
       {children}
     </Link>
   );
+}
+
+function SideActionButton({
+  icon: Icon,
+  children,
+  onClick
+}: {
+  icon: typeof ChevronLeft;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex min-h-10 w-full items-center gap-2 rounded-full border border-field-border bg-white px-3 py-2 text-left text-sm font-black text-field-primary transition hover:bg-field-soft active:scale-[0.99]"
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden />
+      {children}
+    </button>
+  );
+}
+
+function getProjectPageType(pathname: string, projectBasePath: string): ProjectPageType {
+  if (pathname === projectBasePath) return "staff";
+  if (pathname === `${projectBasePath}/basic-info`) return "basicInfo";
+  if (pathname === `${projectBasePath}/staff-list`) return "staffList";
+  if (new RegExp(`^${escapeRegExp(projectBasePath)}/daily-plans/(new|[^/]+)$`).test(pathname)) return "dailyPlan";
+  return "other";
 }
 
 function summarizePlanProgress(plan: DailyPlanListItem): EpisodeProgress {

@@ -347,11 +347,11 @@ export default function HomePage() {
     }
 
     if (!/^\d{4}$/.test(adminPassword) || !/^\d{4}$/.test(progressPassword)) {
-      setNewProjectError("관리자와 진행도 비밀번호를 각각 4자리 숫자로 입력하세요.");
+      setNewProjectError("Key staff와 Staff 비밀번호를 각각 4자리 숫자로 입력하세요.");
       return;
     }
     if (adminPassword === progressPassword) {
-      setNewProjectError("관리자 비밀번호와 진행도 비밀번호는 서로 달라야 합니다.");
+      setNewProjectError("Key staff 비밀번호와 Staff 비밀번호는 서로 달라야 합니다.");
       return;
     }
 
@@ -493,7 +493,7 @@ export default function HomePage() {
                   <span className="font-display">{project.name}</span>
                 </span>
                 <span className="mt-1 hidden max-w-full truncate text-[9px] font-bold text-field-muted md:block md:text-[10px]">
-                  {project.accessRole === "progress" ? "진행도 권한" : project.shareConfigured ? "관리자 권한" : "공유 설정 필요"}
+                  {project.accessRole === "progress" ? "Staff" : project.shareConfigured ? "Key staff" : "공유 설정 필요"}
                 </span>
               </button>
               <button
@@ -691,8 +691,8 @@ export default function HomePage() {
                   autoComplete="off"
                   value={adminPassword}
                   onChange={(event) => setAdminPassword(sanitizePasscode(event.target.value))}
-                  placeholder="관리자 비밀번호 4자리"
-                  aria-label="관리자 비밀번호"
+                  placeholder="Key staff 비밀번호 4자리"
+                  aria-label="Key staff 비밀번호"
                   className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
@@ -701,8 +701,8 @@ export default function HomePage() {
                   autoComplete="off"
                   value={progressPassword}
                   onChange={(event) => setProgressPassword(sanitizePasscode(event.target.value))}
-                  placeholder="진행도 비밀번호 4자리"
-                  aria-label="진행도 비밀번호"
+                  placeholder="Staff 비밀번호 4자리"
+                  aria-label="Staff 비밀번호"
                   className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}

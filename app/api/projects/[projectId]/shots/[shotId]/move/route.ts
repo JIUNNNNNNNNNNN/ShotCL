@@ -8,7 +8,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const projectId = normalizeProjectId(routeProjectId);
     if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
-    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
+    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const { direction, dailyPlanId } = (await request.json()) as { direction?: "up" | "down"; dailyPlanId?: string | null };
     if (direction !== "up" && direction !== "down") return NextResponse.json({ error: "이동 방향이 올바르지 않습니다." }, { status: 400 });
     const supabase = requireProjectAccessDb();

@@ -20,8 +20,8 @@ export function ProjectAccessGate({ projectId, role, children }: { projectId: st
   if (denied) {
     return (
       <div className="rounded-2xl border border-field-border bg-white p-5 text-center">
-        <p className="font-black text-field-primary">관리자 권한이 필요합니다.</p>
-        <p className="mt-2 text-sm font-bold text-field-muted">진행도 권한은 컷 진행 화면에서 OK 처리만 할 수 있습니다.</p>
+        <p className="font-black text-field-primary">Key staff 권한이 필요합니다.</p>
+        <p className="mt-2 text-sm font-bold text-field-muted">Staff 권한은 컷 진행 화면에서 OK 처리만 할 수 있습니다.</p>
       </div>
     );
   }

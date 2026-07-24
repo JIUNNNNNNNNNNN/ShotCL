@@ -81,12 +81,6 @@ export default function StaffListPage() {
     }
   }, [projectId, role]);
 
-  useEffect(() => {
-    if (!isDirty || isLoading || isSaving || errorMessage) return;
-    const timer = window.setTimeout(() => void save(members), 850);
-    return () => window.clearTimeout(timer);
-  }, [errorMessage, isDirty, isLoading, isSaving, members, save]);
-
   function commitMembers(updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) {
     editVersionRef.current += 1;
     setMembers((current) => updater(current).map((member, index) => ({
@@ -119,7 +113,7 @@ export default function StaffListPage() {
   if (role === "progress") {
     return (
       <div className="rounded-[2rem] border border-field-danger bg-white p-6 text-center">
-        <p className="font-black text-field-danger">관리자 권한이 필요합니다.</p>
+        <p className="font-black text-field-danger">Key staff 권한이 필요합니다.</p>
       </div>
     );
   }
@@ -178,8 +172,8 @@ export default function StaffListPage() {
           </div>
         </div>
         <p className="mt-2 text-[11px] font-bold text-field-muted" aria-live="polite">
-          프로젝트 전체에서 사용할 스탭을 직접 추가하고 수정하세요. 일촬표와 자동으로 연동되지 않습니다.
-          {isSaving ? " 저장 중…" : isDirty ? " 자동 저장 대기 중" : " 저장됨"}
+          프로젝트 전체에서 사용할 스탭을 직접 추가하고 수정한 뒤 저장 버튼을 눌러주세요.
+          {isSaving ? " 저장 중…" : isDirty ? " 저장되지 않은 변경사항이 있습니다." : " 저장됨"}
         </p>
       </section>
 

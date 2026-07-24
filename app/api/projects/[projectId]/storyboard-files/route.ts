@@ -19,7 +19,7 @@ async function requireAdmin(request: NextRequest, projectId: string) {
 export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
     const { projectId } = await context.params;
-    if (!(await requireAdmin(request, projectId))) return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: 403 });
+    if (!(await requireAdmin(request, projectId))) return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: 403 });
     const formData = await request.formData();
     const file = formData.get("file");
     const shotId = String(formData.get("shotId") || "");

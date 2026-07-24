@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const projectId = normalizeProjectId(routeProjectId);
     if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
-    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
+    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const body = (await request.json()) as { drafts?: ShotDraft[]; dailyPlanId?: string | null };
     const drafts = body.drafts ?? [];
     const supabase = requireProjectAccessDb();
@@ -62,7 +62,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     const projectId = normalizeProjectId(routeProjectId);
     if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
-    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "관리자 권한이 필요합니다." }, { status: grant ? 403 : 401 });
+    if (!grant || grant.role !== "admin") return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const supabase = requireProjectAccessDb();
     const dailyPlanId = request.nextUrl.searchParams.get("dailyPlanId");
     let query = supabase.from("shots").delete().eq("project_id", projectId);

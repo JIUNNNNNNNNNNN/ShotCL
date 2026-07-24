@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "프로젝트 이름과 4자리 비밀번호 2개를 입력하세요." }, { status: 400 });
     }
     if (adminPassword === progressPassword) {
-      return NextResponse.json({ error: "관리자 비밀번호와 진행도 비밀번호는 서로 달라야 합니다." }, { status: 400 });
+      return NextResponse.json({ error: "Key staff 비밀번호와 Staff 비밀번호는 서로 달라야 합니다." }, { status: 400 });
     }
 
     const supabase = requireProjectAccessDb();

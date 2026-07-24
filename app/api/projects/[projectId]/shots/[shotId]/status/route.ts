@@ -21,7 +21,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
     if (!current) return NextResponse.json({ error: "컷을 찾을 수 없습니다." }, { status: 404 });
 
     if (grant.role === "progress" && !(current.status === "pending" && body.status === "ok")) {
-      return NextResponse.json({ error: "진행도 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다." }, { status: 403 });
+      return NextResponse.json({ error: "Staff 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다." }, { status: 403 });
     }
 
     const { data, error } = await supabase.from("shots").update({ status: body.status }).eq("id", shotId).eq("project_id", projectId).select("*").single();

@@ -139,17 +139,6 @@ type WindowWithDaumPostcode = Window & {
   };
 };
 
-type DailyPlanEditorSnapshot = {
-  version: 1;
-  dailyPlanId: string | null;
-  plan: DailyPlanDraft;
-  printMeta: DailyPlanPrintMeta;
-  locations: DailyPlanLocation[];
-  mealTimes: DailyPlanMealTime[];
-  scenes: SceneBlockInput[];
-  savedAt: string;
-};
-
 type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring" | "teams";
 
 type EditorTimetableRow =
@@ -217,18 +206,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
   const [errorMessage, setErrorMessage] = useState("");
   const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
   const [isStaffOpen, setIsStaffOpen] = useState(false);
-  const [isDraftReady, setIsDraftReady] = useState(false);
-  const [autoSaveStatus, setAutoSaveStatus] = useState("저장 준비 중");
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
   const [expandedLocationDetailId, setExpandedLocationDetailId] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("");
-  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const autoSaveRequestRef = useRef(0);
-  const hasPendingChangesRef = useRef(false);
+  const isSavingRef = useRef(false);
+  const sidebarSaveRequestRef = useRef<() => void>(() => {});
 
   const flattenedShots = useMemo(() => scenesToShotDrafts(scenes), [scenes]);
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
@@ -249,17 +234,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
     plan.assistantDirector.trim() ? `조감독 ${plan.assistantDirector.trim()}` : "",
     plan.production.trim() ? `제작 ${plan.production.trim()}` : ""
   ].filter(Boolean).join(" / ");
-  const draftSnapshot: DailyPlanEditorSnapshot = {
-    version: 1,
-    dailyPlanId,
-    plan,
-    printMeta,
-    locations,
-    mealTimes,
-    scenes,
-    savedAt: new Date().toISOString()
-  };
-  const latestDraftRef = useRef(draftSnapshot);
   const managedShotKeysRef = useRef<Set<string>>(
     new Set(
       initialSourceShots.length > 0
@@ -267,109 +241,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
         : []
     )
   );
-  latestDraftRef.current = draftSnapshot;
-
-  useEffect(() => {
-    const storageKey = getDailyPlanDraftStorageKey(project.id, initialPlan?.id ?? null);
-
-    try {
-      const stored = window.localStorage.getItem(storageKey);
-      if (stored) {
-        const restored = JSON.parse(stored) as Partial<DailyPlanEditorSnapshot>;
-        if (restored.version === 1 && restored.plan && restored.printMeta && restored.locations && restored.mealTimes && restored.scenes) {
-          const restoredDefaults = applyProjectBasicInfoDefaults(
-            restored.plan,
-            normalizeDailyPlanPrintMeta(restored.printMeta),
-            activeProjectBasicInfo
-          );
-          setDailyPlanId(restored.dailyPlanId ?? initialPlan?.id ?? null);
-          setPlan(restoredDefaults.plan);
-          setPrintMeta(restoredDefaults.printMeta);
-          setLocations(restored.locations);
-          setMealTimes(restored.mealTimes);
-          setScenes(restored.scenes.map(normalizeDraftScene));
-          setAutoSaveStatus("임시 저장 복구됨");
-        }
-      }
-    } catch {
-      window.localStorage.removeItem(storageKey);
-      setAutoSaveStatus("임시 저장을 복구하지 못했습니다");
-    } finally {
-      setIsDraftReady(true);
-    }
-  }, [activeProjectBasicInfo, initialPlan?.id, project.id]);
-
-  useEffect(() => {
-    if (!isDraftReady) return;
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-
-    hasPendingChangesRef.current = true;
-    setAutoSaveStatus("저장 중...");
-    const requestId = ++autoSaveRequestRef.current;
-    const snapshot = latestDraftRef.current;
-
-    autoSaveTimerRef.current = setTimeout(() => {
-      const storageKey = getDailyPlanDraftStorageKey(project.id, snapshot.dailyPlanId);
-      window.localStorage.setItem(storageKey, JSON.stringify({ ...snapshot, savedAt: new Date().toISOString() }));
-
-      const constraintMessage = getProjectConstraintMessage(snapshot.plan, snapshot.printMeta, activeProjectBasicInfo);
-      if (constraintMessage) {
-        hasPendingChangesRef.current = true;
-        if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("입력 범위 확인 필요");
-        return;
-      }
-
-      if (!snapshot.dailyPlanId) {
-        hasPendingChangesRef.current = false;
-        if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("임시 저장됨");
-        return;
-      }
-
-      autoSaveQueueRef.current = autoSaveQueueRef.current.then(async () => {
-        try {
-          const saved = await saveDailyPlanWithShots({
-            projectId: project.id,
-            dailyPlanId: snapshot.dailyPlanId,
-            plan: buildPlanForSave(snapshot.plan, snapshot.locations, snapshot.mealTimes, snapshot.printMeta),
-            shots: scenesToShotDrafts(snapshot.scenes)
-          });
-          if (saved.saveStatus === "duplicate") {
-            hasPendingChangesRef.current = true;
-            if (requestId === autoSaveRequestRef.current) setAutoSaveStatus("이미 저장된 일촬표");
-            return;
-          }
-          const didSyncShots = await completeShotBoardSync(saved);
-          window.localStorage.removeItem(storageKey);
-          hasPendingChangesRef.current = false;
-          if (requestId === autoSaveRequestRef.current) {
-            setAutoSaveStatus(didSyncShots ? "자동 저장됨" : formatProgressSyncFailure(saved, true));
-          }
-        } catch (error) {
-          hasPendingChangesRef.current = true;
-          if (requestId === autoSaveRequestRef.current) setAutoSaveStatus(error instanceof DailyPlanDuplicateError ? "이미 저장된 일촬표" : "저장 실패");
-        }
-      });
-    }, 1500);
-
-    return () => {
-      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [activeProjectBasicInfo, dailyPlanId, isDraftReady, locations, mealTimes, plan, printMeta, project.id, scenes]);
-
-  useEffect(() => {
-    function savePendingDraft() {
-      if (!hasPendingChangesRef.current) return;
-      const snapshot = latestDraftRef.current;
-      window.localStorage.setItem(getDailyPlanDraftStorageKey(project.id, snapshot.dailyPlanId), JSON.stringify({ ...snapshot, savedAt: new Date().toISOString() }));
-    }
-
-    window.addEventListener("beforeunload", savePendingDraft);
-    return () => {
-      savePendingDraft();
-      window.removeEventListener("beforeunload", savePendingDraft);
-    };
-  }, [project.id]);
-
   function updatePlanField(field: PlanTextField, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
@@ -807,14 +678,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
   }
 
   async function saveCurrentPlan(showMessage = true) {
+    if (isSavingRef.current) return null;
     const constraintMessage = getProjectConstraintMessage(plan, printMeta, activeProjectBasicInfo);
     if (constraintMessage) {
       setMessage("");
       setErrorMessage(constraintMessage);
-      setAutoSaveStatus("입력 범위 확인 필요");
       return null;
     }
 
+    isSavingRef.current = true;
     setIsSaving(true);
     setErrorMessage("");
     setMessage("");
@@ -843,10 +715,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
       setLocations(nextLocations);
       setMealTimes(nextMeals);
       setScenes(shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations));
-      window.localStorage.removeItem(getDailyPlanDraftStorageKey(project.id, dailyPlanId));
-      window.localStorage.removeItem(getDailyPlanDraftStorageKey(project.id, saved.plan.id));
-      hasPendingChangesRef.current = false;
-      setAutoSaveStatus("자동 저장됨");
 
       if (!dailyPlanId) {
         router.replace(`/projects/${project.id}/daily-plans/${saved.plan.id}`);
@@ -865,9 +733,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
       }
       return null;
     } finally {
+      isSavingRef.current = false;
       setIsSaving(false);
     }
   }
+
+  sidebarSaveRequestRef.current = () => {
+    void saveCurrentPlan();
+  };
 
   async function startApplyToShotBoard() {
     const result = await saveCurrentPlan(false);
@@ -899,8 +772,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
 
   useEffect(() => {
     const handleSidebarPrintRequest = () => handlePrint();
+    const handleSidebarSaveRequest = () => sidebarSaveRequestRef.current();
     window.addEventListener("daily-plan:request-print", handleSidebarPrintRequest);
-    return () => window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
+    window.addEventListener("daily-plan:request-save", handleSidebarSaveRequest);
+    return () => {
+      window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
+      window.removeEventListener("daily-plan:request-save", handleSidebarSaveRequest);
+    };
   }, [canPrint]);
 
   return (
@@ -912,7 +790,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black">
               <span className="max-w-[55vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
-              <span className="text-field-muted" aria-live="polite">저장 상태: {autoSaveStatus}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
@@ -1438,7 +1315,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Button onClick={() => saveCurrentPlan()} disabled={isSaving}>
               <Save className="h-5 w-5" aria-hidden />
-              임시 저장
+              일촬표 저장
             </Button>
             <Button onClick={startApplyToShotBoard} disabled={isSaving || meaningfulShotCount === 0}>
               <ListChecks className="h-5 w-5" aria-hidden />
@@ -3591,10 +3468,8 @@ function sanitizeNumericInput(value: string, maxLength: number) {
   return value.replace(/\D/g, "").slice(0, maxLength);
 }
 
-function formatProgressSyncFailure(saved: SaveDailyPlanResult, compact = false) {
+function formatProgressSyncFailure(saved: SaveDailyPlanResult) {
   const diagnostic = [saved.progressSyncStep, saved.progressSyncErrorCode].filter(Boolean).join(" / ");
-  if (compact) return `일촬표 저장됨 · 진행표 동기화 실패${diagnostic ? ` (${diagnostic})` : ""}`;
-
   return [
     "일촬표는 저장됐지만 진행표 동기화에 실패했습니다.",
     diagnostic ? `단계/코드: ${diagnostic}.` : "",
@@ -3718,17 +3593,4 @@ function formatDateForPreview(value: string) {
 
 function makeLocalId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
-
-function getDailyPlanDraftStorageKey(projectId: string, dailyPlanId: string | null) {
-  return `today-board:daily-plan-draft:${projectId}:${dailyPlanId ?? "new"}`;
-}
-
-function normalizeDraftScene(scene: SceneBlockInput): SceneBlockInput {
-  const runtimeMinutes = getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime);
-  return {
-    ...scene,
-    runtimeMinutes,
-    runtime: formatRuntimeMinutes(runtimeMinutes)
-  };
 }

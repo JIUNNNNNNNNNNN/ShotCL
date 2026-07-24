@@ -53,7 +53,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
 
     const role = await getDiagramAccessRole(request, projectId);
-    if (role !== "admin") return NextResponse.json({ error: "부감도는 관리자만 저장할 수 있습니다." }, { status: 403 });
+    if (role !== "admin") return NextResponse.json({ error: "부감도는 Key staff만 저장할 수 있습니다." }, { status: 403 });
 
     const body = (await request.json()) as {
       dailyPlanId?: unknown;

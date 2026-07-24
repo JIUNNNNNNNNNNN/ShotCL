@@ -116,7 +116,7 @@ export default function ProjectDetailPage() {
     try {
       setShots(await listShots(projectId, dailyPlanId));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "컷 진행도를 갱신하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "Staff 화면을 갱신하지 못했습니다.");
     }
   }, [dailyPlanId, projectId]);
 
@@ -134,7 +134,7 @@ export default function ProjectDetailPage() {
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     if (progressOnly && !(targetShot.status === "pending" && status === "ok")) {
-      setErrorMessage("진행도 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다.");
+      setErrorMessage("Staff 권한은 대기 중인 컷을 OK로만 변경할 수 있습니다.");
       return;
     }
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
@@ -399,7 +399,7 @@ export default function ProjectDetailPage() {
               <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
             </Link>
           </nav>
-        </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도 권한</span>}
+        </details> : <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">Staff</span>}
       </div>
 
       <section className="mb-3">
