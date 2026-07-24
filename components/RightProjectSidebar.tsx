@@ -1,11 +1,10 @@
 "use client";
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
-  ChevronRight,
   FilePenLine,
   Files,
   ListChecks,
@@ -22,15 +21,13 @@ type RightProjectSidebarProps = {
   projectId: string;
   projectName: string | null;
   role: SharedProjectRole | null;
-  placement?: "side" | "bottom";
 };
 
 /** 프로젝트 내부 화면에서 권한별 회차 이동과 관리 기능을 제공하는 공용 패널입니다. */
 export function RightProjectSidebar({
   projectId,
   projectName,
-  role,
-  placement = "side"
+  role
 }: RightProjectSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -40,91 +37,83 @@ export function RightProjectSidebar({
   const progressOnly = role === "progress";
   const pageType = getProjectPageType(pathname, `/projects/${projectId}`);
   const shouldShowSidebar = progressOnly || pageType !== "other";
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
+  const sidebarRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    setIsMobileOpen(false);
+    setIsOpen(false);
   }, [pathname, currentPlanId]);
 
   useEffect(() => {
-    if (!isMobileOpen) return undefined;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setIsMobileOpen(false);
+    if (!isOpen) return undefined;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !sidebarRef.current?.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
     window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isMobileOpen]);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
 
-  const collapsePanel = useCallback(() => setIsCollapsed(true), []);
-  const closeMobilePanel = useCallback(() => setIsMobileOpen(false), []);
+  const closePanel = useCallback(() => setIsOpen(false), []);
 
   if (!shouldShowSidebar) return null;
 
   return (
-    <>
-      <aside
-        aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
-        className={placement === "bottom"
-          ? "mt-5 hidden w-full lg:block"
-          : `sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] hidden self-start lg:block ${
-              isCollapsed ? "w-12" : "w-[280px]"
-            }`}
-      >
-        {placement === "side" && isCollapsed ? (
-          <button
-            type="button"
-            onClick={() => setIsCollapsed(false)}
-            aria-label="프로젝트 사이드 패널 펼치기"
-            className="grid h-12 w-12 place-items-center rounded-full border border-field-border bg-white text-field-primary transition hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-field-primary"
-          >
-            <PanelRight className="h-5 w-5" aria-hidden />
-          </button>
-        ) : (
-          <PanelContent
-            projectName={projectName}
-            currentPlanId={currentPlanId}
-            projectId={projectId}
-            progressOnly={progressOnly}
-            pageType={pageType}
-            layout={placement}
-            onCollapse={placement === "side" ? collapsePanel : undefined}
-          />
-        )}
-      </aside>
-
+    <aside
+      ref={sidebarRef}
+      aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
+      className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] md:right-5"
+    >
       <button
         type="button"
-        onClick={() => setIsMobileOpen(true)}
-        aria-label={progressOnly ? "진행도 이동 패널 열기" : "프로젝트 관리 패널 열기"}
-        aria-expanded={isMobileOpen}
-        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 grid h-12 w-12 place-items-center rounded-full border border-field-primary bg-field-primary text-white shadow-sm transition active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-field-primary lg:hidden"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-label={isOpen
+          ? "프로젝트 메뉴 닫기"
+          : progressOnly
+            ? "진행도 이동 메뉴 열기"
+            : "프로젝트 관리 메뉴 열기"}
+        aria-expanded={isOpen}
+        aria-controls="right-project-menu"
+        className="ml-auto grid h-10 w-10 place-items-center rounded-full border border-field-secondary bg-white/95 text-field-primary shadow-[0_3px_10px_rgba(28,28,26,0.08)] transition-[background-color,border-color,transform] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:h-11 md:w-11"
       >
-        <PanelRight className="h-5 w-5" aria-hidden />
+        {isOpen
+          ? <X className="h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />
+          : <PanelRight className="h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />}
       </button>
 
-      {isMobileOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}>
-          <button
-            type="button"
-            className="absolute inset-0 h-full w-full rounded-none bg-black/25"
-            onClick={() => setIsMobileOpen(false)}
-            aria-label="패널 닫기"
-          />
-          <div className="safe-bottom absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] max-h-[min(78dvh,44rem)] overflow-y-auto rounded-[1.5rem]">
-            <PanelContent
-              projectName={projectName}
-              currentPlanId={currentPlanId}
-              projectId={projectId}
-              progressOnly={progressOnly}
-              pageType={pageType}
-              layout="side"
-              onClose={closeMobilePanel}
-            />
-          </div>
-        </div>
-      ) : null}
-    </>
+      <div
+        id="right-project-menu"
+        role="dialog"
+        aria-modal="false"
+        aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
+        aria-hidden={!isOpen}
+        className={`absolute right-0 top-[calc(100%+0.5rem)] w-[min(18rem,calc(100vw-1.5rem))] origin-top-right transition-[opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none ${
+          isOpen
+            ? "visible translate-y-0 scale-y-100 opacity-100"
+            : "invisible pointer-events-none -translate-y-2 scale-y-95 opacity-0"
+        }`}
+      >
+        <PanelContent
+          projectName={projectName}
+          currentPlanId={currentPlanId}
+          projectId={projectId}
+          progressOnly={progressOnly}
+          pageType={pageType}
+          onClose={closePanel}
+        />
+      </div>
+    </aside>
   );
 }
 
@@ -134,8 +123,6 @@ type PanelContentProps = {
   projectId: string;
   progressOnly: boolean;
   pageType: ProjectPageType;
-  layout: "side" | "bottom";
-  onCollapse?: () => void;
   onClose?: () => void;
 };
 
@@ -145,8 +132,6 @@ const PanelContent = memo(function PanelContent({
   projectId,
   progressOnly,
   pageType,
-  layout,
-  onCollapse,
   onClose
 }: PanelContentProps) {
   const projectBasePath = `/projects/${projectId}`;
@@ -156,18 +141,8 @@ const PanelContent = memo(function PanelContent({
       <div className="flex items-start gap-3 border-b border-field-border bg-field-soft px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-display truncate text-lg font-black text-field-primary">{projectName || "프로젝트"}</p>
-          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "진행도" : "Key staff"}</p>
+          <p className="mt-0.5 text-xs font-bold text-field-muted">{progressOnly ? "진행도" : "관리 메뉴"}</p>
         </div>
-        {onCollapse ? (
-          <button
-            type="button"
-            onClick={onCollapse}
-            aria-label="프로젝트 사이드 패널 접기"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-field-border bg-white text-field-muted transition hover:text-field-primary active:scale-95"
-          >
-            <ChevronRight className="h-4 w-4" aria-hidden />
-          </button>
-        ) : null}
         {onClose ? (
           <button
             type="button"
@@ -194,7 +169,6 @@ const PanelContent = memo(function PanelContent({
             pageType={pageType}
             projectBasePath={projectBasePath}
             currentPlanId={currentPlanId}
-            layout={layout}
             onAction={onClose}
           />
         )}
@@ -216,13 +190,11 @@ function KeyStaffPageActions({
   pageType,
   projectBasePath,
   currentPlanId,
-  layout,
   onAction
 }: {
   pageType: ProjectPageType;
   projectBasePath: string;
   currentPlanId: string;
-  layout: "side" | "bottom";
   onAction?: () => void;
 }) {
   const progressPath = currentPlanId
@@ -230,10 +202,7 @@ function KeyStaffPageActions({
     : projectBasePath;
 
   return (
-    <nav
-      className={layout === "bottom" ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-4" : "grid gap-2"}
-      aria-label="Key staff 페이지 이동"
-    >
+    <nav className="grid gap-2" aria-label="관리 페이지 이동">
       {pageType === "progress" ? (
         <>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>

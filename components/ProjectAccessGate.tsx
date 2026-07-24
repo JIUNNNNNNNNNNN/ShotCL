@@ -25,7 +25,6 @@ export function ProjectAccessGate({
   const router = useRouter();
   const progressPath = `/projects/${projectId}`;
   const sceneListPath = `${progressPath}/scene-list`;
-  const placeSidebarBelow = pathname === sceneListPath;
   const denied = role === "progress" && pathname !== progressPath && pathname !== sceneListPath;
 
   useEffect(() => {
@@ -43,16 +42,12 @@ export function ProjectAccessGate({
 
   return (
     <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>
-      <div className={placeSidebarBelow
-        ? "min-w-0"
-        : "min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-5"}
-      >
+      <div className="min-w-0">
         <div className="min-w-0">{children}</div>
         <RightProjectSidebar
           projectId={projectId}
           projectName={projectName}
           role={role}
-          placement={placeSidebarBelow ? "bottom" : "side"}
         />
       </div>
     </ProjectAccessContext.Provider>
