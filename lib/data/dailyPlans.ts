@@ -3,15 +3,18 @@ import {
   dailyPlanFromRow,
   dailyPlanShotDraftToRow,
   dailyPlanShotFromRow,
+  normalizeDailyPlanMealTimes,
   normalizeDailyPlanShotStatus
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
+import { isValidDatabaseProjectId } from "@/lib/projectId";
 import type {
   DailyPlan,
   DailyPlanDraft,
+  DailyPlanMealTime,
   DailyPlanShot,
   DailyPlanShotDraft,
   DailyPlanSourceType,
@@ -313,6 +316,59 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
     plan,
     shots: dailyPlanShots.filter((shot) => shot.dailyPlanId === dailyPlanId).sort((a, b) => a.orderIndex - b.orderIndex)
   };
+}
+
+/** 기타일정의 진행용 메모와 그림만 저장하며 컷/진행표 데이터는 변경하지 않습니다. */
+export async function updateDailyPlanScheduleItem(
+  projectId: string,
+  dailyPlanId: string,
+  itemId: string,
+  patch: Pick<DailyPlanMealTime, "progressMemo" | "imageUrl">
+): Promise<DailyPlanMealTime[]> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduleItem: { id: itemId, ...patch } })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      mealTimes?: unknown;
+      error?: string;
+    };
+    if (response.ok && payload.mealTimes) {
+      return normalizeDailyPlanMealTimes(payload.mealTimes);
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "기타일정 정보를 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const buckets = readLocalBuckets();
+  const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
+  if (!plan) throw new Error("일촬표를 찾을 수 없습니다.");
+  if (!plan.mealTimes.some((item) => item.id === itemId)) throw new Error("기타일정을 찾을 수 없습니다.");
+  const mealTimes = plan.mealTimes.map((item) => (
+    item.id === itemId
+      ? {
+          ...item,
+          progressMemo: String(patch.progressMemo ?? "").slice(0, 2000),
+          imageUrl: patch.imageUrl || null
+        }
+      : item
+  ));
+  writeLocalBuckets({
+    dailyPlans: buckets.dailyPlans.map((item) => (
+      item.id === dailyPlanId && item.projectId === projectId
+        ? { ...item, mealTimes, updatedAt: new Date().toISOString() }
+        : item
+    ))
+  }, projectId);
+  return mealTimes;
 }
 
 /** 새 일촬표를 만들거나 기존 일촬표를 저장합니다. */

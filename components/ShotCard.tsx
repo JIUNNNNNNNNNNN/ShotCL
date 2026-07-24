@@ -60,9 +60,9 @@ export const ShotCard = memo(function ShotCard({
       onClick={handleCardOpen}
       aria-label={progressOnly ? `${shot.title} 컷 상세 보기` : `${shot.title} 컷 수정`}
       className={cn(
-        "grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[1.5rem] border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
+        "relative grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[1.5rem] border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
         isOk
-          ? "border-[#7f9e8e] bg-[#dfeae3]"
+          ? "border-[#7f9e8e] bg-[#dfeae3] after:pointer-events-none after:absolute after:inset-x-3 after:top-1/2 after:z-10 after:h-[2px] after:-translate-y-1/2 after:bg-field-primary/45 after:content-['']"
           : isOmit
             ? "border-[#d7aaa4] bg-[#f8e9e6]"
             : "border-field-border bg-white hover:border-field-secondary"
@@ -70,13 +70,13 @@ export const ShotCard = memo(function ShotCard({
     >
       <div className={cn("grid min-w-0 max-w-full gap-2 overflow-hidden", hasMedia && "sm:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] sm:items-center")}>
         {hasMedia ? (
-          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-hidden gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
+          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-hidden rounded-none gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
             {shot.storyboardImageUrl ? (
               <button
                 type="button"
                 onClick={handleImageClick}
                 data-no-drag="true"
-                className="flex h-full w-full max-w-full min-w-0 items-center justify-center overflow-hidden p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                className="flex h-full w-full max-w-full min-w-0 items-center justify-center overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="콘티 크게 보기"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -84,7 +84,7 @@ export const ShotCard = memo(function ShotCard({
                   src={shot.storyboardImageUrl}
                   alt={`${displayText} 콘티`}
                   draggable={false}
-                  className="block h-full max-h-full w-full max-w-full select-none object-contain [-webkit-user-drag:none]"
+                  className="block h-full max-h-full w-full max-w-full select-none rounded-none object-contain [-webkit-user-drag:none]"
                 />
               </button>
             ) : null}
@@ -96,7 +96,7 @@ export const ShotCard = memo(function ShotCard({
                   onOpenOverhead(shot);
                 }}
                 data-no-drag="true"
-                className="h-full w-full max-w-full min-w-0 overflow-hidden p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                className="h-full w-full max-w-full min-w-0 overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title={progressOnly ? "부감도 보기" : "부감도 편집"}
               >
                 <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
@@ -110,7 +110,6 @@ export const ShotCard = memo(function ShotCard({
           <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
-          <p className="truncate text-[10px] font-black text-field-muted">촬영순서 {shot.orderIndex}</p>
           <button
             type="button"
             onClick={(event) => {
@@ -132,16 +131,12 @@ export const ShotCard = memo(function ShotCard({
         {displayText ? (
           <h2 className={cn(
             "mt-1 truncate text-sm font-black leading-5 text-field-text",
-            isOk && "line-through decoration-2 decoration-field-primary/65",
             isOmit && "underline decoration-2 underline-offset-4"
           )}>
             {displayText}
           </h2>
         ) : null}
-        <div className={cn(
-          "mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted",
-          isOk && "line-through decoration-1 decoration-field-primary/55"
-        )}>
+        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted">
           {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
           {shot.location ? <p className="min-w-0 flex-1 truncate text-field-secondary">장소 {shot.location}</p> : null}
           {!shot.location && shot.memo ? <p className="min-w-0 flex-1 truncate">{shot.memo}</p> : null}

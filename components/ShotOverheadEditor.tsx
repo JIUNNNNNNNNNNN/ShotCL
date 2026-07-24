@@ -715,11 +715,11 @@ export function ShotOverheadEditor({
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto bg-[#eeeae1] p-2 sm:p-4">
-          <div className="mx-auto aspect-[3/2] w-full max-w-[960px] overflow-hidden rounded-xl border-2 border-field-border bg-[#fbfaf6] shadow-sm">
+          <div className="mx-auto aspect-[3/2] w-full max-w-[960px] overflow-hidden rounded-none bg-[#fbfaf6]">
             <svg
               ref={svgRef}
               viewBox={`0 0 ${OVERHEAD_CANVAS_WIDTH} ${OVERHEAD_CANVAS_HEIGHT}`}
-              className={cn("h-full w-full select-none", !readOnly && "touch-none", tool === "line" && "cursor-crosshair")}
+              className={cn("h-full w-full select-none rounded-none", !readOnly && "touch-none", tool === "line" && "cursor-crosshair")}
               shapeRendering="geometricPrecision"
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handlePointerMove}

@@ -166,12 +166,12 @@ export function ShotEditorModal({
                 readOnly ? "grid-cols-1" : mode === "add" ? "grid-cols-[96px_1fr]" : "grid-cols-[80px_1fr]"
               )}>
                 <div className={cn(
-                  "flex aspect-[4/3] items-center justify-center text-[11px] font-black text-field-muted",
+                  "flex aspect-[4/3] items-center justify-center rounded-none text-[11px] font-black text-field-muted",
                   readOnly ? "w-full max-w-[11rem] justify-self-center" : mode === "add" ? "w-24" : "w-20"
                 )}>
                   {values.storyboardImageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="block h-full max-h-full w-full max-w-full object-contain" />
+                    <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="block h-full max-h-full w-full max-w-full rounded-none object-contain" />
                   ) : (
                     <span className="grid place-items-center gap-1">
                       <ImageIcon className="h-5 w-5" aria-hidden />
@@ -234,9 +234,9 @@ export function ShotEditorModal({
               <textarea
                 value={values.description}
                 readOnly={readOnly}
-                rows={mode === "add" ? 5 : 4}
+                rows={mode === "add" ? 5 : 3}
                 onChange={(event) => updateField("description", event.target.value)}
-                className={cn(textareaClass, mode === "edit" && "min-h-28 py-2 text-sm leading-5")}
+                className={cn(textareaClass, mode === "edit" && "min-h-20 py-2 text-sm leading-5")}
               />
             </label>
 
@@ -250,16 +250,16 @@ export function ShotEditorModal({
               />
             </label> : null}
 
-            {mode === "add" ? <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">등장 인물</span>
+            <label className={cn("grid", mode === "add" ? "gap-2" : "gap-1.5")}>
+              <span className={cn("font-black text-field-muted", mode === "add" ? "text-xs" : "text-[11px]")}>등장인물</span>
               <input
                 value={values.charactersText}
                 readOnly={readOnly}
                 onChange={(event) => updateField("charactersText", event.target.value)}
                 placeholder="주인공, 상대역"
-                className={fieldClass}
+                className={cn(fieldClass, mode === "edit" && "min-h-9 py-1 text-sm")}
               />
-            </label> : null}
+            </label>
 
             {mode === "add" ? <label className="grid gap-2">
               <span className="text-xs font-black text-field-muted">메모</span>

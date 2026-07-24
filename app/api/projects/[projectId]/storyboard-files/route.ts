@@ -22,11 +22,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     if (!(await requireAdmin(request, projectId))) return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: 403 });
     const formData = await request.formData();
     const file = formData.get("file");
-    const shotId = String(formData.get("shotId") || "");
-    if (!(file instanceof File) || !shotId) return NextResponse.json({ error: "컷 이미지 정보가 없습니다." }, { status: 400 });
-    if (!isStoryboardImage(file)) return NextResponse.json({ error: "콘티 이미지 파일만 업로드할 수 있습니다." }, { status: 415 });
+    const legacyShotId = String(formData.get("shotId") || "").trim();
+    const assetType = formData.get("assetType") === "schedule" ? "schedule" : "shot";
+    const assetRef = String(formData.get("assetRef") || legacyShotId).trim();
+    if (!(file instanceof File) || !assetRef) return NextResponse.json({ error: "이미지 정보가 없습니다." }, { status: 400 });
+    if (!isStoryboardImage(file)) return NextResponse.json({ error: "이미지 파일만 업로드할 수 있습니다." }, { status: 415 });
     const supabase = requireProjectAccessDb();
-    const storagePath = `storyboard-files/${projectId}/shots/${shotId}/${Date.now()}-${safeName(file.name)}`;
+    const folder = assetType === "schedule" ? "schedule-items" : "shots";
+    const storagePath = `storyboard-files/${projectId}/${folder}/${safeName(assetRef)}/${Date.now()}-${safeName(file.name)}`;
     const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, Buffer.from(await file.arrayBuffer()), {
       contentType: file.type || "application/octet-stream",
       upsert: true
@@ -35,6 +38,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const { data: publicData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
     return NextResponse.json({ imageUrl: publicData.publicUrl });
   } catch (error) {
-    return NextResponse.json({ error: "콘티 이미지를 업로드하지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
+    return NextResponse.json({ error: "이미지를 업로드하지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }
 }

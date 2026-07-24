@@ -34,25 +34,30 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
-/** 컷 수정 모달에서 선택한 콘티 이미지를 저장하고 카드에서 표시할 URL을 반환합니다. */
-export async function saveShotStoryboardImage(projectId: string, shotId: string, file: File): Promise<string> {
+type StoryboardAsset = {
+  folder: "shots" | "schedule-items";
+  ref: string;
+};
+
+async function saveStoryboardImage(projectId: string, asset: StoryboardAsset, file: File): Promise<string> {
   if (!isStoryboardImage(file)) {
-    throw new Error("콘티 이미지 파일만 업로드할 수 있습니다.");
+    throw new Error("이미지 파일만 업로드할 수 있습니다.");
   }
 
   if (await hasSharedAccess(projectId)) {
     const formData = new FormData();
     formData.set("file", file);
-    formData.set("shotId", shotId);
+    formData.set("assetType", asset.folder === "schedule-items" ? "schedule" : "shot");
+    formData.set("assetRef", asset.ref);
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/storyboard-files`, { method: "POST", body: formData });
     const payload = (await response.json()) as { imageUrl?: string; error?: string };
-    if (!response.ok || !payload.imageUrl) throw new Error(payload.error || "콘티 이미지를 업로드하지 못했습니다.");
+    if (!response.ok || !payload.imageUrl) throw new Error(payload.error || "이미지를 업로드하지 못했습니다.");
     return payload.imageUrl;
   }
-  const supabase = getSupabaseBrowserClient();
 
+  const supabase = getSupabaseBrowserClient();
   if (supabase) {
-    const storagePath = `storyboard-files/${projectId}/shots/${shotId}/${Date.now()}-${sanitizeFileName(file.name) || "shot-image"}`;
+    const storagePath = `storyboard-files/${projectId}/${asset.folder}/${sanitizeFileName(asset.ref)}/${Date.now()}-${sanitizeFileName(file.name) || "image"}`;
     const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
       contentType: file.type || "image/jpeg",
       upsert: true
@@ -65,4 +70,17 @@ export async function saveShotStoryboardImage(projectId: string, shotId: string,
   }
 
   return readFileAsDataUrl(file);
+}
+
+/** 컷 수정 모달에서 선택한 콘티 이미지를 저장하고 카드에서 표시할 URL을 반환합니다. */
+export async function saveShotStoryboardImage(projectId: string, shotId: string, file: File): Promise<string> {
+  return saveStoryboardImage(projectId, { folder: "shots", ref: shotId }, file);
+}
+
+/** 기타일정 팝업에서 선택한 이미지를 컷과 분리된 Storage 경로에 저장합니다. */
+export async function saveScheduleImage(projectId: string, dailyPlanId: string, itemId: string, file: File): Promise<string> {
+  return saveStoryboardImage(projectId, {
+    folder: "schedule-items",
+    ref: `${dailyPlanId}-${itemId}`
+  }, file);
 }

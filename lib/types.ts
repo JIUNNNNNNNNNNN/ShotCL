@@ -28,6 +28,8 @@ export type DailyPlanMealTime = {
   runtime?: string;
   locationId?: string;
   memo: string;
+  progressMemo?: string;
+  imageUrl?: string | null;
 };
 
 export const shotStatusOptions: ShotStatus[] = ["pending", "ok", "omit"];

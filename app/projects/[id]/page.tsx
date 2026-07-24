@@ -7,6 +7,7 @@ import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
+import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import { ShotCard } from "@/components/ShotCard";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { ShotReorderList } from "@/components/ShotReorderList";
@@ -14,10 +15,10 @@ import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
 import { loadShotOverheadDiagram, loadShotOverheadDiagrams, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
-import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
+import { listDailyPlans, updateDailyPlanScheduleItem, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
-import { saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
+import { saveScheduleImage, saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
@@ -32,6 +33,10 @@ const ShotOverheadEditor = dynamic(
 );
 const ImagePreviewModal = dynamic(
   () => import("@/components/ImagePreviewModal").then((module) => module.ImagePreviewModal),
+  { ssr: false, loading: ModalLoadingFallback }
+);
+const ProgressScheduleEditorModal = dynamic(
+  () => import("@/components/ProgressScheduleEditorModal").then((module) => module.ProgressScheduleEditorModal),
   { ssr: false, loading: ModalLoadingFallback }
 );
 
@@ -97,6 +102,8 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
     || row.runtime?.trim()
     || row.locationId?.trim()
     || row.memo.trim()
+    || row.progressMemo?.trim()
+    || row.imageUrl
   );
 }
 
@@ -116,6 +123,7 @@ export default function ProjectDetailPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
   const [overheadShot, setOverheadShot] = useState<Shot | null>(null);
   const [overheadLoadingShotId, setOverheadLoadingShotId] = useState<string | null>(null);
   const overheadLoadingShotIdRef = useRef<string | null>(null);
@@ -189,7 +197,6 @@ export default function ProjectDetailPage() {
     [selectedPlan, shots]
   );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
-  const meetingLocation = selectedPlan ? getProgressMeetingLocation(selectedPlan) : "";
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
   }, []);
@@ -276,10 +283,36 @@ export default function ProjectDetailPage() {
       }, projectId);
 
       setEditingShot(null);
-      setSuccessMessage("컷 정보를 저장했습니다.");
       await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷을 저장하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleSaveSchedule(values: ProgressScheduleEditorValues) {
+    if (!projectId || !dailyPlanId || !editingSchedule || progressOnly) return;
+
+    setIsSaving(true);
+    setErrorMessage("");
+    setSuccessMessage("");
+
+    try {
+      let imageUrl = values.imageUrl;
+      if (values.imageFile) {
+        imageUrl = await saveScheduleImage(projectId, dailyPlanId, editingSchedule.id, values.imageFile);
+      }
+      const mealTimes = await updateDailyPlanScheduleItem(projectId, dailyPlanId, editingSchedule.id, {
+        progressMemo: values.progressMemo.trim(),
+        imageUrl
+      });
+      setDailyPlans((current) => current.map((plan) => (
+        plan.id === dailyPlanId ? { ...plan, mealTimes } : plan
+      )));
+      setEditingSchedule(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "기타일정 정보를 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
     }
@@ -471,12 +504,6 @@ export default function ProjectDetailPage() {
       ) : null}
 
       <div id="cut-board" className="scroll-mt-28">
-        <section className="mb-3 rounded-[1.35rem] border border-field-border bg-white px-4 py-3">
-          <p className="text-[11px] font-black text-field-muted">집합 장소</p>
-          <p className="mt-1 min-h-5 break-words text-sm font-black leading-5 text-field-primary">
-            {meetingLocation}
-          </p>
-        </section>
         <div className="mb-2 px-1">
           <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
         </div>
@@ -499,7 +526,12 @@ export default function ProjectDetailPage() {
             onReorder={handleReorderShots}
             renderShot={renderShot}
             renderRowsBeforeIndex={(index) => scheduleRowsByIndex.get(index)?.map((item) => (
-              <ProgressScheduleCard key={item.id} item={item} />
+              <ProgressScheduleCard
+                key={item.id}
+                item={item}
+                onOpen={setEditingSchedule}
+                onImagePreview={handleImagePreview}
+              />
             ))}
           />
         )}
@@ -548,6 +580,16 @@ export default function ProjectDetailPage() {
         onSave={handleSaveExistingShot}
         onDelete={progressOnly ? undefined : handleDeleteShot}
       /> : null}
+
+      {editingSchedule ? (
+        <ProgressScheduleEditorModal
+          item={editingSchedule}
+          readOnly={progressOnly}
+          isSaving={isSaving}
+          onClose={() => setEditingSchedule(null)}
+          onSave={handleSaveSchedule}
+        />
+      ) : null}
 
       {overheadShot ? (
         <ShotOverheadEditor
@@ -664,34 +706,4 @@ function formatEpisodeLabel(plan: Pick<DailyPlan, "episode" | "shootingDate">, i
   const episode = plan.episode.trim();
   if (episode) return episode.includes("회차") ? episode : `${episode}회차`;
   return plan.shootingDate || `${index + 1}회차`;
-}
-
-function getProgressMeetingLocation(plan: DailyPlan) {
-  const explicitMeetingLocation = plan.meetingLocation?.trim() ?? "";
-  if (explicitMeetingLocation) return explicitMeetingLocation;
-
-  const meta = decodeDailyPlanMemo(plan.memo);
-  const callLocations = [
-    ...meta.starring.map((person) => person.callLocation.trim()),
-    ...meta.teams.map((team) => team.callLocation.trim())
-  ].filter(Boolean);
-  if (callLocations.length > 0) {
-    const counts = new Map<string, number>();
-    callLocations.forEach((location) => {
-      counts.set(location, (counts.get(location) ?? 0) + 1);
-    });
-    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
-  }
-
-  const firstLocation = plan.shootingLocations?.[0];
-  if (firstLocation) {
-    return [
-      firstLocation.name,
-      firstLocation.roadAddress,
-      firstLocation.address,
-      firstLocation.detail
-    ].find((value) => value?.trim())?.trim() ?? "";
-  }
-
-  return plan.shootingLocation?.trim() ?? "";
 }

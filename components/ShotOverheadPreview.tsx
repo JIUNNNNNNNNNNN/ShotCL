@@ -17,7 +17,7 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      className="block h-full max-h-full w-full max-w-full bg-[#fbfaf6]"
+      className="block h-full max-h-full w-full max-w-full rounded-none bg-[#fbfaf6]"
       preserveAspectRatio="xMidYMid meet"
       shapeRendering="geometricPrecision"
       role="img"

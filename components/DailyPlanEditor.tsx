@@ -3044,7 +3044,16 @@ function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], 
   const nextLocations = locations
     .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
     .map(sanitizeManualLocation);
-  const nextMeals = mealTimes.filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.locationId?.trim() || meal.memo.trim());
+  const nextMeals = mealTimes.filter((meal) => (
+    meal.startTime.trim()
+    || meal.endTime.trim()
+    || meal.runtimeMinutes
+    || meal.runtime?.trim()
+    || meal.locationId?.trim()
+    || meal.memo.trim()
+    || meal.progressMemo?.trim()
+    || meal.imageUrl
+  ));
 
   return {
     ...plan,
@@ -3221,7 +3230,9 @@ function createBlankOtherSchedule(): DailyPlanMealTime {
     runtimeMinutes: null,
     runtime: "",
     locationId: "",
-    memo: ""
+    memo: "",
+    progressMemo: "",
+    imageUrl: null
   };
 }
 

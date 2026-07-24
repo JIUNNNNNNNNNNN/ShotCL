@@ -60,7 +60,7 @@ function normalizeLocations(value: unknown): DailyPlanLocation[] {
   });
 }
 
-function normalizeMealTimes(value: unknown): DailyPlanMealTime[] {
+export function normalizeDailyPlanMealTimes(value: unknown): DailyPlanMealTime[] {
   if (!Array.isArray(value)) return [];
 
   return value.map((item, index) => {
@@ -69,7 +69,12 @@ function normalizeMealTimes(value: unknown): DailyPlanMealTime[] {
       id: source.id || `meal_${index + 1}`,
       startTime: source.startTime || source.time || "",
       endTime: source.endTime || "",
-      memo: source.memo || source.type || ""
+      runtimeMinutes: typeof source.runtimeMinutes === "number" ? source.runtimeMinutes : null,
+      runtime: source.runtime || "",
+      locationId: source.locationId || "",
+      memo: source.memo || source.type || "",
+      progressMemo: source.progressMemo || "",
+      imageUrl: source.imageUrl || null
     };
   });
 }
@@ -118,7 +123,7 @@ export function dailyPlanFromRow(row: AnyRow): DailyPlan {
     shootingLocation: row.shooting_location ?? "",
     shootingLocations: normalizeLocations(row.shooting_locations),
     mealTime: row.meal_time ?? "",
-    mealTimes: normalizeMealTimes(row.meal_times),
+    mealTimes: normalizeDailyPlanMealTimes(row.meal_times),
     safetyNotice: row.safety_notice ?? "",
     memo: row.memo ?? "",
     createdAt: row.created_at,
