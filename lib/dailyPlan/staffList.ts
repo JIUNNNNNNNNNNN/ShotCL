@@ -1,7 +1,7 @@
 import type { ProjectStaffMember } from "@/lib/types";
 
 export function normalizeStaffDepartment(value: unknown) {
-  return String(value ?? "").trim().slice(0, 50) || "기타";
+  return String(value ?? "").trim().slice(0, 50);
 }
 
 export function isStaffMemberEmpty(member: Pick<ProjectStaffMember, "name" | "phone" | "location" | "notes">) {

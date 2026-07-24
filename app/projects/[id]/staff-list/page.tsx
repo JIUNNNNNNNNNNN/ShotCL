@@ -42,6 +42,7 @@ export default function StaffListPage() {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const editVersionRef = useRef(0);
+  const pendingDepartmentSubmitRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!projectId || role === "progress") return;
@@ -124,18 +125,18 @@ export default function StaffListPage() {
     setErrorMessage("");
   }
 
-  function addDepartment() {
-    const name = normalizeDepartmentName(newDepartmentName);
+  function addDepartment(rawName = newDepartmentName) {
+    const name = normalizeDepartmentName(rawName);
     if (!name) return;
     if (hasDepartmentName(departments, name)) {
       setErrorMessage("같은 이름의 부서가 이미 등록되어 있습니다.");
       return;
     }
+    setNewDepartmentName("");
     commitDepartments((current) => [
       ...current,
       createBlankProjectStaffDepartment(projectId, name, current.length + 1)
     ]);
-    setNewDepartmentName("");
   }
 
   function updateDepartment(id: string, nextName: string) {
@@ -160,7 +161,7 @@ export default function StaffListPage() {
   function addMember() {
     commitMembers((current) => [
       ...current,
-      createBlankProjectStaffMember(projectId, "기타", current.length + 1)
+      createBlankProjectStaffMember(projectId, "", current.length + 1)
     ]);
   }
 
@@ -211,14 +212,6 @@ export default function StaffListPage() {
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
             </Link>
-            <button
-              type="button"
-              onClick={addMember}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-field-primary bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-              행 추가
-            </button>
             <button
               type="button"
               onClick={() => void save(members, departments, true)}
@@ -278,10 +271,29 @@ export default function StaffListPage() {
                   setNewDepartmentName(event.target.value);
                   setErrorMessage("");
                 }}
+                onCompositionStart={() => {
+                  pendingDepartmentSubmitRef.current = false;
+                }}
+                onCompositionEnd={(event) => {
+                  const completedValue = event.currentTarget.value;
+                  setNewDepartmentName(completedValue);
+                  if (!pendingDepartmentSubmitRef.current) return;
+                  pendingDepartmentSubmitRef.current = false;
+                  window.requestAnimationFrame(() => addDepartment(completedValue));
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
                   event.preventDefault();
-                  addDepartment();
+                  event.stopPropagation();
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                    pendingDepartmentSubmitRef.current = true;
+                    return;
+                  }
+                  pendingDepartmentSubmitRef.current = false;
+                  addDepartment(event.currentTarget.value);
+                }}
+                onBlur={() => {
+                  pendingDepartmentSubmitRef.current = false;
                 }}
                 className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-field-text outline-none placeholder:text-center"
                 placeholder="+ 부서 추가"
@@ -290,7 +302,7 @@ export default function StaffListPage() {
               />
               <button
                 type="button"
-                onClick={addDepartment}
+                onClick={() => addDepartment()}
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-field-primary transition hover:bg-field-light active:scale-90"
                 aria-label="부서 추가"
               >
@@ -307,24 +319,18 @@ export default function StaffListPage() {
             <option key={department.id} value={department.name} />
           ))}
         </datalist>
-        <div className={`hidden ${desktopGridClassName} gap-1.5 px-3 pb-1.5 text-center text-[10px] font-black text-field-muted md:grid`}>
-          <span>부서</span>
-          <span>이름</span>
-          <span>연락처</span>
-          <span>사는곳</span>
-          <span>특이사항</span>
-        </div>
-
-        {members.length === 0 ? (
+        <div className="flex justify-end pb-2 pr-1">
           <button
             type="button"
             onClick={addMember}
-            className="flex h-16 w-full items-center justify-center rounded-2xl border border-dashed border-field-border bg-field-soft/50 text-xs font-bold text-field-muted transition hover:border-field-primary hover:text-field-primary"
+            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-field-primary bg-white px-2.5 py-1 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
           >
-            <Plus className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            첫 행 추가
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            행 추가
           </button>
-        ) : (
+        </div>
+
+        {members.length > 0 ? (
           <div className="grid gap-1">
             {members.map((member, index) => (
               <StaffMemberRow
@@ -337,7 +343,7 @@ export default function StaffListPage() {
               />
             ))}
           </div>
-        )}
+        ) : null}
       </section>
     </main>
   );
@@ -464,6 +470,7 @@ function DepartmentChip({
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
             event.currentTarget.blur();
           }
           if (event.key === "Escape") {
