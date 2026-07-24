@@ -22,10 +22,16 @@ type RightProjectSidebarProps = {
   projectId: string;
   projectName: string | null;
   role: SharedProjectRole | null;
+  placement?: "side" | "bottom";
 };
 
 /** 프로젝트 내부 화면에서 권한별 회차 이동과 관리 기능을 제공하는 공용 패널입니다. */
-export function RightProjectSidebar({ projectId, projectName, role }: RightProjectSidebarProps) {
+export function RightProjectSidebar({
+  projectId,
+  projectName,
+  role,
+  placement = "side"
+}: RightProjectSidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const params = useParams<{ dailyPlanId?: string | string[] }>();
@@ -59,11 +65,13 @@ export function RightProjectSidebar({ projectId, projectName, role }: RightProje
     <>
       <aside
         aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
-        className={`sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] hidden self-start lg:block ${
-          isCollapsed ? "w-12" : "w-[280px]"
-        }`}
+        className={placement === "bottom"
+          ? "mt-5 hidden w-full lg:block"
+          : `sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] hidden self-start lg:block ${
+              isCollapsed ? "w-12" : "w-[280px]"
+            }`}
       >
-        {isCollapsed ? (
+        {placement === "side" && isCollapsed ? (
           <button
             type="button"
             onClick={() => setIsCollapsed(false)}
@@ -79,7 +87,8 @@ export function RightProjectSidebar({ projectId, projectName, role }: RightProje
             projectId={projectId}
             progressOnly={progressOnly}
             pageType={pageType}
-            onCollapse={collapsePanel}
+            layout={placement}
+            onCollapse={placement === "side" ? collapsePanel : undefined}
           />
         )}
       </aside>
@@ -109,6 +118,7 @@ export function RightProjectSidebar({ projectId, projectName, role }: RightProje
               projectId={projectId}
               progressOnly={progressOnly}
               pageType={pageType}
+              layout="side"
               onClose={closeMobilePanel}
             />
           </div>
@@ -124,6 +134,7 @@ type PanelContentProps = {
   projectId: string;
   progressOnly: boolean;
   pageType: ProjectPageType;
+  layout: "side" | "bottom";
   onCollapse?: () => void;
   onClose?: () => void;
 };
@@ -134,6 +145,7 @@ const PanelContent = memo(function PanelContent({
   projectId,
   progressOnly,
   pageType,
+  layout,
   onCollapse,
   onClose
 }: PanelContentProps) {
@@ -182,6 +194,7 @@ const PanelContent = memo(function PanelContent({
             pageType={pageType}
             projectBasePath={projectBasePath}
             currentPlanId={currentPlanId}
+            layout={layout}
             onAction={onClose}
           />
         )}
@@ -203,11 +216,13 @@ function KeyStaffPageActions({
   pageType,
   projectBasePath,
   currentPlanId,
+  layout,
   onAction
 }: {
   pageType: ProjectPageType;
   projectBasePath: string;
   currentPlanId: string;
+  layout: "side" | "bottom";
   onAction?: () => void;
 }) {
   const progressPath = currentPlanId
@@ -215,7 +230,10 @@ function KeyStaffPageActions({
     : projectBasePath;
 
   return (
-    <nav className="grid gap-2" aria-label="Key staff 페이지 이동">
+    <nav
+      className={layout === "bottom" ? "grid gap-2 sm:grid-cols-2 lg:grid-cols-4" : "grid gap-2"}
+      aria-label="Key staff 페이지 이동"
+    >
       {pageType === "progress" ? (
         <>
           <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
