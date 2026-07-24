@@ -12,7 +12,6 @@ import {
   listProjectStaffMembers,
   saveProjectStaffMembers
 } from "@/lib/data/staffMembers";
-import { isStaffMemberEmpty } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
@@ -41,8 +40,11 @@ export default function StaffListPage() {
   const [isDirty, setIsDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
   const editVersionRef = useRef(0);
   const pendingDepartmentSubmitRef = useRef(false);
+  const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
+  const memberDepartmentInputRefs = useRef(new Map<string, HTMLInputElement>());
 
   const load = useCallback(async () => {
     if (!projectId || role === "progress") return;
@@ -66,6 +68,14 @@ export default function StaffListPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!pendingMemberFocusId) return;
+    const input = memberDepartmentInputRefs.current.get(pendingMemberFocusId);
+    if (!input) return;
+    input.focus();
+    setPendingMemberFocusId(null);
+  }, [members, pendingMemberFocusId]);
 
   const save = useCallback(async (
     sourceMembers: ProjectStaffMember[],
@@ -128,15 +138,24 @@ export default function StaffListPage() {
   function addDepartment(rawName = newDepartmentName) {
     const name = normalizeDepartmentName(rawName);
     if (!name) return;
+    const duplicateKey = name.toLocaleLowerCase("ko-KR");
+    const now = Date.now();
+    const lastSubmit = departmentSubmitLockRef.current;
+    if (lastSubmit?.name === duplicateKey && now - lastSubmit.at < 500) {
+      setNewDepartmentName("");
+      return;
+    }
     if (hasDepartmentName(departments, name)) {
       setErrorMessage("같은 이름의 부서가 이미 등록되어 있습니다.");
       return;
     }
+    departmentSubmitLockRef.current = { name: duplicateKey, at: now };
     setNewDepartmentName("");
-    commitDepartments((current) => [
-      ...current,
-      createBlankProjectStaffDepartment(projectId, name, current.length + 1)
-    ]);
+    commitDepartments((current) => (
+      hasDepartmentName(current, name)
+        ? current
+        : [...current, createBlankProjectStaffDepartment(projectId, name, current.length + 1)]
+    ));
   }
 
   function updateDepartment(id: string, nextName: string) {
@@ -158,15 +177,25 @@ export default function StaffListPage() {
     commitDepartments((current) => current.filter((department) => department.id !== id));
   }
 
-  function addMember() {
-    commitMembers((current) => [
-      ...current,
-      createBlankProjectStaffMember(projectId, "", current.length + 1)
-    ]);
-  }
+  const addMember = useCallback((afterMemberId?: string) => {
+    const newMember = createBlankProjectStaffMember(projectId, "", 1);
+    commitMembers((current) => {
+      if (!afterMemberId) return [...current, newMember];
+      const currentIndex = current.findIndex((member) => member.id === afterMemberId);
+      if (currentIndex < 0) return [...current, newMember];
+      const next = [...current];
+      next.splice(currentIndex + 1, 0, newMember);
+      return next;
+    });
+    setPendingMemberFocusId(newMember.id);
+  }, [commitMembers, projectId]);
+
+  const registerMemberDepartmentInput = useCallback((id: string, input: HTMLInputElement | null) => {
+    if (input) memberDepartmentInputRefs.current.set(id, input);
+    else memberDepartmentInputRefs.current.delete(id);
+  }, []);
 
   const deleteMember = useCallback((member: ProjectStaffMember) => {
-    if (!isStaffMemberEmpty(member) && !window.confirm(`${member.name || member.department} 스탭 정보를 삭제할까요?`)) return;
     commitMembers((current) => current.filter((item) => item.id !== member.id));
   }, [commitMembers]);
 
@@ -279,7 +308,7 @@ export default function StaffListPage() {
                   setNewDepartmentName(completedValue);
                   if (!pendingDepartmentSubmitRef.current) return;
                   pendingDepartmentSubmitRef.current = false;
-                  window.requestAnimationFrame(() => addDepartment(completedValue));
+                  addDepartment(completedValue);
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
@@ -319,17 +348,6 @@ export default function StaffListPage() {
             <option key={department.id} value={department.name} />
           ))}
         </datalist>
-        <div className="flex justify-end pb-2 pr-1">
-          <button
-            type="button"
-            onClick={addMember}
-            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-field-primary bg-white px-2.5 py-1 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            행 추가
-          </button>
-        </div>
-
         {members.length > 0 ? (
           <div className="grid gap-1">
             {members.map((member, index) => (
@@ -340,10 +358,22 @@ export default function StaffListPage() {
                 departmentListId={`staff-departments-${project.id}`}
                 onChange={updateMember}
                 onDelete={deleteMember}
+                onAddAfter={addMember}
+                onDepartmentInputRef={registerMemberDepartmentInput}
               />
             ))}
           </div>
         ) : null}
+        <div className="flex justify-center pt-2">
+          <button
+            type="button"
+            onClick={() => addMember()}
+            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-field-primary bg-white px-2.5 py-1 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden />
+            행 추가
+          </button>
+        </div>
       </section>
     </main>
   );
@@ -354,13 +384,17 @@ const StaffMemberRow = memo(function StaffMemberRow({
   number,
   departmentListId,
   onChange,
-  onDelete
+  onDelete,
+  onAddAfter,
+  onDepartmentInputRef
 }: {
   member: ProjectStaffMember;
   number: number;
   departmentListId: string;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
+  onAddAfter: (memberId: string) => void;
+  onDepartmentInputRef: (id: string, input: HTMLInputElement | null) => void;
 }) {
   return (
     <article
@@ -370,6 +404,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
       <label className="col-span-2 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 부서</span>
         <input
+          ref={(input) => onDepartmentInputRef(member.id, input)}
           className={inputClassName}
           list={departmentListId}
           value={member.department}
@@ -415,9 +450,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
         <input
           className={inputClassName}
           value={member.notes}
-          placeholder="특이사항"
           aria-label={`${number}번 특이사항`}
           onChange={(event) => onChange(member.id, { notes: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter") return;
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onAddAfter(member.id);
+          }}
         />
       </label>
       <button
