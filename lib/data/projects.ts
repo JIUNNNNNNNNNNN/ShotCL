@@ -8,6 +8,9 @@ import type { Project, ProjectBasicInfo, ProjectInput } from "@/lib/types";
 
 type ProjectApiErrorPayload = { error?: string; code?: string };
 const projectRequests = new Map<string, Promise<Project | null>>();
+const projectBasicInfoRequests = new Map<string, Promise<ProjectBasicInfo>>();
+const projectBasicInfoCache = new Map<string, { value: ProjectBasicInfo; expiresAt: number }>();
+const PROJECT_BASIC_INFO_CACHE_MS = 15_000;
 
 /** 프로젝트 목록을 최신 생성순으로 가져옵니다. */
 export async function listProjects(): Promise<Project[]> {
@@ -147,8 +150,31 @@ export async function createProject(input: ProjectInput): Promise<Project> {
   return project;
 }
 
-/** 프로젝트 단위 기본정보를 읽습니다. 일촬표 데이터는 생성하거나 조회하지 않습니다. */
-export async function getProjectBasicInfo(projectId: string): Promise<ProjectBasicInfo> {
+/** 프로젝트 단위 기본정보를 읽습니다. 동일 프로젝트의 짧은 중복 조회는 한 요청으로 합칩니다. */
+export function getProjectBasicInfo(projectId: string): Promise<ProjectBasicInfo> {
+  const cacheKey = normalizeProjectId(projectId);
+  const cached = projectBasicInfoCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+  if (cached) projectBasicInfoCache.delete(cacheKey);
+
+  const existingRequest = projectBasicInfoRequests.get(cacheKey);
+  if (existingRequest) return existingRequest;
+
+  const request = loadProjectBasicInfo(projectId).then((value) => {
+    cacheProjectBasicInfo(cacheKey, value);
+    return value;
+  });
+  projectBasicInfoRequests.set(cacheKey, request);
+  const clearRequest = () => {
+    if (projectBasicInfoRequests.get(cacheKey) === request) {
+      projectBasicInfoRequests.delete(cacheKey);
+    }
+  };
+  void request.then(clearRequest, clearRequest);
+  return request;
+}
+
+async function loadProjectBasicInfo(projectId: string): Promise<ProjectBasicInfo> {
   const databaseProjectId = normalizeProjectId(projectId);
   if (!isValidDatabaseProjectId(databaseProjectId)) {
     const { projects } = readLocalBuckets();
@@ -179,6 +205,7 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
       index === projectIndex ? { ...project, basicInfo: validation.value } : project
     ));
     writeLocalBuckets({ projects: nextProjects }, projects[projectIndex].id);
+    cacheProjectBasicInfo(databaseProjectId, validation.value);
     return validation.value;
   }
 
@@ -192,7 +219,16 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
   if (!response.ok) {
     throw new Error(payload.error || "프로젝트 기본정보를 저장하지 못했습니다.");
   }
-  return normalizeProjectBasicInfo(payload.basicInfo);
+  const savedBasicInfo = normalizeProjectBasicInfo(payload.basicInfo);
+  cacheProjectBasicInfo(databaseProjectId, savedBasicInfo);
+  return savedBasicInfo;
+}
+
+function cacheProjectBasicInfo(projectId: string, value: ProjectBasicInfo) {
+  projectBasicInfoCache.set(projectId, {
+    value,
+    expiresAt: Date.now() + PROJECT_BASIC_INFO_CACHE_MS
+  });
 }
 
 function mergeProjects(primary: Project[], secondary: Project[]) {

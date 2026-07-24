@@ -8,10 +8,17 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const projectId = normalizeProjectId(id);
   const cookieStore = await cookies();
   let role: "admin" | "progress" | null = null;
+  let projectName: string | null = null;
   try {
-    role = (await getAccessGrantByToken(cookieStore.get(PROJECT_SESSION_COOKIE)?.value ?? null, projectId))?.role ?? null;
+    const grant = await getAccessGrantByToken(cookieStore.get(PROJECT_SESSION_COOKIE)?.value ?? null, projectId);
+    role = grant?.role ?? null;
+    projectName = grant?.projectName ?? null;
   } catch (error) {
     if (!(error instanceof ProjectAccessUnavailableError)) throw error;
   }
-  return <ProjectAccessGate projectId={id} role={role}>{children}</ProjectAccessGate>;
+  return (
+    <ProjectAccessGate projectId={id} projectName={projectName} role={role}>
+      {children}
+    </ProjectAccessGate>
+  );
 }

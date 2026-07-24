@@ -5,9 +5,22 @@ import { usePathname, useRouter } from "next/navigation";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 
-const ProjectAccessContext = createContext<{ role: SharedProjectRole | null; isShared: boolean }>({ role: null, isShared: false });
+const ProjectAccessContext = createContext<{ role: SharedProjectRole | null; isShared: boolean }>({
+  role: null,
+  isShared: false
+});
 
-export function ProjectAccessGate({ projectId, role, children }: { projectId: string; role: SharedProjectRole | null; children: React.ReactNode }) {
+export function ProjectAccessGate({
+  projectId,
+  projectName,
+  role,
+  children
+}: {
+  projectId: string;
+  projectName: string | null;
+  role: SharedProjectRole | null;
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const progressPath = `/projects/${projectId}`;
@@ -31,7 +44,7 @@ export function ProjectAccessGate({ projectId, role, children }: { projectId: st
     <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>
       <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:gap-5">
         <div className="min-w-0">{children}</div>
-        <RightProjectSidebar projectId={projectId} role={role} />
+        <RightProjectSidebar projectId={projectId} projectName={projectName} role={role} />
       </div>
     </ProjectAccessContext.Provider>
   );

@@ -12,7 +12,7 @@ import {
   getProjectSceneList,
   saveProjectSceneList
 } from "@/lib/data/sceneList";
-import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import { getProject } from "@/lib/data/projects";
 import type { Project, ProjectSceneItem } from "@/lib/types";
 
 const inputClassName =
@@ -42,19 +42,14 @@ export default function ProjectSceneListPage() {
     if (!projectId) return;
     setIsLoading(true);
     try {
-      const [projectData, sceneList, basicInfo] = await Promise.all([
+      const [projectData, sceneList] = await Promise.all([
         getProject(projectId),
-        getProjectSceneList(projectId),
-        canEdit ? getProjectBasicInfo(projectId).catch(() => null) : Promise.resolve(null)
+        getProjectSceneList(projectId)
       ]);
       setProject(projectData);
       setItems(sceneList.items);
       setScenarioReference(sceneList.scenarioReference);
-      setActorRoles(
-        getActorRoles(basicInfo?.actors).length > 0
-          ? getActorRoles(basicInfo?.actors)
-          : sceneList.actorRoles
-      );
+      setActorRoles(sceneList.actorRoles);
       setIsDirty(false);
       setErrorMessage("");
     } catch (error) {
@@ -62,7 +57,7 @@ export default function ProjectSceneListPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [canEdit, projectId]);
+  }, [projectId]);
 
   useEffect(() => {
     void load();
@@ -499,15 +494,6 @@ function SceneCell({
       )}
     </div>
   );
-}
-
-function getActorRoles(actors: Array<{ role: string; name: string }> | undefined) {
-  if (!actors) return [];
-  return Array.from(new Set(
-    actors
-      .map((actor) => actor.role.trim() || actor.name.trim())
-      .filter(Boolean)
-  ));
 }
 
 function parseCharacters(value: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectBasicInfoForm } from "@/components/ProjectBasicInfoForm";
@@ -23,16 +23,40 @@ export default function ProjectBasicInfoPage() {
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
-    if (!projectId) return;
-    Promise.all([getProject(projectId), getProjectBasicInfo(projectId)])
+    if (!projectId) {
+      setErrorMessage("프로젝트를 찾을 수 없습니다.");
+      setIsLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setIsLoading(true);
+    void Promise.all([getProject(projectId), getProjectBasicInfo(projectId)])
       .then(([projectData, basicInfoData]) => {
+        if (!active) return;
         setProject(projectData);
         setBasicInfo(basicInfoData);
         setErrorMessage("");
       })
-      .catch((error) => setErrorMessage(error instanceof Error ? error.message : "프로젝트 기본정보를 불러오지 못했습니다."))
-      .finally(() => setIsLoading(false));
+      .catch((error) => {
+        if (!active) return;
+        setErrorMessage(error instanceof Error ? error.message : "프로젝트 기본정보를 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [projectId]);
+
+  const saveBasicInfo = useCallback(async (nextValue: ProjectBasicInfo) => {
+    if (!project) throw new Error("프로젝트를 찾을 수 없습니다.");
+    const saved = await saveProjectBasicInfo(project.id, nextValue);
+    setBasicInfo(saved);
+    router.replace(`/projects/${project.id}`);
+  }, [project, router]);
 
   if (isLoading) return <PixelDogLoader size="lg" />;
   if (!project || !basicInfo) {
@@ -47,10 +71,7 @@ export default function ProjectBasicInfoPage() {
     <ProjectBasicInfoForm
       projectName={project.name}
       initialValue={basicInfo}
-      onSave={async (nextValue) => {
-        await saveProjectBasicInfo(project.id, nextValue);
-        router.replace(`/projects/${project.id}`);
-      }}
+      onSave={saveBasicInfo}
     />
   );
 }
