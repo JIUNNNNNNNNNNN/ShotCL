@@ -33,7 +33,7 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 const inputClassName =
   "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const notesTextareaClassName =
-  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1.5 text-center text-xs font-bold leading-relaxed text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1 text-center text-xs font-bold leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.75rem,0.85fr)_minmax(4.75rem,0.6fr)_minmax(7.75rem,1fr)_minmax(8rem,1.15fr)_minmax(10rem,2fr)]";
 
@@ -615,28 +615,32 @@ export default function StaffListPage() {
                     borderColor: departmentColor.border
                   }}
                 >
-                  <header
-                    className="flex h-7 items-center justify-between border-b px-2.5 text-xs font-black text-field-primary"
-                    style={{
-                      backgroundColor: `${departmentColor.border}33`,
-                      borderColor: departmentColor.border
-                    }}
-                  >
-                    <span className="truncate">{group.name || "미분류"}</span>
-                    <span className="flex shrink-0 items-center gap-1">
-                      <span className="text-[10px] text-field-muted">{group.members.length}명</span>
-                      {group.name ? (
-                        <button
-                          type="button"
-                          onClick={() => addMember(group.name)}
-                          className="grid h-5 w-5 place-items-center rounded-full border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
-                          aria-label={`${group.name} 부서에 인원 추가`}
-                        >
-                          <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
-                        </button>
-                      ) : null}
-                    </span>
-                  </header>
+                  <div className="overflow-hidden rounded-t-[calc(0.75rem-1px)]">
+                    <header
+                      className="flex h-7 items-center border-b px-2.5 text-xs font-black text-field-primary"
+                      style={{
+                        backgroundColor: `${departmentColor.border}33`,
+                        borderColor: departmentColor.border
+                      }}
+                    >
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="truncate">{group.name || "미분류"}</span>
+                        {group.name ? (
+                          <button
+                            type="button"
+                            onClick={() => addMember(group.name)}
+                            className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
+                            aria-label={`${group.name} 부서에 인원 추가`}
+                          >
+                            <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
+                          </button>
+                        ) : null}
+                      </span>
+                      <span className="ml-auto shrink-0 text-[10px] text-field-muted">
+                        {group.members.length}명
+                      </span>
+                    </header>
+                  </div>
                   <div>
                     {group.members.map((member, index) => (
                       <StaffMemberRow
@@ -726,7 +730,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
       data-staff-member-id={member.id}
       data-staff-department={member.department}
     >
-      <label className="col-span-2 min-w-0 md:col-auto">
+      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 직책</span>
         <input
           ref={(input) => onRoleInputRef(member.id, input)}
@@ -738,7 +742,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           maxLength={100}
         />
       </label>
-      <label className="col-span-1 min-w-0 md:col-auto">
+      <label className="col-span-1 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 이름</span>
         <input
           className={`${inputClassName} ${isDragging ? "cursor-grabbing select-none" : ""}`}
@@ -754,7 +758,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           title="길게 누른 뒤 움직여 순서 변경"
         />
       </label>
-      <label className="col-span-3 min-w-0 md:col-auto">
+      <label className="col-span-3 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 연락처</span>
         <input
           className={inputClassName}
@@ -766,7 +770,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           aria-label={`${number}번 연락처`}
         />
       </label>
-      <label className="col-span-2 min-w-0 md:col-auto">
+      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 사는곳</span>
         <input
           className={inputClassName}
@@ -776,7 +780,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           aria-label={`${number}번 사는곳`}
         />
       </label>
-      <label className="col-span-4 min-w-0 md:col-auto">
+      <label className="col-span-4 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 특이사항</span>
         <textarea
           ref={notesInputRef}
@@ -797,10 +801,10 @@ const StaffMemberRow = memo(function StaffMemberRow({
           event.stopPropagation();
           onDelete(member);
         }}
-        className="absolute -right-1 -top-1 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/35 bg-white text-field-danger/75 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
+        className="absolute -right-0.5 -top-0.5 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
         aria-label={`${member.name || `${number}번 스탭`} 삭제`}
       >
-        <X className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
+        <X className="h-2 w-2" strokeWidth={2.5} aria-hidden />
       </button>
     </article>
   );
