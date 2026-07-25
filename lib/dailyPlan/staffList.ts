@@ -50,6 +50,40 @@ export function sortStaffMembers(members: ProjectStaffMember[]) {
   });
 }
 
+/** 드래그된 행을 목표 행 앞/뒤 또는 목표 부서 끝으로 이동합니다. */
+export function moveProjectStaffMember(
+  members: ProjectStaffMember[],
+  sourceMemberId: string,
+  targetDepartment: string,
+  targetMemberId?: string,
+  placeAfter = false
+) {
+  if (sourceMemberId === targetMemberId) return members;
+  const sourceMember = members.find((member) => member.id === sourceMemberId);
+  if (!sourceMember) return members;
+
+  const withoutSource = members.filter((member) => member.id !== sourceMemberId);
+  let insertionIndex = -1;
+  if (targetMemberId) {
+    insertionIndex = withoutSource.findIndex((member) => member.id === targetMemberId);
+    if (insertionIndex >= 0 && placeAfter) insertionIndex += 1;
+  } else {
+    insertionIndex = withoutSource.reduce((lastIndex, member, index) => (
+      normalizeStaffDepartment(member.department) === normalizeStaffDepartment(targetDepartment)
+        ? index + 1
+        : lastIndex
+    ), -1);
+  }
+  if (insertionIndex < 0) insertionIndex = withoutSource.length;
+
+  const next = [...withoutSource];
+  next.splice(insertionIndex, 0, {
+    ...sourceMember,
+    department: normalizeStaffDepartment(targetDepartment)
+  });
+  return next;
+}
+
 /** 저장 순서는 건드리지 않고, 화면에서만 같은 부서가 붙도록 정렬합니다. */
 export function sortStaffMembersForDisplay(members: ProjectStaffMember[]) {
   return [...members].sort((left, right) => {
@@ -94,6 +128,18 @@ export function groupStaffMembersForDisplay(
     firstCreatedAt: string;
     members: ProjectStaffMember[];
   }>();
+
+  departments.forEach((department) => {
+    const name = normalizeStaffDepartment(department.name);
+    const key = getDepartmentKey(name);
+    if (!key || grouped.has(key)) return;
+    grouped.set(key, {
+      name,
+      firstSortOrder: Number.MAX_SAFE_INTEGER,
+      firstCreatedAt: department.createdAt,
+      members: []
+    });
+  });
 
   members.forEach((member) => {
     const department = normalizeStaffDepartment(member.department);

@@ -1,9 +1,9 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, GripVertical, Plus, Save, Users, X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
@@ -17,11 +17,14 @@ import { getProject } from "@/lib/data/projects";
 import {
   groupStaffMembersForDisplay,
   getStaffDepartmentColor,
+  moveProjectStaffMember,
 } from "@/lib/dailyPlan/staffList";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const inputClassName =
   "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
+const notesTextareaClassName =
+  "min-h-12 max-h-48 w-full min-w-0 resize-y overflow-y-auto whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-2 text-center text-xs font-bold leading-relaxed text-field-text outline-none transition [field-sizing:content] [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.75rem,0.85fr)_minmax(4.75rem,0.6fr)_minmax(7.75rem,1fr)_minmax(8rem,1.15fr)_minmax(10rem,2fr)]";
 
@@ -45,6 +48,8 @@ export default function StaffListPage() {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
+  const [draggedMemberId, setDraggedMemberId] = useState<string | null>(null);
+  const [dragTargetMemberId, setDragTargetMemberId] = useState<string | null>(null);
   const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
   const editVersionRef = useRef(0);
   const pendingDepartmentSubmitRef = useRef(false);
@@ -221,15 +226,25 @@ export default function StaffListPage() {
     commitDepartments((current) => current.filter((department) => department.id !== id));
   }
 
-  const addMember = useCallback((afterMemberId?: string) => {
-    const newMember = createBlankProjectStaffMember(projectId, "", 1);
+  const addMember = useCallback((department: string, afterMemberId?: string) => {
+    const newMember = createBlankProjectStaffMember(projectId, department, 1);
     commitMembers((current) => {
-      if (!afterMemberId) return [...current, newMember];
+      if (!afterMemberId) {
+        const lastDepartmentIndex = current.reduce((lastIndex, member, index) => (
+          normalizeDepartmentName(member.department) === normalizeDepartmentName(department)
+            ? index
+            : lastIndex
+        ), -1);
+        if (lastDepartmentIndex < 0) return [...current, newMember];
+        const next = [...current];
+        next.splice(lastDepartmentIndex + 1, 0, newMember);
+        return next;
+      }
       const currentIndex = current.findIndex((member) => member.id === afterMemberId);
       if (currentIndex < 0) return [...current, newMember];
       const groupMember = {
         ...newMember,
-        department: current[currentIndex].department,
+        department: department || current[currentIndex].department,
         role: ""
       };
       const next = [...current];
@@ -238,6 +253,26 @@ export default function StaffListPage() {
     });
     setPendingMemberFocusId(newMember.id);
   }, [commitMembers, projectId]);
+
+  const moveMember = useCallback((
+    sourceMemberId: string,
+    targetDepartment: string,
+    targetMemberId?: string,
+    placeAfter = false
+  ) => {
+    commitMembers((current) => moveProjectStaffMember(
+      current,
+      sourceMemberId,
+      targetDepartment,
+      targetMemberId,
+      placeAfter
+    ));
+  }, [commitMembers]);
+
+  const finishMemberDrag = useCallback(() => {
+    setDraggedMemberId(null);
+    setDragTargetMemberId(null);
+  }, []);
 
   const registerMemberRoleInput = useCallback((id: string, input: HTMLInputElement | null) => {
     if (input) memberRoleInputRefs.current.set(id, input);
@@ -364,9 +399,10 @@ export default function StaffListPage() {
                   {notesSummary.items.map((item) => (
                     <li
                       key={item.id}
-                      className="break-words rounded-lg bg-field-soft/60 px-2.5 py-2 text-xs font-bold leading-relaxed text-field-text"
+                      className="rounded-lg bg-field-soft/60 px-2.5 py-2 text-xs font-bold leading-relaxed text-field-text [overflow-wrap:anywhere]"
                     >
-                      {item.text}
+                      {item.owner ? <span className="text-field-primary">{item.owner}:</span> : null}
+                      <span className="whitespace-pre-wrap">{item.owner ? " " : ""}{item.notes}</span>
                     </li>
                   ))}
                 </ul>
@@ -451,6 +487,17 @@ export default function StaffListPage() {
                     backgroundColor: departmentColor.background,
                     borderColor: departmentColor.border
                   }}
+                  onDragOver={(event) => {
+                    if (!draggedMemberId || !group.name) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    if (!draggedMemberId || !group.name) return;
+                    event.preventDefault();
+                    moveMember(draggedMemberId, group.name);
+                    finishMemberDrag();
+                  }}
                 >
                   <header
                     className="flex h-7 items-center justify-between border-b px-2.5 text-xs font-black text-field-primary"
@@ -460,7 +507,19 @@ export default function StaffListPage() {
                     }}
                   >
                     <span className="truncate">{group.name || "미분류"}</span>
-                    <span className="shrink-0 text-[10px] text-field-muted">{group.members.length}명</span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="text-[10px] text-field-muted">{group.members.length}명</span>
+                      {group.name ? (
+                        <button
+                          type="button"
+                          onClick={() => addMember(group.name)}
+                          className="grid h-5 w-5 place-items-center rounded-full border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
+                          aria-label={`${group.name} 부서에 인원 추가`}
+                        >
+                          <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
+                        </button>
+                      ) : null}
+                    </span>
                   </header>
                   <div>
                     {group.members.map((member, index) => (
@@ -470,10 +529,33 @@ export default function StaffListPage() {
                         number={displayedMemberNumbers.get(member.id) ?? index + 1}
                         departmentColorIndex={group.colorIndex}
                         showBottomBorder={index < group.members.length - 1}
+                        isDragging={draggedMemberId === member.id}
+                        isDragTarget={dragTargetMemberId === member.id}
                         onChange={updateMember}
                         onDelete={deleteMember}
-                        onAddAfter={addMember}
                         onRoleInputRef={registerMemberRoleInput}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", member.id);
+                          setDraggedMemberId(member.id);
+                        }}
+                        onDragEnd={finishMemberDrag}
+                        onDragEnter={() => {
+                          if (draggedMemberId && draggedMemberId !== member.id) {
+                            setDragTargetMemberId(member.id);
+                          }
+                        }}
+                        onDrop={(event) => {
+                          if (!draggedMemberId) return;
+                          const bounds = event.currentTarget.getBoundingClientRect();
+                          moveMember(
+                            draggedMemberId,
+                            group.name,
+                            member.id,
+                            event.clientY >= bounds.top + bounds.height / 2
+                          );
+                          finishMemberDrag();
+                        }}
                       />
                     ))}
                   </div>
@@ -482,16 +564,11 @@ export default function StaffListPage() {
             })}
           </div>
         ) : null}
-        <div className="flex justify-center pt-2">
-          <button
-            type="button"
-            onClick={() => addMember()}
-            className="inline-flex min-h-8 items-center gap-1 rounded-full border border-field-primary bg-white px-2.5 py-1 text-xs font-black text-field-primary transition hover:bg-field-light active:scale-95"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden />
-            행 추가
-          </button>
-        </div>
+        {departments.length === 0 ? (
+          <p className="px-2 py-3 text-center text-xs font-bold text-field-muted">
+            부서를 먼저 추가하면 해당 부서 제목의 + 버튼으로 인원을 추가할 수 있습니다.
+          </p>
+        ) : null}
       </section>
     </main>
   );
@@ -502,27 +579,52 @@ const StaffMemberRow = memo(function StaffMemberRow({
   number,
   departmentColorIndex,
   showBottomBorder,
+  isDragging,
+  isDragTarget,
   onChange,
   onDelete,
-  onAddAfter,
-  onRoleInputRef
+  onRoleInputRef,
+  onDragStart,
+  onDragEnd,
+  onDragEnter,
+  onDrop
 }: {
   member: ProjectStaffMember;
   number: number;
   departmentColorIndex: number | null;
   showBottomBorder: boolean;
+  isDragging: boolean;
+  isDragTarget: boolean;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
-  onAddAfter: (memberId: string) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
+  onDragStart: (event: DragEvent<HTMLSpanElement>) => void;
+  onDragEnd: () => void;
+  onDragEnter: () => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
 
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center ${showBottomBorder ? "border-b" : ""} ${desktopGridClassName}`}
+      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${showBottomBorder ? "border-b" : ""} ${isDragging ? "opacity-40" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/35" : ""} ${desktopGridClassName}`}
       style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+      }}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDragEnter();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDrop(event);
+      }}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 직책</span>
@@ -536,10 +638,22 @@ const StaffMemberRow = memo(function StaffMemberRow({
           maxLength={100}
         />
       </label>
-      <label className="col-span-1 min-w-0 md:col-auto">
+      <label className="relative col-span-1 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 이름</span>
+        <span
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          className="absolute left-0.5 top-1/2 z-10 grid h-7 w-4 -translate-y-1/2 cursor-grab place-items-center rounded-lg text-field-muted/70 transition hover:bg-field-soft hover:text-field-primary active:cursor-grabbing"
+          role="button"
+          tabIndex={0}
+          aria-label={`${member.name || `${number}번 스탭`} 순서 이동`}
+          title="드래그해서 순서 또는 부서 이동"
+        >
+          <GripVertical className="h-3 w-3" aria-hidden />
+        </span>
         <input
-          className={inputClassName}
+          className={`${inputClassName} pl-5 pr-1`}
           value={member.name}
           onChange={(event) => onChange(member.id, { name: event.target.value })}
           placeholder="이름"
@@ -570,18 +684,12 @@ const StaffMemberRow = memo(function StaffMemberRow({
       </label>
       <label className="col-span-4 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 특이사항</span>
-        <input
-          className={inputClassName}
+        <textarea
+          className={notesTextareaClassName}
           value={member.notes}
           aria-label={`${number}번 특이사항`}
           onChange={(event) => onChange(member.id, { notes: event.target.value })}
-          onKeyDown={(event) => {
-            if (event.key !== "Enter") return;
-            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-            event.preventDefault();
-            event.stopPropagation();
-            onAddAfter(member.id);
-          }}
+          rows={2}
         />
       </label>
       <button
@@ -591,10 +699,10 @@ const StaffMemberRow = memo(function StaffMemberRow({
           event.stopPropagation();
           onDelete(member);
         }}
-        className="absolute -right-1.5 -top-1.5 z-10 grid h-7 w-7 place-items-center rounded-full border border-field-danger/60 bg-white text-field-danger shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
+        className="absolute -right-1 -top-1 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/35 bg-white text-field-danger/75 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
         aria-label={`${member.name || `${number}번 스탭`} 삭제`}
       >
-        <X className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden />
+        <X className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
       </button>
     </article>
   );
@@ -693,21 +801,25 @@ function hasDepartmentName(
 
 function buildStaffNotesSummary(members: ProjectStaffMember[]) {
   const items = members.flatMap((member) => {
-    const notes = member.notes.trim().replace(/\s+/g, " ");
+    const notes = member.notes.trim();
     if (!notes) return [];
     const owner = member.name.trim();
     return [{
       id: member.id,
-      text: owner ? `${owner}: ${notes}` : notes
+      owner,
+      notes,
+      summaryText: owner
+        ? `${owner}: ${notes.replace(/\s+/g, " ")}`
+        : notes.replace(/\s+/g, " ")
     }];
   });
 
   if (items.length === 0) return { displayText: "", fullText: "", items };
-  const visibleItems = items.slice(0, 2).map((item) => item.text).join(" / ");
+  const visibleItems = items.slice(0, 2).map((item) => item.summaryText).join(" / ");
   const remainingCount = items.length - 2;
   return {
     displayText: remainingCount > 0 ? `${visibleItems} 외 ${remainingCount}건` : visibleItems,
-    fullText: items.map((item) => item.text).join(" / "),
+    fullText: items.map((item) => item.summaryText).join(" / "),
     items
   };
 }
