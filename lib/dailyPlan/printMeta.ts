@@ -15,6 +15,7 @@ export type CallSheetPerson = {
 export type TeamCallSheetRow = {
   id: string;
   team: string;
+  name: string;
   total: string;
   contact?: string;
   callTime: string;
@@ -101,6 +102,7 @@ export function createBlankTeamCallSheetRow(team = ""): TeamCallSheetRow {
   return {
     id: createMetaId("team"),
     team,
+    name: "",
     total: "",
     callTime: "",
     callLocation: "",
@@ -205,6 +207,7 @@ function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {
   const next = (Array.isArray(rows) ? rows : []).map((row) => ({
     id: row.id || createMetaId("team"),
     team: row.team ?? "",
+    name: row.name ?? "",
     total: row.total ?? "",
     contact: formatKoreanPhoneNumber(row.contact ?? ""),
     callTime: row.callTime ?? "",

@@ -6,7 +6,8 @@ import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
-import type { Project, ProjectBasicInfo } from "@/lib/types";
+import { listProjectStaffMembers } from "@/lib/data/staffMembers";
+import type { Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -24,6 +25,7 @@ export default function NewDailyPlanPage() {
   const projectId = useProjectId();
   const [project, setProject] = useState<Project | null>(null);
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
+  const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -32,12 +34,14 @@ export default function NewDailyPlanPage() {
 
     async function loadProject() {
       try {
-        const [data, basicInfo] = await Promise.all([
+        const [data, basicInfo, staffList] = await Promise.all([
           getProject(projectId),
-          getProjectBasicInfo(projectId).catch(() => null)
+          getProjectBasicInfo(projectId).catch(() => null),
+          listProjectStaffMembers(projectId).catch(() => null)
         ]);
         setProject(data);
         setProjectBasicInfo(data ? basicInfo : null);
+        setProjectStaffMembers(data ? staffList?.members ?? [] : []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -57,5 +61,11 @@ export default function NewDailyPlanPage() {
     return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
-  return <DailyPlanEditor project={project} projectBasicInfo={projectBasicInfo} />;
+  return (
+    <DailyPlanEditor
+      project={project}
+      projectBasicInfo={projectBasicInfo}
+      projectStaffMembers={projectStaffMembers}
+    />
+  );
 }

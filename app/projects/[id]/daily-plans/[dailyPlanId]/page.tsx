@@ -8,7 +8,8 @@ import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
-import type { DailyPlanWithShots, Project, ProjectBasicInfo } from "@/lib/types";
+import { listProjectStaffMembers } from "@/lib/data/staffMembers";
+import type { DailyPlanWithShots, Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -27,6 +28,7 @@ export default function DailyPlanDetailPage() {
   const { projectId, dailyPlanId } = useRouteIds();
   const [project, setProject] = useState<Project | null>(null);
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
+  const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [dailyPlan, setDailyPlan] = useState<DailyPlanWithShots | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -36,20 +38,23 @@ export default function DailyPlanDetailPage() {
 
     async function loadDailyPlan() {
       try {
-        const [projectData, planData, basicInfo] = await Promise.all([
+        const [projectData, planData, basicInfo, staffList] = await Promise.all([
           getProject(projectId),
           getDailyPlanWithShots(projectId, dailyPlanId),
-          getProjectBasicInfo(projectId).catch(() => null)
+          getProjectBasicInfo(projectId).catch(() => null),
+          listProjectStaffMembers(projectId).catch(() => null)
         ]);
         setProject(projectData);
         if (!projectData) {
           setDailyPlan(null);
           setProjectBasicInfo(null);
+          setProjectStaffMembers([]);
           setErrorMessage("");
           return;
         }
         setDailyPlan(planData);
         setProjectBasicInfo(basicInfo);
+        setProjectStaffMembers(staffList?.members ?? []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다.");
@@ -80,6 +85,7 @@ export default function DailyPlanDetailPage() {
     <DailyPlanEditor
       project={project}
       projectBasicInfo={projectBasicInfo}
+      projectStaffMembers={projectStaffMembers}
       initialPlan={dailyPlan.plan}
       initialShots={dailyPlan.shots}
     />

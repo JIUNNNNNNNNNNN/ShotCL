@@ -213,7 +213,13 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         title="Team"
         headers={["Team", "Total", "CALL", "Call Location", "Notes"]}
         spans={[1, 1, 1, 2, 5]}
-        rows={teamRows.map((row) => row ? [row.team, row.total, row.callTime, row.callLocation, row.notes] : ["", "", "", "", ""])}
+        rows={teamRows.map((row) => row ? [
+          [row.team, row.name].filter(Boolean).join(" · "),
+          row.total,
+          row.callTime,
+          row.callLocation,
+          [row.contact, row.notes].filter(Boolean).join(" · ")
+        ] : ["", "", "", "", ""])}
       />
     </article>
   );

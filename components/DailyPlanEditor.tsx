@@ -27,9 +27,10 @@ import {
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
+import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
-import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo } from "@/lib/types";
+import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
@@ -41,6 +42,7 @@ const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 type DailyPlanEditorProps = {
   project: Project;
   projectBasicInfo?: ProjectBasicInfo | null;
+  projectStaffMembers?: ProjectStaffMember[];
   initialPlan?: DailyPlan | null;
   initialShots?: DailyPlanShot[];
   initialDraft?: DailyPlanDraft;
@@ -183,7 +185,7 @@ const emptyInitialShots: DailyPlanShot[] = [];
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const initialEditorState = useMemo(() => {
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
@@ -191,7 +193,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
     const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
     const initialDefaults = applyProjectBasicInfoDefaults(sourcePlanDraft, sourcePrintMeta, activeProjectBasicInfo);
     const initialPlanDraft = initialDefaults.plan;
-    const initialPrintMeta = initialDefaults.printMeta;
+    const initialPrintMeta = applyProjectStaffDefaults(
+      initialDefaults.printMeta,
+      projectStaffMembers,
+      activeProjectBasicInfo?.actors ?? []
+    );
     const initialLocations = buildInitialLocations(initialPlanDraft);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
     const initialScenes = shotsToScenes(initialSourceShots, initialLocations);
@@ -209,7 +215,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
       initialScenes,
       managedShotKeys
     };
-  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo]);
+  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffMembers]);
   const {
     activeProjectBasicInfo,
     initialPrintMeta,
@@ -1314,7 +1320,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
               <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
                   <h3 className="text-center text-base font-black text-field-primary">스태프 / 부서</h3>
-                  <p className="mt-1 text-center text-sm font-bold text-field-muted">부서별 인원, 콜 시간, 집합 장소를 입력합니다.</p>
+                  <p className="mt-1 text-center text-sm font-bold text-field-muted">스탭별 부서, 이름, 연락처와 콜 정보를 입력합니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addTeam}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -1325,12 +1331,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
                 {printMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_1fr_3.5rem_1.35fr_1.2fr_1.2fr_auto]"
+                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_0.9fr_0.9fr_3.5rem_1fr_1fr_1.1fr_1.1fr_auto]"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "teams", index)}
                   >
                     <div className="flex items-center justify-center"><DragHandle label={`부서 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "teams", index)} /></div>
                     <DraftInput className={compactInputClass} value={team.team} onCommit={(value) => updateTeam(index, { team: value })} placeholder="부서" />
+                    <DraftInput className={compactInputClass} value={team.name} onCommit={(value) => updateTeam(index, { name: value })} placeholder="이름" />
                     <DraftInput
                       className={`${compactInputClass} px-1 text-center`}
                       value={sanitizeNumericInput(team.total, 4)}
@@ -1342,6 +1349,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, initialPlan, initia
                       maxLength={4}
                       placeholder="인원"
                       aria-label={`${team.team || `부서 ${index + 1}`} 인원`}
+                    />
+                    <DraftInput
+                      className={compactInputClass}
+                      value={team.contact ?? ""}
+                      onCommit={(value) => updateTeam(index, { contact: value })}
+                      sanitize={formatKoreanPhoneNumber}
+                      inputMode="tel"
+                      placeholder="연락처"
+                      aria-label={`${team.team || `부서 ${index + 1}`} 연락처`}
                     />
                     <TimeWheelPicker label="콜 시간" value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
                     <CallLocationSelect
@@ -2758,11 +2774,18 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 <td className="border border-black">{person?.callTime || ""}</td>
                 <td colSpan={2} className="border border-black">{person?.callLocation || ""}</td>
                 <td className="border border-black">{person?.notes || ""}</td>
-                <td colSpan={2} className="border border-black">{team?.team || ""}</td>
+                <td colSpan={2} className="border border-black">
+                  {team?.team || ""}
+                  {team?.name ? <span className="block text-[9px]">{team.name}</span> : null}
+                </td>
                 <td className="border border-black">{team?.total || ""}</td>
                 <td className="border border-black">{team?.callTime || ""}</td>
                 <td colSpan={2} className="border border-black">{team?.callLocation || ""}</td>
-                <td colSpan={2} className="border border-black">{team?.notes || ""}</td>
+                <td colSpan={2} className="border border-black">
+                  {team?.contact || ""}
+                  {team?.contact && team?.notes ? <br /> : null}
+                  {team?.notes || ""}
+                </td>
               </tr>
             );
           })}
@@ -2949,25 +2972,6 @@ function applyProjectBasicInfoDefaults(
   }
 
   const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim() || "1";
-  const hasSavedPeople = sourcePrintMeta.starring.some((person) => (
-    person.name.trim() ||
-    person.role.trim() ||
-    (person.contact ?? "").trim() ||
-    person.callTime.trim() ||
-    person.callLocation.trim() ||
-    person.notes.trim()
-  ));
-  const projectActors = projectBasicInfo.actors
-    .filter((actor) => actor.role.trim() || actor.name.trim())
-    .map((actor, index): CallSheetPerson => ({
-      id: `project_actor_${index}`,
-      name: actor.name.trim(),
-      role: actor.role.trim(),
-      contact: "",
-      callTime: "",
-      callLocation: "",
-      notes: ""
-    }));
 
   return {
     plan: {
@@ -2983,8 +2987,7 @@ function applyProjectBasicInfoDefaults(
       day: episode,
       directorContact: sourcePrintMeta.directorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.director.phone),
       assistantDirectorContact: sourcePrintMeta.assistantDirectorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.assistantDirector.phone),
-      producerContact: sourcePrintMeta.producerContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.producer.phone),
-      starring: hasSavedPeople || projectActors.length === 0 ? sourcePrintMeta.starring : projectActors
+      producerContact: sourcePrintMeta.producerContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.producer.phone)
     }
   };
 }

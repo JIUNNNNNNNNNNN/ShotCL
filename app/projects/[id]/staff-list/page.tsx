@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
@@ -14,6 +14,10 @@ import {
 } from "@/lib/data/staffMembers";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
+import {
+  getStaffDepartmentColor,
+  sortStaffMembersForDisplay
+} from "@/lib/dailyPlan/staffList";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const inputClassName =
@@ -45,6 +49,7 @@ export default function StaffListPage() {
   const pendingDepartmentSubmitRef = useRef(false);
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberDepartmentInputRefs = useRef(new Map<string, HTMLInputElement>());
+  const displayedMembers = useMemo(() => sortStaffMembersForDisplay(members), [members]);
 
   const load = useCallback(async () => {
     if (!projectId || role === "progress") return;
@@ -348,9 +353,9 @@ export default function StaffListPage() {
             <option key={department.id} value={department.name} />
           ))}
         </datalist>
-        {members.length > 0 ? (
+        {displayedMembers.length > 0 ? (
           <div className="grid gap-1">
-            {members.map((member, index) => (
+            {displayedMembers.map((member, index) => (
               <StaffMemberRow
                 key={member.id}
                 member={member}
@@ -396,9 +401,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
   onAddAfter: (memberId: string) => void;
   onDepartmentInputRef: (id: string, input: HTMLInputElement | null) => void;
 }) {
+  const departmentColor = getStaffDepartmentColor(member.department);
+
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible rounded-2xl border border-field-border bg-field-soft/40 p-1.5 text-center ${desktopGridClassName}`}
+      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible rounded-2xl border border-l-[3px] border-field-border p-1.5 text-center ${desktopGridClassName}`}
+      style={{
+        backgroundColor: departmentColor.background,
+        borderLeftColor: departmentColor.border
+      }}
       aria-label={`${number}번 스탭`}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
@@ -406,6 +417,10 @@ const StaffMemberRow = memo(function StaffMemberRow({
         <input
           ref={(input) => onDepartmentInputRef(member.id, input)}
           className={inputClassName}
+          style={{
+            backgroundColor: departmentColor.background,
+            borderColor: departmentColor.border
+          }}
           list={departmentListId}
           value={member.department}
           onChange={(event) => onChange(member.id, { department: event.target.value })}
@@ -487,6 +502,7 @@ function DepartmentChip({
   onDelete: () => void;
 }) {
   const [draftName, setDraftName] = useState(department.name);
+  const departmentColor = getStaffDepartmentColor(department.name);
 
   useEffect(() => {
     setDraftName(department.name);
@@ -502,7 +518,13 @@ function DepartmentChip({
   }
 
   return (
-    <div className="flex h-8 items-center rounded-full border border-field-border bg-white pl-2 shadow-sm">
+    <div
+      className="flex h-8 items-center rounded-full border pl-2 shadow-sm"
+      style={{
+        backgroundColor: departmentColor.background,
+        borderColor: departmentColor.border
+      }}
+    >
       <input
         type="text"
         value={draftName}
