@@ -17,14 +17,12 @@ import {
 } from "@/lib/data/projectReferenceAssets";
 import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
-import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
 import type {
   CostumeImage,
   ProjectActor,
   ProjectCostume,
-  ProjectCostumeScene,
-  ProjectSceneItem
+  ProjectCostumeScene
 } from "@/lib/types";
 
 type CostumeDraft = {
@@ -59,7 +57,6 @@ export default function ProjectCostumesPage() {
   const [projectName, setProjectName] = useState("");
   const [scenes, setScenes] = useState<ProjectCostumeScene[]>([]);
   const [actors, setActors] = useState<ProjectActor[]>([]);
-  const [sceneOptions, setSceneOptions] = useState<ProjectSceneItem[]>([]);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [selectedDailyPlanId, setSelectedDailyPlanId] = useState("");
   const [dailyPlanSceneKeys, setDailyPlanSceneKeys] = useState<Set<string> | null>(null);
@@ -78,18 +75,16 @@ export default function ProjectCostumesPage() {
     if (!projectId) return;
     setIsLoading(true);
     try {
-      const [project, costumeScenes, basicInfo, plans, sceneList] = await Promise.all([
+      const [project, costumeScenes, basicInfo, plans] = await Promise.all([
         getProject(projectId),
         listProjectCostumeScenes(projectId),
         getProjectBasicInfo(projectId).catch(() => null),
-        listDailyPlans(projectId).catch(() => []),
-        getProjectSceneList(projectId).catch(() => null)
+        listDailyPlans(projectId).catch(() => [])
       ]);
       setProjectName(project?.name ?? "프로젝트");
       setScenes(costumeScenes);
       setActors(basicInfo?.actors ?? []);
       setDailyPlans(plans);
-      setSceneOptions(sceneList?.items ?? []);
       setDrafts(Object.fromEntries(costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))));
       setExpandedSceneIds((current) => current.size > 0
         ? new Set([...current].filter((id) => costumeScenes.some((scene) => scene.id === id)))
@@ -151,15 +146,6 @@ export default function ProjectCostumesPage() {
       else next.add(id);
       return next;
     });
-  }
-
-  function handleSceneNoChange(value: string) {
-    const matched = sceneOptions.find((scene) => normalizeSceneNumber(scene.sceneNo) === normalizeSceneNumber(value));
-    setSceneDraft((current) => current ? {
-      ...current,
-      sceneNo: value,
-      sceneTitle: matched?.sceneContent || current.sceneTitle
-    } : current);
   }
 
   async function handleSceneSubmit(event: FormEvent<HTMLFormElement>) {
@@ -335,43 +321,43 @@ export default function ProjectCostumesPage() {
 
   return (
     <>
-      <div className="mx-auto grid w-full max-w-6xl gap-3">
-        <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
+      <div className="mx-auto grid w-full max-w-6xl gap-2.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <h1 className="font-display truncate text-xl font-black text-field-primary">의상</h1>
             <p className="truncate text-xs font-bold text-field-muted">{projectName} · 씬별 의상표</p>
           </div>
+          <label className="min-w-0 flex-1 sm:max-w-[280px]">
+            <span className="sr-only">일촬표 씬 필터</span>
+            <select
+              value={selectedDailyPlanId}
+              onChange={(event) => setSelectedDailyPlanId(event.target.value)}
+              className={compactInputClass}
+              aria-label="일촬표 씬 필터"
+            >
+              <option value="">전체 씬</option>
+              {dailyPlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>{dailyPlanLabel(plan)}</option>
+              ))}
+            </select>
+          </label>
           {canEdit ? (
-            <Button onClick={() => setSceneDraft({ sceneNo: "", sceneTitle: "" })}>
+            <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={() => setSceneDraft({ sceneNo: "", sceneTitle: "" })}>
               <Plus className="h-4 w-4" aria-hidden />
               씬 추가
             </Button>
           ) : (
-            <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">읽기 전용</span>
+            <span className="rounded-full border border-field-border bg-white px-2.5 py-1.5 text-[11px] font-black text-field-muted">읽기 전용</span>
           )}
         </div>
 
-        <label className="grid min-w-0 gap-1 sm:max-w-sm">
-          <span className="text-xs font-black text-field-muted">일촬표 씬 필터</span>
-          <select
-            value={selectedDailyPlanId}
-            onChange={(event) => setSelectedDailyPlanId(event.target.value)}
-            className={fieldClass}
-          >
-            <option value="">전체 씬</option>
-            {dailyPlans.map((plan) => (
-              <option key={plan.id} value={plan.id}>{dailyPlanLabel(plan)}</option>
-            ))}
-          </select>
-        </label>
-
         {errorMessage ? (
-          <p role="alert" className="rounded-xl border border-field-danger bg-red-50 px-3 py-2 text-sm font-bold text-field-danger">
+          <p role="alert" className="rounded-lg border border-field-danger bg-red-50 px-3 py-1.5 text-xs font-bold text-field-danger">
             {errorMessage}
           </p>
         ) : null}
         {noticeMessage ? (
-          <p role="status" className="rounded-xl border border-field-secondary bg-field-light px-3 py-2 text-sm font-bold text-field-primary">
+          <p role="status" className="rounded-lg border border-field-secondary bg-field-light px-3 py-1.5 text-xs font-bold text-field-primary">
             {noticeMessage}
           </p>
         ) : null}
@@ -383,40 +369,52 @@ export default function ProjectCostumesPage() {
             {scenes.length === 0 ? "등록된 의상 씬이 없습니다." : "선택한 일촬표에 포함된 의상 씬이 없습니다."}
           </div>
         ) : (
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             {filteredScenes.map((scene) => {
               const expanded = expandedSceneIds.has(scene.id);
+              const imageCount = scene.items.reduce((total, item) => total + item.images.length, 0);
               return (
-                <section key={scene.id} className="overflow-hidden rounded-2xl border border-field-border bg-white">
-                  <div className="flex min-w-0 items-center gap-2 bg-field-light px-3 py-2">
+                <section key={scene.id} className="overflow-hidden rounded-xl border border-field-border bg-white">
+                  <div className="flex min-w-0 items-center gap-1.5 bg-field-light px-2.5 py-1.5">
                     <button
                       type="button"
                       onClick={() => toggleScene(scene.id)}
-                      className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
+                      className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5 text-left"
                       aria-expanded={expanded}
                     >
-                      <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
-                      <span className="min-w-0">
-                        <strong className="block break-words text-sm font-black text-field-primary">{sceneLabel(scene)}</strong>
-                        <span className="block text-xs font-bold text-field-muted">{scene.items.length}개 배역</span>
+                      <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
+                      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <strong className="break-words text-sm font-black text-field-primary">{sceneLabel(scene)}</strong>
+                        <span className="text-[11px] font-bold text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
                       </span>
                     </button>
                     {canEdit ? (
                       <div className="flex shrink-0 gap-1">
                         <IconButton label="씬 정보 수정" onClick={() => setSceneDraft({ id: scene.id, sceneNo: scene.sceneNo, sceneTitle: scene.sceneTitle })}>
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                          <Pencil className="h-3 w-3" aria-hidden />
                         </IconButton>
                         <IconButton label="씬 삭제" danger onClick={() => void handleSceneDelete(scene)}>
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          <Trash2 className="h-3 w-3" aria-hidden />
                         </IconButton>
                       </div>
                     ) : null}
                   </div>
 
                   {expanded ? (
-                    <div className="grid gap-2 border-t border-field-border p-2 sm:p-3">
+                    <div className="border-t border-field-border p-1.5 sm:p-2">
+                      {scene.items.length > 0 ? (
+                        <div className="mb-1 hidden grid-cols-[minmax(100px,.9fr)_minmax(130px,1.35fr)_90px_minmax(110px,1fr)_150px_76px] gap-1.5 px-2 text-[10px] font-black text-field-muted sm:grid">
+                          <span>배역</span>
+                          <span>내용</span>
+                          <span>제공자</span>
+                          <span>헤어</span>
+                          <span>이미지</span>
+                          <span className="text-center">관리</span>
+                        </div>
+                      ) : null}
+                      <div className="grid gap-1.5 sm:divide-y sm:divide-field-border sm:gap-0">
                       {scene.items.length === 0 ? (
-                        <p className="py-6 text-center text-sm font-bold text-field-muted">이 씬에 등록된 배역이 없습니다.</p>
+                        <p className="py-5 text-center text-xs font-bold text-field-muted">이 씬에 등록된 배역이 없습니다.</p>
                       ) : scene.items.map((item) => (
                         <CostumeItemCard
                           key={item.id}
@@ -434,10 +432,11 @@ export default function ProjectCostumesPage() {
                           })}
                         />
                       ))}
+                      </div>
                       {canEdit ? (
                         <Button
                           variant="secondary"
-                          className="justify-self-start"
+                          className="mt-1.5 min-h-8 px-2.5 py-1 text-[11px]"
                           onClick={() => setActorDraft({ sceneId: scene.id, role: "", name: "" })}
                         >
                           <Plus className="h-4 w-4" aria-hidden />
@@ -456,26 +455,20 @@ export default function ProjectCostumesPage() {
       {sceneDraft ? (
         <BottomSheet title={sceneDraft.id ? "의상 씬 수정" : "의상 씬 추가"} onClose={() => setSceneDraft(null)}>
           <form onSubmit={handleSceneSubmit} className="grid gap-3">
-            <Field label="씬">
+            <Field label="씬 번호">
               <input
-                list="costume-scene-options"
                 value={sceneDraft.sceneNo}
-                onChange={(event) => handleSceneNoChange(event.target.value)}
-                placeholder="예: S#1 또는 Scene 1"
-                className={fieldClass}
+                onChange={(event) => setSceneDraft({ ...sceneDraft, sceneNo: event.target.value })}
+                placeholder="예: S#1"
+                className={compactInputClass}
               />
-              <datalist id="costume-scene-options">
-                {sceneOptions.filter((scene) => scene.sceneNo).map((scene) => (
-                  <option key={scene.id} value={scene.sceneNo}>{scene.sceneContent}</option>
-                ))}
-              </datalist>
             </Field>
             <Field label="씬 이름">
               <input
                 value={sceneDraft.sceneTitle}
                 onChange={(event) => setSceneDraft({ ...sceneDraft, sceneTitle: event.target.value })}
-                placeholder="씬리스트 내용 또는 직접 입력"
-                className={fieldClass}
+                placeholder="필요한 경우 직접 입력"
+                className={compactInputClass}
               />
             </Field>
             {!sceneDraft.id ? (
@@ -495,10 +488,10 @@ export default function ProjectCostumesPage() {
         <BottomSheet title="배역 추가" onClose={() => setActorDraft(null)}>
           <form onSubmit={handleActorAdd} className="grid gap-3">
             <Field label="배역">
-              <input value={actorDraft.role} onChange={(event) => setActorDraft({ ...actorDraft, role: event.target.value })} className={fieldClass} />
+              <input value={actorDraft.role} onChange={(event) => setActorDraft({ ...actorDraft, role: event.target.value })} className={compactInputClass} />
             </Field>
             <Field label="배우 이름">
-              <input value={actorDraft.name} onChange={(event) => setActorDraft({ ...actorDraft, name: event.target.value })} className={fieldClass} />
+              <input value={actorDraft.name} onChange={(event) => setActorDraft({ ...actorDraft, name: event.target.value })} className={compactInputClass} />
             </Field>
             <p className="text-xs font-bold leading-5 text-field-muted">이 배역은 의상표에만 추가되며 프로젝트 기본정보는 변경하지 않습니다.</p>
             <div className="flex justify-end gap-2">
@@ -538,49 +531,56 @@ function CostumeItemCard({
   const customProvider = draft.provider && !providerOptions.includes(draft.provider);
   if (!canEdit) {
     return (
-      <article className="grid gap-3 rounded-xl border border-field-border bg-white p-3">
-        <div className="min-w-0">
-          <h3 className="break-words text-sm font-black text-field-primary">{item.actorRole || "배역 미지정"}</h3>
-          {item.actorName ? <p className="break-words text-xs font-bold text-field-muted">{item.actorName}</p> : null}
+      <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(100px,.9fr)_minmax(130px,1.35fr)_90px_minmax(110px,1fr)_150px_76px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
+        <div className="col-span-2 min-w-0 border-b border-field-border pb-1 sm:col-span-1 sm:border-0 sm:pb-0">
+          <h3 className="break-words text-xs font-black leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
+          {item.actorName ? <p className="break-words text-[10px] font-bold leading-4 text-field-muted">{item.actorName}</p> : null}
         </div>
-        <dl className="grid gap-2 text-sm sm:grid-cols-3">
-          <ReadOnlyValue label="내용" value={item.costumeContent} />
-          <ReadOnlyValue label="제공자" value={item.provider} />
-          <ReadOnlyValue label="헤어" value={item.hair} />
-        </dl>
+        <ReadOnlyValue label="내용" value={item.costumeContent} />
+        <ReadOnlyValue label="제공자" value={item.provider} />
+        <ReadOnlyValue label="헤어" value={item.hair} />
         <ImageStrip images={item.images} title={item.actorRole || item.actorName} onPreview={onPreview} />
+        <span className="hidden text-center text-[10px] font-bold text-field-muted sm:block">읽기 전용</span>
       </article>
     );
   }
 
   return (
-    <article className="grid gap-3 rounded-xl border border-field-border bg-white p-3">
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
-        <Field label="배역">
-          <input value={draft.actorRole} onChange={(event) => onChange({ actorRole: event.target.value })} className={fieldClass} />
-        </Field>
-        <Field label="배우 이름">
-          <input value={draft.actorName} onChange={(event) => onChange({ actorName: event.target.value })} className={fieldClass} />
-        </Field>
-        <IconButton label="배역 삭제" danger className="self-end" onClick={onDelete}>
-          <Trash2 className="h-4 w-4" aria-hidden />
-        </IconButton>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        <Field label="내용">
-          <textarea
-            rows={2}
-            value={draft.costumeContent}
-            onChange={(event) => onChange({ costumeContent: event.target.value })}
-            placeholder="정장, 교복, 군복 등"
-            className={`${fieldClass} resize-y`}
+    <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(100px,.9fr)_minmax(130px,1.35fr)_90px_minmax(110px,1fr)_150px_76px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
+      <div className="col-span-2 grid grid-cols-2 gap-1 sm:col-span-1 sm:grid-cols-1">
+        <CompactField label="배역">
+          <input
+            value={draft.actorRole}
+            onChange={(event) => onChange({ actorRole: event.target.value })}
+            placeholder="배역"
+            className={compactInputClass}
           />
-        </Field>
-        <Field label="제공자">
+        </CompactField>
+        <CompactField label="배우">
+          <input
+            value={draft.actorName}
+            onChange={(event) => onChange({ actorName: event.target.value })}
+            placeholder="배우"
+            className={compactInputClass}
+          />
+        </CompactField>
+      </div>
+
+      <CompactField label="내용">
+        <input
+          value={draft.costumeContent}
+          onChange={(event) => onChange({ costumeContent: event.target.value })}
+          placeholder="정장, 교복, 군복"
+          className={compactInputClass}
+        />
+      </CompactField>
+
+      <CompactField label="제공자">
+        <div className="grid gap-1">
           <select
             value={customProvider ? "기타" : draft.provider}
             onChange={(event) => onChange({ provider: event.target.value === "기타" ? "기타" : event.target.value })}
-            className={fieldClass}
+            className={compactInputClass}
           >
             <option value="">선택</option>
             {providerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -590,27 +590,26 @@ function CostumeItemCard({
             <input
               value={draft.provider === "기타" ? "" : draft.provider}
               onChange={(event) => onChange({ provider: event.target.value })}
-              placeholder="제공자 직접 입력"
-              className={fieldClass}
+              placeholder="직접 입력"
+              className={compactInputClass}
             />
           ) : null}
-        </Field>
-        <Field label="헤어">
-          <textarea
-            rows={2}
-            value={draft.hair}
-            onChange={(event) => onChange({ hair: event.target.value })}
-            placeholder="묶음머리, 생머리, 모자 등"
-            className={`${fieldClass} resize-y`}
-          />
-        </Field>
-      </div>
+        </div>
+      </CompactField>
 
-      <div className="grid gap-2">
-        <span className="text-xs font-black text-field-muted">이미지</span>
-        <div className="flex gap-2 overflow-x-auto pb-1">
+      <CompactField label="헤어">
+        <input
+          value={draft.hair}
+          onChange={(event) => onChange({ hair: event.target.value })}
+          placeholder="묶음, 생머리, 모자"
+          className={compactInputClass}
+        />
+      </CompactField>
+
+      <CompactField label="이미지">
+        <div className="flex max-w-full gap-1 overflow-x-auto pb-0.5">
           {draft.existingImages.map((image) => (
-            <div key={image.path} className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-field-border bg-field-soft">
+            <div key={image.path} className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border border-field-border bg-field-soft">
               <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={image.url} alt={`${draft.actorRole || draft.actorName} 의상`} className="h-full w-full object-cover" />
@@ -618,38 +617,42 @@ function CostumeItemCard({
               <button
                 type="button"
                 onClick={() => onChange({ existingImages: draft.existingImages.filter((item) => item.path !== image.path) })}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+                className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white/95 text-field-danger"
                 aria-label="저장 시 이미지 삭제"
               >
-                <X className="h-3.5 w-3.5" aria-hidden />
+                <X className="h-3 w-3" aria-hidden />
               </button>
             </div>
           ))}
           {draft.files.map((file, index) => (
-            <div key={`${file.name}-${index}`} className="relative grid h-24 w-24 shrink-0 place-items-center rounded-lg border border-field-border bg-field-soft px-2 text-center text-[10px] font-bold text-field-muted">
-              <span className="line-clamp-3">{file.name}</span>
+            <div key={`${file.name}-${index}`} className="relative grid h-14 w-14 shrink-0 place-items-center rounded-md border border-field-border bg-field-soft px-1 text-center text-[9px] font-bold leading-3 text-field-muted">
+              <span className="line-clamp-3 break-all">{file.name}</span>
               <button
                 type="button"
                 onClick={() => onChange({ files: draft.files.filter((_, fileIndex) => fileIndex !== index) })}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+                className="absolute right-0.5 top-0.5 grid h-5 w-5 place-items-center rounded-full bg-white/95 text-field-danger"
                 aria-label="선택한 이미지 제외"
               >
-                <X className="h-3.5 w-3.5" aria-hidden />
+                <X className="h-3 w-3" aria-hidden />
               </button>
             </div>
           ))}
-          <label className="grid h-24 w-24 shrink-0 cursor-pointer place-items-center rounded-lg border border-dashed border-field-secondary bg-field-light text-xs font-black text-field-primary">
-            <span className="grid place-items-center gap-1"><ImagePlus className="h-5 w-5" aria-hidden />이미지 선택</span>
+          <label className="grid h-14 w-14 shrink-0 cursor-pointer place-items-center rounded-md border border-dashed border-field-secondary bg-field-light text-[10px] font-black text-field-primary">
+            <span className="grid place-items-center gap-0.5"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
             <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
           </label>
         </div>
-        <p className="text-[11px] font-bold text-field-muted">이미지 추가·제거도 아래 저장 버튼을 눌렀을 때 반영됩니다.</p>
-      </div>
+      </CompactField>
 
-      <Button className="justify-self-end" onClick={onSave} disabled={isSaving}>
-        <Save className="h-4 w-4" aria-hidden />
-        {isSaving ? "저장 중" : "이 배역 저장"}
-      </Button>
+      <div className="col-span-2 flex items-end justify-end gap-1 self-stretch sm:col-span-1">
+        <Button className="min-h-8 px-2 py-1 text-[11px]" onClick={onSave} disabled={isSaving}>
+          <Save className="h-3.5 w-3.5" aria-hidden />
+          {isSaving ? "저장 중" : "저장"}
+        </Button>
+        <IconButton label="배역 삭제" danger compact onClick={onDelete}>
+          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+        </IconButton>
+      </div>
     </article>
   );
 }
@@ -663,24 +666,34 @@ function ImageStrip({
   title: string;
   onPreview: (image: CostumeImage) => void;
 }) {
-  if (images.length === 0) return <p className="text-xs font-bold text-field-muted">등록된 이미지가 없습니다.</p>;
+  if (images.length === 0) {
+    return (
+      <div className="min-w-0">
+        <span className="mb-0.5 block text-[9px] font-black text-field-muted sm:hidden">이미지</span>
+        <p className="truncate text-[10px] font-bold text-field-muted">이미지 없음</p>
+      </div>
+    );
+  }
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
-      {images.map((image) => (
-        <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-field-border bg-field-soft">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={image.url} alt={`${title} 의상`} className="h-full w-full object-cover" />
-        </button>
-      ))}
+    <div className="min-w-0">
+      <span className="mb-0.5 block text-[9px] font-black text-field-muted sm:hidden">이미지</span>
+      <div className="flex gap-1 overflow-x-auto pb-0.5">
+        {images.map((image) => (
+          <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-14 w-14 shrink-0 overflow-hidden rounded-md border border-field-border bg-field-soft">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={image.url} alt={`${title} 의상`} className="h-full w-full object-cover" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
 function ReadOnlyValue({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg bg-field-soft px-3 py-2">
-      <dt className="text-[11px] font-black text-field-muted">{label}</dt>
-      <dd className="mt-0.5 whitespace-pre-wrap break-words font-bold leading-6 text-field-text">{value || "미입력"}</dd>
+    <div className="min-w-0">
+      <dt className="text-[9px] font-black leading-4 text-field-muted sm:hidden">{label}</dt>
+      <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</dd>
     </div>
   );
 }
@@ -702,12 +715,14 @@ function BottomSheet({ title, onClose, children }: { title: string; onClose: () 
 function IconButton({
   label,
   danger = false,
+  compact = false,
   className = "",
   onClick,
   children
 }: {
   label: string;
   danger?: boolean;
+  compact?: boolean;
   className?: string;
   onClick: () => void;
   children: React.ReactNode;
@@ -717,7 +732,7 @@ function IconButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`grid h-10 w-10 shrink-0 place-items-center rounded-full border border-field-border bg-white ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
+      className={`grid shrink-0 place-items-center rounded-full border border-field-border bg-white ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
     >
       {children}
     </button>
@@ -728,6 +743,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <label className="grid min-w-0 content-start gap-1.5">
       <span className="text-xs font-black text-field-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function CompactField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="grid min-w-0 content-start gap-0.5">
+      <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
       {children}
     </label>
   );
@@ -768,4 +792,4 @@ function normalizeActorKey(role: string, name: string) {
   return (role || name).normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
 }
 
-const fieldClass = "min-h-11 w-full rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-field-primary";
+const compactInputClass = "min-h-9 w-full rounded-md border border-field-border bg-white px-2 py-1 text-xs leading-5 outline-none focus:border-field-primary";
