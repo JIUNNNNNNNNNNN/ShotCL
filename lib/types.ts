@@ -201,12 +201,26 @@ export type CostumeImage = {
 export type ProjectCostume = {
   id: string;
   projectId: string;
-  characterName: string;
-  costumeName: string;
-  description: string;
-  memo: string;
+  costumeSceneId: string;
+  sceneNo: string;
+  actorRole: string;
+  actorName: string;
+  costumeContent: string;
+  provider: string;
+  hair: string;
   images: CostumeImage[];
   sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectCostumeScene = {
+  id: string;
+  projectId: string;
+  sceneNo: string;
+  sceneTitle: string;
+  sortOrder: number;
+  items: ProjectCostume[];
   createdAt: string;
   updatedAt: string;
 };

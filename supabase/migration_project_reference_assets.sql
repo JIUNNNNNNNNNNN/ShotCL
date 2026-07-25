@@ -54,9 +54,40 @@ create unique index if not exists project_reference_assets_overhead_unique
   on public.project_reference_assets (project_id, daily_plan_id, shot_ref, asset_type)
   where asset_type = 'overhead' and daily_plan_id is not null and shot_ref is not null;
 
+create table if not exists public.project_costume_scenes (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  scene_no text not null,
+  scene_title text not null default '',
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.project_costume_scenes
+  add column if not exists project_id uuid references public.projects(id) on delete cascade,
+  add column if not exists scene_no text,
+  add column if not exists scene_title text default '',
+  add column if not exists sort_order integer default 0,
+  add column if not exists created_at timestamptz default now(),
+  add column if not exists updated_at timestamptz default now();
+
+create index if not exists project_costume_scenes_project_idx
+  on public.project_costume_scenes (project_id, sort_order, created_at);
+
+create unique index if not exists project_costume_scenes_project_scene_unique
+  on public.project_costume_scenes (project_id, scene_no);
+
 create table if not exists public.project_costumes (
   id uuid primary key default gen_random_uuid(),
   project_id uuid not null references public.projects(id) on delete cascade,
+  costume_scene_id uuid references public.project_costume_scenes(id) on delete cascade,
+  scene_no text not null default '',
+  actor_role text not null default '',
+  actor_name text not null default '',
+  costume_content text not null default '',
+  provider text not null default '',
+  hair text not null default '',
   character_name text not null default '',
   costume_name text not null default '',
   description text not null default '',
@@ -69,6 +100,13 @@ create table if not exists public.project_costumes (
 
 alter table public.project_costumes
   add column if not exists project_id uuid references public.projects(id) on delete cascade,
+  add column if not exists costume_scene_id uuid references public.project_costume_scenes(id) on delete cascade,
+  add column if not exists scene_no text default '',
+  add column if not exists actor_role text default '',
+  add column if not exists actor_name text default '',
+  add column if not exists costume_content text default '',
+  add column if not exists provider text default '',
+  add column if not exists hair text default '',
   add column if not exists character_name text default '',
   add column if not exists costume_name text default '',
   add column if not exists description text default '',
@@ -80,6 +118,9 @@ alter table public.project_costumes
 
 create index if not exists project_costumes_project_idx
   on public.project_costumes (project_id, sort_order, created_at);
+
+create index if not exists project_costumes_scene_idx
+  on public.project_costumes (project_id, costume_scene_id, sort_order, created_at);
 
 create or replace function public.set_project_reference_updated_at()
 returns trigger
@@ -101,7 +142,13 @@ create trigger set_project_costumes_updated_at
 before update on public.project_costumes
 for each row execute function public.set_project_reference_updated_at();
 
+drop trigger if exists set_project_costume_scenes_updated_at on public.project_costume_scenes;
+create trigger set_project_costume_scenes_updated_at
+before update on public.project_costume_scenes
+for each row execute function public.set_project_reference_updated_at();
+
 alter table public.project_reference_assets enable row level security;
+alter table public.project_costume_scenes enable row level security;
 alter table public.project_costumes enable row level security;
 
 -- 브라우저 직접 쓰기는 허용하지 않습니다. 앱 서버가 프로젝트 세션 권한을 확인한 뒤

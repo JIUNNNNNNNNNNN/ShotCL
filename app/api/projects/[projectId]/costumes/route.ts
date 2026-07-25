@@ -12,7 +12,7 @@ type RouteContext = { params: Promise<{ projectId: string }> };
 type CostumeImage = { path: string; url: string; filename: string };
 
 const STORAGE_BUCKET = "storyboards";
-const SELECT_COLUMNS = "id,project_id,character_name,costume_name,description,memo,image_paths,sort_order,created_at,updated_at";
+const SELECT_COLUMNS = "id,project_id,costume_scene_id,scene_no,actor_role,actor_name,costume_content,provider,hair,image_paths,sort_order,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -45,30 +45,47 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const formData = await request.formData();
     const id = cleanText(formData.get("id"), 100);
+    let costumeSceneId = cleanText(formData.get("costumeSceneId"), 100);
     const files = formData.getAll("files").filter((file): file is File => file instanceof File && file.size > 0);
     if (files.some((file) => !isImage(file) || file.size > 20 * 1024 * 1024)) {
       return NextResponse.json({ error: "이미지는 장당 20MB 이하의 이미지 파일만 가능합니다." }, { status: 415 });
     }
     const supabase = requireProjectAccessDb();
     let existingImages: CostumeImage[] = [];
+    let sceneNo = "";
     if (id) {
       const { data, error } = await supabase
         .from("project_costumes")
-        .select("image_paths")
+        .select("image_paths,costume_scene_id")
         .eq("id", id)
         .eq("project_id", projectId)
         .maybeSingle();
       if (error) throw error;
       if (!data) return NextResponse.json({ error: "의상 항목을 찾을 수 없습니다." }, { status: 404 });
       existingImages = normalizeImages(data.image_paths);
+      costumeSceneId = costumeSceneId || String(data.costume_scene_id ?? "");
     }
+    if (!costumeSceneId) {
+      return NextResponse.json({ error: "의상 항목이 속할 씬이 필요합니다." }, { status: 400 });
+    }
+    const { data: scene, error: sceneError } = await supabase
+      .from("project_costume_scenes")
+      .select("id,scene_no")
+      .eq("id", costumeSceneId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (sceneError) throw sceneError;
+    if (!scene) {
+      return NextResponse.json({ error: "의상 씬을 찾을 수 없습니다." }, { status: 404 });
+    }
+    sceneNo = String(scene.scene_no ?? "");
     const keepPaths = parseStringArray(formData.get("keepImagePaths"));
     const keptImages = id
       ? existingImages.filter((image) => keepPaths.includes(image.path))
       : [];
     const newImages: CostumeImage[] = [];
     for (const file of files) {
-      const path = `project-assets/${projectId}/costumes/${id || "new"}/${Date.now()}-${randomUUID()}-${safeName(file.name)}`;
+      const path = `project-assets/${projectId}/costumes/${costumeSceneId}/${id || "new"}/${Date.now()}-${randomUUID()}-${safeName(file.name)}`;
       const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(
         path,
         Buffer.from(await file.arrayBuffer()),
@@ -81,10 +98,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const payload = {
       project_id: projectId,
-      character_name: cleanText(formData.get("characterName"), 200),
-      costume_name: cleanText(formData.get("costumeName"), 200),
-      description: cleanText(formData.get("description"), 4000),
-      memo: cleanText(formData.get("memo"), 4000),
+      costume_scene_id: costumeSceneId,
+      scene_no: sceneNo,
+      actor_role: cleanText(formData.get("actorRole"), 200),
+      actor_name: cleanText(formData.get("actorName"), 200),
+      costume_content: cleanText(formData.get("costumeContent"), 2000),
+      provider: cleanText(formData.get("provider"), 200),
+      hair: cleanText(formData.get("hair"), 1000),
+      character_name: cleanText(formData.get("actorRole"), 200),
+      costume_name: cleanText(formData.get("costumeContent"), 200),
+      description: "",
+      memo: "",
       image_paths: [...keptImages, ...newImages],
       sort_order: toInteger(formData.get("sortOrder"))
     };
@@ -198,10 +222,13 @@ function mapCostumeRow(row: Record<string, unknown>) {
   return {
     id: String(row.id ?? ""),
     projectId: String(row.project_id ?? ""),
-    characterName: String(row.character_name ?? ""),
-    costumeName: String(row.costume_name ?? ""),
-    description: String(row.description ?? ""),
-    memo: String(row.memo ?? ""),
+    costumeSceneId: String(row.costume_scene_id ?? ""),
+    sceneNo: String(row.scene_no ?? ""),
+    actorRole: String(row.actor_role ?? ""),
+    actorName: String(row.actor_name ?? ""),
+    costumeContent: String(row.costume_content ?? ""),
+    provider: String(row.provider ?? ""),
+    hair: String(row.hair ?? ""),
     images: normalizeImages(row.image_paths),
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: String(row.created_at ?? ""),
@@ -215,7 +242,9 @@ function costumeError(error: unknown, message: string) {
   }
   const source = safeError(error);
   console.error("[costumes]", source);
-  const missingTable = source.code === "42P01" || /project_costumes/i.test(source.message) && /does not exist|schema cache/i.test(source.message);
+  const missingTable = source.code === "42P01"
+    || /project_costumes|project_costume_scenes|costume_scene_id|actor_role|costume_content/i.test(source.message)
+      && /does not exist|schema cache|could not find/i.test(source.message);
   return NextResponse.json({
     error: missingTable ? "프로젝트 자료 migration을 먼저 적용해주세요." : message,
     code: missingTable ? "PROJECT_REFERENCE_MIGRATION_REQUIRED" : "PROJECT_COSTUME_ERROR",

@@ -1,6 +1,7 @@
 import { getShotDiagramKey } from "@/lib/data/shotDiagrams";
 import type {
   ProjectCostume,
+  ProjectCostumeScene,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
@@ -104,14 +105,66 @@ export async function listProjectCostumes(projectId: string): Promise<ProjectCos
   return payload.costumes ?? [];
 }
 
+export async function listProjectCostumeScenes(projectId: string): Promise<ProjectCostumeScene[]> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, { cache: "no-store" });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { scenes?: ProjectCostumeScene[] };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "씬별 의상 자료를 불러오지 못했습니다.");
+  }
+  return payload.scenes ?? [];
+}
+
+export async function createProjectCostumeScene(
+  projectId: string,
+  value: { sceneNo: string; sceneTitle: string; actors: Array<{ role: string; name: string }> }
+): Promise<ProjectCostumeScene> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value)
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { scene?: ProjectCostumeScene };
+  if (!response.ok || !payload.scene) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 씬을 추가하지 못했습니다.");
+  }
+  return payload.scene;
+}
+
+export async function updateProjectCostumeScene(
+  projectId: string,
+  value: { id: string; sceneNo: string; sceneTitle: string }
+): Promise<ProjectCostumeScene> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value)
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { scene?: ProjectCostumeScene };
+  if (!response.ok || !payload.scene) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 씬을 수정하지 못했습니다.");
+  }
+  return payload.scene;
+}
+
+export async function deleteProjectCostumeScene(projectId: string, id: string) {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/costume-scenes?id=${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  const payload = (await response.json().catch(() => ({}))) as ApiError;
+  if (!response.ok) throw new Error(payload.error || "의상 씬을 삭제하지 못했습니다.");
+}
+
 export async function saveProjectCostume(
   projectId: string,
   value: {
     id?: string;
-    characterName: string;
-    costumeName: string;
-    description: string;
-    memo: string;
+    costumeSceneId: string;
+    actorRole: string;
+    actorName: string;
+    costumeContent: string;
+    provider: string;
+    hair: string;
     sortOrder: number;
     keepImagePaths: string[];
     files: File[];
@@ -119,10 +172,12 @@ export async function saveProjectCostume(
 ): Promise<ProjectCostume> {
   const formData = new FormData();
   if (value.id) formData.set("id", value.id);
-  formData.set("characterName", value.characterName);
-  formData.set("costumeName", value.costumeName);
-  formData.set("description", value.description);
-  formData.set("memo", value.memo);
+  formData.set("costumeSceneId", value.costumeSceneId);
+  formData.set("actorRole", value.actorRole);
+  formData.set("actorName", value.actorName);
+  formData.set("costumeContent", value.costumeContent);
+  formData.set("provider", value.provider);
+  formData.set("hair", value.hair);
   formData.set("sortOrder", String(value.sortOrder));
   formData.set("keepImagePaths", JSON.stringify(value.keepImagePaths));
   value.files.forEach((file) => formData.append("files", file));
