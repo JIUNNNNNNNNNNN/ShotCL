@@ -153,10 +153,60 @@ export type Shot = {
   orderIndex: number;
   status: ShotStatus;
   storyboardImageUrl: string | null;
+  overheadImageUrl?: string | null;
   overheadDiagram: ShotOverheadDiagram | null;
   sourceFileId: string | null;
   sourcePage: number | null;
   sourceRow: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectReferenceAssetType = "scenario" | "storyboard" | "overhead";
+
+export type ProjectReferenceCrop = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  ratio: number | null;
+};
+
+export type ProjectReferenceAsset = {
+  id: string;
+  projectId: string;
+  assetType: ProjectReferenceAssetType;
+  filename: string;
+  storagePath: string;
+  publicUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+  dailyPlanId: string | null;
+  sceneNo: string | null;
+  cutNo: string | null;
+  shotRef: string | null;
+  groupId: string | null;
+  crop: ProjectReferenceCrop;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CostumeImage = {
+  path: string;
+  url: string;
+  filename: string;
+};
+
+export type ProjectCostume = {
+  id: string;
+  projectId: string;
+  characterName: string;
+  costumeName: string;
+  description: string;
+  memo: string;
+  images: CostumeImage[];
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 };

@@ -4,13 +4,16 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, usePathname, useSearchParams } from "next/navigation";
 import {
+  BookOpen,
   ChevronLeft,
   FilePenLine,
   Files,
+  Images,
   ListChecks,
   PanelRight,
   Printer,
   Save,
+  Shirt,
   Table2,
   Users,
   X
@@ -158,11 +161,9 @@ const PanelContent = memo(function PanelContent({
       <div className="max-h-[calc(100dvh-10rem)] overflow-y-auto p-3">
         {progressOnly ? (
           <nav className="grid gap-2" aria-label="진행도 페이지 이동">
-            {pageType === "sceneList" ? (
-              <SideActionLink href={projectBasePath} icon={ListChecks}>진행도</SideActionLink>
-            ) : (
-              <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
-            )}
+            {pageType !== "progress" ? <SideActionLink href={projectBasePath} icon={ListChecks}>진행도</SideActionLink> : null}
+            {pageType !== "sceneList" ? <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink> : null}
+            <ReferencePageLinks pageType={pageType} projectBasePath={projectBasePath} />
           </nav>
         ) : (
           <KeyStaffPageActions
@@ -184,6 +185,9 @@ type ProjectPageType =
   | "staffList"
   | "sceneList"
   | "basicInfo"
+  | "scenario"
+  | "costumes"
+  | "storyboardOverhead"
   | "other";
 
 function KeyStaffPageActions({
@@ -275,7 +279,34 @@ function KeyStaffPageActions({
         </>
       ) : null}
 
+      {pageType === "scenario" || pageType === "costumes" || pageType === "storyboardOverhead" ? (
+        <>
+          <SideActionLink href={`${projectBasePath}/basic-info`} icon={FilePenLine}>기본정보</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink>
+          <SideActionLink href={`${projectBasePath}/daily-plans`} icon={Files}>일촬표</SideActionLink>
+          <SideActionLink href={progressPath} icon={ListChecks}>진행도</SideActionLink>
+        </>
+      ) : null}
+
+      <ReferencePageLinks pageType={pageType} projectBasePath={projectBasePath} />
     </nav>
+  );
+}
+
+function ReferencePageLinks({
+  pageType,
+  projectBasePath
+}: {
+  pageType: ProjectPageType;
+  projectBasePath: string;
+}) {
+  return (
+    <>
+      {pageType !== "scenario" ? <SideActionLink href={`${projectBasePath}/scenario`} icon={BookOpen}>시나리오</SideActionLink> : null}
+      {pageType !== "costumes" ? <SideActionLink href={`${projectBasePath}/costumes`} icon={Shirt}>의상</SideActionLink> : null}
+      {pageType !== "storyboardOverhead" ? <SideActionLink href={`${projectBasePath}/storyboard-overhead`} icon={Images}>부감도&콘티</SideActionLink> : null}
+    </>
   );
 }
 
@@ -325,6 +356,9 @@ function getProjectPageType(pathname: string, projectBasePath: string): ProjectP
   if (pathname === `${projectBasePath}/basic-info`) return "basicInfo";
   if (pathname === `${projectBasePath}/staff-list`) return "staffList";
   if (pathname === `${projectBasePath}/scene-list`) return "sceneList";
+  if (pathname === `${projectBasePath}/scenario`) return "scenario";
+  if (pathname === `${projectBasePath}/costumes`) return "costumes";
+  if (pathname === `${projectBasePath}/storyboard-overhead`) return "storyboardOverhead";
   if (pathname === `${projectBasePath}/daily-plans`) return "dailyPlanList";
   if (new RegExp(`^${escapeRegExp(projectBasePath)}/daily-plans/(new|[^/]+)$`).test(pathname)) return "dailyPlan";
   return "other";

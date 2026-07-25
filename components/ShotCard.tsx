@@ -29,7 +29,8 @@ export const ShotCard = memo(function ShotCard({
 }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
-  const hasOverhead = hasShotOverheadContent(shot.overheadDiagram);
+  const hasOverheadDiagram = hasShotOverheadContent(shot.overheadDiagram);
+  const hasOverhead = Boolean(shot.overheadImageUrl || hasOverheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
   const hasMedia = Boolean(shot.storyboardImageUrl || hasOverhead);
   const displayText = getShotDisplayText(shot);
@@ -88,7 +89,26 @@ export const ShotCard = memo(function ShotCard({
                 />
               </button>
             ) : null}
-            {hasOverhead && shot.overheadDiagram ? (
+            {shot.overheadImageUrl ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onImagePreview(shot.overheadImageUrl as string, `${displayText || shot.title} 부감도`);
+                }}
+                data-no-drag="true"
+                className="h-full w-full max-w-full min-w-0 overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                title="업로드 부감도 크게 보기"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={shot.overheadImageUrl}
+                  alt={`${displayText || shot.title} 부감도`}
+                  draggable={false}
+                  className="block h-full max-h-full w-full max-w-full select-none rounded-none object-contain [-webkit-user-drag:none]"
+                />
+              </button>
+            ) : hasOverheadDiagram && shot.overheadDiagram ? (
               <button
                 type="button"
                 onClick={(event) => {
@@ -97,7 +117,7 @@ export const ShotCard = memo(function ShotCard({
                 }}
                 data-no-drag="true"
                 className="h-full w-full max-w-full min-w-0 overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
-                title={progressOnly ? "부감도 보기" : "부감도 편집"}
+                title="부감도&콘티 페이지로 이동"
               >
                 <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
               </button>
@@ -121,7 +141,7 @@ export const ShotCard = memo(function ShotCard({
               "ml-auto inline-flex min-h-7 shrink-0 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
               hasOverhead ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
             )}
-            title={progressOnly ? "부감도 보기" : hasOverhead ? "부감도 편집" : "부감도 만들기"}
+            title={progressOnly ? "부감도&콘티 보기" : "부감도&콘티에서 수정"}
           >
             <Map className="h-3.5 w-3.5" aria-hidden />
             부감도

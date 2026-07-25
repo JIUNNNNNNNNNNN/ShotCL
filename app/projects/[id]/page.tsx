@@ -1,9 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
@@ -14,21 +14,18 @@ import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
-import { loadShotOverheadDiagram, loadShotOverheadDiagrams, saveShotOverheadDiagram } from "@/lib/data/shotDiagrams";
+import { loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
+import { loadShotOverheadImageUrls } from "@/lib/data/projectReferenceAssets";
 import { listDailyPlans, updateDailyPlanScheduleItem, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { saveScheduleImage, saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotOverheadDiagram, ShotStatus } from "@/lib/types";
+import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
 const ShotEditorModal = dynamic(
   () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
-  { ssr: false, loading: ModalLoadingFallback }
-);
-const ShotOverheadEditor = dynamic(
-  () => import("@/components/ShotOverheadEditor").then((module) => module.ShotOverheadEditor),
   { ssr: false, loading: ModalLoadingFallback }
 );
 const ImagePreviewModal = dynamic(
@@ -111,6 +108,7 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 export default function ProjectDetailPage() {
   const { role } = useProjectAccess();
   const progressOnly = role === "progress";
+  const router = useRouter();
   const projectId = useProjectId();
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
@@ -124,9 +122,6 @@ export default function ProjectDetailPage() {
   const [successMessage, setSuccessMessage] = useState("");
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
-  const [overheadShot, setOverheadShot] = useState<Shot | null>(null);
-  const [overheadLoadingShotId, setOverheadLoadingShotId] = useState<string | null>(null);
-  const overheadLoadingShotIdRef = useRef<string | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
@@ -149,10 +144,14 @@ export default function ProjectDetailPage() {
       let shotsWithDiagrams = selectedShots;
       if (selectedShots.length > 0) {
         try {
-          const diagrams = await loadShotOverheadDiagrams(selectedShots);
+          const [diagrams, overheadImages] = await Promise.all([
+            loadShotOverheadDiagrams(selectedShots),
+            loadShotOverheadImageUrls(selectedShots)
+          ]);
           shotsWithDiagrams = selectedShots.map((shot) => ({
             ...shot,
-            overheadDiagram: diagrams.get(shot.id) ?? null
+            overheadDiagram: diagrams.get(shot.id) ?? null,
+            overheadImageUrl: overheadImages.get(shot.id) ?? null
           }));
         } catch {
           // 부감도 미리보기 실패가 컷 진행표 자체를 막지 않도록 카드 데이터는 그대로 표시합니다.
@@ -178,7 +177,8 @@ export default function ProjectDetailPage() {
       const refreshedShots = await listShots(projectId, dailyPlanId);
       setShots((current) => refreshedShots.map((shot) => ({
         ...shot,
-        overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null
+        overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null,
+        overheadImageUrl: current.find((item) => item.id === shot.id)?.overheadImageUrl ?? null
       })));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
@@ -338,56 +338,25 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleSaveOverhead(diagram: ShotOverheadDiagram) {
-    if (!projectId || !overheadShot || progressOnly) return;
-
-    setIsSaving(true);
-    setErrorMessage("");
-    setSuccessMessage("");
-
-    try {
-      const savedDiagram = await saveShotOverheadDiagram(overheadShot, diagram);
-      const updatedShot = { ...overheadShot, overheadDiagram: savedDiagram };
-      setShots((current) => current.map((shot) => shot.id === updatedShot.id ? updatedShot : shot));
-      setOverheadShot(null);
-      setSuccessMessage("컷 부감도를 저장했습니다.");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "컷 부감도를 저장하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  const handleOpenOverhead = useCallback(async (shot: Shot) => {
-    if (overheadLoadingShotIdRef.current) return;
-    overheadLoadingShotIdRef.current = shot.id;
-    setOverheadLoadingShotId(shot.id);
-    setErrorMessage("");
-
-    try {
-      const diagram = await loadShotOverheadDiagram(shot);
-      const loadedShot = { ...shot, overheadDiagram: diagram };
-      setShots((current) => current.map((item) => item.id === shot.id ? loadedShot : item));
-      setOverheadShot(loadedShot);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "컷 부감도를 불러오지 못했습니다.");
-    } finally {
-      overheadLoadingShotIdRef.current = null;
-      setOverheadLoadingShotId(null);
-    }
-  }, []);
+  const handleOpenOverhead = useCallback((shot: Shot) => {
+    const plan = shot.dailyPlanId || dailyPlanId;
+    const params = new URLSearchParams();
+    if (plan) params.set("dailyPlanId", plan);
+    params.set("shotRef", shot.id);
+    const query = `?${params.toString()}`;
+    router.push(`/projects/${encodeURIComponent(projectId)}/storyboard-overhead${query}`);
+  }, [dailyPlanId, projectId, router]);
 
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
       onOpen={setEditingShot}
       onOpenOverhead={handleOpenOverhead}
-      isOverheadLoading={overheadLoadingShotId === shot.id}
       onImagePreview={handleImagePreview}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
     />
-  ), [handleImagePreview, handleOpenOverhead, handleStatusChange, overheadLoadingShotId, progressOnly]);
+  ), [handleImagePreview, handleOpenOverhead, handleStatusChange, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -588,16 +557,6 @@ export default function ProjectDetailPage() {
           isSaving={isSaving}
           onClose={() => setEditingSchedule(null)}
           onSave={handleSaveSchedule}
-        />
-      ) : null}
-
-      {overheadShot ? (
-        <ShotOverheadEditor
-          shot={overheadShot}
-          readOnly={progressOnly}
-          isSaving={isSaving}
-          onClose={() => setOverheadShot(null)}
-          onSave={handleSaveOverhead}
         />
       ) : null}
 
