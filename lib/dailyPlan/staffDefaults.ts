@@ -60,7 +60,7 @@ function buildActorDefaults(
       .map((member) => ({
         id: `staff_actor_${member.id}`,
         name: member.name.trim(),
-        role: "",
+        role: member.role.trim(),
         contact: member.phone,
         callTime: "",
         callLocation: member.location.trim(),
@@ -95,7 +95,7 @@ function buildTeamDefaults(members: ProjectStaffMember[]): TeamCallSheetRow[] {
     .map((member) => ({
       id: `project_staff_${member.id}`,
       team: normalizeStaffDepartment(member.department) || "미분류",
-      name: member.name.trim(),
+      name: [member.role.trim(), member.name.trim()].filter(Boolean).join(" · "),
       total: "1",
       contact: member.phone,
       callTime: "",
@@ -130,6 +130,7 @@ function hasMeaningfulTeams(rows: TeamCallSheetRow[]) {
 function hasProjectStaffContent(member: ProjectStaffMember) {
   return Boolean(
     normalizeStaffDepartment(member.department)
+    || member.role.trim()
     || member.name.trim()
     || member.phone.trim()
     || member.location.trim()

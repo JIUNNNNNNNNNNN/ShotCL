@@ -2,6 +2,7 @@ import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { normalizeStaffDepartment, sortStaffMembers } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
+import { decodeProjectStaffNotes } from "@/lib/staffRoleMetadata";
 import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 type StaffListPayload = {
@@ -27,6 +28,7 @@ export function createBlankProjectStaffMember(
     id: createUuid(),
     projectId,
     department: normalizeStaffDepartment(department),
+    role: "",
     name: "",
     phone: "",
     location: "",
@@ -123,9 +125,9 @@ function listLocalStaffMembers(projectId: string): ProjectStaffListResult {
   }
 
   return {
-    members: sortStaffMembers(
-      buckets.projectStaffMembers.filter((member) => member.projectId === projectId)
-    ),
+    members: sortStaffMembers(buckets.projectStaffMembers
+      .filter((member) => member.projectId === projectId)
+      .map((member, index) => normalizeMember(member, projectId, index))),
     departments: sortDepartments(
       buckets.projectStaffDepartments.filter((department) => department.projectId === projectId)
     ),
@@ -174,6 +176,7 @@ function normalizeMember(
     ...member,
     projectId,
     department: normalizeStaffDepartment(member.department),
+    role: String(member.role ?? "").trim().slice(0, 100),
     name: member.name.slice(0, 100),
     phone: formatKoreanPhoneNumber(member.phone),
     location: member.location.slice(0, 120),
@@ -184,14 +187,16 @@ function normalizeMember(
 }
 
 function staffMemberFromRow(row: Record<string, unknown>): ProjectStaffMember {
+  const decodedNotes = decodeProjectStaffNotes(row.notes);
   return {
     id: String(row.id),
     projectId: String(row.project_id),
     department: normalizeStaffDepartment(row.department),
+    role: String(row.role ?? decodedNotes.role),
     name: String(row.name ?? ""),
     phone: formatKoreanPhoneNumber(String(row.phone ?? "")),
     location: String(row.location ?? ""),
-    notes: String(row.notes ?? ""),
+    notes: row.role === undefined ? decodedNotes.notes : String(row.notes ?? ""),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")

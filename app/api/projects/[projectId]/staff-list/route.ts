@@ -3,11 +3,16 @@ import { normalizeStaffDepartment } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import {
+  decodeProjectStaffNotes,
+  encodeProjectStaffNotes
+} from "@/lib/staffRoleMetadata";
 import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 type StaffMemberInput = {
   id?: unknown;
   department?: unknown;
+  role?: unknown;
   name?: unknown;
   phone?: unknown;
   location?: unknown;
@@ -44,7 +49,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     if (error) throw error;
     if (departmentError) throw departmentError;
     return NextResponse.json({
-      members: rows ?? [],
+      members: (rows ?? []).map(staffMemberResponseRow),
       departments: departmentRows ?? [],
       warnings: []
     });
@@ -146,7 +151,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       name: member.name,
       phone: member.phone,
       location: member.location,
-      notes: member.notes,
+      notes: encodeProjectStaffNotes(member.role, member.notes),
       sort_order: index + 1
     }));
     if (rows.length > 0) {
@@ -194,7 +199,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     if (savedDepartmentError) throw savedDepartmentError;
 
     return NextResponse.json({
-      members: savedRows ?? [],
+      members: (savedRows ?? []).map(staffMemberResponseRow),
       departments: savedDepartmentRows ?? [],
       warnings: []
     });
@@ -231,6 +236,7 @@ function normalizeMemberInput(
     id,
     projectId,
     department: normalizeStaffDepartment(member.department),
+    role: normalizeText(member.role, 100).trim(),
     name: normalizeText(member.name, 100),
     phone: formatKoreanPhoneNumber(normalizeText(member.phone, 30)),
     location: normalizeText(member.location, 120),
@@ -238,6 +244,15 @@ function normalizeMemberInput(
     sortOrder: index + 1,
     createdAt: now,
     updatedAt: now
+  };
+}
+
+function staffMemberResponseRow(row: Record<string, unknown>) {
+  const decodedNotes = decodeProjectStaffNotes(row.notes);
+  return {
+    ...row,
+    role: decodedNotes.role,
+    notes: decodedNotes.notes
   };
 }
 

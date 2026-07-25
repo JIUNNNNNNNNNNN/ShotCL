@@ -270,6 +270,7 @@ export type ProjectStaffMember = {
   id: string;
   projectId: string;
   department: string;
+  role: string;
   name: string;
   phone: string;
   location: string;

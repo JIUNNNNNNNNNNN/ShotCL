@@ -36,8 +36,9 @@ export function normalizeStaffDepartment(value: unknown) {
   return String(value ?? "").trim().slice(0, 50);
 }
 
-export function isStaffMemberEmpty(member: Pick<ProjectStaffMember, "name" | "phone" | "location" | "notes">) {
-  return !member.name.trim()
+export function isStaffMemberEmpty(member: Pick<ProjectStaffMember, "role" | "name" | "phone" | "location" | "notes">) {
+  return !member.role.trim()
+    && !member.name.trim()
     && !member.phone.trim()
     && !member.location.trim()
     && !member.notes.trim();

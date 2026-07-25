@@ -48,7 +48,7 @@ export default function StaffListPage() {
   const editVersionRef = useRef(0);
   const pendingDepartmentSubmitRef = useRef(false);
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
-  const memberDepartmentInputRefs = useRef(new Map<string, HTMLInputElement>());
+  const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
     [departments, members]
@@ -88,7 +88,7 @@ export default function StaffListPage() {
 
   useEffect(() => {
     if (!pendingMemberFocusId) return;
-    const input = memberDepartmentInputRefs.current.get(pendingMemberFocusId);
+    const input = memberRoleInputRefs.current.get(pendingMemberFocusId);
     if (!input) return;
     input.focus();
     setPendingMemberFocusId(null);
@@ -200,16 +200,21 @@ export default function StaffListPage() {
       if (!afterMemberId) return [...current, newMember];
       const currentIndex = current.findIndex((member) => member.id === afterMemberId);
       if (currentIndex < 0) return [...current, newMember];
+      const groupMember = {
+        ...newMember,
+        department: current[currentIndex].department,
+        role: ""
+      };
       const next = [...current];
-      next.splice(currentIndex + 1, 0, newMember);
+      next.splice(currentIndex + 1, 0, groupMember);
       return next;
     });
     setPendingMemberFocusId(newMember.id);
   }, [commitMembers, projectId]);
 
-  const registerMemberDepartmentInput = useCallback((id: string, input: HTMLInputElement | null) => {
-    if (input) memberDepartmentInputRefs.current.set(id, input);
-    else memberDepartmentInputRefs.current.delete(id);
+  const registerMemberRoleInput = useCallback((id: string, input: HTMLInputElement | null) => {
+    if (input) memberRoleInputRefs.current.set(id, input);
+    else memberRoleInputRefs.current.delete(id);
   }, []);
 
   const deleteMember = useCallback((member: ProjectStaffMember) => {
@@ -375,11 +380,6 @@ export default function StaffListPage() {
       </section>
 
       <section className="mt-3 rounded-[1.5rem] border border-field-border bg-white p-2 shadow-sm">
-        <datalist id={`staff-departments-${project.id}`}>
-          {departments.map((department) => (
-            <option key={department.id} value={department.name} />
-          ))}
-        </datalist>
         {staffGroups.length > 0 ? (
           <div className="grid gap-2">
             {staffGroups.map((group) => {
@@ -408,11 +408,10 @@ export default function StaffListPage() {
                         number={displayedMemberNumbers.get(member.id) ?? index + 1}
                         departmentColorIndex={group.colorIndex}
                         showBottomBorder={index < group.members.length - 1}
-                        departmentListId={`staff-departments-${project.id}`}
                         onChange={updateMember}
                         onDelete={deleteMember}
                         onAddAfter={addMember}
-                        onDepartmentInputRef={registerMemberDepartmentInput}
+                        onRoleInputRef={registerMemberRoleInput}
                       />
                     ))}
                   </div>
@@ -441,21 +440,19 @@ const StaffMemberRow = memo(function StaffMemberRow({
   number,
   departmentColorIndex,
   showBottomBorder,
-  departmentListId,
   onChange,
   onDelete,
   onAddAfter,
-  onDepartmentInputRef
+  onRoleInputRef
 }: {
   member: ProjectStaffMember;
   number: number;
   departmentColorIndex: number | null;
   showBottomBorder: boolean;
-  departmentListId: string;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onAddAfter: (memberId: string) => void;
-  onDepartmentInputRef: (id: string, input: HTMLInputElement | null) => void;
+  onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
 
@@ -466,19 +463,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
       aria-label={`${number}번 스탭`}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
-        <span className="sr-only">{number}번 부서</span>
+        <span className="sr-only">{number}번 직책</span>
         <input
-          ref={(input) => onDepartmentInputRef(member.id, input)}
+          ref={(input) => onRoleInputRef(member.id, input)}
           className={inputClassName}
-          style={{
-            backgroundColor: departmentColor.background,
-            borderColor: departmentColor.border
-          }}
-          list={departmentListId}
-          value={member.department}
-          onChange={(event) => onChange(member.id, { department: event.target.value })}
-          placeholder="부서"
-          aria-label={`${number}번 부서`}
+          value={member.role}
+          onChange={(event) => onChange(member.id, { role: event.target.value })}
+          placeholder="직책"
+          aria-label={`${number}번 직책`}
+          maxLength={100}
         />
       </label>
       <label className="col-span-1 min-w-0 md:col-auto">
