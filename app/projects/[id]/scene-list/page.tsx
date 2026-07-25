@@ -406,14 +406,15 @@ export default function ProjectSceneListPage() {
       || target instanceof HTMLSelectElement
       || (target instanceof HTMLElement && target.isContentEditable);
     if (isTextEditor) {
-      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (event.key === "Enter") {
+        if (
+          (target instanceof HTMLTextAreaElement ||
+            (target instanceof HTMLElement && target.isContentEditable)) &&
+          (event.metaKey || event.altKey || event.shiftKey)
+        ) {
+          return;
+        }
         event.preventDefault();
-        (target as HTMLElement).blur();
-        focusCell(
-          activeRowIndex + (event.key === "ArrowUp" ? -1 : 1),
-          activeCell.column,
-          canEdit
-        );
         return;
       }
       if (event.key === "Escape") {
@@ -423,16 +424,34 @@ export default function ProjectSceneListPage() {
         return;
       }
       if (
-        event.key === "Enter" &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
       ) {
+        return;
+      }
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         event.preventDefault();
         (target as HTMLElement).blur();
         focusCell(
-          activeRowIndex + (event.shiftKey ? -1 : 1),
+          event.key === "ArrowUp"
+            ? (selectedRangeRef.current?.startIndex ?? activeRowIndex) - 1
+            : (selectedRangeRef.current?.endIndex ?? activeRowIndex) + 1,
           activeCell.column,
+          canEdit
+        );
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        (target as HTMLElement).blur();
+        focusCell(
+          activeRowIndex,
+          getAdjacentVisualColumn(
+            itemsRef.current[activeRowIndex],
+            cellColumns,
+            activeCell.column,
+            event.key === "ArrowLeft" ? -1 : 1
+          ),
           canEdit
         );
       }
@@ -513,11 +532,6 @@ export default function ProjectSceneListPage() {
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      focusCell(
-        activeRowIndex + (event.shiftKey ? -1 : 1),
-        activeCell.column,
-        canEdit
-      );
       return;
     }
     if (event.key === "Escape") {
@@ -987,7 +1001,7 @@ export default function ProjectSceneListPage() {
           role="grid"
           aria-label={`${project.name} 씬리스트`}
           onContextMenu={(event) => event.preventDefault()}
-          onKeyDown={handleGridKeyDown}
+          onKeyDownCapture={handleGridKeyDown}
           className="scene-list-landscape min-w-0 select-none [&_input]:select-text [&_textarea]:select-text"
           style={{
             WebkitUserSelect: "none",
@@ -1008,7 +1022,7 @@ export default function ProjectSceneListPage() {
             {compactLocationLayout ? (
               <SceneHeaderCell
                 label="Location"
-                description="대장소"
+                description="장소"
                 className="col-span-2 border-r border-[#bfc5bf]"
                 onLongPress={startHeaderHelpLongPress}
               />
@@ -1091,6 +1105,7 @@ export default function ProjectSceneListPage() {
                 onCellEditStart={startEditingCell}
                 onCellEditEnd={stopEditingCell}
                 onSceneLongPress={startSceneDeleteLongPress}
+                onHeaderLongPress={startHeaderHelpLongPress}
                 onCharacterNotesLongPress={startCharacterNotesLongPress}
                 onConsumeCharacterClickSuppression={consumeCharacterClickSuppression}
                 onUpdate={updateItem}
@@ -1174,6 +1189,14 @@ export default function ProjectSceneListPage() {
                   setScenarioReference(event.target.value);
                   setIsDirty(true);
                 }}
+                onKeyDown={(event) => handleMultilineEnterShortcut(
+                  event,
+                  scenarioReference,
+                  (nextValue) => {
+                    setScenarioReference(nextValue);
+                    setIsDirty(true);
+                  }
+                )}
                 rows={7}
                 aria-label="시나리오 참고"
                 className="w-full resize-y rounded-lg border border-field-border bg-white px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light"
@@ -1201,7 +1224,7 @@ export default function ProjectSceneListPage() {
   );
 }
 
-const mobileSceneGridTemplate = ".44fr .82fr .46fr .48fr 1.55fr 1.05fr 1.05fr";
+const mobileSceneGridTemplate = ".42fr .8fr .44fr .58fr 1.47fr 1.04fr 1.04fr";
 
 function MobileSceneList({
   items,
@@ -1268,6 +1291,7 @@ function MobileSceneList({
           index={index}
           actorRoles={actorRoles}
           locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+          onHeaderLongPress={onHeaderLongPress}
           onCharacterNotesLongPress={onCharacterNotesLongPress}
         />
       )) : (
@@ -1284,12 +1308,14 @@ function MobileSceneRow({
   index,
   actorRoles,
   locationStyle,
+  onHeaderLongPress,
   onCharacterNotesLongPress
 }: {
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
   locationStyle: PaletteStyle;
+  onHeaderLongPress: HeaderLongPressHandler;
   onCharacterNotesLongPress: (
     event: ReactPointerEvent<HTMLElement>,
     item: ProjectSceneItem,
@@ -1314,6 +1340,10 @@ function MobileSceneRow({
         className={mergedLocation ? "row-span-2" : ""}
         align="center"
         style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+        onLongPress={(event) => onHeaderLongPress(
+          event,
+          mergedLocation ? "장소" : "대장소"
+        )}
       >
         {item.mainLocation}
       </MobileSceneCell>
@@ -1361,6 +1391,7 @@ function MobileSceneRow({
         <MobileSceneCell
           align="center"
           style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+          onLongPress={(event) => onHeaderLongPress(event, "세부장소")}
         >
           {item.subLocation}
         </MobileSceneCell>
@@ -1385,7 +1416,11 @@ function MobileSceneHeader({
       {entries.map(([label, description]) => (
         <span
           key={label}
-          className="flex min-h-5 flex-1 touch-none select-none items-center justify-center px-0.5 py-0.5 text-center"
+          className={`flex min-h-5 flex-1 touch-none select-none items-center justify-center py-0.5 text-center ${
+            label === "Int/Ext"
+              ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
+              : "px-0.5"
+          }`}
           onPointerDown={description
             ? (event) => onLongPress(event, description)
             : undefined}
@@ -1487,6 +1522,11 @@ const CharacterNotesPopover = forwardRef<HTMLDivElement, {
         <textarea
           value={item.characterNotes}
           onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => handleMultilineEnterShortcut(
+            event,
+            item.characterNotes,
+            onChange
+          )}
           rows={5}
           maxLength={4000}
           aria-label="Characters 세부 메모"
@@ -1517,6 +1557,7 @@ const SceneTableRow = memo(function SceneTableRow({
   onCellEditStart,
   onCellEditEnd,
   onSceneLongPress,
+  onHeaderLongPress,
   onCharacterNotesLongPress,
   onConsumeCharacterClickSuppression,
   onUpdate,
@@ -1544,6 +1585,7 @@ const SceneTableRow = memo(function SceneTableRow({
     event: ReactPointerEvent<HTMLDivElement>,
     item: ProjectSceneItem
   ) => void;
+  onHeaderLongPress: HeaderLongPressHandler;
   onCharacterNotesLongPress: (
     event: ReactPointerEvent<HTMLElement>,
     item: ProjectSceneItem,
@@ -1596,7 +1638,20 @@ const SceneTableRow = memo(function SceneTableRow({
   const horizontalLocationRange = horizontallyMergedLocation
     ? getHorizontalLocationMergeRange(allItems, index, editingCell)
     : undefined;
-  const mainLocationInteraction = getCellInteraction("mainLocation", horizontalLocationRange);
+  const mainLocationInteraction = {
+    ...getCellInteraction("mainLocation", horizontalLocationRange),
+    onLongPress: (event: ReactPointerEvent<HTMLDivElement>) => onHeaderLongPress(
+      event,
+      horizontallyMergedLocation ? "장소" : "대장소"
+    )
+  };
+  const subLocationInteraction = {
+    ...getCellInteraction("subLocation"),
+    onLongPress: (event: ReactPointerEvent<HTMLDivElement>) => onHeaderLongPress(
+      event,
+      "세부장소"
+    )
+  };
   const concealMainLocation = isVisuallyMerged(mainLocationInteraction);
   const dayNightInteraction = getCellInteraction("dayNight");
   const concealDayNight = isVisuallyMerged(dayNightInteraction);
@@ -1705,7 +1760,7 @@ const SceneTableRow = memo(function SceneTableRow({
             value={item.subLocation}
             ariaLabel={`${item.sceneNo || index + 1} Scene Sub-Location`}
             canEdit={canEdit}
-            interaction={getCellInteraction("subLocation")}
+            interaction={subLocationInteraction}
             onChange={(subLocation) => onUpdate(item.id, { subLocation })}
           />
         </>
@@ -1779,7 +1834,7 @@ const SceneTableRow = memo(function SceneTableRow({
             aria-label={`${item.sceneNo || index + 1} Scene Content`}
           />
         ) : (
-          <p className="whitespace-normal break-words px-1.5 py-2 text-left font-medium leading-5 [overflow-wrap:anywhere]">
+          <p className="whitespace-pre-wrap px-1.5 py-2 text-left font-medium leading-5 [overflow-wrap:anywhere]">
             {item.sceneContent}
           </p>
         )}
@@ -1833,11 +1888,11 @@ const SceneTableRow = memo(function SceneTableRow({
             )}
             {actorIndex === 0 && item.characterNotes ? (
               <span
-                aria-label="Characters 세부 메모 있음"
+                aria-label={`Characters 세부 메모: ${item.characterNotes}`}
                 title={item.characterNotes}
-                className="pointer-events-none absolute right-0.5 top-0 text-[10px] font-black leading-none text-field-muted"
+                className="pointer-events-none absolute inset-x-0 bottom-0 block truncate px-0.5 text-[8px] font-semibold leading-3 text-field-muted"
               >
-                ···
+                {item.characterNotes}
               </span>
             ) : null}
           </SceneCellFrame>
@@ -1985,12 +2040,34 @@ function AutoGrowSceneTextarea({
       rows={1}
       value={value}
       onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => handleMultilineEnterShortcut(event, value, onChange)}
       onFocus={onFocus}
       onBlur={onBlur}
       aria-label={ariaLabel}
       className="block min-h-9 w-full min-w-0 resize-none overflow-hidden whitespace-pre-wrap border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-semibold leading-5 text-field-text outline-none [overflow-wrap:anywhere] focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary"
     />
   );
+}
+
+function handleMultilineEnterShortcut(
+  event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  value: string,
+  onChange: (value: string) => void
+) {
+  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  if (!event.metaKey && !event.altKey && !event.shiftKey) return;
+
+  const textarea = event.currentTarget;
+  const selectionStart = textarea.selectionStart ?? value.length;
+  const selectionEnd = textarea.selectionEnd ?? selectionStart;
+  const nextValue = `${value.slice(0, selectionStart)}\n${value.slice(selectionEnd)}`;
+  const nextCaretPosition = selectionStart + 1;
+  onChange(nextValue);
+  window.requestAnimationFrame(() => {
+    textarea.setSelectionRange(nextCaretPosition, nextCaretPosition);
+  });
 }
 
 function SceneCellFrame({
