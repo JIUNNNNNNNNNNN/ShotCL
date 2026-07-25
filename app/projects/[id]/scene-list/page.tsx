@@ -1861,18 +1861,28 @@ const SceneTableRow = memo(function SceneTableRow({
                 {selected && !concealActorValue ? "O" : ""}
               </span>
             )}
-            {actorIndex === 0 && item.characterNotes ? (
-              <span
-                aria-label={`Characters 세부 메모: ${item.characterNotes}`}
-                title={item.characterNotes}
-                className="pointer-events-none absolute inset-x-0 bottom-0 block truncate px-0.5 text-[8px] font-semibold leading-3 text-field-muted"
-              >
-                {item.characterNotes}
-              </span>
-            ) : null}
           </SceneCellFrame>
         );
       })}
+
+      {actorRoles.length > 0 && item.characterNotes ? (
+        <div
+          data-scene-character-note-row-id={item.id}
+          className="pointer-events-none z-20 min-w-0 self-end overflow-hidden px-0.5 pb-0.5"
+          style={{
+            gridColumn: `8 / span ${actorRoles.length}`,
+            gridRow: "1",
+          }}
+        >
+          <span
+            aria-label={`Characters 세부 메모: ${item.characterNotes}`}
+            title={item.characterNotes}
+            className="block truncate rounded-sm bg-white/90 px-1 text-[8px] font-semibold leading-3 text-field-muted"
+          >
+            {item.characterNotes}
+          </span>
+        </div>
+      ) : null}
 
       <SceneCellFrame interaction={propsInteraction} value={item.props}>
         {canEdit ? (
