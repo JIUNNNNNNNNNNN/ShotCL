@@ -44,11 +44,13 @@ export default function StaffListPage() {
   const [isDirty, setIsDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
   const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
   const editVersionRef = useRef(0);
   const pendingDepartmentSubmitRef = useRef(false);
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
+  const notesSummaryRef = useRef<HTMLDivElement | null>(null);
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
     [departments, members]
@@ -93,6 +95,31 @@ export default function StaffListPage() {
     input.focus();
     setPendingMemberFocusId(null);
   }, [members, pendingMemberFocusId]);
+
+  useEffect(() => {
+    if (!isNotesSummaryOpen) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && notesSummaryRef.current?.contains(target)) return;
+      setIsNotesSummaryOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsNotesSummaryOpen(false);
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isNotesSummaryOpen]);
+
+  useEffect(() => {
+    if (notesSummary.items.length === 0) setIsNotesSummaryOpen(false);
+  }, [notesSummary.items.length]);
 
   const save = useCallback(async (
     sourceMembers: ProjectStaffMember[],
@@ -288,7 +315,7 @@ export default function StaffListPage() {
       ) : null}
 
       <section className="mt-3 rounded-2xl border border-field-border bg-white px-2.5 py-2 shadow-sm">
-        <div className="grid h-8 grid-cols-2 items-center gap-2">
+        <div className="grid h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
           <button
             type="button"
             onClick={() => setIsDepartmentsOpen((current) => !current)}
@@ -302,16 +329,48 @@ export default function StaffListPage() {
               aria-hidden
             />
           </button>
-          <div
-            className="flex h-8 min-w-0 items-center gap-1.5 rounded-xl bg-field-soft/60 px-2 text-[11px] font-bold text-field-muted"
-            title={notesSummary.fullText || undefined}
-            aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
-          >
-            {notesSummary.displayText ? (
-              <>
-                <span className="shrink-0 text-field-primary">특이사항</span>
-                <span className="truncate">{notesSummary.displayText}</span>
-              </>
+          <div ref={notesSummaryRef} className="relative h-8 min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (notesSummary.items.length > 0) {
+                  setIsNotesSummaryOpen((current) => !current);
+                }
+              }}
+              className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-xl bg-field-soft/60 px-2 text-left text-[11px] font-bold text-field-muted transition hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/30"
+              aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
+              aria-expanded={notesSummary.items.length > 0 ? isNotesSummaryOpen : undefined}
+              aria-controls={notesSummary.items.length > 0 ? "staff-notes-summary-popover" : undefined}
+            >
+              {notesSummary.displayText ? (
+                <>
+                  <span className="shrink-0 text-field-primary">특이사항</span>
+                  <span className="truncate">{notesSummary.displayText}</span>
+                  <ChevronDown
+                    className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${isNotesSummaryOpen ? "rotate-180" : ""}`}
+                    aria-hidden
+                  />
+                </>
+              ) : null}
+            </button>
+            {isNotesSummaryOpen ? (
+              <div
+                id="staff-notes-summary-popover"
+                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-field-border bg-white p-2.5 text-left shadow-lg"
+                role="dialog"
+                aria-label="특이사항 전체보기"
+              >
+                <ul className="grid gap-1.5">
+                  {notesSummary.items.map((item) => (
+                    <li
+                      key={item.id}
+                      className="break-words rounded-lg bg-field-soft/60 px-2.5 py-2 text-xs font-bold leading-relaxed text-field-text"
+                    >
+                      {item.text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
           </div>
         </div>
@@ -395,7 +454,10 @@ export default function StaffListPage() {
                 >
                   <header
                     className="flex h-7 items-center justify-between border-b px-2.5 text-xs font-black text-field-primary"
-                    style={{ borderColor: departmentColor.border }}
+                    style={{
+                      backgroundColor: `${departmentColor.border}33`,
+                      borderColor: departmentColor.border
+                    }}
                   >
                     <span className="truncate">{group.name || "미분류"}</span>
                     <span className="shrink-0 text-[10px] text-field-muted">{group.members.length}명</span>
@@ -633,13 +695,19 @@ function buildStaffNotesSummary(members: ProjectStaffMember[]) {
   const items = members.flatMap((member) => {
     const notes = member.notes.trim().replace(/\s+/g, " ");
     if (!notes) return [];
-    const owner = member.name.trim() || normalizeDepartmentName(member.department) || "이름 없음";
-    return [`${owner}: ${notes}`];
+    const owner = member.name.trim();
+    return [{
+      id: member.id,
+      text: owner ? `${owner}: ${notes}` : notes
+    }];
   });
 
-  if (items.length === 0) return { displayText: "", fullText: "" };
+  if (items.length === 0) return { displayText: "", fullText: "", items };
+  const visibleItems = items.slice(0, 2).map((item) => item.text).join(" / ");
+  const remainingCount = items.length - 2;
   return {
-    displayText: items.length === 1 ? items[0] : `${items[0]} 외 ${items.length - 1}건`,
-    fullText: items.join(" / ")
+    displayText: remainingCount > 0 ? `${visibleItems} 외 ${remainingCount}건` : visibleItems,
+    fullText: items.map((item) => item.text).join(" / "),
+    items
   };
 }
