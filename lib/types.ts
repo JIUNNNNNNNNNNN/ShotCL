@@ -196,6 +196,7 @@ export type CostumeImage = {
   path: string;
   url: string;
   filename: string;
+  fieldType: "costume" | "hair";
 };
 
 export type ProjectCostume = {

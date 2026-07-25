@@ -9,7 +9,8 @@ import {
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
-type CostumeImage = { path: string; url: string; filename: string };
+type CostumeImageField = "costume" | "hair";
+type CostumeImage = { path: string; url: string; filename: string; fieldType: CostumeImageField };
 
 const STORAGE_BUCKET = "storyboards";
 const SELECT_COLUMNS = "id,project_id,costume_scene_id,scene_no,actor_role,actor_name,costume_content,provider,hair,image_paths,sort_order,created_at,updated_at";
@@ -45,8 +46,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const formData = await request.formData();
     const id = cleanText(formData.get("id"), 100);
+    const clientItemId = safePathSegment(cleanText(formData.get("clientItemId"), 160)) || "new";
     let costumeSceneId = cleanText(formData.get("costumeSceneId"), 100);
-    const files = formData.getAll("files").filter((file): file is File => file instanceof File && file.size > 0);
+    const costumeFiles = readFiles(formData, "costumeFiles");
+    const hairFiles = readFiles(formData, "hairFiles");
+    const files = [...costumeFiles, ...hairFiles];
     if (files.some((file) => !isImage(file) || file.size > 20 * 1024 * 1024)) {
       return NextResponse.json({ error: "이미지는 장당 20MB 이하의 이미지 파일만 가능합니다." }, { status: 415 });
     }
@@ -79,22 +83,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "의상 씬을 찾을 수 없습니다." }, { status: 404 });
     }
     sceneNo = String(scene.scene_no ?? "");
-    const keepPaths = parseStringArray(formData.get("keepImagePaths"));
+    const keepCostumePaths = parseStringArray(formData.get("keepCostumeImagePaths"));
+    const keepHairPaths = parseStringArray(formData.get("keepHairImagePaths"));
+    const keepPaths = new Set([...keepCostumePaths, ...keepHairPaths]);
     const keptImages = id
-      ? existingImages.filter((image) => keepPaths.includes(image.path))
+      ? existingImages.filter((image) => keepPaths.has(image.path))
       : [];
     const newImages: CostumeImage[] = [];
-    for (const file of files) {
-      const path = `project-assets/${projectId}/costumes/${costumeSceneId}/${id || "new"}/${Date.now()}-${randomUUID()}-${safeName(file.name)}`;
-      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(
-        path,
-        Buffer.from(await file.arrayBuffer()),
-        { contentType: file.type || "application/octet-stream", upsert: false }
-      );
-      if (error) throw error;
-      uploadedPaths.push(path);
-      const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
-      newImages.push({ path, url: data.publicUrl, filename: file.name.slice(0, 500) });
+    for (const [fieldType, selectedFiles] of [
+      ["costume", costumeFiles],
+      ["hair", hairFiles]
+    ] as const) {
+      for (const file of selectedFiles) {
+        const path = `projects/${projectId}/costumes/${costumeSceneId}/${id || clientItemId}/${fieldType}/${randomUUID()}-${safeName(file.name)}`;
+        const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(
+          path,
+          Buffer.from(await file.arrayBuffer()),
+          { contentType: file.type || "application/octet-stream", upsert: false }
+        );
+        if (error) throw error;
+        uploadedPaths.push(path);
+        const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+        newImages.push({ path, url: data.publicUrl, filename: file.name.slice(0, 500), fieldType });
+      }
     }
     const payload = {
       project_id: projectId,
@@ -192,6 +203,14 @@ function safeName(value: string) {
   return value.normalize("NFKD").replace(/[^\w.\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "image";
 }
 
+function safePathSegment(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+
+function readFiles(formData: FormData, key: string) {
+  return formData.getAll(key).filter((file): file is File => file instanceof File && file.size > 0);
+}
+
 function parseStringArray(value: FormDataEntryValue | null) {
   try {
     const parsed = JSON.parse(typeof value === "string" ? value : "[]");
@@ -209,7 +228,12 @@ function normalizeImages(value: unknown): CostumeImage[] {
     const path = String(source.path ?? "");
     const url = String(source.url ?? "");
     if (!path || !url) return [];
-    return [{ path, url, filename: String(source.filename ?? "") }];
+    return [{
+      path,
+      url,
+      filename: String(source.filename ?? ""),
+      fieldType: source.fieldType === "hair" ? "hair" : "costume"
+    }];
   });
 }
 

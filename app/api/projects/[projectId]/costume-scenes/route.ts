@@ -273,13 +273,20 @@ function cleanText(value: unknown, max: number) {
 }
 
 function normalizeImages(value: unknown) {
-  if (!Array.isArray(value)) return [] as Array<{ path: string; url: string; filename: string }>;
+  if (!Array.isArray(value)) {
+    return [] as Array<{ path: string; url: string; filename: string; fieldType: "costume" | "hair" }>;
+  }
   return value.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const source = item as Record<string, unknown>;
     const path = String(source.path ?? "");
     const url = String(source.url ?? "");
-    return path && url ? [{ path, url, filename: String(source.filename ?? "") }] : [];
+    return path && url ? [{
+      path,
+      url,
+      filename: String(source.filename ?? ""),
+      fieldType: source.fieldType === "hair" ? "hair" as const : "costume" as const
+    }] : [];
   });
 }
 

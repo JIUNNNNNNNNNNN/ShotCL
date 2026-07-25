@@ -33,9 +33,14 @@ type CostumeDraft = {
   costumeContent: string;
   provider: string;
   hair: string;
-  existingImages: CostumeImage[];
-  files: File[];
+  costumeImages: CostumeImage[];
+  hairImages: CostumeImage[];
+  costumeFiles: PendingFile[];
+  hairFiles: PendingFile[];
 };
+
+type PendingFile = { id: string; file: File };
+type ImageFieldType = "costume" | "hair";
 
 type SceneDraft = {
   id?: string;
@@ -252,11 +257,17 @@ export default function ProjectCostumesPage() {
     markDirty("씬 삭제가 대기 중입니다. 전체 저장을 눌러 반영해주세요.");
   }
 
-  function handleFiles(id: string, event: ChangeEvent<HTMLInputElement>) {
+  function handleFiles(id: string, fieldType: ImageFieldType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     const current = drafts[id];
-    if (current) updateDraft(id, { files: [...current.files, ...files] });
+    if (!current || files.length === 0) return;
+    const pendingFiles = files.map((file) => ({ id: crypto.randomUUID(), file }));
+    if (fieldType === "hair") {
+      updateDraft(id, { hairFiles: [...current.hairFiles, ...pendingFiles] });
+    } else {
+      updateDraft(id, { costumeFiles: [...current.costumeFiles, ...pendingFiles] });
+    }
   }
 
   function handleActorAdd(event: FormEvent<HTMLFormElement>) {
@@ -364,6 +375,7 @@ export default function ProjectCostumesPage() {
           if (!draft) continue;
           const savedItem = await saveProjectCostume(projectId, {
             id: isTemporaryId(item.id) ? undefined : item.id,
+            clientItemId: item.id,
             costumeSceneId: savedScene.id,
             actorRole: draft.actorRole,
             actorName: draft.actorName,
@@ -371,8 +383,10 @@ export default function ProjectCostumesPage() {
             provider: draft.provider,
             hair: draft.hair,
             sortOrder: item.sortOrder,
-            keepImagePaths: draft.existingImages.map((image) => image.path),
-            files: draft.files
+            keepCostumeImagePaths: draft.costumeImages.map((image) => image.path),
+            keepHairImagePaths: draft.hairImages.map((image) => image.path),
+            costumeFiles: draft.costumeFiles.map(({ file }) => file),
+            hairFiles: draft.hairFiles.map(({ file }) => file)
           });
           if (isTemporaryId(item.id)) {
             setScenes((current) => current.map((entry) => (
@@ -470,7 +484,11 @@ export default function ProjectCostumesPage() {
               const expanded = expandedSceneIds.has(scene.id);
               const imageCount = scene.items.reduce((total, item) => {
                 const draft = drafts[item.id];
-                return total + (draft?.existingImages.length ?? item.images.length) + (draft?.files.length ?? 0);
+                return total
+                  + (draft?.costumeImages.length ?? item.images.filter((image) => image.fieldType === "costume").length)
+                  + (draft?.hairImages.length ?? item.images.filter((image) => image.fieldType === "hair").length)
+                  + (draft?.costumeFiles.length ?? 0)
+                  + (draft?.hairFiles.length ?? 0);
               }, 0);
               return (
                 <section key={scene.id} className="overflow-hidden rounded-xl border border-field-border bg-white">
@@ -502,12 +520,11 @@ export default function ProjectCostumesPage() {
                   {expanded ? (
                     <div className="border-t border-field-border p-1.5 sm:p-2">
                       {scene.items.length > 0 ? (
-                        <div className="mb-1 hidden grid-cols-[minmax(90px,.7fr)_minmax(105px,.8fr)_80px_minmax(90px,.7fr)_minmax(270px,1.8fr)_40px] gap-1.5 px-2 text-[10px] font-black text-field-muted sm:grid">
+                        <div className="mb-1 hidden grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] gap-1.5 px-2 text-[10px] font-black text-field-muted sm:grid">
                           <span>배역</span>
-                          <span>내용</span>
                           <span>제공자</span>
+                          <span>의상</span>
                           <span>헤어</span>
-                          <span>이미지</span>
                           <span className="text-center">삭제</span>
                         </div>
                       ) : null}
@@ -521,7 +538,8 @@ export default function ProjectCostumesPage() {
                             draft={drafts[item.id] ?? toDraft(item)}
                             canEdit={canEdit}
                             onChange={(patch) => updateDraft(item.id, patch)}
-                            onFiles={(event) => handleFiles(item.id, event)}
+                            onCostumeFiles={(event) => handleFiles(item.id, "costume", event)}
+                            onHairFiles={(event) => handleFiles(item.id, "hair", event)}
                             onDelete={() => handleItemDelete(scene, item)}
                             onPreview={(image) => setPreview({
                               url: image.url,
@@ -628,7 +646,8 @@ function CostumeItemCard({
   draft,
   canEdit,
   onChange,
-  onFiles,
+  onCostumeFiles,
+  onHairFiles,
   onDelete,
   onPreview,
   onPreviewUrl
@@ -637,7 +656,8 @@ function CostumeItemCard({
   draft: CostumeDraft;
   canEdit: boolean;
   onChange: (patch: Partial<CostumeDraft>) => void;
-  onFiles: (event: ChangeEvent<HTMLInputElement>) => void;
+  onCostumeFiles: (event: ChangeEvent<HTMLInputElement>) => void;
+  onHairFiles: (event: ChangeEvent<HTMLInputElement>) => void;
   onDelete: () => void;
   onPreview: (image: CostumeImage) => void;
   onPreviewUrl: (url: string) => void;
@@ -645,22 +665,33 @@ function CostumeItemCard({
   const customProvider = draft.provider && !providerOptions.includes(draft.provider);
   if (!canEdit) {
     return (
-      <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_minmax(105px,.8fr)_80px_minmax(90px,.7fr)_minmax(270px,1.8fr)_40px] sm:items-center sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
+      <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
         <div className="col-span-2 min-w-0 border-b border-field-border pb-1 sm:col-span-1 sm:border-0 sm:pb-0">
           <h3 className="break-words text-xs font-black leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
           {item.actorName ? <p className="break-words text-[10px] font-bold leading-4 text-field-muted">{item.actorName}</p> : null}
         </div>
-        <ReadOnlyValue label="내용" value={item.costumeContent} />
         <ReadOnlyValue label="제공자" value={item.provider} />
-        <ReadOnlyValue label="헤어" value={item.hair} />
-        <ImageStrip images={item.images} title={item.actorRole || item.actorName} onPreview={onPreview} />
+        <ReadOnlyMediaField
+          label="의상"
+          value={item.costumeContent}
+          images={draft.costumeImages}
+          title={item.actorRole || item.actorName}
+          onPreview={onPreview}
+        />
+        <ReadOnlyMediaField
+          label="헤어"
+          value={item.hair}
+          images={draft.hairImages}
+          title={item.actorRole || item.actorName}
+          onPreview={onPreview}
+        />
         <span className="hidden text-center text-[10px] font-bold text-field-muted sm:block">보기</span>
       </article>
     );
   }
 
   return (
-    <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_minmax(105px,.8fr)_80px_minmax(90px,.7fr)_minmax(270px,1.8fr)_40px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
+    <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
       <div className="col-span-2 grid grid-cols-2 gap-1 sm:col-span-1 sm:grid-cols-1">
         <CompactField label="배역">
           <input
@@ -679,15 +710,6 @@ function CostumeItemCard({
           />
         </CompactField>
       </div>
-
-      <CompactField label="내용">
-        <input
-          value={draft.costumeContent}
-          onChange={(event) => onChange({ costumeContent: event.target.value })}
-          placeholder="교복, 정장"
-          className={compactInputClass}
-        />
-      </CompactField>
 
       <CompactField label="제공자">
         <div className="grid gap-1">
@@ -711,49 +733,35 @@ function CostumeItemCard({
         </div>
       </CompactField>
 
-      <CompactField label="헤어">
-        <input
-          value={draft.hair}
-          onChange={(event) => onChange({ hair: event.target.value })}
-          placeholder="묶음, 모자"
-          className={compactInputClass}
-        />
-      </CompactField>
+      <EditableMediaField
+        label="의상"
+        value={draft.costumeContent}
+        placeholder="교복, 정장"
+        images={draft.costumeImages}
+        pendingFiles={draft.costumeFiles}
+        title={draft.actorRole || draft.actorName}
+        onValueChange={(value) => onChange({ costumeContent: value })}
+        onImagesChange={(images) => onChange({ costumeImages: images })}
+        onPendingFilesChange={(files) => onChange({ costumeFiles: files })}
+        onFiles={onCostumeFiles}
+        onPreview={onPreview}
+        onPreviewUrl={onPreviewUrl}
+      />
 
-      <div className="col-span-2 min-w-0 sm:col-span-1">
-        <span className="mb-0.5 block text-[9px] font-black leading-4 text-field-muted sm:sr-only">이미지</span>
-        <div className="flex max-w-full items-start gap-1.5 overflow-x-auto pb-1">
-          {draft.existingImages.map((image) => (
-            <div key={image.path} className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg border border-field-border bg-field-soft">
-              <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image.url} alt={`${draft.actorRole || draft.actorName} 의상`} className="h-full w-full object-contain" />
-              </button>
-              <button
-                type="button"
-                onClick={() => onChange({ existingImages: draft.existingImages.filter((item) => item.path !== image.path) })}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
-                aria-label="저장 시 이미지 삭제"
-              >
-                <X className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-          ))}
-          {draft.files.map((file, index) => (
-            <PendingImagePreview
-              key={`${file.name}-${file.lastModified}-${index}`}
-              file={file}
-              title={draft.actorRole || draft.actorName}
-              onPreview={onPreviewUrl}
-              onRemove={() => onChange({ files: draft.files.filter((_, fileIndex) => fileIndex !== index) })}
-            />
-          ))}
-          <label className="grid min-h-9 w-20 shrink-0 cursor-pointer place-items-center rounded-md border border-dashed border-field-secondary bg-field-light px-1.5 py-1 text-[10px] font-black text-field-primary">
-            <span className="flex items-center gap-1"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
-            <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
-          </label>
-        </div>
-      </div>
+      <EditableMediaField
+        label="헤어"
+        value={draft.hair}
+        placeholder="묶음, 생머리, 가발"
+        images={draft.hairImages}
+        pendingFiles={draft.hairFiles}
+        title={draft.actorRole || draft.actorName}
+        onValueChange={(value) => onChange({ hair: value })}
+        onImagesChange={(images) => onChange({ hairImages: images })}
+        onPendingFilesChange={(files) => onChange({ hairFiles: files })}
+        onFiles={onHairFiles}
+        onPreview={onPreview}
+        onPreviewUrl={onPreviewUrl}
+      />
 
       <div className="col-span-2 flex items-start justify-end sm:col-span-1">
         <IconButton label="배역 삭제" danger compact onClick={onDelete}>
@@ -764,24 +772,97 @@ function CostumeItemCard({
   );
 }
 
+function EditableMediaField({
+  label,
+  value,
+  placeholder,
+  images,
+  pendingFiles,
+  title,
+  onValueChange,
+  onImagesChange,
+  onPendingFilesChange,
+  onFiles,
+  onPreview,
+  onPreviewUrl
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  images: CostumeImage[];
+  pendingFiles: PendingFile[];
+  title: string;
+  onValueChange: (value: string) => void;
+  onImagesChange: (images: CostumeImage[]) => void;
+  onPendingFilesChange: (files: PendingFile[]) => void;
+  onFiles: (event: ChangeEvent<HTMLInputElement>) => void;
+  onPreview: (image: CostumeImage) => void;
+  onPreviewUrl: (url: string) => void;
+}) {
+  return (
+    <div className="col-span-2 grid min-w-0 content-start gap-1 sm:col-span-1">
+      <label className="grid gap-0.5">
+        <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
+        <input
+          value={value}
+          onChange={(event) => onValueChange(event.target.value)}
+          placeholder={placeholder}
+          className={compactInputClass}
+        />
+      </label>
+      <div className="flex max-w-full items-start gap-1.5 overflow-x-auto pb-1">
+        {images.map((image) => (
+          <div key={image.path} className="relative h-32 w-32 shrink-0 border border-field-border bg-field-soft">
+            <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
+              className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+              aria-label={`저장 시 ${label} 이미지 삭제`}
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        ))}
+        {pendingFiles.map((pending) => (
+          <PendingImagePreview
+            key={pending.id}
+            pending={pending}
+            title={`${title} ${label}`}
+            onPreview={onPreviewUrl}
+            onRemove={() => onPendingFilesChange(pendingFiles.filter((item) => item.id !== pending.id))}
+          />
+        ))}
+        <label className="grid min-h-9 w-20 shrink-0 cursor-pointer place-items-center border border-dashed border-field-secondary bg-field-light px-1.5 py-1 text-[10px] font-black text-field-primary">
+          <span className="flex items-center gap-1"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
+          <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 function PendingImagePreview({
-  file,
+  pending,
   title,
   onPreview,
   onRemove
 }: {
-  file: File;
+  pending: PendingFile;
   title: string;
   onPreview: (url: string) => void;
   onRemove: () => void;
 }) {
-  const url = useMemo(() => URL.createObjectURL(file), [file]);
+  const url = useMemo(() => URL.createObjectURL(pending.file), [pending.file]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
   return (
-    <div className="relative h-32 w-32 shrink-0 overflow-hidden rounded-lg border border-amber-300 bg-field-soft">
+    <div className="relative h-32 w-32 shrink-0 border border-amber-300 bg-field-soft">
       <button type="button" onClick={() => onPreview(url)} className="h-full w-full">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt={`${title} 새 의상`} className="h-full w-full object-contain" />
+        <img src={url} alt={`${title} 새 이미지`} className="h-full w-full object-contain" />
       </button>
       <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">저장 전</span>
       <button
@@ -796,34 +877,33 @@ function PendingImagePreview({
   );
 }
 
-function ImageStrip({
+function ReadOnlyMediaField({
+  label,
+  value,
   images,
   title,
   onPreview
 }: {
+  label: string;
+  value: string;
   images: CostumeImage[];
   title: string;
   onPreview: (image: CostumeImage) => void;
 }) {
-  if (images.length === 0) {
-    return (
-      <div className="min-w-0">
-        <span className="mb-0.5 block text-[9px] font-black text-field-muted sm:hidden">이미지</span>
-        <p className="truncate text-[10px] font-bold text-field-muted">이미지 없음</p>
-      </div>
-    );
-  }
   return (
-    <div className="min-w-0">
-      <span className="mb-0.5 block text-[9px] font-black text-field-muted sm:hidden">이미지</span>
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+    <div className="col-span-2 grid min-w-0 content-start gap-1 sm:col-span-1">
+      <div>
+        <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
+        <p className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</p>
+      </div>
+      {images.length > 0 ? <div className="flex gap-1.5 overflow-x-auto pb-1">
         {images.map((image) => (
-          <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 overflow-hidden rounded-lg border border-field-border bg-field-soft">
+          <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 border border-field-border bg-field-soft">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={image.url} alt={`${title} 의상`} className="h-full w-full object-contain" />
+            <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
           </button>
         ))}
-      </div>
+      </div> : <p className="text-[10px] font-bold text-field-muted">이미지 없음</p>}
     </div>
   );
 }
@@ -903,8 +983,10 @@ function toDraft(item: ProjectCostume): CostumeDraft {
     costumeContent: item.costumeContent,
     provider: item.provider,
     hair: item.hair,
-    existingImages: item.images,
-    files: []
+    costumeImages: item.images.filter((image) => image.fieldType !== "hair"),
+    hairImages: item.images.filter((image) => image.fieldType === "hair"),
+    costumeFiles: [],
+    hairFiles: []
   };
 }
 

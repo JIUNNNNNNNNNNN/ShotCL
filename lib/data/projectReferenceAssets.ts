@@ -166,12 +166,16 @@ export async function saveProjectCostume(
     provider: string;
     hair: string;
     sortOrder: number;
-    keepImagePaths: string[];
-    files: File[];
+    clientItemId?: string;
+    keepCostumeImagePaths: string[];
+    keepHairImagePaths: string[];
+    costumeFiles: File[];
+    hairFiles: File[];
   }
 ): Promise<ProjectCostume> {
   const formData = new FormData();
   if (value.id) formData.set("id", value.id);
+  if (value.clientItemId) formData.set("clientItemId", value.clientItemId);
   formData.set("costumeSceneId", value.costumeSceneId);
   formData.set("actorRole", value.actorRole);
   formData.set("actorName", value.actorName);
@@ -179,8 +183,10 @@ export async function saveProjectCostume(
   formData.set("provider", value.provider);
   formData.set("hair", value.hair);
   formData.set("sortOrder", String(value.sortOrder));
-  formData.set("keepImagePaths", JSON.stringify(value.keepImagePaths));
-  value.files.forEach((file) => formData.append("files", file));
+  formData.set("keepCostumeImagePaths", JSON.stringify(value.keepCostumeImagePaths));
+  formData.set("keepHairImagePaths", JSON.stringify(value.keepHairImagePaths));
+  value.costumeFiles.forEach((file) => formData.append("costumeFiles", file));
+  value.hairFiles.forEach((file) => formData.append("hairFiles", file));
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
     method: "POST",
     body: formData
