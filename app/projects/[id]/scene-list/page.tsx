@@ -104,7 +104,7 @@ type HeaderHelpPopoverState = {
 };
 
 type CharacterNotesPopoverState = {
-  itemId: string;
+  rowId: string;
   left: number;
   top: number;
   readOnly: boolean;
@@ -360,17 +360,23 @@ export default function ProjectSceneListPage() {
   useEffect(() => {
     if (!editingCell || !canEdit) return;
     const frame = window.requestAnimationFrame(() => {
-      findCellElement(editingCell.rowId, editingCell.column)
-        ?.querySelector<HTMLElement>("input, textarea, select")
-        ?.focus({ preventScroll: true });
+      const editor = findCellElement(editingCell.rowId, editingCell.column)
+        ?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
+          "input, textarea, select"
+        );
+      if (!editor) return;
+      editor.focus({ preventScroll: true });
+      if (editor instanceof HTMLInputElement || editor instanceof HTMLTextAreaElement) {
+        const caretPosition = editor.value.length;
+        editor.setSelectionRange(caretPosition, caretPosition);
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [canEdit, editingCell, findCellElement]);
 
   const focusCell = useCallback((
     rowIndex: number,
-    requestedColumn: SceneCellColumn,
-    focusEditor = false
+    requestedColumn: SceneCellColumn
   ) => {
     if (itemsRef.current.length === 0) return;
     const safeRowIndex = Math.max(0, Math.min(rowIndex, itemsRef.current.length - 1));
@@ -380,17 +386,10 @@ export default function ProjectSceneListPage() {
     window.requestAnimationFrame(() => {
       const cell = findCellElement(item.id, column);
       if (!cell) return;
-      if (focusEditor && canEdit) {
-        const editor = cell.querySelector<HTMLElement>("input, textarea, select, button");
-        if (editor) {
-          editor.focus({ preventScroll: true });
-          return;
-        }
-      }
       cell.focus({ preventScroll: true });
       cell.scrollIntoView({ block: "nearest", inline: "nearest" });
     });
-  }, [canEdit, findCellElement, selectCell]);
+  }, [findCellElement, selectCell]);
 
   const handleGridKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
@@ -401,11 +400,9 @@ export default function ProjectSceneListPage() {
     if (activeRowIndex < 0 || !cellColumns.includes(activeCell.column)) return;
 
     const target = event.target;
-    const isTextEditor = target instanceof HTMLInputElement
-      || target instanceof HTMLTextAreaElement
-      || target instanceof HTMLSelectElement
-      || (target instanceof HTMLElement && target.isContentEditable);
-    if (isTextEditor) {
+    const isEditingActiveCell = editingCell?.rowId === activeCell.rowId
+      && editingCell.column === activeCell.column;
+    if (isEditingActiveCell) {
       if (event.key === "Enter") {
         if (
           (target instanceof HTMLTextAreaElement ||
@@ -415,45 +412,18 @@ export default function ProjectSceneListPage() {
           return;
         }
         event.preventDefault();
+        setEditingCell(null);
+        if (target instanceof HTMLElement) target.blur();
+        window.requestAnimationFrame(() => {
+          findCellElement(activeCell.rowId, activeCell.column)?.focus({ preventScroll: true });
+        });
         return;
       }
       if (event.key === "Escape") {
         event.preventDefault();
+        setEditingCell(null);
         (target as HTMLElement).blur();
         findCellElement(activeCell.rowId, activeCell.column)?.focus({ preventScroll: true });
-        return;
-      }
-      if (
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-        event.preventDefault();
-        (target as HTMLElement).blur();
-        focusCell(
-          event.key === "ArrowUp"
-            ? (selectedRangeRef.current?.startIndex ?? activeRowIndex) - 1
-            : (selectedRangeRef.current?.endIndex ?? activeRowIndex) + 1,
-          activeCell.column,
-          canEdit
-        );
-        return;
-      }
-      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault();
-        (target as HTMLElement).blur();
-        focusCell(
-          activeRowIndex,
-          getAdjacentVisualColumn(
-            itemsRef.current[activeRowIndex],
-            cellColumns,
-            activeCell.column,
-            event.key === "ArrowLeft" ? -1 : 1
-          ),
-          canEdit
-        );
       }
       return;
     }
@@ -470,8 +440,7 @@ export default function ProjectSceneListPage() {
       event.preventDefault();
       focusCell(
         (activeRange?.startIndex ?? activeRowIndex) - 1,
-        activeCell.column,
-        canEdit
+        activeCell.column
       );
       return;
     }
@@ -479,8 +448,7 @@ export default function ProjectSceneListPage() {
       event.preventDefault();
       focusCell(
         (activeRange?.endIndex ?? activeRowIndex) + 1,
-        activeCell.column,
-        canEdit
+        activeCell.column
       );
       return;
     }
@@ -494,8 +462,7 @@ export default function ProjectSceneListPage() {
       );
       focusCell(
         activeRowIndex,
-        nextColumn,
-        canEdit
+        nextColumn
       );
       return;
     }
@@ -509,8 +476,7 @@ export default function ProjectSceneListPage() {
       );
       focusCell(
         activeRowIndex,
-        nextColumn,
-        canEdit
+        nextColumn
       );
       return;
     }
@@ -525,13 +491,21 @@ export default function ProjectSceneListPage() {
       );
       focusCell(
         nextCell.rowIndex,
-        nextCell.column,
-        canEdit
+        nextCell.column
       );
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
+      if (canEdit) {
+        const cell = findCellElement(activeCell.rowId, activeCell.column);
+        const editor = cell?.querySelector("input, textarea, select");
+        if (editor) {
+          setEditingCell(activeCell);
+        } else {
+          cell?.querySelector<HTMLButtonElement>("button")?.click();
+        }
+      }
       return;
     }
     if (event.key === "Escape") {
@@ -542,7 +516,7 @@ export default function ProjectSceneListPage() {
       setSelectedRange(null);
       (event.currentTarget.ownerDocument.activeElement as HTMLElement | null)?.blur();
     }
-  }, [canEdit, cellColumns, findCellElement, focusCell]);
+  }, [canEdit, cellColumns, editingCell, findCellElement, focusCell]);
 
   const applyCellValueRange = useCallback((
     column: SceneCellColumn,
@@ -892,7 +866,7 @@ export default function ProjectSceneListPage() {
       suppressCharacterClickRef.current = item.id;
       const width = 280;
       setCharacterNotesPopover({
-        itemId: item.id,
+        rowId: item.id,
         left: clampPopoverLeft(x, width),
         top: getPopoverTop(y, 210),
         readOnly
@@ -1166,12 +1140,12 @@ export default function ProjectSceneListPage() {
       {characterNotesPopover ? (
         <CharacterNotesPopover
           ref={characterNotesPopoverRef}
-          item={items.find((item) => item.id === characterNotesPopover.itemId)}
+          item={items.find((item) => item.id === characterNotesPopover.rowId)}
           canEdit={canEdit && !characterNotesPopover.readOnly}
           left={characterNotesPopover.left}
           top={characterNotesPopover.top}
           onChange={(characterNotes) => {
-            updateItem(characterNotesPopover.itemId, { characterNotes });
+            updateItem(characterNotesPopover.rowId, { characterNotes });
           }}
         />
       ) : null}
@@ -1252,7 +1226,7 @@ function MobileSceneList({
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader
-          entries={[["Scene", "씬"]]}
+          entries={[["#S", "씬"]]}
           onLongPress={onHeaderLongPress}
         />
         <MobileSceneHeader
@@ -1417,7 +1391,7 @@ function MobileSceneHeader({
         <span
           key={label}
           className={`flex min-h-5 flex-1 touch-none select-none items-center justify-center py-0.5 text-center ${
-            label === "Int/Ext"
+            label === "Int/Ext" || label === "#S"
               ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
               : "px-0.5"
           }`}
@@ -1615,6 +1589,7 @@ const SceneTableRow = memo(function SceneTableRow({
       rowIndex: index,
       column,
       canEdit,
+      isEditing: editingCell?.rowId === item.id && editingCell.column === column,
       canDrag: canEdit && isFillColumn(column),
       isInRange,
       selectionPosition: getMergePosition(index, selectionRange),
@@ -1926,6 +1901,7 @@ type SceneCellInteraction = {
   rowIndex: number;
   column: SceneCellColumn;
   canEdit: boolean;
+  isEditing: boolean;
   canDrag: boolean;
   isInRange: boolean;
   selectionPosition: MergePosition;
@@ -2138,21 +2114,28 @@ function SceneCellFrame({
       data-scene-row-id={interaction?.rowId}
       data-scene-cell-column={interaction?.column}
       aria-selected={interaction?.isInRange || undefined}
+      onPointerDownCapture={interaction
+        ? (event) => {
+            if (
+              interaction.canEdit &&
+              !interaction.isEditing &&
+              isCellTextEditorTarget(event.target)
+            ) {
+              event.preventDefault();
+            }
+          }
+        : undefined}
       onPointerDown={interaction
         ? (event) => {
             if (interaction.canDrag || interaction.onLongPress) {
               event.stopPropagation();
             }
             interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
-            if (!isInteractiveTarget(event.target)) {
-              const editor = interaction.canEdit
-                ? event.currentTarget.querySelector<HTMLElement>("input, textarea, select")
-                : null;
-              if (editor) {
-                window.requestAnimationFrame(() => editor.focus({ preventScroll: true }));
-              } else {
-                event.currentTarget.focus({ preventScroll: true });
-              }
+            if (!interaction.isEditing && !(event.target instanceof HTMLButtonElement)) {
+              event.preventDefault();
+              event.currentTarget.focus({ preventScroll: true });
+            } else if (!isInteractiveTarget(event.target)) {
+              event.currentTarget.focus({ preventScroll: true });
             }
             interaction.onLongPress?.(event);
             if (interaction.canDrag) {
@@ -2164,6 +2147,14 @@ function SceneCellFrame({
                 value
               );
             }
+          }
+        : undefined}
+      onDoubleClick={interaction?.canEdit
+        ? (event) => {
+            if (!event.currentTarget.querySelector("input, textarea, select")) return;
+            event.preventDefault();
+            interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
+            interaction.onEditStart(interaction.rowId, interaction.column);
           }
         : undefined}
       className={`relative min-w-0 border-r border-[#cbd0cb] ${
@@ -2541,6 +2532,12 @@ function hasEditableTextSelection(target: EventTarget | null) {
 function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(
     target.closest("input, textarea, select, button, a, [role='button']")
+  );
+}
+
+function isCellTextEditorTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(
+    target.closest("input, textarea, select")
   );
 }
 
