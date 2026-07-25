@@ -1,9 +1,18 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, ChevronDown, GripVertical, Plus, Save, Users, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
@@ -24,7 +33,7 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 const inputClassName =
   "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const notesTextareaClassName =
-  "min-h-12 max-h-48 w-full min-w-0 resize-y overflow-y-auto whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-2 text-center text-xs font-bold leading-relaxed text-field-text outline-none transition [field-sizing:content] [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1.5 text-center text-xs font-bold leading-relaxed text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.75rem,0.85fr)_minmax(4.75rem,0.6fr)_minmax(7.75rem,1fr)_minmax(8rem,1.15fr)_minmax(10rem,2fr)]";
 
@@ -56,6 +65,17 @@ export default function StaffListPage() {
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
   const notesSummaryRef = useRef<HTMLDivElement | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerDragRef = useRef<{
+    memberId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    active: boolean;
+    input: HTMLInputElement;
+  } | null>(null);
+  const suppressedNameClickRef = useRef<string | null>(null);
+  const previousBodyUserSelectRef = useRef("");
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
     [departments, members]
@@ -270,9 +290,115 @@ export default function StaffListPage() {
   }, [commitMembers]);
 
   const finishMemberDrag = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pointerDragRef.current = null;
+    if (typeof document !== "undefined") {
+      document.body.style.userSelect = previousBodyUserSelectRef.current;
+    }
     setDraggedMemberId(null);
     setDragTargetMemberId(null);
   }, []);
+
+  useEffect(() => finishMemberDrag, [finishMemberDrag]);
+
+  const findPointerDropTarget = useCallback((clientX: number, clientY: number) => {
+    const target = document.elementFromPoint(clientX, clientY);
+    if (!(target instanceof Element)) return null;
+    const memberElement = target.closest<HTMLElement>("[data-staff-member-id]");
+    if (memberElement) {
+      return {
+        department: memberElement.dataset.staffDepartment ?? "",
+        memberId: memberElement.dataset.staffMemberId
+      };
+    }
+    const departmentElement = target.closest<HTMLElement>("[data-staff-department]");
+    if (!departmentElement) return null;
+    return {
+      department: departmentElement.dataset.staffDepartment ?? "",
+      memberId: undefined
+    };
+  }, []);
+
+  const handleNamePointerDown = useCallback((
+    event: ReactPointerEvent<HTMLInputElement>,
+    memberId: string
+  ) => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    const input = event.currentTarget;
+    const pointerId = event.pointerId;
+    pointerDragRef.current = {
+      memberId,
+      pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      active: false,
+      input
+    };
+
+    longPressTimerRef.current = setTimeout(() => {
+      const current = pointerDragRef.current;
+      if (!current || current.memberId !== memberId || current.pointerId !== pointerId) return;
+      current.active = true;
+      previousBodyUserSelectRef.current = document.body.style.userSelect;
+      document.body.style.userSelect = "none";
+      input.blur();
+      try {
+        input.setPointerCapture?.(current.pointerId);
+      } catch {
+        finishMemberDrag();
+        return;
+      }
+      setDraggedMemberId(memberId);
+    }, 520);
+  }, [finishMemberDrag]);
+
+  const handleNamePointerMove = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
+    const current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY);
+    if (!current.active) {
+      if (distance > 8) finishMemberDrag();
+      return;
+    }
+
+    event.preventDefault();
+    const target = findPointerDropTarget(event.clientX, event.clientY);
+    setDragTargetMemberId(target?.memberId && target.memberId !== current.memberId
+      ? target.memberId
+      : null);
+  }, [findPointerDropTarget, finishMemberDrag]);
+
+  const handleNamePointerEnd = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
+    const current = pointerDragRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (!current.active) {
+      finishMemberDrag();
+      return;
+    }
+
+    event.preventDefault();
+    const target = findPointerDropTarget(event.clientX, event.clientY);
+    if (target?.department) {
+      const targetElement = target.memberId
+        ? document.querySelector<HTMLElement>(`[data-staff-member-id="${CSS.escape(target.memberId)}"]`)
+        : null;
+      const placeAfter = targetElement
+        ? event.clientY >= targetElement.getBoundingClientRect().top + targetElement.getBoundingClientRect().height / 2
+        : false;
+      moveMember(current.memberId, target.department, target.memberId, placeAfter);
+    }
+    suppressedNameClickRef.current = current.memberId;
+    window.setTimeout(() => {
+      if (suppressedNameClickRef.current === current.memberId) {
+        suppressedNameClickRef.current = null;
+      }
+    }, 0);
+    finishMemberDrag();
+  }, [findPointerDropTarget, finishMemberDrag, moveMember]);
 
   const registerMemberRoleInput = useCallback((id: string, input: HTMLInputElement | null) => {
     if (input) memberRoleInputRefs.current.set(id, input);
@@ -483,20 +609,10 @@ export default function StaffListPage() {
                 <section
                   key={group.key}
                   className="overflow-visible rounded-xl border border-l-[3px]"
+                  data-staff-department={group.name}
                   style={{
                     backgroundColor: departmentColor.background,
                     borderColor: departmentColor.border
-                  }}
-                  onDragOver={(event) => {
-                    if (!draggedMemberId || !group.name) return;
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(event) => {
-                    if (!draggedMemberId || !group.name) return;
-                    event.preventDefault();
-                    moveMember(draggedMemberId, group.name);
-                    finishMemberDrag();
                   }}
                 >
                   <header
@@ -534,27 +650,17 @@ export default function StaffListPage() {
                         onChange={updateMember}
                         onDelete={deleteMember}
                         onRoleInputRef={registerMemberRoleInput}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", member.id);
-                          setDraggedMemberId(member.id);
-                        }}
-                        onDragEnd={finishMemberDrag}
-                        onDragEnter={() => {
-                          if (draggedMemberId && draggedMemberId !== member.id) {
-                            setDragTargetMemberId(member.id);
-                          }
-                        }}
-                        onDrop={(event) => {
-                          if (!draggedMemberId) return;
-                          const bounds = event.currentTarget.getBoundingClientRect();
-                          moveMember(
-                            draggedMemberId,
-                            group.name,
-                            member.id,
-                            event.clientY >= bounds.top + bounds.height / 2
-                          );
+                        onNamePointerDown={(event) => handleNamePointerDown(event, member.id)}
+                        onNamePointerMove={handleNamePointerMove}
+                        onNamePointerUp={handleNamePointerEnd}
+                        onNamePointerCancel={() => {
                           finishMemberDrag();
+                        }}
+                        onNameClick={(event) => {
+                          if (suppressedNameClickRef.current !== member.id) return;
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                          suppressedNameClickRef.current = null;
                         }}
                       />
                     ))}
@@ -584,10 +690,11 @@ const StaffMemberRow = memo(function StaffMemberRow({
   onChange,
   onDelete,
   onRoleInputRef,
-  onDragStart,
-  onDragEnd,
-  onDragEnter,
-  onDrop
+  onNamePointerDown,
+  onNamePointerMove,
+  onNamePointerUp,
+  onNamePointerCancel,
+  onNameClick
 }: {
   member: ProjectStaffMember;
   number: number;
@@ -598,33 +705,26 @@ const StaffMemberRow = memo(function StaffMemberRow({
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
-  onDragStart: (event: DragEvent<HTMLSpanElement>) => void;
-  onDragEnd: () => void;
-  onDragEnter: () => void;
-  onDrop: (event: DragEvent<HTMLElement>) => void;
+  onNamePointerDown: (event: ReactPointerEvent<HTMLInputElement>) => void;
+  onNamePointerMove: (event: ReactPointerEvent<HTMLInputElement>) => void;
+  onNamePointerUp: (event: ReactPointerEvent<HTMLInputElement>) => void;
+  onNamePointerCancel: () => void;
+  onNameClick: (event: ReactMouseEvent<HTMLInputElement>) => void;
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
+  const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    resizeNotesTextarea(notesInputRef.current);
+  }, [member.notes]);
 
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${showBottomBorder ? "border-b" : ""} ${isDragging ? "opacity-40" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/35" : ""} ${desktopGridClassName}`}
+      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70 shadow-sm" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""} ${desktopGridClassName}`}
       style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
-      onDragOver={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = "move";
-      }}
-      onDragEnter={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onDragEnter();
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onDrop(event);
-      }}
+      data-staff-member-id={member.id}
+      data-staff-department={member.department}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 직책</span>
@@ -638,26 +738,20 @@ const StaffMemberRow = memo(function StaffMemberRow({
           maxLength={100}
         />
       </label>
-      <label className="relative col-span-1 min-w-0 md:col-auto">
+      <label className="col-span-1 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 이름</span>
-        <span
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          className="absolute left-0.5 top-1/2 z-10 grid h-7 w-4 -translate-y-1/2 cursor-grab place-items-center rounded-lg text-field-muted/70 transition hover:bg-field-soft hover:text-field-primary active:cursor-grabbing"
-          role="button"
-          tabIndex={0}
-          aria-label={`${member.name || `${number}번 스탭`} 순서 이동`}
-          title="드래그해서 순서 또는 부서 이동"
-        >
-          <GripVertical className="h-3 w-3" aria-hidden />
-        </span>
         <input
-          className={`${inputClassName} pl-5 pr-1`}
+          className={`${inputClassName} ${isDragging ? "cursor-grabbing select-none" : ""}`}
           value={member.name}
           onChange={(event) => onChange(member.id, { name: event.target.value })}
+          onPointerDown={onNamePointerDown}
+          onPointerMove={onNamePointerMove}
+          onPointerUp={onNamePointerUp}
+          onPointerCancel={onNamePointerCancel}
+          onClick={onNameClick}
           placeholder="이름"
           aria-label={`${number}번 이름`}
+          title="길게 누른 뒤 움직여 순서 변경"
         />
       </label>
       <label className="col-span-3 min-w-0 md:col-auto">
@@ -685,11 +779,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
       <label className="col-span-4 min-w-0 md:col-auto">
         <span className="sr-only">{number}번 특이사항</span>
         <textarea
+          ref={notesInputRef}
           className={notesTextareaClassName}
           value={member.notes}
           aria-label={`${number}번 특이사항`}
-          onChange={(event) => onChange(member.id, { notes: event.target.value })}
-          rows={2}
+          onChange={(event) => {
+            resizeNotesTextarea(event.currentTarget);
+            onChange(member.id, { notes: event.target.value });
+          }}
+          rows={1}
         />
       </label>
       <button
@@ -785,6 +883,19 @@ function DepartmentChip({
 
 function normalizeDepartmentName(value: string) {
   return value.trim().slice(0, 100);
+}
+
+function resizeNotesTextarea(textarea: HTMLTextAreaElement | null) {
+  if (!textarea) return;
+  const compactHeight = 32;
+  const maximumHeight = 160;
+  textarea.style.height = `${compactHeight}px`;
+  const contentHeight = Math.min(
+    Math.max(textarea.scrollHeight, compactHeight),
+    maximumHeight
+  );
+  textarea.style.height = `${contentHeight}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maximumHeight ? "auto" : "hidden";
 }
 
 function hasDepartmentName(
