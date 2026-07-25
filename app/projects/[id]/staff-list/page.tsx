@@ -15,8 +15,8 @@ import {
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
 import {
+  groupStaffMembersForDisplay,
   getStaffDepartmentColor,
-  sortStaffMembersForDisplay
 } from "@/lib/dailyPlan/staffList";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
@@ -49,7 +49,19 @@ export default function StaffListPage() {
   const pendingDepartmentSubmitRef = useRef(false);
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberDepartmentInputRefs = useRef(new Map<string, HTMLInputElement>());
-  const displayedMembers = useMemo(() => sortStaffMembersForDisplay(members), [members]);
+  const staffGroups = useMemo(
+    () => groupStaffMembersForDisplay(members, departments),
+    [departments, members]
+  );
+  const displayedMemberNumbers = useMemo(
+    () => new Map(
+      staffGroups
+        .flatMap((group) => group.members)
+        .map((member, index) => [member.id, index + 1])
+    ),
+    [staffGroups]
+  );
+  const notesSummary = useMemo(() => buildStaffNotesSummary(members), [members]);
 
   const load = useCallback(async () => {
     if (!projectId || role === "progress") return;
@@ -271,28 +283,43 @@ export default function StaffListPage() {
       ) : null}
 
       <section className="mt-3 rounded-2xl border border-field-border bg-white px-2.5 py-2 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setIsDepartmentsOpen((current) => !current)}
-          className="flex min-h-8 w-full items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
-          aria-expanded={isDepartmentsOpen}
-          aria-controls="staff-departments-panel"
-        >
-          <span>부서 입력</span>
-          <ChevronDown
-            className={`h-4 w-4 transition-transform ${isDepartmentsOpen ? "rotate-180" : ""}`}
-            aria-hidden
-          />
-        </button>
+        <div className="grid h-8 grid-cols-2 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsDepartmentsOpen((current) => !current)}
+            className="flex h-8 min-w-0 items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
+            aria-expanded={isDepartmentsOpen}
+            aria-controls="staff-departments-panel"
+          >
+            <span>부서 입력</span>
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 transition-transform ${isDepartmentsOpen ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+          </button>
+          <div
+            className="flex h-8 min-w-0 items-center gap-1.5 rounded-xl bg-field-soft/60 px-2 text-[11px] font-bold text-field-muted"
+            title={notesSummary.fullText || undefined}
+            aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
+          >
+            {notesSummary.displayText ? (
+              <>
+                <span className="shrink-0 text-field-primary">특이사항</span>
+                <span className="truncate">{notesSummary.displayText}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
         {isDepartmentsOpen ? (
           <div
             id="staff-departments-panel"
             className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-border px-1 pt-2"
           >
-            {departments.map((department) => (
+            {departments.map((department, index) => (
               <DepartmentChip
                 key={department.id}
                 department={department}
+                colorIndex={index}
                 onCommit={(name) => updateDepartment(department.id, name)}
                 onDelete={() => deleteDepartment(department.id)}
               />
@@ -353,20 +380,45 @@ export default function StaffListPage() {
             <option key={department.id} value={department.name} />
           ))}
         </datalist>
-        {displayedMembers.length > 0 ? (
-          <div className="grid gap-1">
-            {displayedMembers.map((member, index) => (
-              <StaffMemberRow
-                key={member.id}
-                member={member}
-                number={index + 1}
-                departmentListId={`staff-departments-${project.id}`}
-                onChange={updateMember}
-                onDelete={deleteMember}
-                onAddAfter={addMember}
-                onDepartmentInputRef={registerMemberDepartmentInput}
-              />
-            ))}
+        {staffGroups.length > 0 ? (
+          <div className="grid gap-2">
+            {staffGroups.map((group) => {
+              const departmentColor = getStaffDepartmentColor(group.name, group.colorIndex);
+              return (
+                <section
+                  key={group.key}
+                  className="overflow-visible rounded-xl border border-l-[3px]"
+                  style={{
+                    backgroundColor: departmentColor.background,
+                    borderColor: departmentColor.border
+                  }}
+                >
+                  <header
+                    className="flex h-7 items-center justify-between border-b px-2.5 text-xs font-black text-field-primary"
+                    style={{ borderColor: departmentColor.border }}
+                  >
+                    <span className="truncate">{group.name || "미분류"}</span>
+                    <span className="shrink-0 text-[10px] text-field-muted">{group.members.length}명</span>
+                  </header>
+                  <div>
+                    {group.members.map((member, index) => (
+                      <StaffMemberRow
+                        key={member.id}
+                        member={member}
+                        number={displayedMemberNumbers.get(member.id) ?? index + 1}
+                        departmentColorIndex={group.colorIndex}
+                        showBottomBorder={index < group.members.length - 1}
+                        departmentListId={`staff-departments-${project.id}`}
+                        onChange={updateMember}
+                        onDelete={deleteMember}
+                        onAddAfter={addMember}
+                        onDepartmentInputRef={registerMemberDepartmentInput}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </div>
         ) : null}
         <div className="flex justify-center pt-2">
@@ -387,6 +439,8 @@ export default function StaffListPage() {
 const StaffMemberRow = memo(function StaffMemberRow({
   member,
   number,
+  departmentColorIndex,
+  showBottomBorder,
   departmentListId,
   onChange,
   onDelete,
@@ -395,21 +449,20 @@ const StaffMemberRow = memo(function StaffMemberRow({
 }: {
   member: ProjectStaffMember;
   number: number;
+  departmentColorIndex: number | null;
+  showBottomBorder: boolean;
   departmentListId: string;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onAddAfter: (memberId: string) => void;
   onDepartmentInputRef: (id: string, input: HTMLInputElement | null) => void;
 }) {
-  const departmentColor = getStaffDepartmentColor(member.department);
+  const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
 
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible rounded-2xl border border-l-[3px] border-field-border p-1.5 text-center ${desktopGridClassName}`}
-      style={{
-        backgroundColor: departmentColor.background,
-        borderLeftColor: departmentColor.border
-      }}
+      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center ${showBottomBorder ? "border-b" : ""} ${desktopGridClassName}`}
+      style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
     >
       <label className="col-span-2 min-w-0 md:col-auto">
@@ -494,15 +547,17 @@ const StaffMemberRow = memo(function StaffMemberRow({
 
 function DepartmentChip({
   department,
+  colorIndex,
   onCommit,
   onDelete
 }: {
   department: ProjectStaffDepartment;
+  colorIndex: number;
   onCommit: (name: string) => boolean;
   onDelete: () => void;
 }) {
   const [draftName, setDraftName] = useState(department.name);
-  const departmentColor = getStaffDepartmentColor(department.name);
+  const departmentColor = getStaffDepartmentColor(department.name, colorIndex);
 
   useEffect(() => {
     setDraftName(department.name);
@@ -579,4 +634,19 @@ function hasDepartmentName(
     department.id !== exceptId &&
     normalizeDepartmentName(department.name).toLocaleLowerCase("ko-KR") === normalizedName
   ));
+}
+
+function buildStaffNotesSummary(members: ProjectStaffMember[]) {
+  const items = members.flatMap((member) => {
+    const notes = member.notes.trim().replace(/\s+/g, " ");
+    if (!notes) return [];
+    const owner = member.name.trim() || normalizeDepartmentName(member.department) || "이름 없음";
+    return [`${owner}: ${notes}`];
+  });
+
+  if (items.length === 0) return { displayText: "", fullText: "" };
+  return {
+    displayText: items.length === 1 ? items[0] : `${items[0]} 외 ${items.length - 1}건`,
+    fullText: items.join(" / ")
+  };
 }

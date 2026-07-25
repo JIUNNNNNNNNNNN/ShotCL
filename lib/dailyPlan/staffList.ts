@@ -1,4 +1,4 @@
-import type { ProjectStaffMember } from "@/lib/types";
+import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const departmentColorPalette = [
   { background: "#f2f7f4", border: "#6b9b82" },
@@ -66,14 +66,95 @@ export function sortStaffMembersForDisplay(members: ProjectStaffMember[]) {
   });
 }
 
+export type StaffDepartmentDisplayGroup = {
+  key: string;
+  name: string;
+  colorIndex: number | null;
+  members: ProjectStaffMember[];
+};
+
+/**
+ * 등록한 부서 배열 순서를 우선하고, 등록되지 않은 부서는 기존 행 순서대로 뒤에 둡니다.
+ * 빈 부서는 항상 마지막 그룹으로 보냅니다.
+ */
+export function groupStaffMembersForDisplay(
+  members: ProjectStaffMember[],
+  departments: ProjectStaffDepartment[]
+): StaffDepartmentDisplayGroup[] {
+  const departmentOrder = new Map<string, number>();
+  departments.forEach((department, index) => {
+    const key = getDepartmentKey(department.name);
+    if (key && !departmentOrder.has(key)) departmentOrder.set(key, index);
+  });
+
+  const grouped = new Map<string, {
+    name: string;
+    firstSortOrder: number;
+    firstCreatedAt: string;
+    members: ProjectStaffMember[];
+  }>();
+
+  members.forEach((member) => {
+    const department = normalizeStaffDepartment(member.department);
+    const key = getDepartmentKey(department) || "__unassigned__";
+    const current = grouped.get(key);
+    if (current) {
+      current.members.push(member);
+      current.firstSortOrder = Math.min(current.firstSortOrder, member.sortOrder);
+      current.firstCreatedAt = current.firstCreatedAt < member.createdAt
+        ? current.firstCreatedAt
+        : member.createdAt;
+      return;
+    }
+    grouped.set(key, {
+      name: department,
+      firstSortOrder: member.sortOrder,
+      firstCreatedAt: member.createdAt,
+      members: [member]
+    });
+  });
+
+  return [...grouped.entries()]
+    .sort(([leftKey, left], [rightKey, right]) => {
+      if (leftKey === "__unassigned__") return rightKey === "__unassigned__" ? 0 : 1;
+      if (rightKey === "__unassigned__") return -1;
+
+      const leftDepartmentOrder = departmentOrder.get(leftKey);
+      const rightDepartmentOrder = departmentOrder.get(rightKey);
+      if (leftDepartmentOrder !== undefined || rightDepartmentOrder !== undefined) {
+        if (leftDepartmentOrder === undefined) return 1;
+        if (rightDepartmentOrder === undefined) return -1;
+        return leftDepartmentOrder - rightDepartmentOrder;
+      }
+
+      return left.firstSortOrder - right.firstSortOrder
+        || left.firstCreatedAt.localeCompare(right.firstCreatedAt);
+    })
+    .map(([key, group]) => ({
+      key,
+      name: group.name,
+      colorIndex: departmentOrder.get(key) ?? null,
+      members: [...group.members].sort((left, right) => (
+        left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt)
+      ))
+    }));
+}
+
 /** 부서 문자열만으로 항상 같은 저채도 색을 선택합니다. */
-export function getStaffDepartmentColor(department: unknown) {
+export function getStaffDepartmentColor(department: unknown, colorIndex?: number | null) {
   const normalized = normalizeStaffDepartment(department).toLocaleLowerCase("ko-KR");
   if (!normalized) return blankDepartmentColor;
+  if (typeof colorIndex === "number" && colorIndex >= 0) {
+    return departmentColorPalette[colorIndex % departmentColorPalette.length];
+  }
 
   let hash = 0;
   for (const character of normalized) {
     hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
   }
   return departmentColorPalette[hash % departmentColorPalette.length];
+}
+
+function getDepartmentKey(value: unknown) {
+  return normalizeStaffDepartment(value).toLocaleLowerCase("ko-KR");
 }
