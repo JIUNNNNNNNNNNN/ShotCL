@@ -21,6 +21,10 @@ import {
 import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { ScenarioPdfSceneSegments } from "@/components/ScenarioPdfSceneSegments";
+import {
+  analyzeScenarioPdfImages
+} from "@/lib/client/scenarioPdfImages";
 import {
   deleteProjectReferenceAsset,
   listProjectReferenceAssets,
@@ -28,6 +32,7 @@ import {
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
 import { getProject } from "@/lib/data/projects";
+import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
 type ViewMode = "scenes" | "pdf";
@@ -97,7 +102,7 @@ export default function ProjectScenarioPage() {
     const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
     if (!normalizedQuery) return draftScenes;
     return draftScenes.filter((scene) =>
-      [scene.sceneNo, scene.title, scene.text]
+      [scene.sceneNo, scene.title]
         .join("\n")
         .toLocaleLowerCase("ko-KR")
         .includes(normalizedQuery)
@@ -113,14 +118,32 @@ export default function ProjectScenarioPage() {
     setStatusMessage("");
     try {
       let uploadedId = "";
+      let analysisWarning = "";
       for (const file of files) {
         const uploadedAsset = await uploadProjectReferenceAsset(projectId, "scenario", file);
         uploadedId = uploadedAsset.id;
+        try {
+          const imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
+          await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
+            scenarioScenes: imageScenes
+          });
+        } catch (analysisError) {
+          analysisWarning = analysisError instanceof Error
+            ? analysisError.message
+            : "PDF 이미지 분할에 실패했습니다.";
+          await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
+            scenarioScenes: [],
+            scenarioParseError: analysisWarning
+          });
+        }
       }
       await load();
       if (uploadedId) setSelectedId(uploadedId);
       setViewMode("scenes");
-      setStatusMessage("PDF 업로드와 씬 분석이 완료되었습니다.");
+      setStatusMessage(analysisWarning
+        ? "PDF 업로드는 완료되었습니다."
+        : "PDF 업로드와 씬 이미지 분석이 완료되었습니다.");
+      if (analysisWarning) setErrorMessage(analysisWarning);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "PDF를 업로드하지 못했습니다.");
     } finally {
@@ -165,8 +188,9 @@ export default function ProjectScenarioPage() {
     setErrorMessage("");
     setStatusMessage("");
     try {
+      const imageScenes = await analyzeScenarioPdfImages(selectedAsset.publicUrl);
       const analyzed = await updateProjectReferenceAsset(projectId, selectedAsset.id, {
-        reanalyzeScenario: true
+        scenarioScenes: imageScenes
       });
       replaceAsset(analyzed);
       setStatusMessage(analyzed.scenarioScenes.length > 0
@@ -344,7 +368,7 @@ export default function ProjectScenarioPage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="씬 번호·제목·본문 검색"
+                placeholder="씬 번호·제목 검색"
                 className="min-h-9 w-full rounded-full border border-field-border bg-white py-1.5 pl-8 pr-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light"
               />
             </label>
@@ -425,7 +449,7 @@ export default function ProjectScenarioPage() {
               <div className="max-w-lg">
                 <p className="text-sm font-black text-field-text">
                   {selectedAsset.scenarioParseError
-                    || "텍스트를 추출할 수 없습니다. 원본 PDF 보기 또는 수동 씬 추가를 사용하세요."}
+                    || SCENARIO_MARKER_NOT_FOUND_MESSAGE}
                 </p>
                 <div className="mt-3 flex flex-wrap justify-center gap-1.5">
                   <button
@@ -454,7 +478,7 @@ export default function ProjectScenarioPage() {
                 const index = draftScenes.findIndex((item) => item.id === scene.id);
                 const expanded = expandedSceneId === scene.id;
                 return (
-                  <article key={scene.id} className="min-w-0 overflow-hidden rounded-xl border border-field-border bg-white">
+                  <article key={scene.id} className="min-w-0 rounded-xl border border-field-border bg-white">
                     <div className="flex min-w-0 items-center gap-1.5 px-2.5 py-2">
                       <button
                         type="button"
@@ -504,8 +528,8 @@ export default function ProjectScenarioPage() {
 
                     {expanded ? (
                       <div className="border-t border-field-border px-3 py-3 sm:px-4">
-                        {isEditing ? (
-                          <div className="grid gap-2">
+                        <div className="grid gap-2">
+                          {isEditing ? (
                             <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
                               <label>
                                 <span className="mb-1 block text-[11px] font-black text-field-primary">씬 번호</span>
@@ -524,20 +548,15 @@ export default function ProjectScenarioPage() {
                                 />
                               </label>
                             </div>
-                            <label>
-                              <span className="mb-1 block text-[11px] font-black text-field-primary">씬 내용</span>
-                              <textarea
-                                value={scene.text}
-                                onChange={(event) => updateScene(scene.id, { text: event.target.value })}
-                                className="min-h-64 w-full resize-y rounded-lg border border-field-border bg-white px-3 py-2.5 text-[15px] leading-7 text-field-text outline-none focus:border-field-primary"
-                              />
-                            </label>
-                          </div>
-                        ) : (
-                          <p className="mx-auto max-w-4xl whitespace-pre-wrap break-words text-[15px] font-medium leading-7 text-field-text sm:text-base sm:leading-8">
-                            {scene.text || "씬 내용이 비어 있습니다."}
-                          </p>
-                        )}
+                          ) : null}
+                          <ScenarioPdfSceneSegments
+                            pdfUrl={selectedAsset.publicUrl}
+                            filename={selectedAsset.filename}
+                            segments={scene.imageSegments}
+                            pageStart={scene.pageStart}
+                            pageEnd={scene.pageEnd}
+                          />
+                        </div>
                       </div>
                     ) : null}
                   </article>
@@ -674,7 +693,8 @@ function createBlankScene(index: number): ProjectScenarioScene {
     title: `Scene ${index}`,
     pageStart: null,
     pageEnd: null,
-    text: ""
+    text: "",
+    imageSegments: []
   };
 }
 

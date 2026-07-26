@@ -8,6 +8,7 @@ import {
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
+import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import { extractScenarioScenesFromPdf } from "@/lib/server/scenarioPdf";
 import type { ProjectScenarioScene } from "@/lib/types";
 
@@ -172,6 +173,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       crop?: unknown;
       sortOrder?: unknown;
       scenarioScenes?: unknown;
+      scenarioParseError?: unknown;
       reanalyzeScenario?: unknown;
     };
     const id = cleanText(body.id, 100);
@@ -205,8 +207,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       } else {
         const scenes = normalizeScenarioScenes(body.scenarioScenes);
         updatePayload.scenario_scenes = scenes;
-        updatePayload.scenario_parse_error = scenes.length > 0 ? null : "저장된 씬이 없습니다. 수동 씬 추가를 사용하세요.";
+        updatePayload.scenario_parse_error = scenes.length > 0 ? null : SCENARIO_MARKER_NOT_FOUND_MESSAGE;
       }
+    }
+    if ("scenarioParseError" in body) {
+      updatePayload.scenario_parse_error = cleanText(body.scenarioParseError, 1_000) || null;
     }
 
     if (Object.keys(updatePayload).length === 0) {
@@ -351,14 +356,38 @@ function normalizeScenarioScenes(value: unknown): ProjectScenarioScene[] {
     const pageStart = nullablePositiveInteger(source.pageStart);
     const pageEnd = nullablePositiveInteger(source.pageEnd);
     const rawSceneNo = cleanText(source.sceneNo, 100);
+    const imageSegments = normalizeScenarioImageSegments(source.imageSegments);
     return [{
       id: cleanText(source.id, 100) || randomUUID(),
       sceneNo: normalizeSceneNumber(rawSceneNo) || rawSceneNo || String(index + 1),
       title: cleanText(source.title, 240) || `Scene ${index + 1}`,
       pageStart,
       pageEnd: pageEnd ?? pageStart,
-      text: typeof source.text === "string" ? source.text.slice(0, 500_000) : ""
+      text: "",
+      imageSegments
     }];
+  });
+}
+
+function normalizeScenarioImageSegments(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5_000).flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const source = entry as Record<string, unknown>;
+    const pageIndex = Number(source.pageIndex);
+    const startYRatio = Number(source.startYRatio);
+    const endYRatio = Number(source.endYRatio);
+    if (
+      !Number.isInteger(pageIndex)
+      || pageIndex < 0
+      || !Number.isFinite(startYRatio)
+      || !Number.isFinite(endYRatio)
+    ) {
+      return [];
+    }
+    const start = Math.min(1, Math.max(0, startYRatio));
+    const end = Math.min(1, Math.max(0, endYRatio));
+    return end > start ? [{ pageIndex, startYRatio: start, endYRatio: end }] : [];
   });
 }
 

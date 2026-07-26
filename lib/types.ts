@@ -172,6 +172,12 @@ export type ProjectReferenceCrop = {
   ratio: number | null;
 };
 
+export type ProjectScenarioImageSegment = {
+  pageIndex: number;
+  startYRatio: number;
+  endYRatio: number;
+};
+
 export type ProjectScenarioScene = {
   id: string;
   sceneNo: string;
@@ -179,6 +185,7 @@ export type ProjectScenarioScene = {
   pageStart: number | null;
   pageEnd: number | null;
   text: string;
+  imageSegments: ProjectScenarioImageSegment[];
 };
 
 export type ProjectReferenceAsset = {

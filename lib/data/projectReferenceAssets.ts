@@ -65,6 +65,7 @@ export async function updateProjectReferenceAsset(
     crop?: Partial<ProjectReferenceCrop>;
     sortOrder?: number;
     scenarioScenes?: ProjectScenarioScene[];
+    scenarioParseError?: string | null;
     reanalyzeScenario?: boolean;
   }
 ): Promise<ProjectReferenceAsset> {
