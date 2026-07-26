@@ -51,7 +51,8 @@ import {
 import {
   scanArchiveDrop,
   scanArchiveFileList,
-  type ArchiveFolderFile
+  type ArchiveFolderIssue,
+  type ArchiveFolderScanResult
 } from "@/lib/client/archiveFolderDrop";
 import {
   createProjectArchiveFolder,
@@ -105,8 +106,12 @@ type FolderEditor = {
 
 type PendingConfirm =
   | { kind: "folder"; folder: ProjectArchiveFolder; assetIds: string[] }
-  | { kind: "assets"; assetIds: string[]; label: string }
-  | { kind: "diagram"; item: OverheadDiagramArchiveItem };
+  | {
+    kind: "selection";
+    assetIds: string[];
+    diagrams: OverheadDiagramArchiveItem[];
+    label: string;
+  };
 
 type DiagramDraft = {
   item: OverheadDiagramArchiveItem | null;
@@ -118,13 +123,41 @@ type DiagramDraft = {
 };
 
 type LassoBox = {
+  startPageX: number;
+  startPageY: number;
+  currentPageX: number;
+  currentPageY: number;
+};
+
+type MetadataDraft = {
+  title: string;
+  memo: string;
+  sceneNo: string;
+  cutNo: string;
+  folderId: string;
+};
+
+type FolderUploadReport = {
+  discoveredCount: number;
+  supportedCount: number;
+  uploadedCount: number;
+  skipped: ArchiveFolderIssue[];
+  failed: ArchiveFolderIssue[];
+  verified: boolean;
+};
+
+type AssetLongPress = {
+  assetId: string;
+  pointerId: number;
   startX: number;
   startY: number;
-  currentX: number;
-  currentY: number;
+  triggered: boolean;
+  timeoutId: number;
 };
 
 const PAGE_SIZE = 48;
+const LONG_PRESS_MS = 600;
+const LONG_PRESS_MOVE_TOLERANCE = 9;
 
 export default function ProjectStoryboardOverheadPage() {
   const params = useParams<{ id: string | string[] }>();
@@ -148,7 +181,13 @@ export default function ProjectStoryboardOverheadPage() {
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
-  const [metadataDraft, setMetadataDraft] = useState({ title: "", memo: "", sceneNo: "", cutNo: "" });
+  const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>({
+    title: "",
+    memo: "",
+    sceneNo: "",
+    cutNo: "",
+    folderId: ""
+  });
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
@@ -160,12 +199,21 @@ export default function ProjectStoryboardOverheadPage() {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
+  const [pressedAssetId, setPressedAssetId] = useState<string | null>(null);
+  const [folderUploadReport, setFolderUploadReport] = useState<FolderUploadReport | null>(null);
   const preparingRef = useRef(false);
   const folderUploadRef = useRef<HTMLInputElement | null>(null);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLElement>());
   const lassoBaseSelectionRef = useRef<Set<string>>(new Set());
   const lassoMovedRef = useRef(false);
+  const lassoRef = useRef<LassoBox | null>(null);
+  const lassoPointerRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
+  const lassoCleanupRef = useRef<(() => void) | null>(null);
+  const lassoAnimationRef = useRef<number | null>(null);
+  const previousBodyUserSelectRef = useRef("");
+  const longPressRef = useRef<AssetLongPress | null>(null);
+  const suppressAssetClickRef = useRef<string | null>(null);
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
@@ -229,6 +277,13 @@ export default function ProjectStoryboardOverheadPage() {
       setActiveFolderId("all");
     }
   }, [activeFolderId, folders]);
+
+  useEffect(() => () => {
+    lassoCleanupRef.current?.();
+    if (lassoAnimationRef.current !== null) cancelAnimationFrame(lassoAnimationRef.current);
+    const longPress = longPressRef.current;
+    if (longPress) window.clearTimeout(longPress.timeoutId);
+  }, []);
 
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
   const folderNameById = useMemo(
@@ -295,6 +350,61 @@ export default function ProjectStoryboardOverheadPage() {
       : [],
     [activeFolderId, activeType, diagramArchives, query]
   );
+  const selectableFilteredIds = useMemo(
+    () => [
+      ...filteredDiagrams.filter((item) => !item.legacy).map((item) => item.id),
+      ...filteredAssets.map((asset) => asset.id)
+    ],
+    [filteredAssets, filteredDiagrams]
+  );
+  const selectedReferenceAssetIds = useMemo(
+    () => filteredAssets.filter((asset) => selectedIds.has(asset.id)).map((asset) => asset.id),
+    [filteredAssets, selectedIds]
+  );
+  const selectedDiagramItems = useMemo(
+    () => filteredDiagrams.filter((item) => !item.legacy && selectedIds.has(item.id)),
+    [filteredDiagrams, selectedIds]
+  );
+  const allFilteredSelected = selectableFilteredIds.length > 0
+    && selectableFilteredIds.every((id) => selectedIds.has(id));
+
+  function mergeUploadedAssets(assetType: ArchiveType, uploaded: ProjectReferenceAsset[]) {
+    if (uploaded.length === 0) return;
+    const merge = (current: ProjectReferenceAsset[]) => {
+      const byId = new Map(current.map((asset) => [asset.id, asset]));
+      for (const asset of uploaded) byId.set(asset.id, asset);
+      return [...byId.values()];
+    };
+    if (assetType === "overhead") setOverheads(merge);
+    else setStoryboards(merge);
+  }
+
+  function removeAssetsFromLocalState(assetIds: Iterable<string>) {
+    const ids = new Set(assetIds);
+    setOverheads((current) => current.filter((asset) => !ids.has(asset.id)));
+    setStoryboards((current) => current.filter((asset) => !ids.has(asset.id)));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+  }
+
+  function updateAssetsInLocalState(
+    assetIds: Iterable<string>,
+    update: (asset: ProjectReferenceAsset) => ProjectReferenceAsset
+  ) {
+    const ids = new Set(assetIds);
+    const apply = (current: ProjectReferenceAsset[]) => (
+      current.map((asset) => ids.has(asset.id) ? update(asset) : asset)
+    );
+    setOverheads(apply);
+    setStoryboards(apply);
+  }
+
+  function replaceAssetInLocalState(updated: ProjectReferenceAsset) {
+    updateAssetsInLocalState([updated.id], () => updated);
+  }
 
   async function preparePdf(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -460,7 +570,7 @@ export default function ProjectStoryboardOverheadPage() {
     try {
       setProgressMessage("폴더 읽는 중");
       const scan = await scanArchiveDrop(event.dataTransfer);
-      await uploadScannedFiles(assetType, scan.files, scan.excludedCount);
+      await uploadScannedFiles(assetType, scan);
     } catch (error) {
       setProgressMessage("");
       setErrorMessage(error instanceof Error ? error.message : "폴더를 읽지 못했습니다.");
@@ -683,20 +793,34 @@ export default function ProjectStoryboardOverheadPage() {
       if (pendingConfirm.kind === "folder") {
         if (pendingConfirm.assetIds.length > 0) {
           await moveProjectReferenceAssets(projectId, pendingConfirm.assetIds, null);
+          updateAssetsInLocalState(pendingConfirm.assetIds, (asset) => ({
+            ...asset,
+            crop: { ...asset.crop, folderId: null }
+          }));
         }
         await deleteProjectArchiveFolder(projectId, pendingConfirm.folder.id);
         setFolders((current) => current.filter((entry) => entry.id !== pendingConfirm.folder.id));
         setActiveFolderId("unfiled");
-      } else if (pendingConfirm.kind === "assets") {
-        await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
+      } else {
+        if (pendingConfirm.assetIds.length > 0) {
+          await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
+          removeAssetsFromLocalState(pendingConfirm.assetIds);
+        }
+        for (const item of pendingConfirm.diagrams) {
+          await deleteOverheadDiagramArchive(projectId, item.id);
+          setDiagramArchives((current) => current.filter((entry) => entry.id !== item.id));
+          setSelectedIds((current) => {
+            const next = new Set(current);
+            next.delete(item.id);
+            return next;
+          });
+        }
         setSelectedIds(new Set());
         setSelectionMode(false);
-      } else if (!pendingConfirm.item.legacy) {
-        await deleteOverheadDiagramArchive(projectId, pendingConfirm.item.id);
       }
       setPendingConfirm(null);
-      await loadArchive();
     } catch (error) {
+      if (pendingConfirm.kind === "selection") setPendingConfirm(null);
       setErrorMessage(error instanceof Error ? error.message : "삭제 작업을 완료하지 못했습니다.");
     } finally {
       setIsSaving(false);
@@ -707,17 +831,26 @@ export default function ProjectStoryboardOverheadPage() {
     if (!projectId || !canEdit) return;
     const scan = scanArchiveFileList(Array.from(event.target.files ?? []));
     event.target.value = "";
-    await uploadScannedFiles(activeType, scan.files, scan.excludedCount);
+    await uploadScannedFiles(activeType, scan);
   }
 
   async function uploadScannedFiles(
     assetType: ArchiveType,
-    entries: ArchiveFolderFile[],
-    initialExcludedCount: number
+    scan: ArchiveFolderScanResult
   ) {
     if (!projectId || !canEdit || preparingRef.current || isSaving) return;
+    const entries = scan.files;
+    setFolderUploadReport(null);
     if (entries.length === 0) {
       setProgressMessage("");
+      setFolderUploadReport({
+        discoveredCount: scan.discoveredCount,
+        supportedCount: 0,
+        uploadedCount: 0,
+        skipped: scan.skipped,
+        failed: [],
+        verified: false
+      });
       setErrorMessage("선택한 폴더에 읽을 수 있는 PDF 또는 이미지가 없습니다.");
       return;
     }
@@ -726,71 +859,101 @@ export default function ProjectStoryboardOverheadPage() {
     setErrorMessage("");
     setActiveType(assetType);
     try {
-      setProgressMessage("지원 파일 선별 중");
-      const groups = new Map<string, ArchiveFolderFile[]>();
-      entries.forEach((entry) => {
+      setProgressMessage(`지원 파일 선별 중 · 발견 ${scan.discoveredCount}개 · 지원 ${entries.length}개`);
+      const groups = new Map<string, typeof entries>();
+      for (const entry of entries) {
         const folderPath = entry.folderPath || "";
         groups.set(folderPath, [...(groups.get(folderPath) ?? []), entry]);
-      });
+      }
 
       const folderCache = new Map(
         folders.map((folder) => [folder.name.trim().toLocaleLowerCase("ko-KR"), folder])
       );
-      let completed = 0;
-      let excludedCount = initialExcludedCount;
+      const uploadedAssets: ProjectReferenceAsset[] = [];
+      const failed: ArchiveFolderIssue[] = [];
       let firstFolderId: string | null = null;
-      let sortOffset = imageAssets.length;
+      const entryOrder = new Map(entries.map((entry, index) => [
+        `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`,
+        index
+      ]));
 
       for (const [folderPath, folderEntries] of groups) {
         const folder = folderPath ? await ensureArchiveFolder(folderPath, folderCache) : null;
         const folderId = folder?.id ?? selectedFolderValue(activeFolderId);
         if (folderPath && !folder) {
-          excludedCount += folderEntries.length;
+          for (const entry of folderEntries) {
+            failed.push({ path: entry.relativePath, reason: "아카이브 폴더 생성 실패" });
+          }
           continue;
         }
         if (!firstFolderId && folderId) firstFolderId = folderId;
-        await mapWithConcurrency(folderEntries, 3, async (entry, index) => {
+        await mapWithConcurrency(folderEntries, 3, async (entry) => {
           try {
+            const sourceOrder = entryOrder.get(
+              `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`
+            ) ?? 0;
+            let uploaded: ProjectReferenceAsset;
             if (isPdfFile(entry.file)) {
               setProgressMessage(`PDF 확인 중 · ${entry.file.name}`);
               if (!await hasPdfSignature(entry.file)) throw new Error("Invalid PDF");
-              await uploadProjectReferenceAsset(projectId, assetType, entry.file, {
+              uploaded = await uploadProjectReferenceAsset(projectId, assetType, entry.file, {
                 sourceType: "upload_pdf",
                 folderId,
                 groupId: `source:folder:${folderId || "unfiled"}`,
                 originalFolderName: entry.originalFolderName,
                 relativePath: entry.relativePath,
-                sortOrder: sortOffset + index
+                sortOrder: imageAssets.length + sourceOrder
               });
             } else {
               setProgressMessage(`이미지 최적화 중 · ${entry.file.name}`);
               const optimized = await optimizeArchiveImage(entry.file);
-              setProgressMessage(`업로드 중 ${completed + 1}/${entries.length}`);
-              await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
+              setProgressMessage(`업로드 중 ${uploadedAssets.length + 1}/${entries.length}`);
+              uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
                 thumbnailFile: optimized.thumbnailFile,
                 sourceType: "upload_image",
                 folderId,
                 groupId: `folder:${folderId || "unfiled"}`,
                 originalFolderName: entry.originalFolderName,
                 relativePath: entry.relativePath,
-                sortOrder: sortOffset + index
+                sortOrder: imageAssets.length + sourceOrder
               });
             }
-            completed += 1;
-            setProgressMessage(`저장 중 ${completed}/${entries.length}`);
-          } catch {
-            excludedCount += 1;
+            uploadedAssets.push(uploaded);
+            setProgressMessage(`저장 중 ${uploadedAssets.length}/${entries.length}`);
+          } catch (error) {
+            failed.push({
+              path: entry.relativePath,
+              reason: error instanceof Error ? error.message : "업로드 실패"
+            });
           }
         });
-        sortOffset += folderEntries.length;
       }
-      await loadArchive();
+      setProgressMessage("검증 중");
+      const uniqueUploadedIds = new Set(uploadedAssets.map((asset) => asset.id));
+      const expectedUploadedCount = entries.length - failed.length;
+      const verified = uploadedAssets.length === expectedUploadedCount
+        && uniqueUploadedIds.size === uploadedAssets.length;
+      if (!verified) {
+        failed.push({
+          path: "(업로드 검증)",
+          reason: `지원 ${entries.length}개 중 응답 확인 ${uploadedAssets.length}개`
+        });
+      }
+      mergeUploadedAssets(assetType, uploadedAssets);
       setProgressMessage("");
       if (firstFolderId) setActiveFolderId(firstFolderId);
-      if (completed === 0) {
-        setErrorMessage(`폴더에서 업로드할 수 있는 자료가 없었습니다. ${excludedCount}개 파일을 제외했습니다.`);
-      } else {
-        setStatusMessage(`${completed}개 업로드됨${excludedCount > 0 ? ` · ${excludedCount}개 제외` : ""}`);
+      setFolderUploadReport({
+        discoveredCount: scan.discoveredCount,
+        supportedCount: entries.length,
+        uploadedCount: uploadedAssets.length,
+        skipped: scan.skipped,
+        failed,
+        verified
+      });
+      if (uploadedAssets.length === 0 || failed.length > 0 || !verified) {
+        setErrorMessage(
+          `폴더 업로드를 완전히 마치지 못했습니다. 성공 ${uploadedAssets.length}개 · 실패 ${failed.length}개 · 스킵 ${scan.skipped.length}개`
+        );
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "폴더를 업로드하지 못했습니다.");
@@ -810,14 +973,22 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
+  function selectAllFilteredAssets() {
+    setSelectionMode(true);
+    setSelectedIds(new Set(selectableFilteredIds));
+  }
+
   async function moveSelectedAssets() {
-    if (!projectId || selectedIds.size === 0) return;
+    if (!projectId || selectedReferenceAssetIds.length === 0) return;
     try {
       setIsSaving(true);
-      await moveProjectReferenceAssets(projectId, [...selectedIds], moveFolderId || null);
+      await moveProjectReferenceAssets(projectId, selectedReferenceAssetIds, moveFolderId || null);
+      updateAssetsInLocalState(selectedReferenceAssetIds, (asset) => ({
+        ...asset,
+        crop: { ...asset.crop, folderId: moveFolderId || null }
+      }));
       setSelectedIds(new Set());
       setSelectionMode(false);
-      await loadArchive();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "선택한 자료를 이동하지 못했습니다.");
     } finally {
@@ -828,52 +999,138 @@ export default function ProjectStoryboardOverheadPage() {
   async function deleteSelectedAssets() {
     if (!projectId || selectedIds.size === 0) return;
     setPendingConfirm({
-      kind: "assets",
-      assetIds: [...selectedIds],
-      label: `선택한 자료 ${selectedIds.size}개`
+      kind: "selection",
+      assetIds: selectedReferenceAssetIds,
+      diagrams: selectedDiagramItems,
+      label: `선택한 자료 ${selectedReferenceAssetIds.length + selectedDiagramItems.length}개`
     });
   }
 
   function beginLasso(event: ReactPointerEvent<HTMLDivElement>) {
     if (!canEdit || !supportsDesktopDrop || event.pointerType !== "mouse" || event.button !== 0) return;
     const target = event.target as HTMLElement;
-    if (target.closest("input,textarea,select,a,[data-no-lasso]")) return;
+    if (target.closest("input,textarea,select,a,button,[contenteditable='true'],[data-no-lasso]")) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
+    lassoCleanupRef.current?.();
     lassoBaseSelectionRef.current = event.metaKey || event.ctrlKey || event.shiftKey
       ? new Set(selectedIds)
       : new Set();
     lassoMovedRef.current = false;
-    setLasso({
-      startX: event.clientX,
-      startY: event.clientY,
-      currentX: event.clientX,
-      currentY: event.clientY
-    });
+    lassoPointerRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY
+    };
+    const initial = {
+      startPageX: event.clientX + window.scrollX,
+      startPageY: event.clientY + window.scrollY,
+      currentPageX: event.clientX + window.scrollX,
+      currentPageY: event.clientY + window.scrollY
+    };
+    lassoRef.current = initial;
+    setLasso(initial);
+    previousBodyUserSelectRef.current = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    const handlePointerMove = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== lassoPointerRef.current?.pointerId) return;
+      if (pointerEvent.cancelable) pointerEvent.preventDefault();
+      lassoPointerRef.current = {
+        pointerId: pointerEvent.pointerId,
+        clientX: pointerEvent.clientX,
+        clientY: pointerEvent.clientY
+      };
+      updateLassoFromClient(pointerEvent.clientX, pointerEvent.clientY);
+    };
+    const handlePointerUp = (pointerEvent: PointerEvent) => {
+      if (pointerEvent.pointerId !== lassoPointerRef.current?.pointerId) return;
+      finishLasso();
+    };
+    const handleScroll = () => {
+      const pointer = lassoPointerRef.current;
+      if (pointer) updateLassoFromClient(pointer.clientX, pointer.clientY);
+    };
+    const handleBlur = () => finishLasso();
+    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key === "Escape") finishLasso();
+    };
+    const cleanup = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+      document.removeEventListener("pointercancel", handlePointerUp);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("blur", handleBlur);
+      document.body.style.userSelect = previousBodyUserSelectRef.current;
+      if (lassoAnimationRef.current !== null) {
+        cancelAnimationFrame(lassoAnimationRef.current);
+        lassoAnimationRef.current = null;
+      }
+      lassoCleanupRef.current = null;
+    };
+    lassoCleanupRef.current = cleanup;
+    document.addEventListener("pointermove", handlePointerMove, { passive: false });
+    document.addEventListener("pointerup", handlePointerUp);
+    document.addEventListener("pointercancel", handlePointerUp);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("blur", handleBlur);
+    runLassoAutoScroll();
   }
 
-  function moveLasso(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!lasso) return;
-    event.preventDefault();
-    const next = { ...lasso, currentX: event.clientX, currentY: event.clientY };
-    const bounds = clientBounds(next);
-    if (Math.abs(next.currentX - next.startX) > 4 || Math.abs(next.currentY - next.startY) > 4) {
+  function updateLassoFromClient(clientX: number, clientY: number) {
+    const current = lassoRef.current;
+    if (!current) return;
+    const next = {
+      ...current,
+      currentPageX: clientX + window.scrollX,
+      currentPageY: clientY + window.scrollY
+    };
+    const bounds = pageBounds(next);
+    if (
+      Math.abs(next.currentPageX - next.startPageX) > 4
+      || Math.abs(next.currentPageY - next.startPageY) > 4
+    ) {
       lassoMovedRef.current = true;
       setSelectionMode(true);
     }
     const ids = new Set(lassoBaseSelectionRef.current);
     cardRefs.current.forEach((node, id) => {
-      if (rectanglesIntersect(bounds, node.getBoundingClientRect())) ids.add(id);
+      const rect = node.getBoundingClientRect();
+      const pageRect = {
+        left: rect.left + window.scrollX,
+        right: rect.right + window.scrollX,
+        top: rect.top + window.scrollY,
+        bottom: rect.bottom + window.scrollY
+      };
+      if (rectanglesIntersect(bounds, pageRect)) ids.add(id);
     });
+    lassoRef.current = next;
     setSelectedIds(ids);
     setLasso(next);
   }
 
-  function endLasso(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!lasso) return;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+  function runLassoAutoScroll() {
+    if (!lassoRef.current || !lassoPointerRef.current) return;
+    const pointer = lassoPointerRef.current;
+    const edge = 72;
+    let deltaY = 0;
+    if (pointer.clientY < edge) deltaY = -Math.ceil((edge - pointer.clientY) / 6);
+    else if (pointer.clientY > window.innerHeight - edge) {
+      deltaY = Math.ceil((pointer.clientY - (window.innerHeight - edge)) / 6);
     }
+    if (deltaY !== 0) {
+      window.scrollBy(0, deltaY);
+      updateLassoFromClient(pointer.clientX, pointer.clientY);
+    }
+    lassoAnimationRef.current = requestAnimationFrame(runLassoAutoScroll);
+  }
+
+  function finishLasso() {
+    if (!lassoRef.current) return;
+    lassoCleanupRef.current?.();
+    lassoRef.current = null;
+    lassoPointerRef.current = null;
     setLasso(null);
     window.setTimeout(() => {
       lassoMovedRef.current = false;
@@ -923,18 +1180,48 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  function deleteDiagram(item: OverheadDiagramArchiveItem) {
-    if (!projectId || item.legacy) return;
-    setPendingConfirm({ kind: "diagram", item });
+  function beginAssetLongPress(asset: ProjectReferenceAsset, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (selectionMode || event.button !== 0) return;
+    cancelAssetLongPress();
+    const state: AssetLongPress = {
+      assetId: asset.id,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      triggered: false,
+      timeoutId: window.setTimeout(() => {
+        const current = longPressRef.current;
+        if (!current || current.assetId !== asset.id) return;
+        current.triggered = true;
+        suppressAssetClickRef.current = asset.id;
+        longPressRef.current = null;
+        setPressedAssetId(null);
+        openMetadata(asset);
+        window.setTimeout(() => {
+          if (suppressAssetClickRef.current === asset.id) suppressAssetClickRef.current = null;
+        }, 1_000);
+      }, LONG_PRESS_MS)
+    };
+    longPressRef.current = state;
+    setPressedAssetId(asset.id);
   }
 
-  function deleteAsset(asset: ProjectReferenceAsset) {
-    if (!projectId) return;
-    setPendingConfirm({
-      kind: "assets",
-      assetIds: [asset.id],
-      label: `"${asset.crop.title || asset.filename}" 자료`
-    });
+  function moveAssetLongPress(event: ReactPointerEvent<HTMLButtonElement>) {
+    const current = longPressRef.current;
+    if (!current || current.pointerId !== event.pointerId || current.triggered) return;
+    if (
+      Math.hypot(event.clientX - current.startX, event.clientY - current.startY)
+      > LONG_PRESS_MOVE_TOLERANCE
+    ) {
+      cancelAssetLongPress();
+    }
+  }
+
+  function cancelAssetLongPress() {
+    const current = longPressRef.current;
+    if (current) window.clearTimeout(current.timeoutId);
+    longPressRef.current = null;
+    setPressedAssetId(null);
   }
 
   async function cropStoredPdf(asset: ProjectReferenceAsset) {
@@ -969,17 +1256,24 @@ export default function ProjectStoryboardOverheadPage() {
       title: asset.crop.title || "",
       memo: asset.crop.memo || "",
       sceneNo: asset.sceneNo || "",
-      cutNo: asset.cutNo || ""
+      cutNo: asset.cutNo || "",
+      folderId: asset.crop.folderId || ""
     });
   }
 
   async function saveMetadata() {
-    if (!projectId || !editingAsset) return;
+    if (!projectId || !editingAsset || !canEdit) return;
     setIsSaving(true);
     try {
-      await updateProjectReferenceAsset(projectId, editingAsset.id, metadataDraft);
+      const updated = await updateProjectReferenceAsset(projectId, editingAsset.id, {
+        title: metadataDraft.title,
+        memo: metadataDraft.memo,
+        sceneNo: metadataDraft.sceneNo,
+        cutNo: metadataDraft.cutNo,
+        crop: { folderId: metadataDraft.folderId || null }
+      });
+      replaceAssetInLocalState(updated);
       setEditingAsset(null);
-      await loadArchive();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다.");
     } finally {
@@ -991,7 +1285,7 @@ export default function ProjectStoryboardOverheadPage() {
 
   return (
     <>
-      <div className="mx-auto grid w-full max-w-6xl gap-4">
+      <div className="mx-auto grid w-full max-w-6xl select-none gap-4 [&_input]:select-text [&_textarea]:select-text" onContextMenu={(event) => event.preventDefault()}>
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="font-display truncate text-xl font-black text-field-primary">부감도&콘티 아카이브</h1>
@@ -1012,6 +1306,7 @@ export default function ProjectStoryboardOverheadPage() {
             <p className="text-xs font-bold text-field-muted">{progressMessage}</p>
           </div>
         ) : null}
+        {folderUploadReport ? <FolderUploadSummary report={folderUploadReport} /> : null}
 
         {canEdit && supportsDesktopDrop ? (
           <div className="hidden grid-cols-2 gap-3 md:grid" aria-label="데스크탑 자료 드롭 영역">
@@ -1220,9 +1515,22 @@ export default function ProjectStoryboardOverheadPage() {
               </form>
             ) : null}
           </div>
-          {canEdit && selectedIds.size > 0 ? (
+          {canEdit && selectionMode ? (
             <div className="flex flex-wrap items-center gap-2 border-t border-field-border bg-field-soft/55 px-2 py-2">
-              <span className="text-xs font-black text-field-primary">{selectedIds.size}개 선택</span>
+              <span className="text-xs font-black text-field-primary">
+                {selectedReferenceAssetIds.length + selectedDiagramItems.length}개 선택
+              </span>
+              <button
+                type="button"
+                disabled={selectableFilteredIds.length === 0 || allFilteredSelected}
+                onClick={selectAllFilteredAssets}
+                className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-45"
+              >
+                현재 결과 전체 선택 · {selectableFilteredIds.length}
+              </button>
+              <button type="button" onClick={() => setSelectedIds(new Set())} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">
+                선택 해제
+              </button>
               <select
                 value={moveFolderId}
                 onChange={(event) => setMoveFolderId(event.target.value)}
@@ -1232,15 +1540,14 @@ export default function ProjectStoryboardOverheadPage() {
                 <option value="">미분류로 이동</option>
                 {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
               </select>
-              <button type="button" disabled={isSaving} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
+              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length === 0} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
                 <Move className="h-3.5 w-3.5" aria-hidden />
                 이동
               </button>
-              <button type="button" disabled={isSaving} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
+              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length + selectedDiagramItems.length === 0} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 일괄 삭제
               </button>
-              <button type="button" onClick={() => setSelectedIds(new Set())} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">선택 해제</button>
             </div>
           ) : null}
           <p className="text-xs font-bold text-field-muted">업로드한 자료는 진행도에 자동 적용되지 않습니다. 진행도 컷 카드에서 명시적으로 선택해야 표시됩니다.</p>
@@ -1258,25 +1565,54 @@ export default function ProjectStoryboardOverheadPage() {
               ref={gridRef}
               className="relative grid select-none grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
               onPointerDown={beginLasso}
-              onPointerMove={moveLasso}
-              onPointerUp={endLasso}
-              onPointerCancel={endLasso}
               onContextMenu={(event) => event.preventDefault()}
             >
-              {filteredDiagrams.map((item) => (
-                <article key={item.id} className="grid min-w-0 gap-2 border border-field-border bg-white p-2">
-                  <button type="button" data-no-lasso onClick={() => openDiagram(item, false)} className="grid aspect-[4/3] place-items-center bg-field-soft">
+              {filteredDiagrams.map((item) => {
+                const selected = selectedIds.has(item.id);
+                return (
+                <article
+                  key={item.id}
+                  ref={(node) => {
+                    if (node && !item.legacy) cardRefs.current.set(item.id, node);
+                    else cardRefs.current.delete(item.id);
+                  }}
+                  data-no-lasso
+                  onContextMenu={(event) => event.preventDefault()}
+                  className={`relative grid min-w-0 select-none gap-2 border bg-white p-2 ${
+                    selected ? "border-[#ef8f39] ring-2 ring-[#ef8f39]/35" : "border-field-border"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    data-no-lasso
+                    onClick={(event) => {
+                      if (selectionMode && !item.legacy) {
+                        event.preventDefault();
+                        toggleAssetSelection(item.id);
+                        return;
+                      }
+                      openDiagram(item, false);
+                    }}
+                    className="grid aspect-[4/3] place-items-center bg-field-soft"
+                    aria-pressed={selectionMode && !item.legacy ? selected : undefined}
+                  >
                     <ShotOverheadPreview diagram={item.diagram} label={`${item.title} 부감도`} />
                   </button>
+                  {selectionMode && !item.legacy ? (
+                    <span className={`pointer-events-none absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border ${
+                      selected ? "border-[#ef8f39] bg-[#ef8f39] text-white" : "border-field-border bg-white text-field-muted"
+                    }`} aria-hidden>
+                      {selected ? <Check className="h-4 w-4" /> : <Square className="h-3.5 w-3.5" />}
+                    </span>
+                  ) : null}
                   <ArchiveText title={item.title} sceneNo={item.sceneNo} cutNo={item.cutNo} memo={item.legacy ? `기존 컷 자료 · ${item.sourceShotRef || ""}` : item.memo} />
-                  {canEdit && !item.legacy ? (
-                    <div className="grid grid-cols-2 gap-1">
+                  {canEdit && !item.legacy && !selectionMode ? (
+                    <div className="grid">
                       <button type="button" data-no-lasso onClick={() => openDiagram(item, true)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />수정</button>
-                      <button type="button" data-no-lasso onClick={() => deleteDiagram(item)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
                     </div>
                   ) : null}
                 </article>
-              ))}
+              )})}
               {visibleAssets.map((asset) => {
                 const selected = selectedIds.has(asset.id);
                 return (
@@ -1288,12 +1624,24 @@ export default function ProjectStoryboardOverheadPage() {
                   }}
                   className={`relative grid min-w-0 select-none gap-2 border bg-white p-2 ${
                     selected ? "border-[#ef8f39] ring-2 ring-[#ef8f39]/35" : "border-field-border"
-                  }`}
+                  } ${pressedAssetId === asset.id ? "scale-[0.985] border-[#ef8f39]" : ""}`}
                   onContextMenu={(event) => event.preventDefault()}
+                  data-no-lasso
                 >
                   <button
                     type="button"
+                    data-no-lasso
+                    onPointerDown={(event) => beginAssetLongPress(asset, event)}
+                    onPointerMove={moveAssetLongPress}
+                    onPointerUp={cancelAssetLongPress}
+                    onPointerCancel={cancelAssetLongPress}
+                    onPointerLeave={cancelAssetLongPress}
                     onClick={(event) => {
+                      if (suppressAssetClickRef.current === asset.id) {
+                        suppressAssetClickRef.current = null;
+                        event.preventDefault();
+                        return;
+                      }
                       if (lassoMovedRef.current) return;
                       if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
                         event.preventDefault();
@@ -1302,7 +1650,7 @@ export default function ProjectStoryboardOverheadPage() {
                       }
                       setPreview({ url: asset.publicUrl, title: asset.crop.title || asset.filename });
                     }}
-                    className="grid aspect-[4/3] place-items-center bg-field-soft"
+                    className="grid aspect-[4/3] touch-pan-y place-items-center bg-field-soft"
                     aria-pressed={selectionMode ? selected : undefined}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1312,6 +1660,7 @@ export default function ProjectStoryboardOverheadPage() {
                       loading="lazy"
                       decoding="async"
                       draggable={false}
+                      onDragStart={(event) => event.preventDefault()}
                       className="block h-full w-full rounded-none object-contain"
                     />
                   </button>
@@ -1326,12 +1675,6 @@ export default function ProjectStoryboardOverheadPage() {
                   <p className="truncate px-1 text-[10px] font-bold text-field-muted">
                     {folderNameById.get(asset.crop.folderId || "") || "미분류"}
                   </p>
-                  {canEdit ? (
-                    <div className="grid grid-cols-2 gap-1">
-                      <button type="button" data-no-lasso onClick={() => openMetadata(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />정보</button>
-                      <button type="button" data-no-lasso onClick={() => deleteAsset(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
-                    </div>
-                  ) : null}
                 </article>
               )})}
               {lasso && gridRef.current ? (
@@ -1367,15 +1710,10 @@ export default function ProjectStoryboardOverheadPage() {
                     ) : null}
                     <a href={asset.publicUrl} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-field-primary underline underline-offset-2">원본 보기</a>
                   </div>
-                  {canEdit ? (
-                    <div className="flex shrink-0 items-center gap-1">
-                      {asset.mimeType === "application/pdf" ? (
-                        <button type="button" onClick={() => void cropStoredPdf(asset)} className="min-h-9 rounded-full border border-field-border px-3 text-[11px] font-black text-field-primary">
-                          crop
-                        </button>
-                      ) : null}
-                      <button type="button" onClick={() => deleteAsset(asset)} className="grid h-9 w-9 place-items-center rounded-full text-field-danger" aria-label={`${asset.filename} 원본 삭제`}><Trash2 className="h-4 w-4" aria-hidden /></button>
-                    </div>
+                  {canEdit && asset.mimeType === "application/pdf" ? (
+                    <button type="button" onClick={() => void cropStoredPdf(asset)} className="min-h-9 shrink-0 rounded-full border border-field-border px-3 text-[11px] font-black text-field-primary">
+                      crop
+                    </button>
                   ) : null}
                 </article>
               ))}
@@ -1396,16 +1734,22 @@ export default function ProjectStoryboardOverheadPage() {
         </>
       ) : null}
       {editingAsset ? (
-        <MetadataDialog value={metadataDraft} isSaving={isSaving} onChange={setMetadataDraft} onClose={() => setEditingAsset(null)} onSave={saveMetadata} />
+        <MetadataDialog
+          value={metadataDraft}
+          folders={folders}
+          readOnly={!canEdit}
+          isSaving={isSaving}
+          onChange={setMetadataDraft}
+          onClose={() => setEditingAsset(null)}
+          onSave={saveMetadata}
+        />
       ) : null}
       {pendingConfirm ? (
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
           <CompactConfirm
             message={pendingConfirm.kind === "folder"
               ? `"${pendingConfirm.folder.name}" 폴더를 삭제할까요? 안의 자료 ${pendingConfirm.assetIds.length}개는 미분류로 이동합니다.`
-              : pendingConfirm.kind === "assets"
-                ? `${pendingConfirm.label}를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`
-                : `"${pendingConfirm.item.title}" 부감도를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`}
+              : `${pendingConfirm.label}를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`}
             isSaving={isSaving}
             onConfirm={() => void confirmPendingAction()}
             onCancel={() => setPendingConfirm(null)}
@@ -1414,6 +1758,42 @@ export default function ProjectStoryboardOverheadPage() {
       ) : null}
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? "자료"} onClose={() => setPreview(null)} />
     </>
+  );
+}
+
+function FolderUploadSummary({ report }: { report: FolderUploadReport }) {
+  const issues = [
+    ...report.failed.map((issue) => ({ ...issue, kind: "실패" })),
+    ...report.skipped.map((issue) => ({ ...issue, kind: "스킵" }))
+  ];
+  return (
+    <section className={`grid gap-2 border px-3 py-2 text-xs ${
+      report.verified && report.failed.length === 0
+        ? "border-field-border bg-field-soft/55 text-field-primary"
+        : "border-field-danger bg-red-50 text-field-danger"
+    }`} aria-label="폴더 업로드 결과">
+      <p className="font-black">
+        발견 {report.discoveredCount} · 지원 {report.supportedCount} · 성공 {report.uploadedCount}
+        {" · "}스킵 {report.skipped.length} · 실패 {report.failed.length}
+      </p>
+      <p className="font-bold">
+        {report.verified && report.failed.length === 0
+          ? "지원 파일 수와 저장 응답 수가 일치합니다."
+          : "지원 파일 수와 저장 결과를 확인해주세요."}
+      </p>
+      {issues.length > 0 ? (
+        <details className="select-text">
+          <summary className="cursor-pointer select-none font-black">실패·스킵 파일 보기 ({issues.length})</summary>
+          <ul className="mt-2 grid max-h-44 gap-1 overflow-y-auto text-[11px] leading-5">
+            {issues.map((issue, index) => (
+              <li key={`${issue.kind}-${issue.path}-${index}`}>
+                <strong>{issue.kind}</strong> · {issue.path} · {issue.reason}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </section>
   );
 }
 
@@ -1482,31 +1862,53 @@ function CompactConfirm({
 
 function MetadataDialog({
   value,
+  folders,
+  readOnly,
   isSaving,
   onChange,
   onClose,
   onSave
 }: {
-  value: { title: string; memo: string; sceneNo: string; cutNo: string };
+  value: MetadataDraft;
+  folders: ProjectArchiveFolder[];
+  readOnly: boolean;
   isSaving: boolean;
-  onChange: (value: { title: string; memo: string; sceneNo: string; cutNo: string }) => void;
+  onChange: (value: MetadataDraft) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[85] grid place-items-center bg-black/25 p-4" role="dialog" aria-modal="true" aria-label="자료 정보 수정">
-      <section className="grid w-full max-w-md gap-3 rounded-2xl border border-field-border bg-white p-4">
+    <div
+      className="fixed inset-0 z-[85] grid select-text place-items-center bg-black/25 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={readOnly ? "자료 정보 보기" : "자료 정보 수정"}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section className="grid w-full max-w-md gap-3 rounded-2xl border border-field-border bg-white p-4" data-no-lasso>
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-black text-field-primary">자료 정보</h2>
           <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full border border-field-border" aria-label="자료 정보 닫기"><X className="h-4 w-4" aria-hidden /></button>
         </div>
-        <label className="grid gap-1 text-xs font-black text-field-muted">제목<input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text" /></label>
+        {readOnly ? <p className="text-xs font-bold text-field-muted">읽기 전용 정보입니다.</p> : null}
+        <label className="grid gap-1 text-xs font-black text-field-muted">제목<input readOnly={readOnly} value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft" /></label>
         <div className="grid grid-cols-2 gap-2">
-          <label className="grid gap-1 text-xs font-black text-field-muted">씬<input value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text" /></label>
-          <label className="grid gap-1 text-xs font-black text-field-muted">컷<input value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text" /></label>
+          <label className="grid gap-1 text-xs font-black text-field-muted">씬<input readOnly={readOnly} value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft" /></label>
+          <label className="grid gap-1 text-xs font-black text-field-muted">컷<input readOnly={readOnly} value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft" /></label>
         </div>
-        <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} rows={4} className="rounded-lg border border-field-border px-3 py-2 text-sm leading-5 text-field-text" /></label>
-        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-11 rounded-full bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        <label className="grid gap-1 text-xs font-black text-field-muted">
+          폴더
+          <select disabled={readOnly} value={value.folderId} onChange={(event) => onChange({ ...value, folderId: event.target.value })} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft">
+            <option value="">미분류</option>
+            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea readOnly={readOnly} value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} rows={4} className="rounded-lg border border-field-border px-3 py-2 text-sm leading-5 text-field-text read-only:bg-field-soft" /></label>
+        {!readOnly ? (
+          <button type="button" disabled={isSaving} onClick={onSave} className="min-h-11 rounded-full bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        ) : null}
       </section>
     </div>
   );
@@ -1611,18 +2013,18 @@ function selectedFolderValue(value: string) {
   return value === "all" || value === "unfiled" ? null : value;
 }
 
-function clientBounds(value: LassoBox) {
+function pageBounds(value: LassoBox) {
   return {
-    left: Math.min(value.startX, value.currentX),
-    right: Math.max(value.startX, value.currentX),
-    top: Math.min(value.startY, value.currentY),
-    bottom: Math.max(value.startY, value.currentY)
+    left: Math.min(value.startPageX, value.currentPageX),
+    right: Math.max(value.startPageX, value.currentPageX),
+    top: Math.min(value.startPageY, value.currentPageY),
+    bottom: Math.max(value.startPageY, value.currentPageY)
   };
 }
 
 function rectanglesIntersect(
   left: { left: number; right: number; top: number; bottom: number },
-  right: DOMRect
+  right: { left: number; right: number; top: number; bottom: number }
 ) {
   return left.left <= right.right
     && left.right >= right.left
@@ -1631,10 +2033,10 @@ function rectanglesIntersect(
 }
 
 function lassoStyle(value: LassoBox, grid: DOMRect) {
-  const bounds = clientBounds(value);
+  const bounds = pageBounds(value);
   return {
-    left: bounds.left - grid.left,
-    top: bounds.top - grid.top,
+    left: bounds.left - (grid.left + window.scrollX),
+    top: bounds.top - (grid.top + window.scrollY),
     width: Math.max(1, bounds.right - bounds.left),
     height: Math.max(1, bounds.bottom - bounds.top)
   };

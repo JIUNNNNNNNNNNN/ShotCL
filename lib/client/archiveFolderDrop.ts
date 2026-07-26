@@ -5,9 +5,16 @@ export type ArchiveFolderFile = {
   folderPath: string;
 };
 
+export type ArchiveFolderIssue = {
+  path: string;
+  reason: string;
+};
+
 export type ArchiveFolderScanResult = {
   files: ArchiveFolderFile[];
+  discoveredCount: number;
   excludedCount: number;
+  skipped: ArchiveFolderIssue[];
 };
 
 type LegacyFileSystemEntry = {
@@ -49,7 +56,7 @@ export async function scanArchiveDrop(dataTransfer: DataTransfer): Promise<Archi
     return scanArchiveFileList(Array.from(dataTransfer.files ?? []));
   }
 
-  const result: ArchiveFolderScanResult = { files: [], excludedCount: 0 };
+  const result = createScanResult();
   for (const entry of entries) {
     if (entry.isDirectory) {
       await traverseEntry(entry, entry.name, entry.name, result);
@@ -61,12 +68,13 @@ export async function scanArchiveDrop(dataTransfer: DataTransfer): Promise<Archi
 }
 
 export function scanArchiveFileList(files: File[]): ArchiveFolderScanResult {
-  const result: ArchiveFolderScanResult = { files: [], excludedCount: 0 };
+  const result = createScanResult();
   for (const file of files) {
     const relativePath = normalizePath(file.webkitRelativePath || file.name);
     const parts = relativePath.split("/").filter(Boolean);
     const originalFolderName = parts.length > 1 ? parts[0] : "";
     const folderPath = parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+    result.discoveredCount += 1;
     addFile(result, file, originalFolderName, relativePath, folderPath);
   }
   return dedupeScanResult(result);
@@ -79,21 +87,23 @@ async function traverseEntry(
   result: ArchiveFolderScanResult
 ) {
   if (isHiddenPath(relativePath)) {
-    result.excludedCount += 1;
+    if (entry.isFile) result.discoveredCount += 1;
+    addSkipped(result, relativePath, "숨김 또는 시스템 파일");
     return;
   }
   if (entry.isFile) {
+    result.discoveredCount += 1;
     try {
       const file = await readFileEntry(entry as LegacyFileSystemFileEntry);
       const folderPath = normalizePath(relativePath).split("/").slice(0, -1).join("/");
       addFile(result, file, originalFolderName, normalizePath(relativePath), folderPath);
     } catch {
-      result.excludedCount += 1;
+      addSkipped(result, relativePath, "파일 읽기 실패");
     }
     return;
   }
   if (!entry.isDirectory) {
-    result.excludedCount += 1;
+    addSkipped(result, relativePath, "지원하지 않는 항목");
     return;
   }
 
@@ -108,7 +118,7 @@ async function traverseEntry(
       );
     }
   } catch {
-    result.excludedCount += 1;
+    addSkipped(result, relativePath, "폴더 읽기 실패");
   }
 }
 
@@ -137,13 +147,16 @@ function addFile(
   relativePath: string,
   folderPath: string
 ) {
-  if (
-    file.size <= 0
-    || !SUPPORTED_EXTENSION.test(file.name)
-    || isHiddenPath(relativePath)
-    || IGNORED_NAMES.has(file.name)
-  ) {
-    result.excludedCount += 1;
+  if (file.size <= 0) {
+    addSkipped(result, relativePath, "0바이트 파일");
+    return;
+  }
+  if (isHiddenPath(relativePath) || IGNORED_NAMES.has(file.name)) {
+    addSkipped(result, relativePath, "숨김 또는 시스템 파일");
+    return;
+  }
+  if (!SUPPORTED_EXTENSION.test(file.name)) {
+    addSkipped(result, relativePath, "지원하지 않는 형식");
     return;
   }
   result.files.push({
@@ -164,16 +177,34 @@ function normalizePath(value: string) {
   return value.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/");
 }
 
+function createScanResult(): ArchiveFolderScanResult {
+  return {
+    files: [],
+    discoveredCount: 0,
+    excludedCount: 0,
+    skipped: []
+  };
+}
+
+function addSkipped(result: ArchiveFolderScanResult, path: string, reason: string) {
+  result.excludedCount += 1;
+  result.skipped.push({ path: normalizePath(path) || "(이름 없음)", reason });
+}
+
 function dedupeScanResult(result: ArchiveFolderScanResult): ArchiveFolderScanResult {
   const seen = new Set<string>();
   const files = result.files.filter((entry) => {
     const key = `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`;
-    if (seen.has(key)) return false;
+    if (seen.has(key)) {
+      addSkipped(result, entry.relativePath, "동일 경로·크기·수정일 중복");
+      return false;
+    }
     seen.add(key);
     return true;
   });
   return {
+    ...result,
     files,
-    excludedCount: result.excludedCount + result.files.length - files.length
+    excludedCount: result.excludedCount
   };
 }
