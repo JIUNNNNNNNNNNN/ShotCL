@@ -11,11 +11,15 @@ import {
   createProjectCostumeScene,
   deleteProjectCostume,
   deleteProjectCostumeScene,
-  listProjectCostumeScenes,
+  getProjectCostumeSceneOverview,
   saveProjectCostume,
   updateProjectCostumeScene
 } from "@/lib/data/projectReferenceAssets";
-import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
+import {
+  getDailyPlanWithShots,
+  listDailyPlans,
+  type DailyPlanListItem
+} from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
@@ -50,12 +54,6 @@ type SceneDraft = {
   seedAllBasicActors?: boolean;
 };
 
-type ActorDraft = {
-  sceneId: string;
-  role: string;
-  name: string;
-};
-
 const providerOptions = ["소지", "대여", "구입"];
 const tempPrefix = "costume-local-";
 
@@ -70,6 +68,8 @@ export default function ProjectCostumesPage() {
   const [sceneOptions, setSceneOptions] = useState<ProjectSceneItem[]>([]);
   const [sceneActorRoles, setSceneActorRoles] = useState<string[]>([]);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
+  const [totalEpisodes, setTotalEpisodes] = useState(0);
+  const [automaticEpisodesByScene, setAutomaticEpisodesByScene] = useState<Map<string, Set<number>>>(new Map());
   const [selectedDailyPlanId, setSelectedDailyPlanId] = useState("");
   const [dailyPlanSceneKeys, setDailyPlanSceneKeys] = useState<Set<string> | null>(null);
   const [expandedSceneIds, setExpandedSceneIds] = useState<Set<string>>(new Set());
@@ -77,7 +77,6 @@ export default function ProjectCostumesPage() {
   const [deletedSceneIds, setDeletedSceneIds] = useState<Set<string>>(new Set());
   const [deletedItemIds, setDeletedItemIds] = useState<Set<string>>(new Set());
   const [sceneDraft, setSceneDraft] = useState<SceneDraft | null>(null);
-  const [actorDraft, setActorDraft] = useState<ActorDraft | null>(null);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
@@ -90,33 +89,61 @@ export default function ProjectCostumesPage() {
     if (!projectId) return;
     setIsLoading(true);
     try {
-      const [project, costumeScenes, basicInfo, plans, sceneList] = await Promise.all([
+      const [project, costumeOverview, basicInfo, plans, sceneList] = await Promise.all([
         getProject(projectId),
-        listProjectCostumeScenes(projectId),
+        getProjectCostumeSceneOverview(projectId),
         getProjectBasicInfo(projectId).catch(() => null),
         listDailyPlans(projectId).catch(() => []),
         getProjectSceneList(projectId).catch(() => null)
       ]);
+      const costumeScenes = costumeOverview.scenes;
+      const dailyPlanDetails = await Promise.all(plans.map(async (plan) => ({
+        plan,
+        detail: await getDailyPlanWithShots(projectId, plan.id).catch(() => null)
+      })));
+      const automaticEpisodes = buildAutomaticEpisodesByScene(dailyPlanDetails);
+      const scenesWithAutomaticEpisodes = costumeScenes.map((scene) => ({
+        ...scene,
+        episodeNumbers: mergeEpisodeNumbers(
+          scene.episodeNumbers,
+          automaticEpisodes.get(normalizeSceneNumber(scene.sceneNo))
+        )
+      }));
+      const automaticEpisodesAdded = scenesWithAutomaticEpisodes.some((scene, index) => (
+        !sameEpisodeNumbers(scene.episodeNumbers, costumeScenes[index]?.episodeNumbers ?? [])
+      ));
       setProjectName(project?.name ?? "프로젝트");
-      setScenes(costumeScenes);
+      setScenes(scenesWithAutomaticEpisodes);
       setActors(basicInfo?.actors ?? []);
       setSceneOptions(sceneList?.items ?? []);
       setSceneActorRoles(sceneList?.actorRoles ?? []);
       setDailyPlans(plans);
+      setTotalEpisodes(Math.max(
+        0,
+        basicInfo?.totalEpisodes
+          ?? project?.basicInfo?.totalEpisodes
+          ?? costumeOverview.totalEpisodes
+      ));
+      setAutomaticEpisodesByScene(automaticEpisodes);
       setDrafts(Object.fromEntries(costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))));
       setDeletedSceneIds(new Set());
       setDeletedItemIds(new Set());
-      setIsDirty(false);
-      setExpandedSceneIds((current) => current.size > 0
-        ? new Set([...current].filter((id) => costumeScenes.some((scene) => scene.id === id)))
-        : new Set(costumeScenes[0] ? [costumeScenes[0].id] : []));
+      setIsDirty(canEdit && automaticEpisodesAdded);
+      setExpandedSceneIds((current) => new Set(
+        [...current].filter((id) => costumeScenes.some((scene) => scene.id === id))
+      ));
       setErrorMessage("");
+      setNoticeMessage(
+        canEdit && automaticEpisodesAdded
+          ? "일촬표에 포함된 씬의 회차 체크를 추가했습니다. 전체 저장을 눌러 반영해주세요."
+          : ""
+      );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "씬별 의상 자료를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [canEdit, projectId]);
 
   useEffect(() => {
     void load();
@@ -185,6 +212,73 @@ export default function ProjectCostumesPage() {
     });
   }
 
+  function handleImportAllScenes() {
+    if (!projectId || !canEdit) return;
+    const existingKeys = new Set(scenes.map((scene) => normalizeSceneNumber(scene.sceneNo)));
+    const addedKeys = new Set<string>();
+    const now = new Date().toISOString();
+    const newScenes = sceneOptions.flatMap((sourceScene) => {
+      const sceneKey = normalizeSceneNumber(sourceScene.sceneNo);
+      if (!sceneKey || existingKeys.has(sceneKey) || addedKeys.has(sceneKey)) return [];
+      addedKeys.add(sceneKey);
+      const sceneId = createTemporaryId("scene");
+      const sceneNo = displaySceneNumber(sourceScene.sceneNo);
+      const seededActors = getPresentSceneActors(sourceScene, actors, sceneActorRoles);
+      const items = seededActors.map((actor, index) => createTemporaryCostume(
+        projectId,
+        sceneId,
+        sceneNo,
+        actor.role,
+        actor.name,
+        index,
+        now
+      ));
+      return [{
+        id: sceneId,
+        projectId,
+        sceneNo,
+        sceneTitle: "",
+        episodeNumbers: mergeEpisodeNumbers([], automaticEpisodesByScene.get(sceneKey)),
+        sortOrder: scenes.length + addedKeys.size - 1,
+        items,
+        createdAt: now,
+        updatedAt: now
+      } satisfies ProjectCostumeScene];
+    });
+
+    if (newScenes.length === 0) {
+      setNoticeMessage("추가할 씬리스트 씬이 없습니다.");
+      setErrorMessage("");
+      return;
+    }
+    setScenes((current) => [...current, ...newScenes]);
+    setDrafts((current) => ({
+      ...current,
+      ...Object.fromEntries(newScenes.flatMap((scene) => (
+        scene.items.map((item) => [item.id, toDraft(item)])
+      )))
+    }));
+    // 새 씬 ID는 expandedSceneIds에 넣지 않아 기존 씬의 펼침 상태만 유지합니다.
+    markDirty(`씬리스트의 새 씬 ${newScenes.length}개를 접힌 상태로 추가했습니다. 전체 저장을 눌러 반영해주세요.`);
+  }
+
+  function handleEpisodeToggle(scene: ProjectCostumeScene, episode: number) {
+    if (!canEdit) return;
+    const sceneKey = normalizeSceneNumber(scene.sceneNo);
+    if (automaticEpisodesByScene.get(sceneKey)?.has(episode)) return;
+    setScenes((current) => current.map((entry) => {
+      if (entry.id !== scene.id) return entry;
+      const checked = entry.episodeNumbers.includes(episode);
+      return {
+        ...entry,
+        episodeNumbers: checked
+          ? entry.episodeNumbers.filter((value) => value !== episode)
+          : [...entry.episodeNumbers, episode].sort((left, right) => left - right)
+      };
+    }));
+    markDirty("씬 회차 체크를 변경했습니다. 전체 저장을 눌러 반영해주세요.");
+  }
+
   function handleSceneListSelection(sceneId: string) {
     if (!sceneDraft) return;
     const selected = sceneOptions.find((item) => item.id === sceneId);
@@ -239,6 +333,10 @@ export default function ProjectCostumesPage() {
         projectId,
         sceneNo: sceneDraft.sceneNo.trim(),
         sceneTitle: sceneDraft.sceneTitle.trim(),
+        episodeNumbers: mergeEpisodeNumbers(
+          [],
+          automaticEpisodesByScene.get(normalizeSceneNumber(sceneDraft.sceneNo))
+        ),
         sortOrder: scenes.length,
         items,
         createdAt: now,
@@ -261,7 +359,6 @@ export default function ProjectCostumesPage() {
     const presentActors = sourceScene
       ? getPresentSceneActors(sourceScene, actors, sceneActorRoles)
       : [];
-    const seedActors = presentActors.length > 0 ? presentActors : dedupeActors(actors);
     const existingKeys = new Set(scene.items.map((item) => {
       const draft = drafts[item.id];
       return normalizeActorKey(
@@ -269,7 +366,7 @@ export default function ProjectCostumesPage() {
         draft?.actorName ?? item.actorName
       );
     }));
-    const missingActors = seedActors.filter((actor) => {
+    const missingActors = presentActors.filter((actor) => {
       const key = normalizeActorKey(actor.role, actor.name);
       if (!key || existingKeys.has(key)) return false;
       existingKeys.add(key);
@@ -277,11 +374,7 @@ export default function ProjectCostumesPage() {
     });
 
     if (missingActors.length === 0) {
-      setNoticeMessage(
-        presentActors.length > 0
-          ? "씬리스트의 등장 배역이 이미 모두 등록되어 있습니다."
-          : "추가할 기본정보 배우가 없습니다."
-      );
+      setNoticeMessage("씬리스트의 등장 배역이 이미 모두 등록되어 있습니다.");
       setErrorMessage("");
       return;
     }
@@ -303,11 +396,27 @@ export default function ProjectCostumesPage() {
       ...current,
       ...Object.fromEntries(items.map((item) => [item.id, toDraft(item)]))
     }));
-    markDirty(
-      presentActors.length > 0
-        ? `씬리스트 등장 배역 ${missingActors.length}명을 보충했습니다. 전체 저장을 눌러 반영해주세요.`
-        : `기본정보 배우 ${missingActors.length}명을 추가했습니다. 전체 저장을 눌러 반영해주세요.`
+    markDirty(`씬리스트 등장 배역 ${missingActors.length}명을 보충했습니다. 전체 저장을 눌러 반영해주세요.`);
+  }
+
+  function handleDirectActorAdd(scene: ProjectCostumeScene) {
+    if (!projectId || !canEdit) return;
+    const now = new Date().toISOString();
+    const item = createTemporaryCostume(
+      projectId,
+      scene.id,
+      scene.sceneNo,
+      "",
+      "",
+      scene.items.length,
+      now
     );
+    setScenes((current) => current.map((entry) => entry.id === scene.id
+      ? { ...entry, items: [...entry.items, item] }
+      : entry));
+    setDrafts((current) => ({ ...current, [item.id]: toDraft(item) }));
+    setExpandedSceneIds((current) => new Set([...current, scene.id]));
+    markDirty("빈 배역 행을 추가했습니다. 내용을 입력한 뒤 전체 저장을 눌러주세요.");
   }
 
   function handleSceneDelete(scene: ProjectCostumeScene) {
@@ -335,38 +444,6 @@ export default function ProjectCostumesPage() {
     } else {
       updateDraft(id, { costumeFiles: [...current.costumeFiles, ...pendingFiles] });
     }
-  }
-
-  function handleActorAdd(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!projectId || !actorDraft || !canEdit) return;
-    const scene = scenes.find((item) => item.id === actorDraft.sceneId);
-    if (!scene) return;
-    if (!actorDraft.role.trim() && !actorDraft.name.trim()) {
-      setErrorMessage("배역 또는 배우 이름을 입력해주세요.");
-      return;
-    }
-    const duplicateKey = normalizeActorKey(actorDraft.role, actorDraft.name);
-    if (scene.items.some((item) => normalizeActorKey(item.actorRole, item.actorName) === duplicateKey)) {
-      setErrorMessage("이미 이 씬에 등록된 배역입니다.");
-      return;
-    }
-    const now = new Date().toISOString();
-    const item = createTemporaryCostume(
-      projectId,
-      scene.id,
-      scene.sceneNo,
-      actorDraft.role.trim(),
-      actorDraft.name.trim(),
-      scene.items.length,
-      now
-    );
-    setScenes((current) => current.map((entry) => entry.id === scene.id
-      ? { ...entry, items: [...entry.items, item] }
-      : entry));
-    setDrafts((current) => ({ ...current, [item.id]: toDraft(item) }));
-    setActorDraft(null);
-    markDirty("배역을 임시 추가했습니다. 전체 저장을 눌러 반영해주세요.");
   }
 
   function handleItemDelete(scene: ProjectCostumeScene, item: ProjectCostume) {
@@ -416,12 +493,14 @@ export default function ProjectCostumesPage() {
           ? await createProjectCostumeScene(projectId, {
               sceneNo: scene.sceneNo,
               sceneTitle: scene.sceneTitle,
+              episodeNumbers: scene.episodeNumbers,
               actors: []
             })
           : await updateProjectCostumeScene(projectId, {
               id: scene.id,
               sceneNo: scene.sceneNo,
-              sceneTitle: scene.sceneTitle
+              sceneTitle: scene.sceneTitle,
+              episodeNumbers: scene.episodeNumbers
             });
 
         if (isTemporaryId(scene.id)) {
@@ -511,6 +590,14 @@ export default function ProjectCostumesPage() {
           </label>
           {canEdit ? (
             <>
+              <Button
+                variant="secondary"
+                className="min-h-9 px-3 py-1.5 text-xs"
+                onClick={handleImportAllScenes}
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                씬리스트 전체 불러오기
+              </Button>
               <Button variant="secondary" className="min-h-9 px-3 py-1.5 text-xs" onClick={() => setSceneDraft({ sceneNo: "", sceneTitle: "" })}>
                 <Plus className="h-4 w-4" aria-hidden />
                 씬 추가
@@ -553,6 +640,7 @@ export default function ProjectCostumesPage() {
               const sourceActors = sourceScene
                 ? getPresentSceneActors(sourceScene, actors, sceneActorRoles)
                 : [];
+              const missingSourceActors = getMissingSceneActors(scene, sourceActors, drafts);
               const imageCount = scene.items.reduce((total, item) => {
                 const draft = drafts[item.id];
                 return total
@@ -563,11 +651,11 @@ export default function ProjectCostumesPage() {
               }, 0);
               return (
                 <section key={scene.id} className="overflow-hidden rounded-xl border border-field-border bg-white">
-                  <div className="flex min-w-0 items-center gap-1.5 bg-field-light px-2.5 py-1.5">
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 bg-field-light px-2.5 py-1.5">
                     <button
                       type="button"
                       onClick={() => toggleScene(scene.id)}
-                      className="flex min-h-9 min-w-0 flex-1 items-center gap-1.5 text-left"
+                      className="flex min-h-9 min-w-[150px] flex-1 items-center gap-1.5 text-left"
                       aria-expanded={expanded}
                     >
                       <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
@@ -576,8 +664,20 @@ export default function ProjectCostumesPage() {
                         <span className="text-[11px] font-bold text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
                       </span>
                     </button>
+                    {totalEpisodes > 0 ? (
+                      <EpisodeChecks
+                        totalEpisodes={totalEpisodes}
+                        checkedEpisodes={scene.episodeNumbers}
+                        automaticEpisodes={automaticEpisodesByScene.get(normalizeSceneNumber(scene.sceneNo))}
+                        canEdit={canEdit}
+                        onToggle={(episode) => handleEpisodeToggle(scene, episode)}
+                      />
+                    ) : null}
                     {canEdit ? (
                       <div className="flex shrink-0 gap-1">
+                        <IconButton compact label="배역 직접 추가" onClick={() => handleDirectActorAdd(scene)}>
+                          <Plus className="h-3.5 w-3.5" aria-hidden />
+                        </IconButton>
                         <IconButton label="씬 정보 수정" onClick={() => setSceneDraft({ id: scene.id, sceneNo: scene.sceneNo, sceneTitle: scene.sceneTitle })}>
                           <Pencil className="h-3 w-3" aria-hidden />
                         </IconButton>
@@ -624,24 +724,16 @@ export default function ProjectCostumesPage() {
                       </div>
                       {canEdit ? (
                         <div className="mt-1.5 flex flex-wrap gap-1.5">
-                          <Button
-                            variant="secondary"
-                            className="min-h-8 px-2.5 py-1 text-[11px]"
-                            onClick={() => handleSceneActorSeed(scene)}
-                          >
-                            <Plus className="h-4 w-4" aria-hidden />
-                            {sourceActors.length > 0
-                              ? `씬리스트 배역 보충 (${sourceActors.length}명)`
-                              : "기본정보 배우 전체 추가"}
-                          </Button>
-                          <Button
-                            variant="secondary"
-                            className="min-h-8 px-2.5 py-1 text-[11px]"
-                            onClick={() => setActorDraft({ sceneId: scene.id, role: "", name: "" })}
-                          >
-                            <Plus className="h-4 w-4" aria-hidden />
-                            배역 직접 추가
-                          </Button>
+                          {missingSourceActors.length > 0 ? (
+                            <Button
+                              variant="secondary"
+                              className="min-h-8 px-2.5 py-1 text-[11px]"
+                              onClick={() => handleSceneActorSeed(scene)}
+                            >
+                              <Plus className="h-4 w-4" aria-hidden />
+                              씬리스트 배역 보충 ({missingSourceActors.length}명)
+                            </Button>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -712,24 +804,6 @@ export default function ProjectCostumesPage() {
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setSceneDraft(null)}>닫기</Button>
               <Button type="submit">변경사항 반영</Button>
-            </div>
-          </form>
-        </BottomSheet>
-      ) : null}
-
-      {actorDraft ? (
-        <BottomSheet title="배역 추가" onClose={() => setActorDraft(null)}>
-          <form onSubmit={handleActorAdd} className="grid gap-3">
-            <Field label="배역">
-              <input value={actorDraft.role} onChange={(event) => setActorDraft({ ...actorDraft, role: event.target.value })} className={compactInputClass} />
-            </Field>
-            <Field label="배우 이름">
-              <input value={actorDraft.name} onChange={(event) => setActorDraft({ ...actorDraft, name: event.target.value })} className={compactInputClass} />
-            </Field>
-            <p className="text-xs font-bold leading-5 text-field-muted">이 배역은 의상표에만 추가되며 프로젝트 기본정보는 변경하지 않습니다.</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={() => setActorDraft(null)}>닫기</Button>
-              <Button type="submit">임시 추가</Button>
             </div>
           </form>
         </BottomSheet>
@@ -905,7 +979,7 @@ function EditableMediaField({
     <div className="grid min-w-0 content-start gap-1">
       <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
-        <div className="flex min-h-32 min-w-0 items-start gap-1.5 overflow-x-auto pb-1">
+        <div className="flex min-h-32 min-w-0 items-start gap-1.5 overflow-x-auto overflow-y-hidden pb-1">
           {images.map((image) => (
             <div key={image.path} className="relative h-32 w-32 shrink-0 border border-field-border bg-field-soft">
               <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
@@ -931,9 +1005,16 @@ function EditableMediaField({
               onRemove={() => onPendingFilesChange(pendingFiles.filter((item) => item.id !== pending.id))}
             />
           ))}
-          <label className="grid min-h-32 w-20 shrink-0 cursor-pointer place-items-center border border-dashed border-field-secondary bg-field-light px-1.5 py-1 text-[10px] font-black text-field-primary">
-            <span className="flex items-center gap-1"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
-            <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
+          <label
+            className="grid h-14 w-14 shrink-0 cursor-pointer place-items-center self-center border border-dashed border-field-secondary bg-field-light text-field-primary"
+            title={`${label} 사진 추가`}
+            aria-label={`${label} 사진 추가`}
+          >
+            <span className="relative">
+              <ImagePlus className="h-5 w-5" aria-hidden />
+              <Plus className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 bg-field-light" aria-hidden />
+            </span>
+            <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={onFiles} />
           </label>
         </div>
         <label className="grid gap-0.5">
@@ -1000,7 +1081,7 @@ function ReadOnlyMediaField({
     <div className="grid min-w-0 content-start gap-1">
       <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
-        {images.length > 0 ? <div className="flex min-h-32 gap-1.5 overflow-x-auto pb-1">
+        {images.length > 0 ? <div className="flex min-h-32 gap-1.5 overflow-x-auto overflow-y-hidden pb-1">
           {images.map((image) => (
             <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 border border-field-border bg-field-soft">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1022,6 +1103,49 @@ function ReadOnlyValue({ label, value }: { label: string; value: string }) {
     <div className="min-w-0">
       <dt className="text-[9px] font-black leading-4 text-field-muted lg:hidden">{label}</dt>
       <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</dd>
+    </div>
+  );
+}
+
+function EpisodeChecks({
+  totalEpisodes,
+  checkedEpisodes,
+  automaticEpisodes,
+  canEdit,
+  onToggle
+}: {
+  totalEpisodes: number;
+  checkedEpisodes: number[];
+  automaticEpisodes?: Set<number>;
+  canEdit: boolean;
+  onToggle: (episode: number) => void;
+}) {
+  return (
+    <div className="flex max-w-full shrink-0 gap-1 overflow-x-auto overflow-y-hidden py-0.5" aria-label="씬 포함 회차">
+      {Array.from({ length: totalEpisodes }, (_, index) => index + 1).map((episode) => {
+        const checked = checkedEpisodes.includes(episode);
+        const automatic = automaticEpisodes?.has(episode) ?? false;
+        return (
+          <label
+            key={episode}
+            title={automatic ? `${episode}회차 일촬표에서 자동 반영됨` : `${episode}회차`}
+            className={`flex h-6 min-w-7 items-center justify-center gap-0.5 border px-1 text-[10px] font-black ${
+              checked
+                ? "border-field-primary bg-field-primary text-white"
+                : "border-field-border bg-white text-field-muted"
+            } ${canEdit && !automatic ? "cursor-pointer" : "cursor-default"}`}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={!canEdit || automatic}
+              onChange={() => onToggle(episode)}
+              className="h-3 w-3 accent-field-primary"
+            />
+            <span>{episode}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }
@@ -1184,6 +1308,64 @@ function dedupeActors(actors: ProjectActor[]) {
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+function buildAutomaticEpisodesByScene(
+  entries: Array<{
+    plan: DailyPlanListItem;
+    detail: Awaited<ReturnType<typeof getDailyPlanWithShots>>;
+  }>
+) {
+  const episodesByScene = new Map<string, Set<number>>();
+  entries.forEach(({ plan, detail }) => {
+    if (!detail) return;
+    const episode = parseEpisodeNumber(detail.plan.episode || plan.episode || plan.title);
+    if (!episode) return;
+    detail.shots.forEach((shot) => {
+      const sceneKey = normalizeSceneNumber(shot.sceneNumber);
+      if (!sceneKey) return;
+      const episodes = episodesByScene.get(sceneKey) ?? new Set<number>();
+      episodes.add(episode);
+      episodesByScene.set(sceneKey, episodes);
+    });
+  });
+  return episodesByScene;
+}
+
+function parseEpisodeNumber(value: string) {
+  const match = value.normalize("NFKC").match(/\d{1,3}/);
+  if (!match) return null;
+  const episode = Number.parseInt(match[0], 10);
+  return episode > 0 ? episode : null;
+}
+
+function mergeEpisodeNumbers(current: number[], automatic?: Iterable<number>) {
+  return Array.from(new Set([
+    ...current.filter((episode) => Number.isInteger(episode) && episode > 0),
+    ...(automatic ?? [])
+  ])).sort((left, right) => left - right);
+}
+
+function sameEpisodeNumbers(left: number[], right: number[]) {
+  return left.length === right.length && left.every((episode, index) => episode === right[index]);
+}
+
+function getMissingSceneActors(
+  scene: ProjectCostumeScene,
+  sourceActors: ProjectActor[],
+  drafts: Record<string, CostumeDraft>
+) {
+  const existingKeys = new Set(scene.items.map((item) => {
+    const draft = drafts[item.id];
+    return normalizeActorKey(
+      draft?.actorRole ?? item.actorRole,
+      draft?.actorName ?? item.actorName
+    );
+  }));
+  return sourceActors.filter((actor) => {
+    const key = normalizeActorKey(actor.role, actor.name);
+    return Boolean(key) && !existingKeys.has(key);
   });
 }
 

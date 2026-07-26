@@ -114,17 +114,34 @@ export async function listProjectCostumes(projectId: string): Promise<ProjectCos
 }
 
 export async function listProjectCostumeScenes(projectId: string): Promise<ProjectCostumeScene[]> {
+  return (await getProjectCostumeSceneOverview(projectId)).scenes;
+}
+
+export async function getProjectCostumeSceneOverview(
+  projectId: string
+): Promise<{ scenes: ProjectCostumeScene[]; totalEpisodes: number }> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, { cache: "no-store" });
-  const payload = (await response.json().catch(() => ({}))) as ApiError & { scenes?: ProjectCostumeScene[] };
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    scenes?: ProjectCostumeScene[];
+    totalEpisodes?: number;
+  };
   if (!response.ok) {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "씬별 의상 자료를 불러오지 못했습니다.");
   }
-  return payload.scenes ?? [];
+  return {
+    scenes: payload.scenes ?? [],
+    totalEpisodes: Math.max(0, Number(payload.totalEpisodes ?? 0))
+  };
 }
 
 export async function createProjectCostumeScene(
   projectId: string,
-  value: { sceneNo: string; sceneTitle: string; actors: Array<{ role: string; name: string }> }
+  value: {
+    sceneNo: string;
+    sceneTitle: string;
+    episodeNumbers: number[];
+    actors: Array<{ role: string; name: string }>;
+  }
 ): Promise<ProjectCostumeScene> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
     method: "POST",
@@ -140,7 +157,7 @@ export async function createProjectCostumeScene(
 
 export async function updateProjectCostumeScene(
   projectId: string,
-  value: { id: string; sceneNo: string; sceneTitle: string }
+  value: { id: string; sceneNo: string; sceneTitle: string; episodeNumbers: number[] }
 ): Promise<ProjectCostumeScene> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
     method: "PATCH",

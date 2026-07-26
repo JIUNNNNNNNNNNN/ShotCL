@@ -10,7 +10,7 @@ import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 type RouteContext = { params: Promise<{ projectId: string }> };
 type ActorSeed = { role: string; name: string };
 
-const SCENE_COLUMNS = "id,project_id,scene_no,scene_title,sort_order,created_at,updated_at";
+const SCENE_COLUMNS = "id,project_id,scene_no,scene_title,episode_numbers,sort_order,created_at,updated_at";
 const ITEM_COLUMNS = "id,project_id,costume_scene_id,scene_no,actor_role,actor_name,costume_content,provider,hair,image_paths,sort_order,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: RouteContext) {
@@ -21,8 +21,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "의상 자료를 볼 권한이 없습니다." }, { status: 403 });
     }
 
-    const scenes = await readScenes(projectId);
-    return NextResponse.json({ ok: true, scenes });
+    const [scenes, totalEpisodes] = await Promise.all([
+      readScenes(projectId),
+      readProjectTotalEpisodes(projectId)
+    ]);
+    return NextResponse.json({ ok: true, scenes, totalEpisodes });
   } catch (error) {
     return costumeSceneError(error, "씬별 의상 자료를 불러오지 못했습니다.");
   }
@@ -39,6 +42,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const sceneNo = cleanText(body.sceneNo, 80);
     const sceneTitle = cleanText(body.sceneTitle, 300);
+    const episodeNumbers = normalizeEpisodeNumbers(body.episodeNumbers);
     const actors = normalizeActors(body.actors);
     if (!sceneNo) {
       return NextResponse.json({ error: "씬 번호 또는 씬 이름을 입력해주세요." }, { status: 400 });
@@ -67,6 +71,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         project_id: projectId,
         scene_no: sceneNo,
         scene_title: sceneTitle,
+        episode_numbers: episodeNumbers,
         sort_order: count ?? 0
       })
       .select(SCENE_COLUMNS)
@@ -120,6 +125,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const id = cleanText(body.id, 100);
     const sceneNo = cleanText(body.sceneNo, 80);
     const sceneTitle = cleanText(body.sceneTitle, 300);
+    const episodeNumbers = normalizeEpisodeNumbers(body.episodeNumbers);
     if (!id || !sceneNo) {
       return NextResponse.json({ error: "씬 ID와 씬 번호가 필요합니다." }, { status: 400 });
     }
@@ -138,7 +144,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const { data, error } = await supabase
       .from("project_costume_scenes")
-      .update({ scene_no: sceneNo, scene_title: sceneTitle })
+      .update({
+        scene_no: sceneNo,
+        scene_title: sceneTitle,
+        episode_numbers: episodeNumbers
+      })
       .eq("id", id)
       .eq("project_id", projectId)
       .select(SCENE_COLUMNS)
@@ -230,6 +240,18 @@ async function readScenes(projectId: string) {
   });
 }
 
+async function readProjectTotalEpisodes(projectId: string) {
+  const supabase = requireProjectAccessDb();
+  const { data, error } = await supabase
+    .from("project_basic_info")
+    .select("total_episodes")
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (error) throw error;
+  const totalEpisodes = Number(data?.total_episodes ?? 0);
+  return Number.isInteger(totalEpisodes) && totalEpisodes > 0 ? totalEpisodes : 0;
+}
+
 async function getProjectId(context: RouteContext) {
   const { projectId: routeProjectId } = await context.params;
   const projectId = normalizeProjectId(routeProjectId);
@@ -256,6 +278,15 @@ function normalizeActors(value: unknown): ActorSeed[] {
     seen.add(key);
     return [{ role, name }];
   });
+}
+
+function normalizeEpisodeNumbers(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value
+      .map((episode) => Number.parseInt(String(episode), 10))
+      .filter((episode) => Number.isInteger(episode) && episode > 0 && episode <= 999)
+  )).sort((left, right) => left - right);
 }
 
 function normalizeSceneKey(value: string) {
@@ -296,6 +327,7 @@ function mapSceneRow(row: Record<string, unknown>) {
     projectId: String(row.project_id ?? ""),
     sceneNo: String(row.scene_no ?? ""),
     sceneTitle: String(row.scene_title ?? ""),
+    episodeNumbers: normalizeEpisodeNumbers(row.episode_numbers),
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
@@ -326,6 +358,16 @@ function costumeSceneError(error: unknown, message: string) {
   }
   const source = safeError(error);
   console.error("[costume-scenes]", source);
+  const missingEpisodeNumbers = (
+    source.code === "42703" || source.code === "PGRST204"
+  ) && /episode_numbers/i.test(source.message);
+  if (missingEpisodeNumbers) {
+    return NextResponse.json({
+      error: "의상 씬 회차 migration을 먼저 적용해주세요.",
+      code: "PROJECT_COSTUME_EPISODES_MIGRATION_REQUIRED",
+      detail: source.message
+    }, { status: 503 });
+  }
   const missingTable = source.code === "42P01"
     || /project_costume_scenes|costume_scene_id|actor_role|costume_content/i.test(source.message)
       && /does not exist|schema cache|could not find/i.test(source.message);

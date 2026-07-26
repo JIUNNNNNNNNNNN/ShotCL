@@ -238,6 +238,7 @@ export type ProjectCostumeScene = {
   projectId: string;
   sceneNo: string;
   sceneTitle: string;
+  episodeNumbers: number[];
   sortOrder: number;
   items: ProjectCostume[];
   createdAt: string;
