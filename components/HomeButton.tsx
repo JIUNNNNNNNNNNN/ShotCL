@@ -11,16 +11,19 @@ const LONG_PRESS_MS = 700;
 export function HomeButton() {
   const pathname = usePathname();
   const router = useRouter();
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigationUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressTriggeredRef = useRef(false);
+  const longPressArmedRef = useRef(false);
   const navigatingRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [isPressing, setIsPressing] = useState(false);
+  const [isArmed, setIsArmed] = useState(false);
 
   useEffect(() => () => {
-    clearPressTimer(timerRef);
+    cleanupPress({ suppressClick: true });
     clearPressTimer(navigationUnlockTimerRef);
   }, []);
 
@@ -42,79 +45,117 @@ export function HomeButton() {
     }, 800);
   }
 
-  function beginPress() {
+  function beginPress(pointerId: number, clientX: number, clientY: number) {
     if (navigatingRef.current) return;
     clearPressTimer(timerRef);
-    longPressTriggeredRef.current = false;
+    longPressArmedRef.current = false;
+    pointerStartRef.current = { x: clientX, y: clientY };
+    activePointerIdRef.current = pointerId;
+    setIsArmed(false);
     setIsPressing(true);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      longPressTriggeredRef.current = true;
-      setIsPressing(false);
-      navigate("/");
+      longPressArmedRef.current = true;
+      setIsArmed(true);
     }, LONG_PRESS_MS);
   }
 
-  function finishPress() {
+  function cleanupPress({ suppressClick = false }: { suppressClick?: boolean } = {}) {
     clearPressTimer(timerRef);
-    setIsPressing(false);
-  }
-
-  function cancelPress(suppressClick = false) {
-    clearPressTimer(timerRef);
-    if (suppressClick) longPressTriggeredRef.current = true;
+    const pointerId = activePointerIdRef.current;
+    const button = buttonRef.current;
+    if (pointerId !== null && button?.hasPointerCapture(pointerId)) {
+      try {
+        button.releasePointerCapture(pointerId);
+      } catch {
+        // 이미 브라우저가 capture를 해제한 경우에도 나머지 상태는 정리합니다.
+      }
+    }
+    if (suppressClick) suppressClickUntilRef.current = Date.now() + 500;
     activePointerIdRef.current = null;
+    pointerStartRef.current = null;
+    longPressArmedRef.current = false;
     setIsPressing(false);
+    setIsArmed(false);
   }
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={projectId ? "회차 선택으로 이동, 길게 누르면 메인 홈으로 이동" : "메인 홈으로 이동"}
       title={projectId ? "회차 선택 · 길게 누르면 메인 홈" : "메인 홈"}
-      className={`fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center rounded-full border bg-white/95 text-field-primary shadow-[0_3px_10px_rgba(28,28,26,0.08)] backdrop-blur-sm transition-[background-color,border-color,transform] hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:left-5 md:h-11 md:w-11 ${
-        isPressing ? "scale-90 border-[#d7b95f] bg-field-light" : "border-field-secondary active:scale-95"
+      className={`fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center rounded-full border bg-white/95 text-field-primary shadow-[0_3px_10px_rgba(28,28,26,0.08)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform] hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:left-5 md:h-11 md:w-11 ${
+        isArmed
+          ? "scale-95 border-[#d7b95f] bg-[#fff9df] shadow-[0_0_0_3px_rgba(215,185,95,0.18),0_4px_14px_rgba(215,185,95,0.3)]"
+          : isPressing
+            ? "scale-90 border-[#d7b95f] bg-field-light"
+            : "border-field-secondary active:scale-95"
       }`}
-      style={{ touchAction: "manipulation", WebkitTouchCallout: "none" }}
+      style={{ touchAction: "none", WebkitTouchCallout: "none" }}
       onContextMenu={(event) => event.preventDefault()}
       onPointerDown={(event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
         event.preventDefault();
-        activePointerIdRef.current = event.pointerId;
-        beginPress();
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // capture 미지원 환경에서도 동일한 timer/cleanup 흐름을 사용합니다.
+        }
+        beginPress(event.pointerId, event.clientX, event.clientY);
+      }}
+      onPointerMove={(event) => {
+        if (activePointerIdRef.current !== event.pointerId || !pointerStartRef.current) return;
+        const distance = Math.hypot(
+          event.clientX - pointerStartRef.current.x,
+          event.clientY - pointerStartRef.current.y
+        );
+        const cancelDistance = event.pointerType === "mouse" ? 14 : 24;
+        if (distance > cancelDistance) cleanupPress({ suppressClick: true });
       }}
       onPointerUp={(event) => {
         if (activePointerIdRef.current !== event.pointerId) return;
-        activePointerIdRef.current = null;
-        const wasLongPress = longPressTriggeredRef.current;
-        finishPress();
-        longPressTriggeredRef.current = false;
-        suppressClickUntilRef.current = Date.now() + 500;
-        if (!wasLongPress) navigate(projectEpisodePath);
+        const wasArmed = longPressArmedRef.current;
+        cleanupPress({ suppressClick: true });
+        navigate(wasArmed ? "/" : projectEpisodePath);
       }}
       onPointerCancel={() => {
-        suppressClickUntilRef.current = Date.now() + 500;
-        cancelPress(true);
+        cleanupPress({ suppressClick: true });
       }}
       onPointerLeave={() => {
-        suppressClickUntilRef.current = Date.now() + 500;
-        cancelPress(true);
+        cleanupPress({ suppressClick: true });
       }}
       onClick={(event) => {
         event.preventDefault();
         if (Date.now() < suppressClickUntilRef.current) return;
-        if (longPressTriggeredRef.current) {
-          longPressTriggeredRef.current = false;
-          return;
-        }
         navigate(projectEpisodePath);
       }}
       onBlur={() => {
-        suppressClickUntilRef.current = Date.now() + 500;
-        cancelPress(true);
+        cleanupPress({ suppressClick: true });
       }}
     >
-      <House className="h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />
+      <svg
+        aria-hidden
+        viewBox="0 0 44 44"
+        className={`pointer-events-none absolute -inset-[3px] h-[calc(100%+6px)] w-[calc(100%+6px)] -rotate-90 ${
+          isPressing || isArmed ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        <circle
+          cx="22"
+          cy="22"
+          r="19"
+          fill="none"
+          stroke="#d7b95f"
+          strokeWidth="2.5"
+          pathLength="100"
+          strokeDasharray="100"
+          strokeDashoffset={isPressing || isArmed ? 0 : 100}
+          className="transition-[stroke-dashoffset] ease-linear motion-reduce:transition-none"
+          style={{ transitionDuration: `${LONG_PRESS_MS}ms` }}
+        />
+      </svg>
+      <House className="relative h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />
     </button>
   );
 }

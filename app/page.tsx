@@ -168,6 +168,35 @@ export default function HomePage() {
   const isProjectTargetEngaged = projectSpinner.activationIndex !== null
     && projectSpinner.activationState !== "outside";
 
+  useEffect(() => {
+    function resetHomeInteractions() {
+      mainSpinner.resetInteraction();
+      projectSpinner.resetInteraction();
+      projectNavigationRef.current = false;
+      setSelectedMainId(null);
+      setSelectedProjectId(null);
+      setPickerMode(null);
+      setFeedback(null);
+
+      [document.body, document.documentElement].forEach((element) => {
+        if (element.style.cursor === "grabbing" || element.style.cursor === "grab") {
+          element.style.cursor = "";
+        }
+        if (element.style.userSelect === "none") element.style.userSelect = "";
+      });
+      document.body.classList.remove("cursor-grabbing", "select-none");
+      document.documentElement.classList.remove("cursor-grabbing", "select-none");
+    }
+
+    resetHomeInteractions();
+    window.addEventListener("pageshow", resetHomeInteractions);
+    return () => {
+      window.removeEventListener("pageshow", resetHomeInteractions);
+      mainSpinner.resetInteraction();
+      projectSpinner.resetInteraction();
+    };
+  }, [mainSpinner.resetInteraction, projectSpinner.resetInteraction]);
+
   useEffect(() => () => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);

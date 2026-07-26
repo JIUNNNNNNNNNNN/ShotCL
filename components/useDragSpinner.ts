@@ -268,10 +268,12 @@ export function useDragSpinner({
   const rotationFrameRef = useRef<number | null>(null);
   const inertiaFrameRef = useRef<number | null>(null);
   const magnetFrameRef = useRef<number | null>(null);
+  const clickReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isAnimatingRef = useRef(false);
   const dragStateRef = useRef<{
     pointerId: number;
     pointerType: string;
+    captureTarget: HTMLElement;
     startX: number;
     startY: number;
     lastAngle: number;
@@ -307,11 +309,13 @@ export function useDragSpinner({
     if (rotationFrameRef.current !== null) window.cancelAnimationFrame(rotationFrameRef.current);
     if (inertiaFrameRef.current !== null) window.cancelAnimationFrame(inertiaFrameRef.current);
     if (magnetFrameRef.current !== null) window.cancelAnimationFrame(magnetFrameRef.current);
+    if (clickReleaseTimerRef.current) clearTimeout(clickReleaseTimerRef.current);
     settleTimerRef.current = null;
     animationTimerRef.current = null;
     rotationFrameRef.current = null;
     inertiaFrameRef.current = null;
     magnetFrameRef.current = null;
+    clickReleaseTimerRef.current = null;
     isAnimatingRef.current = false;
     setIsInertiaActive(false);
     setMotionState("idle");
@@ -635,8 +639,28 @@ export function useDragSpinner({
     updateRotation
   ]);
 
-  useEffect(() => {
+  const resetInteraction = useCallback(() => {
     cancelPending();
+    const dragState = dragStateRef.current;
+    dragStateRef.current = null;
+    if (
+      dragState?.captured
+      && dragState.captureTarget.hasPointerCapture(dragState.pointerId)
+    ) {
+      try {
+        dragState.captureTarget.releasePointerCapture(dragState.pointerId);
+      } catch {
+        // 브라우저가 capture를 먼저 해제했어도 내부 상태는 계속 초기화합니다.
+      }
+    }
+    suppressClickRef.current = false;
+    setIsDragging(false);
+    setIsInertiaActive(false);
+    setMotionState("idle");
+  }, [cancelPending, setMotionState]);
+
+  useEffect(() => {
+    resetInteraction();
     if (itemCount <= 0) {
       updateRotation(0, 0);
       return;
@@ -645,12 +669,31 @@ export function useDragSpinner({
     const snappedRotation = rotationRef.current
       - normalizeSpinnerAngle(getSpinnerItemAngle(safeIndex, itemCount) + rotationRef.current);
     updateRotation(snappedRotation, itemCount);
-  }, [cancelPending, itemCount, updateRotation]);
+  }, [itemCount, resetInteraction, updateRotation]);
 
   useEffect(() => () => {
-    cancelPending();
+    resetInteraction();
     if (rotationFrameRef.current !== null) window.cancelAnimationFrame(rotationFrameRef.current);
-  }, [cancelPending]);
+  }, [resetInteraction]);
+
+  useEffect(() => {
+    function resetInterruptedGesture() {
+      resetInteraction();
+    }
+
+    function resetWhenHidden() {
+      if (document.visibilityState === "hidden") resetInteraction();
+    }
+
+    window.addEventListener("blur", resetInterruptedGesture);
+    window.addEventListener("pagehide", resetInterruptedGesture);
+    document.addEventListener("visibilitychange", resetWhenHidden);
+    return () => {
+      window.removeEventListener("blur", resetInterruptedGesture);
+      window.removeEventListener("pagehide", resetInterruptedGesture);
+      document.removeEventListener("visibilitychange", resetWhenHidden);
+    };
+  }, [resetInteraction]);
 
   useLayoutEffect(() => {
     if (!isAnimatingRef.current) refreshActivation();
@@ -671,6 +714,7 @@ export function useDragSpinner({
     dragStateRef.current = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
+      captureTarget: event.currentTarget,
       startX: event.clientX,
       startY: event.clientY,
       lastAngle: getPointerAngle(event),
@@ -722,26 +766,39 @@ export function useDragSpinner({
     scheduleRotation(nextRotation);
   }
 
-  function finishPointer(event: ReactPointerEvent<HTMLElement>) {
+  function releaseSuppressedClickSoon() {
+    if (clickReleaseTimerRef.current) clearTimeout(clickReleaseTimerRef.current);
+    clickReleaseTimerRef.current = setTimeout(() => {
+      clickReleaseTimerRef.current = null;
+      suppressClickRef.current = false;
+    }, 0);
+  }
+
+  function finishPointer(event: ReactPointerEvent<HTMLElement>, cancelled = false) {
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
 
-    if (dragState.captured && event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
     dragStateRef.current = null;
+    if (dragState.captured && dragState.captureTarget.hasPointerCapture(event.pointerId)) {
+      dragState.captureTarget.releasePointerCapture(event.pointerId);
+    }
     setIsDragging(false);
     setMotionState("idle");
 
-    if (dragState.moved) {
+    if (dragState.moved && !cancelled) {
       flushRotationFrame();
       startInertia(getRecentSpinnerVelocity([
         ...dragState.samples,
         { rotation: rotationRef.current, time: event.timeStamp }
       ].slice(-5)));
-      window.setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
+      releaseSuppressedClickSoon();
+      return;
+    }
+
+    if (cancelled) {
+      cancelPending();
+      suppressClickRef.current = true;
+      releaseSuppressedClickSoon();
     }
   }
 
@@ -764,11 +821,16 @@ export function useDragSpinner({
     snapToIndex,
     activateIndex,
     consumeSuppressedClick,
+    resetInteraction,
     pointerHandlers: {
       onPointerDown,
       onPointerMove,
-      onPointerUp: finishPointer,
-      onPointerCancel: finishPointer
+      onPointerUp: (event: ReactPointerEvent<HTMLElement>) => finishPointer(event),
+      onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => finishPointer(event, true),
+      onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => {
+        const dragState = dragStateRef.current;
+        if (dragState?.pointerId === event.pointerId) finishPointer(event, true);
+      }
     }
   };
 }
