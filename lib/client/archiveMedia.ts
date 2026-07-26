@@ -31,6 +31,10 @@ export type StoryboardCropTemplate = {
   cropWidth: number;
   cropHeight: number;
   aspectRatio: number;
+  columnX: number;
+  rowAnchorCenterY: number;
+  rowStep: number;
+  rowsPerPage: number;
   clickPlacementMode: "center";
   targetColumn: "storyboard";
   includeContext: false;
@@ -117,12 +121,19 @@ export function createStoryboardCropTemplate(
   crop: RelativeCrop
 ): StoryboardCropTemplate {
   const safeCrop = normalizeRelativeCrop(crop);
+  const rowStep = Math.min(1, Math.max(safeCrop.height, safeCrop.height * 1.16));
   return {
     basePageWidth: page.width,
     basePageHeight: page.height,
     cropWidth: safeCrop.width,
     cropHeight: safeCrop.height,
-    aspectRatio: safeCrop.height > 0 ? safeCrop.width / safeCrop.height : 1,
+    aspectRatio: safeCrop.height > 0
+      ? (safeCrop.width * page.width) / (safeCrop.height * page.height)
+      : 1,
+    columnX: safeCrop.x,
+    rowAnchorCenterY: safeCrop.y + safeCrop.height / 2,
+    rowStep,
+    rowsPerPage: Math.max(1, Math.floor((1 - safeCrop.height) / rowStep) + 1),
     clickPlacementMode: "center",
     targetColumn: "storyboard",
     includeContext: false
@@ -132,16 +143,87 @@ export function createStoryboardCropTemplate(
 export function createCenteredStoryboardCrop(
   template: StoryboardCropTemplate,
   centerX: number,
-  centerY: number
+  centerY: number,
+  page?: Pick<ArchiveImportPage, "width" | "height">
 ): RelativeCrop {
-  const width = Math.min(1, Math.max(0.01, template.cropWidth));
-  const height = Math.min(1, Math.max(0.01, template.cropHeight));
+  const width = Math.min(
+    1,
+    Math.max(
+      0.01,
+      page ? template.cropWidth * template.basePageWidth / page.width : template.cropWidth
+    )
+  );
+  const height = Math.min(
+    1,
+    Math.max(
+      0.01,
+      page ? template.cropHeight * template.basePageHeight / page.height : template.cropHeight
+    )
+  );
   return {
     x: Math.min(1 - width, Math.max(0, centerX - width / 2)),
     y: Math.min(1 - height, Math.max(0, centerY - height / 2)),
     width,
     height
   };
+}
+
+export function estimateStoryboardRowStep(
+  template: StoryboardCropTemplate,
+  crops: RelativeCrop[]
+) {
+  const centers = crops
+    .map((crop) => crop.y + crop.height / 2)
+    .sort((left, right) => left - right);
+  const minimumGap = Math.max(0.01, template.cropHeight * 0.62);
+  const gaps = centers
+    .slice(1)
+    .map((center, index) => center - centers[index])
+    .filter((gap) => gap >= minimumGap);
+  if (gaps.length === 0) return template.rowStep;
+  const sorted = [...gaps].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+export function createSnappedStoryboardCrop(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "width" | "height">,
+  centerY: number,
+  existingCrops: RelativeCrop[]
+) {
+  const rowStep = estimateStoryboardRowStep(template, existingCrops);
+  const rowIndex = Math.round((centerY - template.rowAnchorCenterY) / rowStep);
+  const snappedCenterY = template.rowAnchorCenterY + rowIndex * rowStep;
+  const referenceCenterX = template.columnX + template.cropWidth / 2;
+  return createCenteredStoryboardCrop(template, referenceCenterX, snappedCenterY, page);
+}
+
+export function createStoryboardAutoCrops(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "width" | "height">,
+  existingCrops: RelativeCrop[]
+) {
+  const size = createCenteredStoryboardCrop(template, 0.5, 0.5, page);
+  const rowStep = estimateStoryboardRowStep(template, existingCrops);
+  const minimumCenter = size.height / 2;
+  const maximumCenter = 1 - size.height / 2;
+  const firstIndex = Math.ceil((minimumCenter - template.rowAnchorCenterY) / rowStep);
+  const lastIndex = Math.floor((maximumCenter - template.rowAnchorCenterY) / rowStep);
+  const crops: RelativeCrop[] = [];
+
+  for (let rowIndex = firstIndex; rowIndex <= lastIndex; rowIndex += 1) {
+    const centerY = template.rowAnchorCenterY + rowIndex * rowStep;
+    const candidate = createSnappedStoryboardCrop(template, page, centerY, existingCrops);
+    const alreadyExists = existingCrops.some((crop) => (
+      Math.abs(crop.x - candidate.x) < Math.max(0.012, candidate.width * 0.18)
+      && Math.abs(
+        crop.y + crop.height / 2 - (candidate.y + candidate.height / 2)
+      ) < Math.max(0.012, candidate.height * 0.32)
+    ));
+    if (!alreadyExists) crops.push(candidate);
+  }
+
+  return crops;
 }
 
 export async function createCroppedArchiveFile(

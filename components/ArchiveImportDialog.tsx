@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Check, Crop, FileImage, MousePointer2, Save, Trash2, Undo2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronLeft, ChevronRight, Crop, FileImage, Grid2X2, Save, Trash2, Undo2, X } from "lucide-react";
 import {
   createCenteredStoryboardCrop,
+  createSnappedStoryboardCrop,
+  createStoryboardAutoCrops,
   createStoryboardCropTemplate,
   type ArchiveImportPage,
   type RelativeCrop,
@@ -44,7 +46,12 @@ export function ArchiveImportDialog({
   onSave: (value: ArchiveImportCommit) => Promise<void> | void;
 }) {
   const [selectedIds, setSelectedIds] = useState(() => new Set(pages.map((page) => page.id)));
-  const [referenceCrop, setReferenceCrop] = useState<RelativeCrop>(DEFAULT_CROP);
+  const [referenceCrop, setReferenceCrop] = useState<RelativeCrop>(
+    assetType === "storyboard"
+      ? { x: 0, y: 0, width: 0, height: 0 }
+      : DEFAULT_CROP
+  );
+  const [referenceSelected, setReferenceSelected] = useState(false);
   const [applyCrop, setApplyCrop] = useState(assetType === "storyboard");
   const [cropTemplate, setCropTemplate] = useState<StoryboardCropTemplate | null>(null);
   const [candidates, setCandidates] = useState<StoryboardCropCandidate[]>([]);
@@ -66,29 +73,54 @@ export function ArchiveImportDialog({
     : selectedPages.map((page) => ({ page, crop: applyCrop ? referenceCrop : null }));
 
   function confirmTemplate() {
-    if (!referencePage) return;
+    if (!referencePage || !referenceSelected) return;
     const template = createStoryboardCropTemplate(referencePage, referenceCrop);
+    const referenceCandidateId = `${referencePage.id}-reference-${Date.now()}`;
     setCropTemplate(template);
     setActivePageId(referencePage.id);
     setCandidates((current) => {
       if (current.length > 0) return current;
       return [{
-        id: `${referencePage.id}-reference-${Date.now()}`,
+        id: referenceCandidateId,
         page: referencePage,
         crop: { ...referenceCrop }
       }];
     });
+    setEditingCandidateId(referenceCandidateId);
   }
 
-  function addCandidateAt(page: ArchiveImportPage, centerX: number, centerY: number) {
+  function addCandidateAt(page: ArchiveImportPage, _centerX: number, centerY: number) {
     if (!cropTemplate) return;
+    const pageCrops = candidates
+      .filter((candidate) => candidate.page.id === page.id)
+      .map((candidate) => candidate.crop);
     const candidate: StoryboardCropCandidate = {
       id: `${page.id}-click-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       page,
-      crop: createCenteredStoryboardCrop(cropTemplate, centerX, centerY)
+      crop: createSnappedStoryboardCrop(cropTemplate, page, centerY, pageCrops)
     };
     setCandidates((current) => [...current, candidate]);
     setEditingCandidateId(candidate.id);
+  }
+
+  function addAutomaticCandidates(page: ArchiveImportPage) {
+    if (!cropTemplate) return;
+    setCandidates((current) => {
+      const existing = current.filter((candidate) => candidate.page.id === page.id);
+      const crops = createStoryboardAutoCrops(
+        cropTemplate,
+        page,
+        existing.map((candidate) => candidate.crop)
+      );
+      return [
+        ...current,
+        ...crops.map((crop, index) => ({
+          id: `${page.id}-auto-${Date.now()}-${index}`,
+          page,
+          crop
+        }))
+      ];
+    });
   }
 
   function removeCandidate(id: string) {
@@ -109,21 +141,27 @@ export function ArchiveImportDialog({
           </button>
         </header>
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(20rem,0.7fr)]">
-          {assetType === "storyboard" ? (
+        {assetType === "storyboard" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
             <StoryboardCropWorkflow
               pages={pages}
               referencePage={referencePage}
               referenceCrop={referenceCrop}
+              referenceSelected={referenceSelected}
               cropTemplate={cropTemplate}
               candidates={candidates}
               activePage={activePage}
               editingCandidate={editingCandidate}
               isSaving={isSaving}
-              onReferenceCropChange={setReferenceCrop}
+              onReferenceCropChange={(crop) => {
+                setReferenceCrop(crop);
+                setReferenceSelected(false);
+              }}
+              onReferenceSelectionComplete={() => setReferenceSelected(true)}
               onConfirmTemplate={confirmTemplate}
               onActivePageChange={setActivePageId}
               onAddCandidate={addCandidateAt}
+              onAddAutomaticCandidates={addAutomaticCandidates}
               onEditCandidate={setEditingCandidateId}
               onCandidateChange={(id, crop) => setCandidates((current) => current.map((candidate) => (
                 candidate.id === id ? { ...candidate, crop } : candidate
@@ -133,58 +171,112 @@ export function ArchiveImportDialog({
                 const last = candidates.at(-1);
                 if (last) removeCandidate(last.id);
               }}
+              onCancel={onClose}
+              onConfirmExtraction={() => onSave({
+                results,
+                cropTemplate,
+                title,
+                memo,
+                sceneNo,
+                cutNo
+              })}
             />
-          ) : (
-            <OverheadCropWorkflow
-              pages={pages}
-              selectedIds={selectedIds}
-              selectedCount={selectedPages.length}
-              crop={referenceCrop}
-              applyCrop={applyCrop}
-              referencePage={referencePage}
-              isSaving={isSaving}
-              onSelectedIdsChange={setSelectedIds}
-              onCropChange={setReferenceCrop}
-              onApplyCropChange={setApplyCrop}
-            />
-          )}
-
-          <div className="grid content-start gap-3">
-            <div className="grid gap-2 rounded-xl border border-field-border p-3">
-              <label className="grid gap-1 text-xs font-black text-field-muted">
-                제목
-                <input value={title} onChange={(event) => setTitle(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" placeholder="선택 사항" />
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1 text-xs font-black text-field-muted">씬<input value={sceneNo} onChange={(event) => setSceneNo(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
-                <label className="grid gap-1 text-xs font-black text-field-muted">컷<input value={cutNo} onChange={(event) => setCutNo(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
+            <details className="mx-auto mt-3 max-w-5xl border border-field-border bg-white">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-black text-field-primary">
+                제목·씬·컷·메모
+              </summary>
+              <div className="border-t border-field-border p-3">
+                <ArchiveMetadataFields
+                  title={title}
+                  memo={memo}
+                  sceneNo={sceneNo}
+                  cutNo={cutNo}
+                  onTitleChange={setTitle}
+                  onMemoChange={setMemo}
+                  onSceneNoChange={setSceneNo}
+                  onCutNoChange={setCutNo}
+                />
               </div>
-              <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea value={memo} onChange={(event) => setMemo(event.target.value)} rows={3} className="rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-5 text-field-text" /></label>
-            </div>
-            {assetType === "storyboard" ? (
-              <p className="rounded-xl border border-field-border bg-field-soft/45 px-3 py-2 text-xs font-bold leading-5 text-field-muted">
-                첫 칸만 드래그해 크기를 정한 뒤, 각 페이지에서 그림칸의 중앙을 클릭하세요. 텍스트 추출·OCR·AI 분석은 사용하지 않습니다.
-              </p>
-            ) : null}
+            </details>
           </div>
-        </div>
-
-        <footer className="flex items-center justify-between gap-3 border-t border-field-border px-4 py-3">
-          <p className="inline-flex items-center gap-1 text-xs font-bold text-field-muted">
-            {results.some((result) => result.crop) ? <Crop className="h-4 w-4" aria-hidden /> : <FileImage className="h-4 w-4" aria-hidden />}
-            {results.length}개 결과 확인
-          </p>
-          <button
-            type="button"
-            disabled={isSaving || results.length === 0 || (assetType === "storyboard" && !cropTemplate)}
-            onClick={() => onSave({ results, cropTemplate: assetType === "storyboard" ? cropTemplate : null, title, memo, sceneNo, cutNo })}
-            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
-          >
-            <Save className="h-4 w-4" aria-hidden />
-            {isSaving ? "저장 중" : "추출 확정"}
-          </button>
-        </footer>
+        ) : (
+          <>
+            <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(20rem,0.7fr)]">
+              <OverheadCropWorkflow
+                pages={pages}
+                selectedIds={selectedIds}
+                selectedCount={selectedPages.length}
+                crop={referenceCrop}
+                applyCrop={applyCrop}
+                referencePage={referencePage}
+                isSaving={isSaving}
+                onSelectedIdsChange={setSelectedIds}
+                onCropChange={setReferenceCrop}
+                onApplyCropChange={setApplyCrop}
+              />
+              <ArchiveMetadataFields
+                title={title}
+                memo={memo}
+                sceneNo={sceneNo}
+                cutNo={cutNo}
+                onTitleChange={setTitle}
+                onMemoChange={setMemo}
+                onSceneNoChange={setSceneNo}
+                onCutNoChange={setCutNo}
+              />
+            </div>
+            <footer className="flex items-center justify-between gap-3 border-t border-field-border px-4 py-3">
+              <p className="inline-flex items-center gap-1 text-xs font-bold text-field-muted">
+                {results.some((result) => result.crop) ? <Crop className="h-4 w-4" aria-hidden /> : <FileImage className="h-4 w-4" aria-hidden />}
+                {results.length}개 결과 확인
+              </p>
+              <button
+                type="button"
+                disabled={isSaving || results.length === 0}
+                onClick={() => onSave({ results, cropTemplate: null, title, memo, sceneNo, cutNo })}
+                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
+              >
+                <Save className="h-4 w-4" aria-hidden />
+                {isSaving ? "저장 중" : "추출 확정"}
+              </button>
+            </footer>
+          </>
+        )}
       </section>
+    </div>
+  );
+}
+
+function ArchiveMetadataFields({
+  title,
+  memo,
+  sceneNo,
+  cutNo,
+  onTitleChange,
+  onMemoChange,
+  onSceneNoChange,
+  onCutNoChange
+}: {
+  title: string;
+  memo: string;
+  sceneNo: string;
+  cutNo: string;
+  onTitleChange: (value: string) => void;
+  onMemoChange: (value: string) => void;
+  onSceneNoChange: (value: string) => void;
+  onCutNoChange: (value: string) => void;
+}) {
+  return (
+    <div className="grid content-start gap-2">
+      <label className="grid gap-1 text-xs font-black text-field-muted">
+        제목
+        <input value={title} onChange={(event) => onTitleChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" placeholder="선택 사항" />
+      </label>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="grid gap-1 text-xs font-black text-field-muted">씬<input value={sceneNo} onChange={(event) => onSceneNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
+        <label className="grid gap-1 text-xs font-black text-field-muted">컷<input value={cutNo} onChange={(event) => onCutNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
+      </div>
+      <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea value={memo} onChange={(event) => onMemoChange(event.target.value)} rows={3} className="rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-5 text-field-text" /></label>
     </div>
   );
 }
@@ -193,159 +285,453 @@ function StoryboardCropWorkflow({
   pages,
   referencePage,
   referenceCrop,
+  referenceSelected,
   cropTemplate,
   candidates,
   activePage,
   editingCandidate,
   isSaving,
   onReferenceCropChange,
+  onReferenceSelectionComplete,
   onConfirmTemplate,
   onActivePageChange,
   onAddCandidate,
+  onAddAutomaticCandidates,
   onEditCandidate,
   onCandidateChange,
   onDeleteCandidate,
-  onUndo
+  onUndo,
+  onCancel,
+  onConfirmExtraction
 }: {
   pages: ArchiveImportPage[];
   referencePage: ArchiveImportPage | null;
   referenceCrop: RelativeCrop;
+  referenceSelected: boolean;
   cropTemplate: StoryboardCropTemplate | null;
   candidates: StoryboardCropCandidate[];
   activePage: ArchiveImportPage | null;
   editingCandidate: StoryboardCropCandidate | null;
   isSaving: boolean;
   onReferenceCropChange: (crop: RelativeCrop) => void;
+  onReferenceSelectionComplete: () => void;
   onConfirmTemplate: () => void;
   onActivePageChange: (id: string) => void;
   onAddCandidate: (page: ArchiveImportPage, centerX: number, centerY: number) => void;
+  onAddAutomaticCandidates: (page: ArchiveImportPage) => void;
   onEditCandidate: (id: string | null) => void;
   onCandidateChange: (id: string, crop: RelativeCrop) => void;
   onDeleteCandidate: (id: string) => void;
   onUndo: () => void;
+  onCancel: () => void;
+  onConfirmExtraction: () => void;
 }) {
   const activeCandidates = activePage
     ? candidates.filter((candidate) => candidate.page.id === activePage.id)
     : [];
+  const candidateNumbers = new Map(candidates.map((candidate, index) => [candidate.id, index + 1]));
+  const activePageIndex = activePage
+    ? Math.max(0, pages.findIndex((page) => page.id === activePage.id))
+    : 0;
+
+  useEffect(() => {
+    function handleDelete(event: KeyboardEvent) {
+      if (!editingCandidate || isSaving || (event.key !== "Delete" && event.key !== "Backspace")) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      event.preventDefault();
+      onDeleteCandidate(editingCandidate.id);
+    }
+    window.addEventListener("keydown", handleDelete);
+    return () => window.removeEventListener("keydown", handleDelete);
+  }, [editingCandidate, isSaving, onDeleteCandidate]);
+
+  function movePage(delta: number) {
+    const nextPage = pages[activePageIndex + delta];
+    if (!nextPage) return;
+    onEditCandidate(null);
+    onActivePageChange(nextPage.id);
+  }
+
   return (
-    <div className="grid content-start gap-4">
-      <div className="grid gap-3 border border-field-border bg-field-soft/45 p-3">
-        <div>
-          <p className="text-sm font-black text-field-primary">1단계 · 첫 콘티 그림칸 지정</p>
-          <p className="text-[11px] font-bold leading-5 text-field-muted">첫 페이지에서 그림칸만 드래그하고 크기를 조절한 뒤 기준을 확정하세요.</p>
-        </div>
-        {referencePage ? <CropSelector page={referencePage} value={referenceCrop} disabled={isSaving || Boolean(cropTemplate)} onChange={onReferenceCropChange} label="첫 콘티 그림칸 기준" /> : null}
-        <CropNumbers crop={referenceCrop} />
-        <button type="button" onClick={onConfirmTemplate} disabled={isSaving || Boolean(cropTemplate)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-field-primary bg-white px-4 text-xs font-black text-field-primary disabled:opacity-60">
-          <Check className="h-4 w-4" aria-hidden />
-          {cropTemplate ? "기준 크기 적용됨" : "기준 비율·크기 확정"}
-        </button>
+    <div className="mx-auto grid max-w-5xl content-start gap-2">
+      <div className="flex min-h-8 items-center justify-between gap-2">
+        <p className="text-xs font-black text-field-primary sm:text-sm">
+          {cropTemplate ? "나머지 그림칸 중앙을 클릭하세요" : "첫 그림칸을 드래그하세요"}
+        </p>
+        <span className="shrink-0 text-[11px] font-bold text-field-muted">
+          {activePageIndex + 1}/{pages.length} 페이지 · {activeCandidates.length}개
+        </span>
       </div>
 
-      {cropTemplate && activePage ? (
-        <div className="grid gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="text-sm font-black text-field-primary">2단계 · 그림칸 중앙 클릭</p>
-              <p className="text-[11px] font-bold text-field-muted">현재 페이지 후보 {activeCandidates.length}개 · 전체 {candidates.length}개</p>
-            </div>
-            <div className="flex items-center gap-1">
-              <select value={activePage.id} onChange={(event) => onActivePageChange(event.target.value)} className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black">
-                {pages.map((page) => (
-                  <option key={page.id} value={page.id}>{page.index + 1}페이지</option>
-                ))}
-              </select>
-              <button type="button" onClick={onUndo} disabled={candidates.length === 0} className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-40" aria-label="마지막 후보 취소">
-                <Undo2 className="h-4 w-4" aria-hidden />
-              </button>
-            </div>
-          </div>
-          <CandidatePlacementCanvas
-            page={activePage}
-            candidates={activeCandidates}
-            disabled={isSaving}
-            onPlace={(x, y) => onAddCandidate(activePage, x, y)}
-            onEdit={onEditCandidate}
-          />
-        </div>
+      {activePage ? (
+        <StoryboardCropCanvas
+          page={activePage}
+          referenceCrop={referenceCrop}
+          referenceSelected={referenceSelected}
+          cropTemplate={cropTemplate}
+          candidates={activeCandidates}
+          candidateNumbers={candidateNumbers}
+          selectedCandidateId={editingCandidate?.page.id === activePage.id ? editingCandidate.id : null}
+          disabled={isSaving}
+          onReferenceCropChange={onReferenceCropChange}
+          onReferenceSelectionComplete={onReferenceSelectionComplete}
+          onConfirmTemplate={onConfirmTemplate}
+          onPlace={(x, y) => onAddCandidate(activePage, x, y)}
+          onSelect={onEditCandidate}
+          onCandidateChange={onCandidateChange}
+        />
+      ) : referencePage ? (
+        <p className="p-6 text-center text-sm font-bold text-field-muted">페이지를 표시할 수 없습니다.</p>
       ) : null}
 
-      {candidates.length > 0 ? (
-        <div className="grid gap-2">
-          <p className="text-sm font-black text-field-primary">crop 후보</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {candidates.map((candidate, index) => (
-              <article key={candidate.id} className={`grid gap-1 border bg-white p-1.5 ${editingCandidate?.id === candidate.id ? "border-field-primary ring-2 ring-field-primary/20" : "border-field-border"}`}>
-                <button type="button" onClick={() => onEditCandidate(candidate.id)} className="grid gap-1 text-left">
-                  <CropCandidatePreview candidate={candidate} />
-                  <span className="truncate px-1 text-[10px] font-bold text-field-muted">{index + 1}. {candidate.page.index + 1}페이지</span>
-                </button>
-                <button type="button" onClick={() => onDeleteCandidate(candidate.id)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full text-[10px] font-black text-field-danger">
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />후보 삭제
-                </button>
-              </article>
-            ))}
-          </div>
+      <div className="sticky bottom-0 z-30 flex flex-wrap items-center justify-between gap-2 border border-field-border bg-white/95 p-2 shadow-[0_-8px_24px_rgba(20,32,27,0.1)] backdrop-blur">
+        <div className="flex items-center gap-1">
+          <span className="px-1 text-[11px] font-black text-field-primary">
+            현재 {activeCandidates.length} · 전체 {candidates.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => activePage && onAddAutomaticCandidates(activePage)}
+            disabled={!cropTemplate || !activePage || isSaving}
+            className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+          >
+            <Grid2X2 className="h-3.5 w-3.5" aria-hidden />
+            자동 후보
+          </button>
+          <button
+            type="button"
+            onClick={onUndo}
+            disabled={candidates.length === 0 || isSaving}
+            className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-40"
+            aria-label="마지막 후보 취소"
+          >
+            <Undo2 className="h-4 w-4" aria-hidden />
+          </button>
+          {editingCandidate?.page.id === activePage?.id ? (
+            <button
+              type="button"
+              onClick={() => editingCandidate && onDeleteCandidate(editingCandidate.id)}
+              disabled={isSaving}
+              className="grid h-9 w-9 place-items-center rounded-full border border-field-danger/35 text-field-danger disabled:opacity-40"
+              aria-label="선택한 crop 후보 삭제"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+            </button>
+          ) : null}
         </div>
-      ) : null}
 
-      {editingCandidate ? (
-        <div className="grid gap-2 border border-field-primary bg-white p-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-black text-field-primary">후보 위치·크기 수정 · {editingCandidate.page.index + 1}페이지</p>
-            <button type="button" onClick={() => onEditCandidate(null)} className="grid h-8 w-8 place-items-center rounded-full border border-field-border" aria-label="후보 수정 닫기"><X className="h-4 w-4" aria-hidden /></button>
-          </div>
-          <CropSelector page={editingCandidate.page} value={editingCandidate.crop} disabled={isSaving} onChange={(crop) => onCandidateChange(editingCandidate.id, crop)} label="개별 crop 후보 수정" />
-          <CropNumbers crop={editingCandidate.crop} />
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => movePage(-1)} disabled={activePageIndex <= 0 || isSaving} className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-35" aria-label="이전 페이지">
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </button>
+          <button type="button" onClick={() => movePage(1)} disabled={activePageIndex >= pages.length - 1 || isSaving} className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-35" aria-label="다음 페이지">
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-9 rounded-full border border-field-border px-3 text-[11px] font-black text-field-muted disabled:opacity-40">
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={onConfirmExtraction}
+            disabled={!cropTemplate || candidates.length === 0 || isSaving}
+            className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-[11px] font-black text-white disabled:opacity-40"
+          >
+            <Save className="h-3.5 w-3.5" aria-hidden />
+            {isSaving ? "저장 중" : "추출 확정"}
+          </button>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }
 
-function CandidatePlacementCanvas({
+type CropResizeHandle = "nw" | "ne" | "sw" | "se";
+
+type CanvasDrag = {
+  pointerId: number;
+  mode: "reference-create" | "reference-move" | "reference-resize" | "move" | "resize";
+  startX: number;
+  startY: number;
+  original: RelativeCrop;
+  candidateId?: string;
+  handle?: CropResizeHandle;
+  latest: RelativeCrop;
+};
+
+function StoryboardCropCanvas({
   page,
+  referenceCrop,
+  referenceSelected,
+  cropTemplate,
   candidates,
+  candidateNumbers,
+  selectedCandidateId,
   disabled,
+  onReferenceCropChange,
+  onReferenceSelectionComplete,
+  onConfirmTemplate,
   onPlace,
-  onEdit
+  onSelect,
+  onCandidateChange
 }: {
   page: ArchiveImportPage;
+  referenceCrop: RelativeCrop;
+  referenceSelected: boolean;
+  cropTemplate: StoryboardCropTemplate | null;
   candidates: StoryboardCropCandidate[];
+  candidateNumbers: Map<string, number>;
+  selectedCandidateId: string | null;
   disabled: boolean;
+  onReferenceCropChange: (crop: RelativeCrop) => void;
+  onReferenceSelectionComplete: () => void;
+  onConfirmTemplate: () => void;
   onPlace: (x: number, y: number) => void;
-  onEdit: (id: string) => void;
+  onSelect: (id: string | null) => void;
+  onCandidateChange: (id: string, crop: RelativeCrop) => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<CanvasDrag | null>(null);
+
+  function relativePoint(event: React.PointerEvent) {
+    const rect = frameRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: clamp01((event.clientX - rect.left) / rect.width),
+      y: clamp01((event.clientY - rect.top) / rect.height)
+    };
+  }
+
+  function startReference(event: React.PointerEvent<HTMLDivElement>) {
+    if (disabled || cropTemplate) return;
+    const point = relativePoint(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const crop = { x: point.x, y: point.y, width: 0.01, height: 0.01 };
+    dragRef.current = {
+      pointerId: event.pointerId,
+      mode: "reference-create",
+      startX: point.x,
+      startY: point.y,
+      original: crop,
+      latest: crop
+    };
+    onReferenceCropChange(crop);
+  }
+
+  function startReferenceAdjustment(
+    event: React.PointerEvent<HTMLElement>,
+    mode: "reference-move" | "reference-resize",
+    handle?: CropResizeHandle
+  ) {
+    if (disabled || cropTemplate) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = relativePoint(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      mode,
+      startX: point.x,
+      startY: point.y,
+      original: { ...referenceCrop },
+      handle,
+      latest: { ...referenceCrop }
+    };
+  }
+
+  function startCandidateDrag(
+    event: React.PointerEvent<HTMLElement>,
+    candidate: StoryboardCropCandidate,
+    mode: "move" | "resize",
+    handle?: CropResizeHandle
+  ) {
+    if (disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = relativePoint(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      mode,
+      startX: point.x,
+      startY: point.y,
+      original: { ...candidate.crop },
+      candidateId: candidate.id,
+      handle,
+      latest: { ...candidate.crop }
+    };
+    onSelect(candidate.id);
+  }
+
+  function updateDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = relativePoint(event);
+    let next: RelativeCrop;
+
+    if (drag.mode === "reference-create") {
+      next = {
+        x: Math.min(drag.startX, point.x),
+        y: Math.min(drag.startY, point.y),
+        width: Math.max(0.01, Math.abs(point.x - drag.startX)),
+        height: Math.max(0.01, Math.abs(point.y - drag.startY))
+      };
+      onReferenceCropChange(next);
+    } else if (drag.mode === "reference-move") {
+      next = {
+        ...drag.original,
+        x: Math.min(1 - drag.original.width, Math.max(0, drag.original.x + point.x - drag.startX)),
+        y: Math.min(1 - drag.original.height, Math.max(0, drag.original.y + point.y - drag.startY))
+      };
+      onReferenceCropChange(next);
+    } else if (drag.mode === "reference-resize" && drag.handle) {
+      next = resizeCropWithAspect(drag.original, drag.handle, point);
+      onReferenceCropChange(next);
+    } else if (drag.mode === "move" && drag.candidateId) {
+      next = {
+        ...drag.original,
+        x: Math.min(1 - drag.original.width, Math.max(0, drag.original.x + point.x - drag.startX)),
+        y: Math.min(1 - drag.original.height, Math.max(0, drag.original.y + point.y - drag.startY))
+      };
+      onCandidateChange(drag.candidateId, next);
+    } else if (drag.mode === "resize" && drag.candidateId && drag.handle) {
+      next = resizeCropWithAspect(drag.original, drag.handle, point);
+      onCandidateChange(drag.candidateId, next);
+    } else {
+      return;
+    }
+
+    drag.latest = next;
+  }
+
+  function finishDrag(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (
+      drag.mode === "reference-create"
+      || drag.mode === "reference-move"
+      || drag.mode === "reference-resize"
+    ) {
+      if (drag.latest.width >= 0.025 && drag.latest.height >= 0.025) {
+        onReferenceSelectionComplete();
+      }
+      return;
+    }
+    if (drag.mode === "move" && drag.candidateId && cropTemplate) {
+      onCandidateChange(
+        drag.candidateId,
+        snapMovedCrop(
+          cropTemplate,
+          page,
+          drag.latest,
+          candidates.filter((candidate) => candidate.id !== drag.candidateId).map((candidate) => candidate.crop)
+        )
+      );
+    }
+  }
+
   return (
     <div
       ref={frameRef}
       role="button"
       tabIndex={disabled ? -1 : 0}
-      aria-label={`${page.index + 1}페이지 crop 중심 위치 지정`}
-      className={`relative w-full select-none border border-field-border bg-black/5 ${disabled ? "" : "cursor-crosshair"}`}
+      aria-label={cropTemplate ? `${page.index + 1}페이지 crop 중심 위치 지정` : "첫 콘티 crop 범위 드래그"}
+      className={`relative w-full select-none border border-field-border bg-black/5 ${disabled ? "" : "touch-none cursor-crosshair"}`}
       style={{ aspectRatio: `${page.width} / ${page.height}` }}
+      onPointerDown={startReference}
+      onPointerMove={updateDrag}
+      onPointerUp={finishDrag}
+      onPointerCancel={() => {
+        dragRef.current = null;
+      }}
       onClick={(event) => {
-        if (disabled || !frameRef.current) return;
+        if (disabled || !cropTemplate || !frameRef.current) return;
         const rect = frameRef.current.getBoundingClientRect();
         onPlace(
-          Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-          Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height))
+          clamp01((event.clientX - rect.left) / rect.width),
+          clamp01((event.clientY - rect.top) / rect.height)
         );
       }}
       onContextMenu={(event) => event.preventDefault()}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={page.previewUrl} alt="" draggable={false} className="pointer-events-none block h-full w-full select-none rounded-none object-fill" />
-      {candidates.map((candidate, index) => (
+      {!cropTemplate && referenceCrop.width > 0 && referenceCrop.height > 0 ? (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="첫 콘티 기준 crop 이동 및 크기 조절"
+          className="absolute cursor-move border-2 border-[#ef8f39] bg-[#ef8f39]/10"
+          style={{
+            left: `${referenceCrop.x * 100}%`,
+            top: `${referenceCrop.y * 100}%`,
+            width: `${referenceCrop.width * 100}%`,
+            height: `${referenceCrop.height * 100}%`
+          }}
+          onPointerDown={(event) => startReferenceAdjustment(event, "reference-move")}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {referenceSelected
+            ? (["nw", "ne", "sw", "se"] as CropResizeHandle[]).map((handle) => (
+              <button
+                key={handle}
+                type="button"
+                tabIndex={-1}
+                aria-label={`기준 crop ${handle} 모서리 크기 조절`}
+                className={`absolute grid h-7 w-7 touch-none place-items-center ${
+                  handle.includes("n") ? "-top-3.5" : "-bottom-3.5"
+                } ${handle.includes("w") ? "-left-3.5" : "-right-3.5"}`}
+                style={{ cursor: handle === "nw" || handle === "se" ? "nwse-resize" : "nesw-resize" }}
+                onPointerDown={(event) => startReferenceAdjustment(event, "reference-resize", handle)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="block h-3 w-3 border-2 border-white bg-[#ef8f39]" />
+              </button>
+            ))
+            : null}
+        </div>
+      ) : null}
+      {!cropTemplate && referenceSelected ? (
         <button
-          key={candidate.id}
           type="button"
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
-            onEdit(candidate.id);
+            onConfirmTemplate();
           }}
-          className="absolute border-2 border-[#ef8f39] bg-[#ef8f39]/14"
+          className="absolute z-20 inline-flex min-h-9 -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-field-primary px-3 text-[11px] font-black text-white shadow-[0_4px_16px_rgba(20,66,52,0.24)]"
+          style={{
+            left: `clamp(4.75rem, ${(referenceCrop.x + referenceCrop.width / 2) * 100}%, calc(100% - 4.75rem))`,
+            top: `clamp(0.5rem, ${(referenceCrop.y + referenceCrop.height + 0.015) * 100}%, calc(100% - 2.75rem))`
+          }}
+        >
+          <Check className="h-3.5 w-3.5" aria-hidden />
+          기준 비율로 적용
+        </button>
+      ) : null}
+      {candidates.map((candidate, index) => (
+        <div
+          key={candidate.id}
+          role="button"
+          tabIndex={0}
+          aria-pressed={selectedCandidateId === candidate.id}
+          onPointerDown={(event) => startCandidateDrag(event, candidate, "move")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(candidate.id);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onSelect(candidate.id);
+            }
+          }}
+          className={`absolute cursor-move border-2 bg-[#ef8f39]/12 ${
+            selectedCandidateId === candidate.id
+              ? "z-10 border-[#d96f18] ring-2 ring-white/90"
+              : "border-[#ef8f39]"
+          }`}
           style={{
             left: `${candidate.crop.x * 100}%`,
             top: `${candidate.crop.y * 100}%`,
@@ -354,16 +740,87 @@ function CandidatePlacementCanvas({
           }}
           aria-label={`후보 ${index + 1} 수정`}
         >
-          <span className="absolute left-0 top-0 grid h-5 min-w-5 place-items-center bg-[#ef8f39] px-1 text-[10px] font-black text-white">{index + 1}</span>
-        </button>
+          <span className="pointer-events-none absolute left-0 top-0 grid h-5 min-w-5 place-items-center bg-[#ef8f39] px-1 text-[10px] font-black text-white">
+            {candidateNumbers.get(candidate.id) ?? index + 1}
+          </span>
+          {selectedCandidateId === candidate.id
+            ? (["nw", "ne", "sw", "se"] as CropResizeHandle[]).map((handle) => (
+              <button
+                key={handle}
+                type="button"
+                tabIndex={-1}
+                aria-label={`crop ${handle} 모서리 크기 조절`}
+                className={`absolute grid h-7 w-7 touch-none place-items-center ${
+                  handle.includes("n") ? "-top-3.5" : "-bottom-3.5"
+                } ${handle.includes("w") ? "-left-3.5" : "-right-3.5"}`}
+                style={{ cursor: handle === "nw" || handle === "se" ? "nwse-resize" : "nesw-resize" }}
+                onPointerDown={(event) => startCandidateDrag(event, candidate, "resize", handle)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="block h-3 w-3 border-2 border-white bg-[#ef8f39]" />
+              </button>
+            ))
+            : null}
+        </div>
       ))}
-      {!disabled ? (
-        <span className="pointer-events-none absolute bottom-2 left-2 inline-flex items-center gap-1 bg-white/90 px-2 py-1 text-[10px] font-black text-field-primary">
-          <MousePointer2 className="h-3 w-3" aria-hidden />그림칸 중앙 클릭
-        </span>
-      ) : null}
     </div>
   );
+}
+
+function resizeCropWithAspect(
+  crop: RelativeCrop,
+  handle: CropResizeHandle,
+  point: { x: number; y: number }
+) {
+  const fixedX = handle.includes("w") ? crop.x + crop.width : crop.x;
+  const fixedY = handle.includes("n") ? crop.y + crop.height : crop.y;
+  const availableWidth = handle.includes("w") ? fixedX : 1 - fixedX;
+  const availableHeight = handle.includes("n") ? fixedY : 1 - fixedY;
+  const scaleX = Math.abs(point.x - fixedX) / crop.width;
+  const scaleY = Math.abs(point.y - fixedY) / crop.height;
+  const requestedScale = Math.max(0.18, (scaleX + scaleY) / 2);
+  const maximumScale = Math.max(
+    0.18,
+    Math.min(availableWidth / crop.width, availableHeight / crop.height)
+  );
+  const scale = Math.min(requestedScale, maximumScale);
+  const width = Math.max(0.02, crop.width * scale);
+  const height = Math.max(0.02, crop.height * scale);
+  return {
+    x: handle.includes("w") ? fixedX - width : fixedX,
+    y: handle.includes("n") ? fixedY - height : fixedY,
+    width,
+    height
+  };
+}
+
+function snapMovedCrop(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "width" | "height">,
+  crop: RelativeCrop,
+  otherCrops: RelativeCrop[]
+) {
+  const centerY = crop.y + crop.height / 2;
+  const snapped = createSnappedStoryboardCrop(template, page, centerY, otherCrops);
+  const templatePosition = createCenteredStoryboardCrop(
+    template,
+    template.columnX + template.cropWidth / 2,
+    centerY,
+    page
+  );
+  const next = { ...crop };
+  if (Math.abs(crop.x - templatePosition.x) <= Math.max(0.025, crop.width * 0.18)) {
+    next.x = templatePosition.x;
+  }
+  const snappedCenterY = snapped.y + snapped.height / 2;
+  if (Math.abs(centerY - snappedCenterY) <= Math.max(0.025, crop.height * 0.32)) {
+    next.y = Math.min(1 - crop.height, Math.max(0, snappedCenterY - crop.height / 2));
+  }
+  return next;
+}
+
+function clamp01(value: number) {
+  return Math.min(1, Math.max(0, value));
 }
 
 function OverheadCropWorkflow({
@@ -433,25 +890,6 @@ function OverheadCropWorkflow({
         <CropNumbers crop={crop} />
       </div>
     </div>
-  );
-}
-
-function CropCandidatePreview({ candidate }: { candidate: StoryboardCropCandidate }) {
-  const viewX = candidate.crop.x * candidate.page.width;
-  const viewY = candidate.crop.y * candidate.page.height;
-  const viewWidth = candidate.crop.width * candidate.page.width;
-  const viewHeight = candidate.crop.height * candidate.page.height;
-  return (
-    <svg
-      viewBox={`${viewX} ${viewY} ${viewWidth} ${viewHeight}`}
-      preserveAspectRatio="xMidYMid meet"
-      className="block w-full border border-field-border bg-black/5"
-      style={{ aspectRatio: `${viewWidth} / ${viewHeight}` }}
-      aria-label={`${candidate.page.index + 1}페이지 crop 미리보기`}
-      role="img"
-    >
-      <image href={candidate.page.previewUrl} x="0" y="0" width={candidate.page.width} height={candidate.page.height} />
-    </svg>
   );
 }
 

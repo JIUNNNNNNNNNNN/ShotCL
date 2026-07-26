@@ -2003,6 +2003,8 @@ function cropMetadata(
       templateCropHeight: template.cropHeight,
       aspectRatio: template.aspectRatio,
       clickPlacementMode: template.clickPlacementMode,
+      rowStep: template.rowStep,
+      rowsPerPage: template.rowsPerPage,
       targetColumn: template.targetColumn,
       includeContext: template.includeContext
     } : {})
