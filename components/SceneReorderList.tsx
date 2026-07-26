@@ -29,6 +29,12 @@ type PendingDrag = {
 
 const interactiveSelector = "input, textarea, select, button, a, [role='button']";
 
+function isMobileSceneListInteraction(event: ReactPointerEvent<HTMLDivElement>) {
+  if (event.pointerType === "touch") return true;
+  return typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
+}
+
 export function SceneReorderList({
   items,
   disabled,
@@ -130,7 +136,7 @@ export function SceneReorderList({
     event: ReactPointerEvent<HTMLDivElement>,
     itemId: string
   ) {
-    if (disabled || event.button !== 0) return;
+    if (disabled || event.button !== 0 || isMobileSceneListInteraction(event)) return;
     const target = event.target as HTMLElement;
     if (!target.closest("[data-scene-row-handle]")) return;
     if (target.closest(interactiveSelector)) return;

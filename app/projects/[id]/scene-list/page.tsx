@@ -115,6 +115,14 @@ type HeaderLongPressHandler = (
   description: string
 ) => void;
 
+function isMobileSceneListInteraction(
+  event?: Pick<ReactPointerEvent<HTMLElement>, "pointerType">
+) {
+  if (event?.pointerType === "touch") return true;
+  return typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 767px) and (orientation: portrait)").matches;
+}
+
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
   return Array.isArray(params.id) ? params.id[0] : params.id;
@@ -204,6 +212,30 @@ export default function ProjectSceneListPage() {
     selectedCellRef.current = selectedCell;
     selectedRangeRef.current = selectedRange;
   }, [selectedCell, selectedRange]);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia(
+      "(max-width: 767px) and (orientation: portrait)"
+    );
+    const clearDesktopInteractions = () => {
+      if (!mobileQuery.matches) return;
+      cellDragCleanupRef.current?.();
+      sceneLongPressCleanupRef.current?.();
+      headerLongPressCleanupRef.current?.();
+      characterLongPressCleanupRef.current?.();
+      selectedCellRef.current = null;
+      selectedRangeRef.current = null;
+      setSelectedCell(null);
+      setSelectedRange(null);
+      setEditingCell(null);
+      setDeletePopover(null);
+      setHeaderHelpPopover(null);
+      setCharacterNotesPopover(null);
+    };
+    clearDesktopInteractions();
+    mobileQuery.addEventListener("change", clearDesktopInteractions);
+    return () => mobileQuery.removeEventListener("change", clearDesktopInteractions);
+  }, []);
 
   useEffect(() => () => {
     cellDragCleanupRef.current?.();
@@ -580,7 +612,12 @@ export default function ProjectSceneListPage() {
     rowIndex: number,
     value: string
   ) => {
-    if (!canEdit || event.button !== 0 || !isFillColumn(column)) return;
+    if (
+      !canEdit ||
+      event.button !== 0 ||
+      !isFillColumn(column) ||
+      isMobileSceneListInteraction(event)
+    ) return;
     if (
       (event.target instanceof HTMLInputElement ||
         event.target instanceof HTMLTextAreaElement ||
@@ -781,7 +818,7 @@ export default function ProjectSceneListPage() {
     event: ReactPointerEvent<HTMLDivElement>,
     item: ProjectSceneItem
   ) => {
-    if (!canEdit || event.button !== 0) return;
+    if (!canEdit || event.button !== 0 || isMobileSceneListInteraction(event)) return;
     event.stopPropagation();
     sceneLongPressCleanupRef.current?.();
     setDeletePopover(null);
@@ -843,6 +880,7 @@ export default function ProjectSceneListPage() {
   }, [canEdit]);
 
   const startHeaderHelpLongPress = useCallback<HeaderLongPressHandler>((event, description) => {
+    if (isMobileSceneListInteraction(event)) return;
     headerLongPressCleanupRef.current?.();
     setHeaderHelpPopover(null);
     headerLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
@@ -860,6 +898,7 @@ export default function ProjectSceneListPage() {
     item: ProjectSceneItem,
     readOnly: boolean
   ) => {
+    if (isMobileSceneListInteraction(event)) return;
     characterLongPressCleanupRef.current?.();
     setCharacterNotesPopover(null);
     characterLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
@@ -966,8 +1005,6 @@ export default function ProjectSceneListPage() {
           items={items}
           actorRoles={actorRoles}
           locationStyles={locationStyles}
-          onHeaderLongPress={startHeaderHelpLongPress}
-          onCharacterNotesLongPress={startCharacterNotesLongPress}
         />
 
         <div
@@ -1203,59 +1240,43 @@ const mobileSceneGridTemplate = ".42fr .8fr .44fr .58fr 1.47fr 1.04fr 1.04fr";
 function MobileSceneList({
   items,
   actorRoles,
-  locationStyles,
-  onHeaderLongPress,
-  onCharacterNotesLongPress
+  locationStyles
 }: {
   items: ProjectSceneItem[];
   actorRoles: string[];
   locationStyles: Map<string, PaletteStyle>;
-  onHeaderLongPress: HeaderLongPressHandler;
-  onCharacterNotesLongPress: (
-    event: ReactPointerEvent<HTMLElement>,
-    item: ProjectSceneItem,
-    readOnly: boolean
-  ) => void;
 }) {
   return (
     <div
-      className="scene-list-mobile min-w-0"
+      className="scene-list-mobile min-w-0 touch-pan-y select-none"
       aria-label="모바일 읽기 전용 씬리스트"
+      draggable={false}
+      style={{
+        touchAction: "pan-y",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none"
+      }}
     >
       <div className="grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
-        <MobileSceneHeader
-          entries={[["#S", "씬"]]}
-          onLongPress={onHeaderLongPress}
-        />
+        <MobileSceneHeader entries={[["#S", "씬"]]} />
         <MobileSceneHeader
           entries={[
             ["Location", "대장소"],
             ["Sub-Location", "세부장소"]
           ]}
-          onLongPress={onHeaderLongPress}
         />
-        <MobileSceneHeader entries={[["Day"]]} onLongPress={onHeaderLongPress} />
+        <MobileSceneHeader entries={[["Day"]]} />
         <MobileSceneHeader
           entries={[
             ["Time", "D/N"],
             ["Int/Ext", "I/E"]
           ]}
-          onLongPress={onHeaderLongPress}
         />
-        <MobileSceneHeader
-          entries={[["Content", "씬 내용"]]}
-          onLongPress={onHeaderLongPress}
-        />
-        <MobileSceneHeader
-          entries={[["Characters", "등장인물"]]}
-          onLongPress={onHeaderLongPress}
-        />
-        <MobileSceneHeader
-          entries={[["Memo", "소품&특이사항"]]}
-          onLongPress={onHeaderLongPress}
-        />
+        <MobileSceneHeader entries={[["Content", "씬 내용"]]} />
+        <MobileSceneHeader entries={[["Characters", "등장인물"]]} />
+        <MobileSceneHeader entries={[["Memo", "소품&특이사항"]]} />
       </div>
 
       {items.length > 0 ? items.map((item, index) => (
@@ -1265,8 +1286,6 @@ function MobileSceneList({
           index={index}
           actorRoles={actorRoles}
           locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
-          onHeaderLongPress={onHeaderLongPress}
-          onCharacterNotesLongPress={onCharacterNotesLongPress}
         />
       )) : (
         <p className="border-x border-b border-[#bfc5bf] px-3 py-8 text-center text-xs font-semibold text-field-muted">
@@ -1281,30 +1300,26 @@ function MobileSceneRow({
   item,
   index,
   actorRoles,
-  locationStyle,
-  onHeaderLongPress,
-  onCharacterNotesLongPress
+  locationStyle
 }: {
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
   locationStyle: PaletteStyle;
-  onHeaderLongPress: HeaderLongPressHandler;
-  onCharacterNotesLongPress: (
-    event: ReactPointerEvent<HTMLElement>,
-    item: ProjectSceneItem,
-    readOnly: boolean
-  ) => void;
 }) {
   const selectedCharacters = parseCharacters(item.characters);
   const mergedLocation = isSameHorizontalLocation(item);
   return (
     <div
       role="row"
-      className="grid min-w-0 border-l text-[9px] font-semibold leading-[1.35] text-field-text"
+      className="grid min-w-0 touch-pan-y select-none border-l text-[9px] font-semibold leading-[1.35] text-field-text"
+      draggable={false}
       style={{
         gridTemplateColumns: mobileSceneGridTemplate,
-        gridTemplateRows: "minmax(2rem, auto) minmax(2rem, auto)"
+        gridTemplateRows: "minmax(2rem, auto) minmax(2rem, auto)",
+        touchAction: "pan-y",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none"
       }}
     >
       <MobileSceneCell className="row-span-2" align="center">
@@ -1314,10 +1329,6 @@ function MobileSceneRow({
         className={mergedLocation ? "row-span-2" : ""}
         align="center"
         style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-        onLongPress={(event) => onHeaderLongPress(
-          event,
-          mergedLocation ? "장소" : "대장소"
-        )}
       >
         {item.mainLocation}
       </MobileSceneCell>
@@ -1331,10 +1342,9 @@ function MobileSceneRow({
       <MobileSceneCell
         className="row-span-2"
         align="left"
-        onLongPress={(event) => onCharacterNotesLongPress(event, item, true)}
       >
-        <span className="flex min-w-0 flex-col items-start gap-0.5">
-          <span className="flex min-w-0 flex-wrap items-center gap-0.5">
+        <span className="flex w-full min-w-0 max-w-full flex-col items-start gap-0.5 overflow-hidden">
+          <span className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-0.5">
           {selectedCharacters.map((role) => {
             const actorIndex = actorRoles.findIndex(
               (candidate) => candidate.toLocaleLowerCase() === role.toLocaleLowerCase()
@@ -1352,7 +1362,10 @@ function MobileSceneRow({
           })}
           </span>
           {item.characterNotes ? (
-            <span className="whitespace-pre-wrap text-[8px] font-medium text-field-muted [overflow-wrap:anywhere]">
+            <span
+              data-scene-character-note-row-id={item.id}
+              className="block max-h-10 w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap text-[8px] font-medium leading-3 text-field-muted [overflow-wrap:anywhere]"
+            >
               {item.characterNotes}
             </span>
           ) : null}
@@ -1365,7 +1378,6 @@ function MobileSceneRow({
         <MobileSceneCell
           align="center"
           style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-          onLongPress={(event) => onHeaderLongPress(event, "세부장소")}
         >
           {item.subLocation}
         </MobileSceneCell>
@@ -1376,28 +1388,24 @@ function MobileSceneRow({
 }
 
 function MobileSceneHeader({
-  entries,
-  onLongPress
+  entries
 }: {
   entries: ReadonlyArray<readonly [label: string, description?: string]>;
-  onLongPress: HeaderLongPressHandler;
 }) {
   return (
     <div
       role="columnheader"
       className="flex min-w-0 flex-col items-stretch justify-center border-b border-r border-[#bfc5bf] text-center [overflow-wrap:anywhere]"
     >
-      {entries.map(([label, description]) => (
+      {entries.map(([label]) => (
         <span
           key={label}
-          className={`flex min-h-5 flex-1 touch-none select-none items-center justify-center py-0.5 text-center ${
+          className={`flex min-h-5 flex-1 touch-pan-y select-none items-center justify-center py-0.5 text-center ${
             label === "Int/Ext" || label === "#S"
               ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
               : "px-0.5"
           }`}
-          onPointerDown={description
-            ? (event) => onLongPress(event, description)
-            : undefined}
+          draggable={false}
         >
           {label}
         </span>
@@ -1410,23 +1418,28 @@ function MobileSceneCell({
   children,
   className = "",
   align = "left",
-  style,
-  onLongPress
+  style
 }: {
   children: ReactNode;
   className?: string;
   align?: "left" | "center";
   style?: CSSProperties;
-  onLongPress?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }) {
   return (
     <div
       role="gridcell"
-      className={`flex min-w-0 items-center border-b border-r border-[#cbd0cb] px-0.5 py-1 [overflow-wrap:anywhere] ${
+      className={`flex min-w-0 touch-pan-y select-none items-center overflow-hidden border-b border-r border-[#cbd0cb] px-0.5 py-1 [overflow-wrap:anywhere] ${
         align === "center" ? "justify-center text-center" : "justify-start whitespace-pre-wrap text-left"
       } ${className}`}
-      style={style}
-      onPointerDown={onLongPress}
+      draggable={false}
+      style={{
+        ...style,
+        maxWidth: "100%",
+        boxSizing: "border-box",
+        touchAction: "pan-y",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none"
+      }}
     >
       {children}
     </div>
@@ -1815,72 +1828,74 @@ const SceneTableRow = memo(function SceneTableRow({
         )}
       </SceneCellFrame>
 
-      {actorRoles.map((role, actorIndex) => {
-        const selected = selectedCharacters.some(
-          (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
-        );
-        const baseActorInteraction = getCellInteraction(`actor:${role}`);
-        const actorInteraction: SceneCellInteraction = {
-          ...baseActorInteraction,
-          onLongPress: (event) => onCharacterNotesLongPress(event, item, !canEdit)
-        };
-        const actorStyle = getActorStyle(actorIndex);
-        const concealActorValue = isVisuallyMerged(actorInteraction);
-        return (
-          <SceneCellFrame
-            key={role}
-            interaction={actorInteraction}
-            value={selected ? "O" : ""}
-            className="grid place-items-center"
-            style={selected
-              ? { backgroundColor: actorStyle.background, color: actorStyle.color }
-              : undefined}
-          >
-            {canEdit ? (
-              <button
-                type="button"
-                onClick={() => {
-                  if (onConsumeCharacterClickSuppression(item.id)) return;
-                  toggleCharacter(role);
-                }}
-                aria-label={`${item.sceneNo || index + 1} Scene Character ${role} ${selected ? "제외" : "포함"}`}
-                aria-pressed={selected}
-                className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
-                  selected
-                    ? concealActorValue
-                      ? "text-transparent"
-                      : ""
-                    : "text-transparent hover:bg-field-soft"
-                }`}
-                style={selected && !concealActorValue ? { color: actorStyle.color } : undefined}
-              >
-                O
-              </button>
-            ) : (
-              <span className="font-black" style={{ color: actorStyle.color }}>
-                {selected && !concealActorValue ? "O" : ""}
-              </span>
-            )}
-          </SceneCellFrame>
-        );
-      })}
-
-      {actorRoles.length > 0 && item.characterNotes ? (
+      {actorRoles.length > 0 ? (
         <div
-          data-scene-character-note-row-id={item.id}
-          className="pointer-events-none z-20 min-w-0 self-end overflow-hidden px-0.5 pb-0.5"
+          data-scene-characters-row-id={item.id}
+          className="grid min-w-0 max-w-full content-start"
           style={{
-            gridColumn: `8 / span ${actorRoles.length}`,
-            gridRow: "1",
+            gridColumn: `span ${actorRoles.length}`,
+            gridTemplateColumns: `repeat(${actorRoles.length}, minmax(0, 1fr))`
           }}
         >
-          <span
-            aria-label={`Characters 세부 메모: ${item.characterNotes}`}
-            title={item.characterNotes}
-            className="block truncate rounded-sm bg-white/90 px-1 text-[8px] font-semibold leading-3 text-field-muted"
-          >
-            {item.characterNotes}
-          </span>
+          {actorRoles.map((role, actorIndex) => {
+            const selected = selectedCharacters.some(
+              (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
+            );
+            const baseActorInteraction = getCellInteraction(`actor:${role}`);
+            const actorInteraction: SceneCellInteraction = {
+              ...baseActorInteraction,
+              onLongPress: (event) => onCharacterNotesLongPress(event, item, !canEdit)
+            };
+            const actorStyle = getActorStyle(actorIndex);
+            const concealActorValue = isVisuallyMerged(actorInteraction);
+            return (
+              <SceneCellFrame
+                key={role}
+                interaction={actorInteraction}
+                value={selected ? "O" : ""}
+                className="grid min-w-0 place-items-center"
+                style={selected
+                  ? { backgroundColor: actorStyle.background, color: actorStyle.color }
+                  : undefined}
+              >
+                {canEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onConsumeCharacterClickSuppression(item.id)) return;
+                      toggleCharacter(role);
+                    }}
+                    aria-label={`${item.sceneNo || index + 1} Scene Character ${role} ${selected ? "제외" : "포함"}`}
+                    aria-pressed={selected}
+                    className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
+                      selected
+                        ? concealActorValue
+                          ? "text-transparent"
+                          : ""
+                        : "text-transparent hover:bg-field-soft"
+                    }`}
+                    style={selected && !concealActorValue ? { color: actorStyle.color } : undefined}
+                  >
+                    O
+                  </button>
+                ) : (
+                  <span className="font-black" style={{ color: actorStyle.color }}>
+                    {selected && !concealActorValue ? "O" : ""}
+                  </span>
+                )}
+              </SceneCellFrame>
+            );
+          })}
+
+          {item.characterNotes ? (
+            <div
+              data-scene-character-note-row-id={item.id}
+              aria-label={`Characters 세부 메모: ${item.characterNotes}`}
+              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-[#cbd0cb] bg-white/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
+            >
+              {item.characterNotes}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
