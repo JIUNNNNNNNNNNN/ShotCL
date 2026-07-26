@@ -211,9 +211,14 @@ function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCe
   const normalized: Record<string, ProjectSceneActorCell> = {};
   for (const [rawRole, rawCell] of Object.entries(value)) {
     const role = rawRole.trim().slice(0, 120);
-    if (!role || !rawCell || typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
+    if (!role || !rawCell) continue;
+    if (rawCell === true || isLegacyPresentValue(rawCell)) {
+      normalized[role] = { mode: "color" };
+      continue;
+    }
+    if (typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
     const record = rawCell as Record<string, unknown>;
-    if (record.mode === "color") {
+    if (isPresentMode(record.mode)) {
       normalized[role] = { mode: "color" };
       continue;
     }
@@ -223,6 +228,17 @@ function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCe
     }
   }
   return normalized;
+}
+
+function isPresentMode(value: unknown) {
+  const mode = String(value ?? "").trim().toLocaleLowerCase();
+  return mode === "color" || mode === "colored" || mode === "present";
+}
+
+function isLegacyPresentValue(value: unknown) {
+  const normalized = String(value ?? "").trim().toLocaleLowerCase();
+  return normalized === "o" || normalized === "true" || normalized === "present"
+    || normalized === "color" || normalized === "colored";
 }
 
 function createUuid() {

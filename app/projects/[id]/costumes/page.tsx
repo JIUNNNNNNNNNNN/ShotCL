@@ -47,6 +47,7 @@ type SceneDraft = {
   sceneNo: string;
   sceneTitle: string;
   selectedSceneId?: string;
+  seedAllBasicActors?: boolean;
 };
 
 type ActorDraft = {
@@ -67,6 +68,7 @@ export default function ProjectCostumesPage() {
   const [scenes, setScenes] = useState<ProjectCostumeScene[]>([]);
   const [actors, setActors] = useState<ProjectActor[]>([]);
   const [sceneOptions, setSceneOptions] = useState<ProjectSceneItem[]>([]);
+  const [sceneActorRoles, setSceneActorRoles] = useState<string[]>([]);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [selectedDailyPlanId, setSelectedDailyPlanId] = useState("");
   const [dailyPlanSceneKeys, setDailyPlanSceneKeys] = useState<Set<string> | null>(null);
@@ -99,6 +101,7 @@ export default function ProjectCostumesPage() {
       setScenes(costumeScenes);
       setActors(basicInfo?.actors ?? []);
       setSceneOptions(sceneList?.items ?? []);
+      setSceneActorRoles(sceneList?.actorRoles ?? []);
       setDailyPlans(plans);
       setDrafts(Object.fromEntries(costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))));
       setDeletedSceneIds(new Set());
@@ -188,7 +191,8 @@ export default function ProjectCostumesPage() {
     setSceneDraft({
       ...sceneDraft,
       selectedSceneId: sceneId,
-      sceneNo: selected?.sceneNo ?? sceneDraft.sceneNo
+      seedAllBasicActors: false,
+      sceneNo: selected ? displaySceneNumber(selected.sceneNo) : sceneDraft.sceneNo
     });
   }
 
@@ -212,7 +216,15 @@ export default function ProjectCostumesPage() {
     } else {
       const sceneId = createTemporaryId("scene");
       const now = new Date().toISOString();
-      const seededActors = dedupeActors(actors);
+      const selectedScene = sceneOptions.find((item) => item.id === sceneDraft.selectedSceneId);
+      const presentActors = selectedScene
+        ? getPresentSceneActors(selectedScene, actors, sceneActorRoles)
+        : [];
+      const seededActors = presentActors.length > 0
+        ? presentActors
+        : sceneDraft.seedAllBasicActors
+          ? dedupeActors(actors)
+          : [];
       const items = seededActors.map((actor, index) => createTemporaryCostume(
         projectId,
         sceneId,
@@ -241,6 +253,61 @@ export default function ProjectCostumesPage() {
     }
     setSceneDraft(null);
     markDirty("씬 변경사항을 임시 저장했습니다. 전체 저장을 눌러 반영해주세요.");
+  }
+
+  function handleSceneActorSeed(scene: ProjectCostumeScene) {
+    if (!projectId || !canEdit) return;
+    const sourceScene = findMatchingSceneOption(scene.sceneNo, sceneOptions);
+    const presentActors = sourceScene
+      ? getPresentSceneActors(sourceScene, actors, sceneActorRoles)
+      : [];
+    const seedActors = presentActors.length > 0 ? presentActors : dedupeActors(actors);
+    const existingKeys = new Set(scene.items.map((item) => {
+      const draft = drafts[item.id];
+      return normalizeActorKey(
+        draft?.actorRole ?? item.actorRole,
+        draft?.actorName ?? item.actorName
+      );
+    }));
+    const missingActors = seedActors.filter((actor) => {
+      const key = normalizeActorKey(actor.role, actor.name);
+      if (!key || existingKeys.has(key)) return false;
+      existingKeys.add(key);
+      return true;
+    });
+
+    if (missingActors.length === 0) {
+      setNoticeMessage(
+        presentActors.length > 0
+          ? "씬리스트의 등장 배역이 이미 모두 등록되어 있습니다."
+          : "추가할 기본정보 배우가 없습니다."
+      );
+      setErrorMessage("");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const items = missingActors.map((actor, index) => createTemporaryCostume(
+      projectId,
+      scene.id,
+      scene.sceneNo,
+      actor.role,
+      actor.name,
+      scene.items.length + index,
+      now
+    ));
+    setScenes((current) => current.map((entry) => entry.id === scene.id
+      ? { ...entry, items: [...entry.items, ...items] }
+      : entry));
+    setDrafts((current) => ({
+      ...current,
+      ...Object.fromEntries(items.map((item) => [item.id, toDraft(item)]))
+    }));
+    markDirty(
+      presentActors.length > 0
+        ? `씬리스트 등장 배역 ${missingActors.length}명을 보충했습니다. 전체 저장을 눌러 반영해주세요.`
+        : `기본정보 배우 ${missingActors.length}명을 추가했습니다. 전체 저장을 눌러 반영해주세요.`
+    );
   }
 
   function handleSceneDelete(scene: ProjectCostumeScene) {
@@ -482,6 +549,10 @@ export default function ProjectCostumesPage() {
           <div className="grid gap-1.5">
             {filteredScenes.map((scene) => {
               const expanded = expandedSceneIds.has(scene.id);
+              const sourceScene = findMatchingSceneOption(scene.sceneNo, sceneOptions);
+              const sourceActors = sourceScene
+                ? getPresentSceneActors(sourceScene, actors, sceneActorRoles)
+                : [];
               const imageCount = scene.items.reduce((total, item) => {
                 const draft = drafts[item.id];
                 return total
@@ -520,9 +591,8 @@ export default function ProjectCostumesPage() {
                   {expanded ? (
                     <div className="border-t border-field-border p-1.5 sm:p-2">
                       {scene.items.length > 0 ? (
-                        <div className="mb-1 hidden grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] gap-1.5 px-2 text-[10px] font-black text-field-muted sm:grid">
-                          <span>배역</span>
-                          <span>제공자</span>
+                        <div className="mb-1 hidden grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] gap-2 px-2 text-[10px] font-black text-field-muted lg:grid">
+                          <span>배역 / 제공자</span>
                           <span>의상</span>
                           <span>헤어</span>
                           <span className="text-center">삭제</span>
@@ -543,24 +613,36 @@ export default function ProjectCostumesPage() {
                             onDelete={() => handleItemDelete(scene, item)}
                             onPreview={(image) => setPreview({
                               url: image.url,
-                              title: `${scene.sceneNo} · ${item.actorRole || item.actorName || "의상"}`
+                              title: `${displaySceneNumber(scene.sceneNo)} · ${item.actorRole || item.actorName || "의상"}`
                             })}
                             onPreviewUrl={(url) => setPreview({
                               url,
-                              title: `${scene.sceneNo} · ${item.actorRole || item.actorName || "의상"}`
+                              title: `${displaySceneNumber(scene.sceneNo)} · ${item.actorRole || item.actorName || "의상"}`
                             })}
                           />
                         ))}
                       </div>
                       {canEdit ? (
-                        <Button
-                          variant="secondary"
-                          className="mt-1.5 min-h-8 px-2.5 py-1 text-[11px]"
-                          onClick={() => setActorDraft({ sceneId: scene.id, role: "", name: "" })}
-                        >
-                          <Plus className="h-4 w-4" aria-hidden />
-                          배역 추가
-                        </Button>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          <Button
+                            variant="secondary"
+                            className="min-h-8 px-2.5 py-1 text-[11px]"
+                            onClick={() => handleSceneActorSeed(scene)}
+                          >
+                            <Plus className="h-4 w-4" aria-hidden />
+                            {sourceActors.length > 0
+                              ? `씬리스트 배역 보충 (${sourceActors.length}명)`
+                              : "기본정보 배우 전체 추가"}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            className="min-h-8 px-2.5 py-1 text-[11px]"
+                            onClick={() => setActorDraft({ sceneId: scene.id, role: "", name: "" })}
+                          >
+                            <Plus className="h-4 w-4" aria-hidden />
+                            배역 직접 추가
+                          </Button>
+                        </div>
                       ) : null}
                     </div>
                   ) : null}
@@ -591,7 +673,12 @@ export default function ProjectCostumesPage() {
             <Field label="씬 번호">
               <input
                 value={sceneDraft.sceneNo}
-                onChange={(event) => setSceneDraft({ ...sceneDraft, selectedSceneId: "", sceneNo: event.target.value })}
+                onChange={(event) => setSceneDraft({
+                  ...sceneDraft,
+                  selectedSceneId: "",
+                  seedAllBasicActors: false,
+                  sceneNo: event.target.value
+                })}
                 placeholder="예: S#1"
                 className={compactInputClass}
               />
@@ -605,10 +692,22 @@ export default function ProjectCostumesPage() {
               />
             </Field>
             {!sceneDraft.id ? (
-              <p className="text-xs font-bold leading-5 text-field-muted">
-                씬리스트에서는 씬 번호만 가져옵니다. 별도 씬 이름 필드가 없어 이름은 직접 입력하며, 씬 내용과 Characters 메모는 가져오지 않습니다.
-                새 씬에는 현재 기본정보의 배역 {actors.length}개만 복사됩니다.
-              </p>
+              <SceneSeedSummary
+                selectedScene={sceneOptions.find((scene) => scene.id === sceneDraft.selectedSceneId)}
+                presentActors={sceneOptions.find((scene) => scene.id === sceneDraft.selectedSceneId)
+                  ? getPresentSceneActors(
+                      sceneOptions.find((scene) => scene.id === sceneDraft.selectedSceneId)!,
+                      actors,
+                      sceneActorRoles
+                    )
+                  : []}
+                actorCount={actors.length}
+                useBasicActors={Boolean(sceneDraft.seedAllBasicActors)}
+                onUseBasicActors={() => setSceneDraft({
+                  ...sceneDraft,
+                  seedAllBasicActors: !sceneDraft.seedAllBasicActors
+                })}
+              />
             ) : null}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setSceneDraft(null)}>닫기</Button>
@@ -665,12 +764,14 @@ function CostumeItemCard({
   const customProvider = draft.provider && !providerOptions.includes(draft.provider);
   if (!canEdit) {
     return (
-      <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
-        <div className="col-span-2 min-w-0 border-b border-field-border pb-1 sm:col-span-1 sm:border-0 sm:pb-0">
+      <article className="grid gap-2 rounded-lg border border-field-border bg-white p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:rounded-none lg:border-0 lg:px-2 lg:py-2">
+        <div className="min-w-0 border-b border-field-border pb-1 lg:border-0 lg:pb-0">
           <h3 className="break-words text-xs font-black leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
           {item.actorName ? <p className="break-words text-[10px] font-bold leading-4 text-field-muted">{item.actorName}</p> : null}
+          <dl className="mt-1 border-t border-field-border pt-1">
+            <ReadOnlyValue label="제공자" value={item.provider} />
+          </dl>
         </div>
-        <ReadOnlyValue label="제공자" value={item.provider} />
         <ReadOnlyMediaField
           label="의상"
           value={item.costumeContent}
@@ -685,14 +786,14 @@ function CostumeItemCard({
           title={item.actorRole || item.actorName}
           onPreview={onPreview}
         />
-        <span className="hidden text-center text-[10px] font-bold text-field-muted sm:block">보기</span>
+        <span className="hidden text-center text-[10px] font-bold text-field-muted lg:block">보기</span>
       </article>
     );
   }
 
   return (
-    <article className="grid grid-cols-2 gap-1.5 rounded-lg border border-field-border bg-white p-2 sm:grid-cols-[minmax(90px,.7fr)_80px_minmax(230px,1.5fr)_minmax(230px,1.5fr)_40px] sm:items-start sm:gap-1.5 sm:rounded-none sm:border-0 sm:px-2 sm:py-1.5">
-      <div className="col-span-2 grid grid-cols-2 gap-1 sm:col-span-1 sm:grid-cols-1">
+    <article className="grid gap-2 rounded-lg border border-field-border bg-white p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:rounded-none lg:border-0 lg:px-2 lg:py-2">
+      <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
         <CompactField label="배역">
           <input
             value={draft.actorRole}
@@ -709,29 +810,30 @@ function CostumeItemCard({
             className={compactInputClass}
           />
         </CompactField>
-      </div>
-
-      <CompactField label="제공자">
-        <div className="grid gap-1">
-          <select
-            value={customProvider ? "기타" : draft.provider}
-            onChange={(event) => onChange({ provider: event.target.value === "기타" ? "기타" : event.target.value })}
-            className={compactInputClass}
-          >
-            <option value="">선택</option>
-            {providerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            <option value="기타">기타</option>
-          </select>
-          {customProvider || draft.provider === "기타" ? (
-            <input
-              value={draft.provider === "기타" ? "" : draft.provider}
-              onChange={(event) => onChange({ provider: event.target.value })}
-              placeholder="직접 입력"
-              className={compactInputClass}
-            />
-          ) : null}
+        <div className="col-span-2 mt-0.5 border-t border-field-border pt-1 lg:col-span-1">
+          <CompactField label="제공자">
+            <div className="grid gap-1">
+              <select
+                value={customProvider ? "기타" : draft.provider}
+                onChange={(event) => onChange({ provider: event.target.value === "기타" ? "기타" : event.target.value })}
+                className={compactInputClass}
+              >
+                <option value="">선택</option>
+                {providerOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                <option value="기타">기타</option>
+              </select>
+              {customProvider || draft.provider === "기타" ? (
+                <input
+                  value={draft.provider === "기타" ? "" : draft.provider}
+                  onChange={(event) => onChange({ provider: event.target.value })}
+                  placeholder="직접 입력"
+                  className={compactInputClass}
+                />
+              ) : null}
+            </div>
+          </CompactField>
         </div>
-      </CompactField>
+      </div>
 
       <EditableMediaField
         label="의상"
@@ -763,7 +865,7 @@ function CostumeItemCard({
         onPreviewUrl={onPreviewUrl}
       />
 
-      <div className="col-span-2 flex items-start justify-end sm:col-span-1">
+      <div className="flex items-start justify-end">
         <IconButton label="배역 삭제" danger compact onClick={onDelete}>
           <Trash2 className="h-3.5 w-3.5" aria-hidden />
         </IconButton>
@@ -800,45 +902,49 @@ function EditableMediaField({
   onPreviewUrl: (url: string) => void;
 }) {
   return (
-    <div className="col-span-2 grid min-w-0 content-start gap-1 sm:col-span-1">
-      <label className="grid gap-0.5">
-        <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
-        <input
-          value={value}
-          onChange={(event) => onValueChange(event.target.value)}
-          placeholder={placeholder}
-          className={compactInputClass}
-        />
-      </label>
-      <div className="flex max-w-full items-start gap-1.5 overflow-x-auto pb-1">
-        {images.map((image) => (
-          <div key={image.path} className="relative h-32 w-32 shrink-0 border border-field-border bg-field-soft">
-            <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
-              className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
-              aria-label={`저장 시 ${label} 이미지 삭제`}
-            >
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-        ))}
-        {pendingFiles.map((pending) => (
-          <PendingImagePreview
-            key={pending.id}
-            pending={pending}
-            title={`${title} ${label}`}
-            onPreview={onPreviewUrl}
-            onRemove={() => onPendingFilesChange(pendingFiles.filter((item) => item.id !== pending.id))}
+    <div className="grid min-w-0 content-start gap-1">
+      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
+      <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
+        <div className="flex min-h-32 min-w-0 items-start gap-1.5 overflow-x-auto pb-1">
+          {images.map((image) => (
+            <div key={image.path} className="relative h-32 w-32 shrink-0 border border-field-border bg-field-soft">
+              <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
+                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+                aria-label={`저장 시 ${label} 이미지 삭제`}
+              >
+                <X className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
+          ))}
+          {pendingFiles.map((pending) => (
+            <PendingImagePreview
+              key={pending.id}
+              pending={pending}
+              title={`${title} ${label}`}
+              onPreview={onPreviewUrl}
+              onRemove={() => onPendingFilesChange(pendingFiles.filter((item) => item.id !== pending.id))}
+            />
+          ))}
+          <label className="grid min-h-32 w-20 shrink-0 cursor-pointer place-items-center border border-dashed border-field-secondary bg-field-light px-1.5 py-1 text-[10px] font-black text-field-primary">
+            <span className="flex items-center gap-1"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
+            <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
+          </label>
+        </div>
+        <label className="grid gap-0.5">
+          <span className="text-[10px] font-black text-field-muted">{label} 메모</span>
+          <textarea
+            value={value}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder={placeholder}
+            rows={4}
+            className={`${compactInputClass} min-h-32 resize-y py-2`}
           />
-        ))}
-        <label className="grid min-h-9 w-20 shrink-0 cursor-pointer place-items-center border border-dashed border-field-secondary bg-field-light px-1.5 py-1 text-[10px] font-black text-field-primary">
-          <span className="flex items-center gap-1"><ImagePlus className="h-4 w-4" aria-hidden />+ 사진</span>
-          <input type="file" accept="image/*,.heic,.heif" multiple className="sr-only" onChange={onFiles} />
         </label>
       </div>
     </div>
@@ -891,19 +997,22 @@ function ReadOnlyMediaField({
   onPreview: (image: CostumeImage) => void;
 }) {
   return (
-    <div className="col-span-2 grid min-w-0 content-start gap-1 sm:col-span-1">
-      <div>
-        <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
-        <p className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</p>
+    <div className="grid min-w-0 content-start gap-1">
+      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
+      <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
+        {images.length > 0 ? <div className="flex min-h-32 gap-1.5 overflow-x-auto pb-1">
+          {images.map((image) => (
+            <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 border border-field-border bg-field-soft">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
+            </button>
+          ))}
+        </div> : <div className="grid min-h-32 place-items-center border border-dashed border-field-border text-[10px] font-bold text-field-muted">이미지 없음</div>}
+        <div className="min-h-32 border border-field-border bg-field-soft p-2">
+          <span className="text-[10px] font-black text-field-muted">{label} 메모</span>
+          <p className="mt-1 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</p>
+        </div>
       </div>
-      {images.length > 0 ? <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {images.map((image) => (
-          <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 border border-field-border bg-field-soft">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
-          </button>
-        ))}
-      </div> : <p className="text-[10px] font-bold text-field-muted">이미지 없음</p>}
     </div>
   );
 }
@@ -911,8 +1020,52 @@ function ReadOnlyMediaField({
 function ReadOnlyValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[9px] font-black leading-4 text-field-muted sm:hidden">{label}</dt>
+      <dt className="text-[9px] font-black leading-4 text-field-muted lg:hidden">{label}</dt>
       <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</dd>
+    </div>
+  );
+}
+
+function SceneSeedSummary({
+  selectedScene,
+  presentActors,
+  actorCount,
+  useBasicActors,
+  onUseBasicActors
+}: {
+  selectedScene?: ProjectSceneItem;
+  presentActors: ProjectActor[];
+  actorCount: number;
+  useBasicActors: boolean;
+  onUseBasicActors: () => void;
+}) {
+  if (selectedScene && presentActors.length > 0) {
+    return (
+      <p className="text-xs font-bold leading-5 text-field-muted">
+        씬 내용과 메모는 가져오지 않고, 배우칸이 색상/등장 상태인 배역 {presentActors.length}명만 모두 추가합니다.
+      </p>
+    );
+  }
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-field-border bg-field-soft p-2.5">
+      <p className="text-xs font-bold leading-5 text-field-muted">
+        {selectedScene
+          ? "이 씬에는 색상/등장 상태인 배우칸이 없어 배역을 자동 추가하지 않습니다."
+          : "직접 입력한 씬에는 배역을 자동 추가하지 않습니다."}
+        {" "}씬 내용과 Characters 메모는 가져오지 않습니다.
+      </p>
+      <Button
+        type="button"
+        variant="secondary"
+        className="justify-self-start"
+        onClick={onUseBasicActors}
+        disabled={actorCount === 0}
+      >
+        {useBasicActors
+          ? `기본정보 배우 ${actorCount}명 추가 예정`
+          : "기본정보 배우 전체 추가"}
+      </Button>
     </div>
   );
 }
@@ -970,7 +1123,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function CompactField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid min-w-0 content-start gap-0.5">
-      <span className="text-[9px] font-black leading-4 text-field-muted sm:sr-only">{label}</span>
+      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
       {children}
     </label>
   );
@@ -1034,12 +1187,117 @@ function dedupeActors(actors: ProjectActor[]) {
   });
 }
 
+function getPresentSceneActors(
+  scene: ProjectSceneItem,
+  basicActors: ProjectActor[],
+  actorRoles: string[]
+) {
+  const actorCells = scene.actorCells as Record<string, unknown>;
+  const legacyPresence = getLegacyActorPresence(scene);
+  const candidates = dedupeTextValues([
+    ...actorRoles,
+    ...basicActors.flatMap((actor) => [actor.role, actor.name]),
+    ...Object.keys(actorCells),
+    ...Object.keys(legacyPresence)
+  ]);
+  const legacyCharacterKeys = new Set(
+    splitLegacyCharacters(scene.characters).map(normalizeActorTextKey)
+  );
+
+  return dedupeActors(candidates.flatMap((role) => {
+    const actorCell = findCaseInsensitiveValue(actorCells, role);
+    const legacyCell = findCaseInsensitiveValue(legacyPresence, role);
+    const isPresent = isPresentActorCell(actorCell)
+      || isPresentActorCell(legacyCell)
+      || legacyCharacterKeys.has(normalizeActorTextKey(role));
+    if (!isPresent || isTextOnlyActorCell(actorCell)) return [];
+
+    const actor = basicActors.find((candidate) => (
+      normalizeActorTextKey(candidate.role) === normalizeActorTextKey(role)
+      || normalizeActorTextKey(candidate.name) === normalizeActorTextKey(role)
+    ));
+    return [{
+      role: actor?.role || role.trim(),
+      name: actor?.name || ""
+    }];
+  }));
+}
+
+function findMatchingSceneOption(sceneNo: string, sceneOptions: ProjectSceneItem[]) {
+  const key = normalizeSceneNumber(sceneNo);
+  return sceneOptions.find((scene) => normalizeSceneNumber(scene.sceneNo) === key);
+}
+
+function getLegacyActorPresence(scene: ProjectSceneItem) {
+  const record = scene as ProjectSceneItem & {
+    actorPresence?: unknown;
+    actor_presence?: unknown;
+  };
+  const value = record.actorPresence ?? record.actor_presence;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function findCaseInsensitiveValue(record: Record<string, unknown>, key: string) {
+  const normalizedKey = normalizeActorTextKey(key);
+  const entry = Object.entries(record).find(
+    ([candidate]) => normalizeActorTextKey(candidate) === normalizedKey
+  );
+  return entry?.[1];
+}
+
+function isPresentActorCell(value: unknown) {
+  if (value === true) return true;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLocaleLowerCase();
+    return normalized === "o" || normalized === "true" || normalized === "color"
+      || normalized === "colored" || normalized === "present";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const mode = String((value as Record<string, unknown>).mode ?? "").trim().toLocaleLowerCase();
+  return mode === "color" || mode === "colored" || mode === "present";
+}
+
+function isTextOnlyActorCell(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return String((value as Record<string, unknown>).mode ?? "").trim().toLocaleLowerCase() === "text";
+}
+
+function splitLegacyCharacters(value: string) {
+  return value
+    .split(/[,;\n|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function dedupeTextValues(values: string[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = normalizeActorTextKey(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeActorTextKey(value: string) {
+  return value.normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
+}
+
 function sceneOptionLabel(scene: ProjectSceneItem) {
-  return [scene.sceneNo, scene.mainLocation, scene.subLocation].filter(Boolean).join(" · ") || "번호 없는 씬";
+  return [displaySceneNumber(scene.sceneNo), scene.mainLocation, scene.subLocation].filter(Boolean).join(" · ") || "번호 없는 씬";
 }
 
 function sceneLabel(scene: Pick<ProjectCostumeScene, "sceneNo" | "sceneTitle">) {
-  return [scene.sceneNo, scene.sceneTitle].filter(Boolean).join(" · ") || "씬";
+  return [displaySceneNumber(scene.sceneNo), scene.sceneTitle].filter(Boolean).join(" · ") || "씬";
+}
+
+function displaySceneNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (/^\d+$/.test(trimmed)) return `S#${Number.parseInt(trimmed, 10)}`;
+  return trimmed;
 }
 
 function dailyPlanLabel(plan: DailyPlanListItem) {
