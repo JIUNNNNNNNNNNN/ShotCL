@@ -108,6 +108,12 @@ export default function ProjectScenarioPage() {
         .includes(normalizedQuery)
     );
   }, [draftScenes, query]);
+  const detectedSceneNumbers = useMemo(
+    () => draftScenes
+      .filter((scene) => scene.imageSegments.length > 0)
+      .map((scene) => scene.sceneNo),
+    [draftScenes]
+  );
 
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
@@ -430,6 +436,22 @@ export default function ProjectScenarioPage() {
       {statusMessage ? (
         <p role="status" className="border-l-2 border-field-primary bg-field-light px-2.5 py-1.5 text-xs font-bold text-field-primary">
           {statusMessage}
+        </p>
+      ) : null}
+      {selectedAsset && canEdit && detectedSceneNumbers.length > 0 ? (
+        <p
+          role={detectedSceneNumbers.length <= 2 ? "alert" : "status"}
+          className={`border-l-2 px-2.5 py-1.5 text-[11px] font-bold leading-normal ${
+            detectedSceneNumbers.length <= 2
+              ? "border-amber-500 bg-amber-50 text-amber-800"
+              : "border-field-primary bg-field-light text-field-primary"
+          }`}
+        >
+          감지된 씬: {detectedSceneNumbers.length}개 ·{" "}
+          {detectedSceneNumbers.map((sceneNo) => `S#${sceneNo}`).join(", ")}
+          {detectedSceneNumbers.length <= 2
+            ? " · 후반 씬 marker가 있다면 재분석 결과와 개발 로그를 확인하세요."
+            : ""}
         </p>
       ) : null}
       {hasChanges ? (

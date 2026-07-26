@@ -9,10 +9,7 @@ export type ScenarioPageText = {
 
 export { parseScenarioSceneMarker } from "../scenarioSceneMarker";
 
-/**
- * 각 번호의 첫 marker부터 다음으로 큰 번호 marker 직전까지를 한 씬으로 자릅니다.
- * 마지막 씬은 추출된 PDF 텍스트 끝까지 포함합니다.
- */
+/** 각 번호의 첫 marker부터 문서상 다음 marker 직전까지를 한 씬으로 자릅니다. */
 export function splitScenarioScenesByNumber(
   pages: ScenarioPageText[]
 ): ProjectScenarioScene[] {
@@ -21,7 +18,6 @@ export function splitScenarioScenesByNumber(
   );
   const firstMarkerByNumber = new Map<string, {
     sceneNo: string;
-    number: number;
     originalLine: string;
     lineIndex: number;
     page: number;
@@ -32,20 +28,16 @@ export function splitScenarioScenesByNumber(
     if (!marker || firstMarkerByNumber.has(marker.sceneNo)) return;
     firstMarkerByNumber.set(marker.sceneNo, {
       ...marker,
-      number: Number(marker.sceneNo),
       lineIndex,
       page
     });
   });
 
   const markers = [...firstMarkerByNumber.values()]
-    .sort((left, right) => left.number - right.number || left.lineIndex - right.lineIndex);
+    .sort((left, right) => left.lineIndex - right.lineIndex);
 
-  return markers.slice(0, 2_000).map((marker) => {
-    const nextMarker = markers.find((candidate) =>
-      candidate.number > marker.number &&
-      candidate.lineIndex > marker.lineIndex
-    );
+  return markers.slice(0, 2_000).map((marker, markerIndex) => {
+    const nextMarker = markers[markerIndex + 1];
     const endIndex = nextMarker?.lineIndex ?? lines.length;
     const blockLines = lines.slice(marker.lineIndex, endIndex);
     const lastLine = [...blockLines].reverse().find(({ line }) => line.trim());
