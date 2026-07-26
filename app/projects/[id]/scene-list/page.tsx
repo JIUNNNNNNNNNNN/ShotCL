@@ -45,8 +45,8 @@ type SceneValueColumn =
 type SceneActorColumn = `actor:${string}`;
 type SceneCellColumn = SceneValueColumn | SceneActorColumn;
 type SceneFillColumn =
-  | Exclude<SceneValueColumn, "sceneNo" | "sceneContent">
-  | SceneActorColumn;
+  Exclude<SceneValueColumn, "sceneNo" | "sceneContent">;
+type SceneVisualMergeColumn = SceneFillColumn | SceneActorColumn;
 
 type SelectedSceneCell = {
   rowId: string;
@@ -370,6 +370,7 @@ export default function ProjectSceneListPage() {
   }, []);
 
   const startEditingCell = useCallback((rowId: string, column: SceneCellColumn) => {
+    if (isActorColumn(column)) return;
     setEditingCell({ rowId, column });
   }, []);
 
@@ -391,6 +392,10 @@ export default function ProjectSceneListPage() {
 
   useEffect(() => {
     if (!editingCell || !canEdit) return;
+    if (isActorColumn(editingCell.column)) {
+      setEditingCell(null);
+      return;
+    }
     const frame = window.requestAnimationFrame(() => {
       const editor = findCellElement(editingCell.rowId, editingCell.column)
         ?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
@@ -461,6 +466,18 @@ export default function ProjectSceneListPage() {
     }
 
     if ((event.metaKey || event.ctrlKey) && ["c", "v", "x"].includes(event.key.toLowerCase())) {
+      return;
+    }
+    if (
+      isActorColumn(activeCell.column) &&
+      (event.key === "Enter" || event.key === " ")
+    ) {
+      event.preventDefault();
+      if (canEdit) {
+        findCellElement(activeCell.rowId, activeCell.column)
+          ?.querySelector<HTMLButtonElement>("button")
+          ?.click();
+      }
       return;
     }
     if (target instanceof HTMLButtonElement && (event.key === "Enter" || event.key === " ")) {
@@ -1831,59 +1848,60 @@ const SceneTableRow = memo(function SceneTableRow({
       {actorRoles.length > 0 ? (
         <div
           data-scene-characters-row-id={item.id}
-          className="grid min-w-0 max-w-full content-start"
+          className="grid min-w-0 max-w-full content-start overflow-hidden"
           style={{
             gridColumn: `span ${actorRoles.length}`,
-            gridTemplateColumns: `repeat(${actorRoles.length}, minmax(0, 1fr))`
+            gridTemplateColumns: `repeat(${actorRoles.length}, minmax(0, 1fr))`,
+            gridTemplateRows: item.characterNotes
+              ? "minmax(2.25rem, 1fr) auto"
+              : "minmax(2.25rem, 1fr)"
           }}
         >
           {actorRoles.map((role, actorIndex) => {
             const selected = selectedCharacters.some(
               (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
             );
-            const baseActorInteraction = getCellInteraction(`actor:${role}`);
-            const actorInteraction: SceneCellInteraction = {
-              ...baseActorInteraction,
-              onLongPress: (event) => onCharacterNotesLongPress(event, item, !canEdit)
-            };
+            const column: SceneActorColumn = `actor:${role}`;
+            const mergeRange = getVisualMergeRange(allItems, index, column);
+            const mergePosition = getMergePosition(index, mergeRange);
+            const selectionStart = selectedRange
+              ? Math.min(selectedRange.startIndex, selectedRange.endIndex)
+              : -1;
+            const selectionEnd = selectedRange
+              ? Math.max(selectedRange.startIndex, selectedRange.endIndex)
+              : -1;
+            const isInRange = selectedRange?.column === column &&
+              index >= selectionStart &&
+              index <= selectionEnd;
+            const selectionPosition = isInRange
+              ? getMergePosition(index, {
+                  column,
+                  startIndex: selectionStart,
+                  endIndex: selectionEnd
+                })
+              : "single";
             const actorStyle = getActorStyle(actorIndex);
-            const concealActorValue = isVisuallyMerged(actorInteraction);
             return (
-              <SceneCellFrame
+              <ActorSceneCell
                 key={role}
-                interaction={actorInteraction}
-                value={selected ? "O" : ""}
-                className="grid min-w-0 place-items-center"
-                style={selected
-                  ? { backgroundColor: actorStyle.background, color: actorStyle.color }
-                  : undefined}
-              >
-                {canEdit ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onConsumeCharacterClickSuppression(item.id)) return;
-                      toggleCharacter(role);
-                    }}
-                    aria-label={`${item.sceneNo || index + 1} Scene Character ${role} ${selected ? "제외" : "포함"}`}
-                    aria-pressed={selected}
-                    className={`grid h-6 w-6 place-items-center rounded-full bg-transparent text-[11px] font-black transition active:scale-90 ${
-                      selected
-                        ? concealActorValue
-                          ? "text-transparent"
-                          : ""
-                        : "text-transparent hover:bg-field-soft"
-                    }`}
-                    style={selected && !concealActorValue ? { color: actorStyle.color } : undefined}
-                  >
-                    O
-                  </button>
-                ) : (
-                  <span className="font-black" style={{ color: actorStyle.color }}>
-                    {selected && !concealActorValue ? "O" : ""}
-                  </span>
-                )}
-              </SceneCellFrame>
+                rowId={item.id}
+                rowIndex={index}
+                column={column}
+                role={role}
+                sceneLabel={item.sceneNo || String(index + 1)}
+                selected={selected}
+                canEdit={canEdit}
+                actorStyle={actorStyle}
+                mergePosition={mergePosition}
+                isInRange={isInRange}
+                selectionPosition={selectionPosition}
+                onSelect={onCellSelect}
+                onToggle={() => {
+                  if (onConsumeCharacterClickSuppression(item.id)) return;
+                  toggleCharacter(role);
+                }}
+                onLongPress={(event) => onCharacterNotesLongPress(event, item, !canEdit)}
+              />
             );
           })}
 
@@ -1891,7 +1909,7 @@ const SceneTableRow = memo(function SceneTableRow({
             <div
               data-scene-character-note-row-id={item.id}
               aria-label={`Characters 세부 메모: ${item.characterNotes}`}
-              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-[#cbd0cb] bg-white/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
+              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-t border-[#cbd0cb] bg-white/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
             >
               {item.characterNotes}
             </div>
@@ -1920,6 +1938,87 @@ const SceneTableRow = memo(function SceneTableRow({
     </div>
   );
 });
+
+function ActorSceneCell({
+  rowId,
+  rowIndex,
+  column,
+  role,
+  sceneLabel,
+  selected,
+  canEdit,
+  actorStyle,
+  mergePosition,
+  isInRange,
+  selectionPosition,
+  onSelect,
+  onToggle,
+  onLongPress
+}: {
+  rowId: string;
+  rowIndex: number;
+  column: SceneActorColumn;
+  role: string;
+  sceneLabel: string;
+  selected: boolean;
+  canEdit: boolean;
+  actorStyle: ActorPaletteStyle;
+  mergePosition: MergePosition;
+  isInRange: boolean;
+  selectionPosition: MergePosition;
+  onSelect: (rowId: string, column: SceneCellColumn, rowIndex: number) => void;
+  onToggle: () => void;
+  onLongPress: (event: ReactPointerEvent<HTMLElement>) => void;
+}) {
+  const showValue = selected &&
+    (mergePosition === "single" || mergePosition === "start");
+  const mergesWithNext = selected &&
+    (mergePosition === "start" || mergePosition === "middle");
+
+  return (
+    <div
+      role="gridcell"
+      tabIndex={-1}
+      data-scene-row-id={rowId}
+      data-scene-cell-column={column}
+      aria-selected={isInRange || undefined}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSelect(rowId, column, rowIndex);
+        onLongPress(event);
+      }}
+      className={`relative grid min-h-9 min-w-0 place-items-center border-r outline-none ${
+        mergesWithNext
+          ? "border-b border-b-transparent"
+          : "border-b border-b-[#cbd0cb]"
+      } ${canEdit ? "cursor-pointer" : "cursor-default"}`}
+      style={{
+        backgroundColor: selected ? actorStyle.background : "#ffffff",
+        color: actorStyle.color,
+        boxShadow: isInRange
+          ? getSelectionBoxShadow(selectionPosition)
+          : undefined
+      }}
+    >
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={`${sceneLabel} Scene Character ${role} ${selected ? "제외" : "포함"}`}
+          aria-pressed={selected}
+          className="grid h-full min-h-9 w-full min-w-0 place-items-center bg-transparent text-[11px] font-black transition active:scale-95"
+          style={{ color: showValue ? actorStyle.color : "transparent" }}
+        >
+          O
+        </button>
+      ) : (
+        <span className="font-black" aria-hidden={!showValue}>
+          {showValue ? "O" : ""}
+        </span>
+      )}
+    </div>
+  );
+}
 
 type SceneCellInteraction = {
   rowId: string;
@@ -2444,7 +2543,7 @@ function getDraggedRange(drag: CellDragState, targetIndex: number) {
     : { startIndex: targetIndex, endIndex: drag.initialEndIndex };
 }
 
-function isVisualMergeColumn(column: SceneCellColumn): column is SceneFillColumn {
+function isVisualMergeColumn(column: SceneCellColumn): column is SceneVisualMergeColumn {
   return isActorColumn(column) || [
     "mainLocation",
     "subLocation",
@@ -2455,7 +2554,7 @@ function isVisualMergeColumn(column: SceneCellColumn): column is SceneFillColumn
 }
 
 function isFillColumn(column: SceneCellColumn): column is SceneFillColumn {
-  return isActorColumn(column) || [
+  return [
     "mainLocation",
     "subLocation",
     "dayLabel",
