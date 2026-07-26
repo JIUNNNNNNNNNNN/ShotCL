@@ -6,6 +6,7 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -220,7 +221,7 @@ function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
   return {
     id,
     project_id: projectId,
-    scene_no: normalizeText(item.sceneNo, 30),
+    scene_no: normalizeSceneNumber(item.sceneNo) || normalizeText(item.sceneNo, 30),
     main_location: normalizeText(item.mainLocation, 120),
     sub_location: normalizeText(item.subLocation, 160),
     day_label: normalizeText(item.dayLabel, 30),

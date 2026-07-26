@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { inflateSync } from "node:zlib";
+import { splitScenarioScenesByNumber } from "@/lib/server/scenarioSceneParser";
 import type { ProjectScenarioScene } from "@/lib/types";
 
 type PdfObject = {
@@ -45,9 +45,9 @@ export function extractScenarioScenesFromPdf(buffer: Buffer): ScenarioPdfExtract
       return failed("텍스트를 추출할 수 없습니다. 원본 PDF 보기 또는 수동 씬 추가를 사용하세요.");
     }
 
-    const scenes = splitScenarioPages(readablePages);
+    const scenes = splitScenarioScenesByNumber(readablePages);
     if (scenes.length === 0) {
-      return failed("씬 헤더를 찾을 수 없습니다. 원본 PDF 보기 또는 수동 씬 추가를 사용하세요.");
+      return failed("씬 번호 표기를 찾지 못했습니다. 수동으로 씬을 추가하세요.");
     }
     return { scenes, error: null };
   } catch {
@@ -379,67 +379,4 @@ function cleanExtractedText(value: string) {
 
 function countReadableCharacters(value: string) {
   return (value.match(/[\p{L}\p{N}]/gu) ?? []).length;
-}
-
-function splitScenarioPages(pages: PageText[]) {
-  const scenes: ProjectScenarioScene[] = [];
-  let current: ProjectScenarioScene | null = null;
-  let fallbackNumber = 1;
-
-  for (const { page, text } of pages) {
-    for (const rawLine of text.split("\n")) {
-      const line = rawLine.trim();
-      if (!line) {
-        if (current && current.text && !current.text.endsWith("\n\n")) current.text += "\n";
-        continue;
-      }
-      if (isSceneHeader(line)) {
-        if (current) {
-          current.text = current.text.trim();
-          scenes.push(current);
-        }
-        current = {
-          id: randomUUID(),
-          sceneNo: sceneNumberFromHeader(line) || String(fallbackNumber),
-          title: sceneTitleFromHeader(line, fallbackNumber),
-          pageStart: page,
-          pageEnd: page,
-          text: ""
-        };
-        fallbackNumber += 1;
-        continue;
-      }
-      if (current) {
-        current.pageEnd = page;
-        current.text += `${line}\n`;
-      }
-    }
-  }
-
-  if (current) {
-    current.text = current.text.trim();
-    scenes.push(current);
-  }
-  return scenes.slice(0, 2_000);
-}
-
-function isSceneHeader(line: string) {
-  if (line.length > 240) return false;
-  return /^(?:S\s*#?\s*\d[\dA-Z_-]*|SCENE\s*#?\s*[\dA-Z가-힣_-]+|씬\s*#?\s*[\dA-Z가-힣_-]+|\d+\s*(?:[.)]|장)(?:\s|$))/i.test(line)
-    || /^(?:INT|EXT|I\/E)\.?(?:\s|[-–—.])/i.test(line)
-    || /^(?=.{2,160}$)(?=.*(?:INT|EXT|I\/E))(?=.*(?:D\/N|DAY|NIGHT|낮|밤))/i.test(line);
-}
-
-function sceneNumberFromHeader(line: string) {
-  return line.match(/^(?:S|SCENE|씬)\s*#?\s*([\dA-Z가-힣_-]+)/i)?.[1]
-    ?? line.match(/^(\d+)\s*(?:[.)]|장)/)?.[1]
-    ?? "";
-}
-
-function sceneTitleFromHeader(line: string, fallbackNumber: number) {
-  const withoutNumber = line
-    .replace(/^(?:S|SCENE|씬)\s*#?\s*[\dA-Z가-힣_-]+\s*[-–—.:]?\s*/i, "")
-    .replace(/^\d+\s*(?:[.)]|장)\s*/, "")
-    .trim();
-  return (withoutNumber || line || `Scene ${fallbackNumber}`).slice(0, 240);
 }

@@ -7,6 +7,7 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { extractScenarioScenesFromPdf } from "@/lib/server/scenarioPdf";
 import type { ProjectScenarioScene } from "@/lib/types";
 
@@ -349,9 +350,10 @@ function normalizeScenarioScenes(value: unknown): ProjectScenarioScene[] {
     const source = entry as Record<string, unknown>;
     const pageStart = nullablePositiveInteger(source.pageStart);
     const pageEnd = nullablePositiveInteger(source.pageEnd);
+    const rawSceneNo = cleanText(source.sceneNo, 100);
     return [{
       id: cleanText(source.id, 100) || randomUUID(),
-      sceneNo: cleanText(source.sceneNo, 100) || String(index + 1),
+      sceneNo: normalizeSceneNumber(rawSceneNo) || rawSceneNo || String(index + 1),
       title: cleanText(source.title, 240) || `Scene ${index + 1}`,
       pageStart,
       pageEnd: pageEnd ?? pageStart,

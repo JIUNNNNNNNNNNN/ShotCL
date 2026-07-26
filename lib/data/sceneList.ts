@@ -1,4 +1,5 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import type {
   ProjectSceneActorCell,
   ProjectSceneItem,
@@ -110,7 +111,7 @@ function normalizeSceneList(
     items: sceneList.items.map((item, index) => ({
       ...item,
       projectId,
-      sceneNo: item.sceneNo.slice(0, 30),
+      sceneNo: normalizeSceneNumber(item.sceneNo) || item.sceneNo.trim().slice(0, 30),
       mainLocation: item.mainLocation.slice(0, 120),
       subLocation: item.subLocation.slice(0, 160),
       dayLabel: item.dayLabel.slice(0, 30),
@@ -132,7 +133,7 @@ function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
   return {
     id: String(row.id),
     projectId: String(row.project_id),
-    sceneNo: String(row.scene_no ?? ""),
+    sceneNo: normalizeSceneNumber(row.scene_no) || String(row.scene_no ?? ""),
     mainLocation: String(row.main_location ?? ""),
     subLocation: String(row.sub_location ?? ""),
     dayLabel: String(row.day_label ?? ""),
