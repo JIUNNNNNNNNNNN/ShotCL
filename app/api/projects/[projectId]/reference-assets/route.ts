@@ -7,12 +7,14 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import { extractScenarioScenesFromPdf } from "@/lib/server/scenarioPdf";
+import type { ProjectScenarioScene } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 type AssetType = "scenario" | "storyboard" | "overhead";
 
 const STORAGE_BUCKET = "storyboards";
-const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,sort_order,created_at,updated_at";
+const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,scenario_scenes,scenario_parse_error,sort_order,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -72,9 +74,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const supabase = requireProjectAccessDb();
     const safeFilename = safeName(file.name);
     uploadedPath = `project-assets/${projectId}/${assetType}/${Date.now()}-${randomUUID()}-${safeFilename}`;
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const scenarioExtraction = assetType === "scenario"
+      ? extractScenarioScenesFromPdf(fileBuffer)
+      : null;
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(uploadedPath, Buffer.from(await file.arrayBuffer()), {
+      .upload(uploadedPath, fileBuffer, {
         contentType: file.type || "application/octet-stream",
         upsert: false
       });
@@ -96,6 +102,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       crop_data: normalizeCrop({
         ratio: formData.get("cropRatio")
       }),
+      scenario_scenes: scenarioExtraction?.scenes ?? [],
+      scenario_parse_error: scenarioExtraction?.error ?? null,
       sort_order: toInteger(formData.get("sortOrder"))
     };
 
@@ -162,17 +170,50 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       groupId?: unknown;
       crop?: unknown;
       sortOrder?: unknown;
+      scenarioScenes?: unknown;
+      reanalyzeScenario?: unknown;
     };
     const id = cleanText(body.id, 100);
     if (!id) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
     const supabase = requireProjectAccessDb();
+    const updatePayload: Record<string, unknown> = {};
+    if ("groupId" in body) updatePayload.group_id = cleanText(body.groupId, 200) || null;
+    if ("crop" in body) updatePayload.crop_data = normalizeCrop(body.crop);
+    if ("sortOrder" in body) updatePayload.sort_order = toInteger(body.sortOrder);
+
+    if ("scenarioScenes" in body || body.reanalyzeScenario === true) {
+      const { data: scenarioAsset, error: readError } = await supabase
+        .from("project_reference_assets")
+        .select("id,asset_type,storage_path")
+        .eq("id", id)
+        .eq("project_id", projectId)
+        .maybeSingle();
+      if (readError) throw readError;
+      if (!scenarioAsset || scenarioAsset.asset_type !== "scenario") {
+        return NextResponse.json({ error: "시나리오 PDF를 찾을 수 없습니다." }, { status: 404 });
+      }
+
+      if (body.reanalyzeScenario === true) {
+        const { data: storedFile, error: downloadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .download(String(scenarioAsset.storage_path ?? ""));
+        if (downloadError || !storedFile) throw downloadError ?? new Error("PDF 파일을 내려받지 못했습니다.");
+        const extraction = extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
+        updatePayload.scenario_scenes = extraction.scenes;
+        updatePayload.scenario_parse_error = extraction.error;
+      } else {
+        const scenes = normalizeScenarioScenes(body.scenarioScenes);
+        updatePayload.scenario_scenes = scenes;
+        updatePayload.scenario_parse_error = scenes.length > 0 ? null : "저장된 씬이 없습니다. 수동 씬 추가를 사용하세요.";
+      }
+    }
+
+    if (Object.keys(updatePayload).length === 0) {
+      return NextResponse.json({ error: "수정할 자료 설정이 없습니다." }, { status: 400 });
+    }
     const { data, error } = await supabase
       .from("project_reference_assets")
-      .update({
-        group_id: cleanText(body.groupId, 200) || null,
-        crop_data: normalizeCrop(body.crop),
-        sort_order: toInteger(body.sortOrder)
-      })
+      .update(updatePayload)
       .eq("id", id)
       .eq("project_id", projectId)
       .select(SELECT_COLUMNS)
@@ -293,10 +334,36 @@ function mapAssetRow(row: Record<string, unknown>) {
     shotRef: row.shot_ref ? String(row.shot_ref) : null,
     groupId: row.group_id ? String(row.group_id) : null,
     crop: normalizeCrop(row.crop_data),
+    scenarioScenes: normalizeScenarioScenes(row.scenario_scenes),
+    scenarioParseError: row.scenario_parse_error ? String(row.scenario_parse_error) : null,
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
   };
+}
+
+function normalizeScenarioScenes(value: unknown): ProjectScenarioScene[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2_000).flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const source = entry as Record<string, unknown>;
+    const pageStart = nullablePositiveInteger(source.pageStart);
+    const pageEnd = nullablePositiveInteger(source.pageEnd);
+    return [{
+      id: cleanText(source.id, 100) || randomUUID(),
+      sceneNo: cleanText(source.sceneNo, 100) || String(index + 1),
+      title: cleanText(source.title, 240) || `Scene ${index + 1}`,
+      pageStart,
+      pageEnd: pageEnd ?? pageStart,
+      text: typeof source.text === "string" ? source.text.slice(0, 500_000) : ""
+    }];
+  });
+}
+
+function nullablePositiveInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(1, Math.round(number)) : null;
 }
 
 function materialError(error: unknown, message: string) {
@@ -305,7 +372,10 @@ function materialError(error: unknown, message: string) {
   }
   console.error("[reference-assets]", safeError(error));
   const source = safeError(error);
-  const missingTable = source.code === "42P01" || /project_reference_assets/i.test(source.message) && /does not exist|schema cache/i.test(source.message);
+  const missingTable = source.code === "42P01"
+    || source.code === "42703"
+    || /project_reference_assets|scenario_scenes|scenario_parse_error/i.test(source.message)
+      && /does not exist|schema cache|column/i.test(source.message);
   return NextResponse.json({
     error: missingTable ? "프로젝트 자료 migration을 먼저 적용해주세요." : message,
     code: missingTable ? "PROJECT_REFERENCE_MIGRATION_REQUIRED" : "PROJECT_REFERENCE_ERROR",

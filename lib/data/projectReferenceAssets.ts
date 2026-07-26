@@ -5,6 +5,7 @@ import type {
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
+  ProjectScenarioScene,
   Shot
 } from "@/lib/types";
 
@@ -59,7 +60,13 @@ export async function uploadProjectReferenceAsset(
 export async function updateProjectReferenceAsset(
   projectId: string,
   id: string,
-  patch: { groupId?: string; crop?: Partial<ProjectReferenceCrop>; sortOrder?: number }
+  patch: {
+    groupId?: string;
+    crop?: Partial<ProjectReferenceCrop>;
+    sortOrder?: number;
+    scenarioScenes?: ProjectScenarioScene[];
+    reanalyzeScenario?: boolean;
+  }
 ): Promise<ProjectReferenceAsset> {
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
     method: "PATCH",

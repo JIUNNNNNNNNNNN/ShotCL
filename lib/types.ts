@@ -172,6 +172,15 @@ export type ProjectReferenceCrop = {
   ratio: number | null;
 };
 
+export type ProjectScenarioScene = {
+  id: string;
+  sceneNo: string;
+  title: string;
+  pageStart: number | null;
+  pageEnd: number | null;
+  text: string;
+};
+
 export type ProjectReferenceAsset = {
   id: string;
   projectId: string;
@@ -187,6 +196,8 @@ export type ProjectReferenceAsset = {
   shotRef: string | null;
   groupId: string | null;
   crop: ProjectReferenceCrop;
+  scenarioScenes: ProjectScenarioScene[];
+  scenarioParseError: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
