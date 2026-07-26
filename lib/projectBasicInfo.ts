@@ -2,6 +2,7 @@ import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/l
 import { isValidKoreanPhoneNumber, sanitizeKoreanPhoneDigits } from "@/lib/formatKoreanPhoneNumber";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+export const MAX_DAILY_PLAN_MAIN_STAFF = 3;
 
 export const emptyProjectBasicInfo: ProjectBasicInfo = {
   totalEpisodes: 1,
@@ -44,6 +45,9 @@ export function validateProjectBasicInfo(value: unknown) {
   }
 
   const mainStaff = normalizeMainStaff(value.mainStaff);
+  if (mainStaff.filter((member) => member.includeInDailyPlan).length > MAX_DAILY_PLAN_MAIN_STAFF) {
+    return { ok: false as const, error: "일촬표 반영은 최대 3명까지만 가능합니다." };
+  }
   for (const member of mainStaff) {
     if (!isValidKoreanPhoneNumber(member.phone)) {
       return { ok: false as const, error: `${member.role || member.name || "메인 스태프"} 연락처 형식을 확인해주세요.` };
@@ -75,8 +79,8 @@ export function createBlankProjectMainStaffMember(index = 0): ProjectMainStaffMe
 
 function normalizeMainStaff(value: unknown): ProjectMainStaffMember[] {
   if (Array.isArray(value)) {
-    return value.slice(0, 200).map((member, index) => normalizeStaffMember(member, index))
-      .filter((member) => member.role || member.name)
+    return value.map((member, index) => normalizeStaffMember(member, index))
+      .filter((member) => member.role || member.name || member.phone)
       .map((member, index) => ({ ...member, sortOrder: index }));
   }
 

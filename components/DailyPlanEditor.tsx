@@ -31,6 +31,7 @@ import {
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
+import { MAX_DAILY_PLAN_MAIN_STAFF } from "@/lib/projectBasicInfo";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
@@ -2993,6 +2994,7 @@ function applyProjectBasicInfoDefaults(
   const selectedMainStaff = allowMainStaffDefaults
     ? projectBasicInfo.mainStaff
       .filter((member) => member.includeInDailyPlan && (member.role.trim() || member.name.trim()))
+      .slice(0, MAX_DAILY_PLAN_MAIN_STAFF)
       .map((member) => ({
         id: member.id,
         role: member.role.trim(),

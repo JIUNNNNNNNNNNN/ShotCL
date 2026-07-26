@@ -6,7 +6,16 @@ import { getLocalProjectIdCandidates, isValidDatabaseProjectId, normalizeProject
 import { emptyProjectBasicInfo, normalizeProjectBasicInfo, validateProjectBasicInfo } from "@/lib/projectBasicInfo";
 import type { Project, ProjectBasicInfo, ProjectInput } from "@/lib/types";
 
-type ProjectApiErrorPayload = { error?: string; code?: string };
+type ProjectApiErrorPayload = {
+  error?: string;
+  code?: string;
+  debug?: {
+    code?: string;
+    message?: string;
+    details?: string;
+    hint?: string;
+  } | null;
+};
 const projectRequests = new Map<string, Promise<Project | null>>();
 const projectBasicInfoRequests = new Map<string, Promise<ProjectBasicInfo>>();
 const projectBasicInfoCache = new Map<string, { value: ProjectBasicInfo; expiresAt: number }>();
@@ -217,6 +226,14 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
   });
   const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & { basicInfo?: unknown };
   if (!response.ok) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[project-basic-info] save failed", {
+        status: response.status,
+        code: payload.code,
+        error: payload.error,
+        debug: payload.debug
+      });
+    }
     throw new Error(payload.error || "프로젝트 기본정보를 저장하지 못했습니다.");
   }
   const savedBasicInfo = normalizeProjectBasicInfo(payload.basicInfo);

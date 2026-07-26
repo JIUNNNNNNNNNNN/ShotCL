@@ -4,7 +4,11 @@ import { FormEvent, memo, useCallback, useRef, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
-import { createBlankProjectMainStaffMember, validateProjectBasicInfo } from "@/lib/projectBasicInfo";
+import {
+  createBlankProjectMainStaffMember,
+  MAX_DAILY_PLAN_MAIN_STAFF,
+  validateProjectBasicInfo
+} from "@/lib/projectBasicInfo";
 import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -35,6 +39,17 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   );
 
   const updateStaff = useCallback((index: number, field: keyof Pick<ProjectMainStaffMember, "role" | "name" | "phone" | "includeInDailyPlan">, nextValue: string | boolean) => {
+    if (
+      field === "includeInDailyPlan"
+      && nextValue === true
+      && !value.mainStaff[index]?.includeInDailyPlan
+      && value.mainStaff.filter((member) => member.includeInDailyPlan).length >= MAX_DAILY_PLAN_MAIN_STAFF
+    ) {
+      setErrorMessage("일촬표 반영은 최대 3명까지만 가능합니다.");
+      return;
+    }
+
+    setErrorMessage("");
     setValue((current) => ({
       ...current,
       mainStaff: current.mainStaff.map((member, memberIndex) => (
@@ -46,7 +61,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           : member
       ))
     }));
-  }, []);
+  }, [value.mainStaff]);
 
   const deleteStaff = useCallback((index: number) => {
     setValue((current) => ({
@@ -145,7 +160,9 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-sm font-black text-field-primary">메인 스태프</h2>
-            <p className="truncate text-[11px] font-bold text-field-muted">일촬표에 처음 복사할 사람만 반영을 켜세요.</p>
+            <p className="text-[11px] font-bold text-field-muted">
+              인원·직책 중복 제한 없음 · 일촬표 반영 {value.mainStaff.filter((member) => member.includeInDailyPlan).length}/3
+            </p>
           </div>
           <Button
             type="button"
@@ -156,7 +173,10 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
               ...current,
               mainStaff: [
                 ...current.mainStaff,
-                createFormMainStaffMember(current.mainStaff.length)
+                createFormMainStaffMember(
+                  current.mainStaff.length,
+                  current.mainStaff.filter((member) => member.includeInDailyPlan).length < MAX_DAILY_PLAN_MAIN_STAFF
+                )
               ]
             }))}
           >
@@ -329,10 +349,11 @@ const ActorFields = memo(function ActorFields({
   );
 });
 
-function createFormMainStaffMember(sortOrder = 0) {
+function createFormMainStaffMember(sortOrder = 0, includeInDailyPlan = true) {
   const member = createBlankProjectMainStaffMember(sortOrder);
   return {
     ...member,
+    includeInDailyPlan,
     id: `${member.id}_${Date.now()}_${Math.random().toString(16).slice(2)}`
   };
 }

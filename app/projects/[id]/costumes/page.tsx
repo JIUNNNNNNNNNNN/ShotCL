@@ -1203,7 +1203,7 @@ function EpisodeChecks({
   onToggle: (episode: number) => void;
 }) {
   return (
-    <div className="flex max-w-full shrink-0 gap-1 overflow-x-auto overflow-y-hidden py-0.5" aria-label="씬 포함 회차">
+    <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-1 py-0.5" aria-label="씬 포함 회차">
       {Array.from({ length: totalEpisodes }, (_, index) => index + 1).map((episode) => {
         const checked = checkedEpisodes.includes(episode);
         const automatic = automaticEpisodes?.has(episode) ?? false;

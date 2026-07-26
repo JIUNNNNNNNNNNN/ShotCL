@@ -66,19 +66,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const supabase = requireProjectAccessDb();
+    const savePayload = {
+      project_id: projectId,
+      total_episodes: validation.value.totalEpisodes,
+      shooting_start_date: validation.value.shootingStartDate || null,
+      shooting_end_date: validation.value.shootingEndDate || null,
+      main_staff: validation.value.mainStaff,
+      actors: validation.value.actors
+    };
+    logBasicInfoSavePayload(savePayload);
     const { data, error } = await supabase
       .from("project_basic_info")
-      .upsert(
-        {
-          project_id: projectId,
-          total_episodes: validation.value.totalEpisodes,
-          shooting_start_date: validation.value.shootingStartDate || null,
-          shooting_end_date: validation.value.shootingEndDate || null,
-          main_staff: validation.value.mainStaff,
-          actors: validation.value.actors
-        },
-        { onConflict: "project_id" }
-      )
+      .upsert(savePayload, { onConflict: "project_id" })
       .select(PROJECT_BASIC_INFO_COLUMNS)
       .single();
     if (error) throw error;
@@ -123,27 +122,45 @@ function basicInfoErrorResponse(error: unknown, fallbackMessage: string, permiss
   }
   if (isMissingProjectBasicInfoTable(error)) {
     return NextResponse.json(
-      { error: "프로젝트 기본정보 migration을 먼저 적용해주세요.", code: "PROJECT_BASIC_INFO_MIGRATION_REQUIRED" },
+      errorBody(error, "프로젝트 기본정보 migration을 먼저 적용해주세요.", "PROJECT_BASIC_INFO_MIGRATION_REQUIRED"),
+      { status: 503 }
+    );
+  }
+  if (isLegacyMainStaffObjectConstraintError(error)) {
+    logBasicInfoError(error);
+    return NextResponse.json(
+      errorBody(
+        error,
+        "메인 스태프 배열 저장을 위한 DB 설정을 적용해주세요.",
+        "PROJECT_BASIC_INFO_MAIN_STAFF_ARRAY_REQUIRED"
+      ),
       { status: 503 }
     );
   }
   if (isProjectBasicInfoSchemaMismatch(error)) {
     logBasicInfoError(error);
     return NextResponse.json(
-      {
-        error: "프로젝트 기본정보 테이블의 컬럼 구성을 확인해주세요.",
-        code: "PROJECT_BASIC_INFO_SCHEMA_MISMATCH"
-      },
+      errorBody(
+        error,
+        "프로젝트 기본정보 테이블의 컬럼 구성을 확인해주세요.",
+        "PROJECT_BASIC_INFO_SCHEMA_MISMATCH"
+      ),
       { status: 503 }
     );
   }
   if (isPermissionError(error)) {
     logBasicInfoError(error);
-    return NextResponse.json({ error: permissionMessage, code: "PROJECT_BASIC_INFO_FORBIDDEN" }, { status: 403 });
+    return NextResponse.json(
+      errorBody(error, permissionMessage, "PROJECT_BASIC_INFO_FORBIDDEN"),
+      { status: 403 }
+    );
   }
 
   logBasicInfoError(error);
-  return NextResponse.json({ error: fallbackMessage }, { status: 500 });
+  return NextResponse.json(
+    errorBody(error, fallbackMessage, "PROJECT_BASIC_INFO_REQUEST_FAILED"),
+    { status: 500 }
+  );
 }
 
 function isMissingProjectBasicInfoTable(error: unknown) {
@@ -164,6 +181,12 @@ function isProjectBasicInfoSchemaMismatch(error: unknown) {
   return source?.code === "42703" || source?.code === "PGRST204";
 }
 
+function isLegacyMainStaffObjectConstraintError(error: unknown) {
+  const source = getDatabaseError(error);
+  if (source?.code !== "23514") return false;
+  return `${source.message} ${source.details}`.includes("project_basic_info_main_staff_object_check");
+}
+
 function isPermissionError(error: unknown) {
   const source = getDatabaseError(error);
   return source?.code === "42501" || source?.code === "PGRST301";
@@ -182,6 +205,32 @@ function getDatabaseError(error: unknown) {
 function logBasicInfoError(error: unknown) {
   const source = getDatabaseError(error);
   console.error("[project-basic-info]", source ?? { message: "Unknown project basic info error" });
+}
+
+function logBasicInfoSavePayload(payload: {
+  project_id: string;
+  total_episodes: number;
+  shooting_start_date: string | null;
+  shooting_end_date: string | null;
+  main_staff: Array<{ id: string; role: string; name: string; phone: string; includeInDailyPlan: boolean; sortOrder: number }>;
+  actors: Array<{ role: string; name: string }>;
+}) {
+  if (process.env.NODE_ENV === "production") return;
+  console.debug("[project-basic-info] save payload", {
+    ...payload,
+    main_staff: payload.main_staff.map((member) => ({
+      ...member,
+      phone: member.phone ? "[provided]" : ""
+    }))
+  });
+}
+
+function errorBody(error: unknown, message: string, code: string) {
+  return {
+    error: message,
+    code,
+    ...(process.env.NODE_ENV !== "production" ? { debug: getDatabaseError(error) } : {})
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
