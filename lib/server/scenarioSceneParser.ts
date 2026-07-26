@@ -13,13 +13,8 @@ export type ScenarioSceneMarker = {
 };
 
 const MAX_MARKER_LINE_LENGTH = 79;
-const EXPLICIT_SCENE_MARKER =
-  /^(?:S\s*#?\s*|SCENE\s*#?\s*|씬\s*#?\s*|#\s*)0*(\d{1,4})(?=$|[\s.():-])([\s\S]*)$/i;
-const STANDALONE_NUMBER_MARKER =
-  /^0*(\d{1,4})(?:\s*[.):-]\s*([^\n]*))?$/;
-const QUANTITY_OR_NARRATIVE_START =
-  /^(?:시간|층|번|회|개|분|초|명|일|월|년|원|차|쪽|페이지)(?:\s|$)/;
-const NATURAL_SENTENCE_END = /(?:다|요|함|됨)[.!?]?$/;
+const SCENE_MARKER_REGEX =
+  /^(?:S\s*#?\s*|SCENE\s*#?\s*|씬\s*#?\s*|#\s*)0*(\d{1,4})(?=$|[\s.:–—-])([\s\S]*)$/i;
 
 /**
  * 줄 시작의 씬 번호 표기만 인식합니다.
@@ -29,25 +24,9 @@ export function parseScenarioSceneMarker(rawLine: string): ScenarioSceneMarker |
   const line = rawLine.trim();
   if (!line || line.length > MAX_MARKER_LINE_LENGTH || isDateOrTimeLine(line)) return null;
 
-  const explicit = line.match(EXPLICIT_SCENE_MARKER);
-  if (explicit) {
-    const sceneNo = normalizeSceneNumber(explicit[1]);
-    return sceneNo ? { sceneNo, originalLine: line } : null;
-  }
-
-  const numeric = line.match(STANDALONE_NUMBER_MARKER);
-  if (!numeric) return null;
-  const suffix = String(numeric[2] ?? "").trim();
-  if (
-    suffix &&
-    (
-      QUANTITY_OR_NARRATIVE_START.test(suffix) ||
-      NATURAL_SENTENCE_END.test(suffix)
-    )
-  ) {
-    return null;
-  }
-  const sceneNo = normalizeSceneNumber(numeric[1]);
+  const marker = line.match(SCENE_MARKER_REGEX);
+  if (!marker) return null;
+  const sceneNo = normalizeSceneNumber(marker[1]);
   return sceneNo ? { sceneNo, originalLine: line } : null;
 }
 

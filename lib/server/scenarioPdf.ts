@@ -47,7 +47,9 @@ export function extractScenarioScenesFromPdf(buffer: Buffer): ScenarioPdfExtract
 
     const scenes = splitScenarioScenesByNumber(readablePages);
     if (scenes.length === 0) {
-      return failed("씬 번호 표기를 찾지 못했습니다. 수동으로 씬을 추가하세요.");
+      return failed(
+        "씬 표기를 찾지 못했습니다. S#1, Scene1, #1, 씬1 같은 표기만 자동 인식합니다. 수동으로 씬을 추가하세요."
+      );
     }
     return { scenes, error: null };
   } catch {
