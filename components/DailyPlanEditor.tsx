@@ -24,6 +24,7 @@ import {
   mergeDailyPlanTimetableRows,
   normalizeDailyPlanPrintMeta,
   type CallSheetPerson,
+  type DailyPlanMainStaffRow,
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
@@ -192,7 +193,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
     const sourcePlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
     const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
-    const initialDefaults = applyProjectBasicInfoDefaults(sourcePlanDraft, sourcePrintMeta, activeProjectBasicInfo);
+    const initialDefaults = applyProjectBasicInfoDefaults(
+      sourcePlanDraft,
+      sourcePrintMeta,
+      activeProjectBasicInfo,
+      !initialPlan && !initialDraft
+    );
     const initialPlanDraft = initialDefaults.plan;
     const initialPrintMeta = applyProjectStaffDefaults(
       initialDefaults.printMeta,
@@ -290,17 +296,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
     : [];
   const projectConstraintMessage = getProjectConstraintMessage(plan, printMeta, activeProjectBasicInfo);
-  const mainStaffSummary = [
-    plan.director.trim() ? `감독 ${plan.director.trim()}` : "",
-    plan.assistantDirector.trim() ? `조감독 ${plan.assistantDirector.trim()}` : "",
-    plan.production.trim() ? `제작 ${plan.production.trim()}` : ""
-  ].filter(Boolean).join(" / ");
+  const mainStaffSummary = getDailyPlanMainStaffRows(plan, printMeta)
+    .map((member) => [member.role, member.name].filter(Boolean).join(" "))
+    .join(" / ");
   const managedShotKeysRef = useRef<Set<string>>(managedShotKeys);
   function updatePlanField(field: PlanTextField, value: string) {
     setPlan((current) => ({ ...current, [field]: value }));
   }
 
-  function updatePrintMetaField(field: keyof Omit<DailyPlanPrintMeta, "starring" | "teams">, value: string) {
+  function updatePrintMetaField(field: keyof Omit<DailyPlanPrintMeta, "mainStaff" | "starring" | "teams">, value: string) {
     setPrintMeta((current) => ({ ...current, [field]: value }));
   }
 
@@ -2656,33 +2660,29 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
   const timetableRows = getPrintTimetableRows(data);
   const starringRows = padRows(data.meta.starring, 9);
   const teamRows = padRows(data.meta.teams, 10);
+  const mainStaffRows = getDailyPlanMainStaffRows(data.plan, data.meta);
+  const printableMainStaffRows = mainStaffRows.length > 0
+    ? mainStaffRows
+    : [{ id: "empty-main-staff", role: "", name: "", contact: "" }];
+  const headerRowSpan = printableMainStaffRows.length + 1;
 
   return (
     <article className={className}>
       <table className="daily-plan-grid daily-plan-export-table w-full border-collapse border-2 border-black text-center">
         <tbody>
           <tr>
-            <td rowSpan={4} className="border border-black font-black">
+            <td rowSpan={headerRowSpan} className="border border-black font-black">
               <span className="text-[10px]">DAY</span>
               <span className="ml-1 text-2xl">{data.meta.day || "-"}</span>
             </td>
-            <td rowSpan={4} colSpan={11} className="border border-black text-2xl font-black">
+            <td rowSpan={headerRowSpan} colSpan={11} className="border border-black text-2xl font-black">
               {data.plan.title || "작품명"} TIME TABLE
             </td>
-            <td className="border border-black">Director</td>
-            <td className="border border-black">{data.plan.director || "-"}</td>
-            <td colSpan={2} className="border border-black">{data.meta.directorContact || "-"}</td>
+            <MainStaffPrintCells member={printableMainStaffRows[0]} />
           </tr>
-          <tr>
-            <td className="border border-black">A.D</td>
-            <td className="border border-black">{data.plan.assistantDirector || "-"}</td>
-            <td colSpan={2} className="border border-black">{data.meta.assistantDirectorContact || "-"}</td>
-          </tr>
-          <tr>
-            <td className="border border-black">Producer</td>
-            <td className="border border-black">{data.plan.production || "-"}</td>
-            <td colSpan={2} className="border border-black">{data.meta.producerContact || "-"}</td>
-          </tr>
+          {printableMainStaffRows.slice(1).map((member) => (
+            <tr key={member.id}><MainStaffPrintCells member={member} /></tr>
+          ))}
           <tr>
             <td colSpan={2} className="border border-black">Total Crew</td>
             <td colSpan={2} className="border border-black">{data.meta.totalCrew || "-"}</td>
@@ -2966,25 +2966,20 @@ function formatTimeRange(startTime: string, endTime: string) {
 
 function isConfiguredProjectBasicInfo(value: ProjectBasicInfo | null | undefined): value is ProjectBasicInfo {
   if (!value) return false;
-  const staff = value.mainStaff;
   return Boolean(
     value.totalEpisodes > 1 ||
     value.shootingStartDate ||
     value.shootingEndDate ||
     value.actors.some((actor) => actor.role.trim() || actor.name.trim()) ||
-    staff.director.name.trim() ||
-    staff.director.phone.trim() ||
-    staff.assistantDirector.name.trim() ||
-    staff.assistantDirector.phone.trim() ||
-    staff.producer.name.trim() ||
-    staff.producer.phone.trim()
+    value.mainStaff.some((member) => member.role.trim() || member.name.trim() || member.phone.trim())
   );
 }
 
 function applyProjectBasicInfoDefaults(
   sourcePlan: DailyPlanDraft,
   sourcePrintMeta: DailyPlanPrintMeta,
-  projectBasicInfo: ProjectBasicInfo | null
+  projectBasicInfo: ProjectBasicInfo | null,
+  allowMainStaffDefaults: boolean
 ) {
   if (!projectBasicInfo) {
     const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim();
@@ -2995,24 +2990,87 @@ function applyProjectBasicInfoDefaults(
   }
 
   const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim() || "1";
+  const selectedMainStaff = allowMainStaffDefaults
+    ? projectBasicInfo.mainStaff
+      .filter((member) => member.includeInDailyPlan && (member.role.trim() || member.name.trim()))
+      .map((member) => ({
+        id: member.id,
+        role: member.role.trim(),
+        name: member.name.trim(),
+        contact: formatKoreanPhoneNumber(member.phone)
+      }))
+    : sourcePrintMeta.mainStaff;
+  const directorStaff = selectedMainStaff.filter((member) => isDirectorRole(member.role));
+  const assistantDirectorStaff = selectedMainStaff.filter((member) => isAssistantDirectorRole(member.role));
+  const producerStaff = selectedMainStaff.filter((member) => isProducerRole(member.role));
 
   return {
     plan: {
       ...sourcePlan,
       episode,
       shootingDate: sourcePlan.shootingDate || projectBasicInfo.shootingStartDate,
-      director: sourcePlan.director || projectBasicInfo.mainStaff.director.name,
-      assistantDirector: sourcePlan.assistantDirector || projectBasicInfo.mainStaff.assistantDirector.name,
-      production: sourcePlan.production || projectBasicInfo.mainStaff.producer.name
+      director: sourcePlan.director || joinMainStaffNames(directorStaff),
+      assistantDirector: sourcePlan.assistantDirector || joinMainStaffNames(assistantDirectorStaff),
+      production: sourcePlan.production || joinMainStaffNames(producerStaff)
     },
     printMeta: {
       ...sourcePrintMeta,
       day: episode,
-      directorContact: sourcePrintMeta.directorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.director.phone),
-      assistantDirectorContact: sourcePrintMeta.assistantDirectorContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.assistantDirector.phone),
-      producerContact: sourcePrintMeta.producerContact || formatKoreanPhoneNumber(projectBasicInfo.mainStaff.producer.phone)
+      mainStaff: selectedMainStaff,
+      directorContact: sourcePrintMeta.directorContact || joinMainStaffContacts(directorStaff),
+      assistantDirectorContact: sourcePrintMeta.assistantDirectorContact || joinMainStaffContacts(assistantDirectorStaff),
+      producerContact: sourcePrintMeta.producerContact || joinMainStaffContacts(producerStaff)
     }
   };
+}
+
+function getDailyPlanMainStaffRows(
+  plan: Pick<DailyPlanDraft, "director" | "assistantDirector" | "production">,
+  meta: DailyPlanPrintMeta
+): DailyPlanMainStaffRow[] {
+  if (meta.mainStaff.length > 0) return meta.mainStaff;
+  return [
+    { id: "legacy-director", role: "Director", name: plan.director, contact: meta.directorContact },
+    { id: "legacy-assistant-director", role: "A.D", name: plan.assistantDirector, contact: meta.assistantDirectorContact },
+    { id: "legacy-producer", role: "Producer", name: plan.production, contact: meta.producerContact }
+  ].filter((member) => member.name.trim() || member.contact.trim());
+}
+
+function MainStaffPrintCells({ member }: { member: DailyPlanMainStaffRow }) {
+  return (
+    <>
+      <td className="border border-black">{member.role || "-"}</td>
+      <td className="border border-black">{member.name || "-"}</td>
+      <td colSpan={2} className="border border-black">{member.contact || "-"}</td>
+    </>
+  );
+}
+
+function joinMainStaffNames(rows: DailyPlanMainStaffRow[]) {
+  return rows.map((member) => member.name).filter(Boolean).join(" / ");
+}
+
+function joinMainStaffContacts(rows: DailyPlanMainStaffRow[]) {
+  return rows.map((member) => member.contact).filter(Boolean).join(" / ");
+}
+
+function normalizeRoleKey(value: string) {
+  return value.trim().toLocaleLowerCase("ko-KR").replace(/[\s._-]+/g, "");
+}
+
+function isAssistantDirectorRole(value: string) {
+  const role = normalizeRoleKey(value);
+  return role === "조감독" || role === "ad" || role === "assistantdirector";
+}
+
+function isDirectorRole(value: string) {
+  const role = normalizeRoleKey(value);
+  return !isAssistantDirectorRole(value) && (role === "감독" || role === "director");
+}
+
+function isProducerRole(value: string) {
+  const role = normalizeRoleKey(value);
+  return role === "제작" || role === "pd" || role === "producer" || role === "production";
 }
 
 function getProjectConstraintMessage(

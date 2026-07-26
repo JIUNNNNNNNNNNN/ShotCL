@@ -19,6 +19,10 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
   const printableLocations = locations.filter(isPrintableLocation);
   const starringRows = padRows(meta.starring, 9);
   const teamRows = padRows(meta.teams, 10);
+  const mainStaffRows = getPreviewMainStaffRows(plan, meta);
+  const printableMainStaffRows = mainStaffRows.length > 0
+    ? mainStaffRows
+    : [{ id: "empty-main-staff", role: "", name: "", contact: "" }];
 
   return (
     <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-tight text-black">
@@ -49,27 +53,18 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
             <tr />
             <tr />
             <tr>
-              <td rowSpan={3} className={`${cellClass} font-black`}>CALL TIME</td>
-              <td rowSpan={3} colSpan={8} className={`${cellClass} bg-[#ead1d1]`}>
+              <td rowSpan={printableMainStaffRows.length} className={`${cellClass} font-black`}>CALL TIME</td>
+              <td rowSpan={printableMainStaffRows.length} colSpan={8} className={`${cellClass} bg-[#ead1d1]`}>
                 <span className="mr-1 text-[9px] font-bold">Day</span>
                 <span className="text-lg font-black">{formatDate(plan.shootingDate) || "-"}</span>
                 <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
                 <span className="text-lg font-black">{plan.callTime || "-"}</span>
               </td>
-              <td className={cellClass}>Director</td>
-              <td className={cellClass}>{plan.director || "-"}</td>
-              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.directorContact || "-"}</td>
+              <PreviewMainStaffCells member={printableMainStaffRows[0]} />
             </tr>
-            <tr>
-              <td className={cellClass}>A.D</td>
-              <td className={cellClass}>{plan.assistantDirector || "-"}</td>
-              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.assistantDirectorContact || "-"}</td>
-            </tr>
-            <tr>
-              <td className={cellClass}>Producer</td>
-              <td className={cellClass}>{plan.production || "-"}</td>
-              <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{meta.producerContact || "-"}</td>
-            </tr>
+            {printableMainStaffRows.slice(1).map((member) => (
+              <tr key={member.id}><PreviewMainStaffCells member={member} /></tr>
+            ))}
           </tbody>
         </table>
 
@@ -222,6 +217,25 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
       </div>
     </article>
   );
+}
+
+function PreviewMainStaffCells({ member }: { member: { role: string; name: string; contact: string } }) {
+  return (
+    <>
+      <td className={cellClass}>{member.role || "-"}</td>
+      <td className={cellClass}>{member.name || "-"}</td>
+      <td className={`${cellClass} overflow-hidden whitespace-nowrap text-ellipsis`}>{member.contact || "-"}</td>
+    </>
+  );
+}
+
+function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta) {
+  if (meta.mainStaff.length > 0) return meta.mainStaff;
+  return [
+    { id: "legacy-director", role: "Director", name: plan.director, contact: meta.directorContact },
+    { id: "legacy-assistant-director", role: "A.D", name: plan.assistantDirector, contact: meta.assistantDirectorContact },
+    { id: "legacy-producer", role: "Producer", name: plan.production, contact: meta.producerContact }
+  ].filter((member) => member.name.trim() || member.contact.trim());
 }
 
 function isPrintableLocation(location: DailyPlanLocation) {

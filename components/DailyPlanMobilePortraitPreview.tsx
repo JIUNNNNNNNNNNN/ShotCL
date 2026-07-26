@@ -42,6 +42,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
   const sheetTimetableRows = padRows(timetableRows, 7);
   const starringRows = padRows(meta.starring, 10);
   const teamRows = padRows(meta.teams, 10);
+  const mainStaffRows = chunkRows(getPreviewMainStaffRows(plan, meta), 2);
 
   return (
     <article
@@ -72,14 +73,17 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               </div>
             </td>
           </tr>
+          {mainStaffRows.map((row, rowIndex) => (
+            <tr key={`portrait-main-staff-${rowIndex}`}>
+              <StaffCells label={row[0].role} name={row[0].name} contact={row[0].contact} />
+              {row[1]
+                ? <StaffCells label={row[1].role} name={row[1].name} contact={row[1].contact} />
+                : <td colSpan={5} className={cellClass} />}
+            </tr>
+          ))}
           <tr>
-            <StaffCells label="Director" name={plan.director} contact={meta.directorContact} />
-            <StaffCells label="A.D" name={plan.assistantDirector} contact={meta.assistantDirectorContact} />
-          </tr>
-          <tr>
-            <StaffCells label="Producer" name={plan.production} contact={meta.producerContact} />
-            <td colSpan={2} className={cellClass}>Total Crew</td>
-            <td colSpan={3} className={`${cellClass} bg-[#d9ead3] font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
+            <td colSpan={5} className={cellClass}>Total Crew</td>
+            <td colSpan={5} className={`${cellClass} bg-[#d9ead3] font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
           </tr>
         </tbody>
       </table>
@@ -237,6 +241,23 @@ function StaffCells({ label, name, contact }: { label: string; name: string; con
       <td colSpan={3} className={cellClass}>{contact || ""}</td>
     </>
   );
+}
+
+function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta) {
+  if (meta.mainStaff.length > 0) return meta.mainStaff;
+  return [
+    { id: "legacy-director", role: "Director", name: plan.director, contact: meta.directorContact },
+    { id: "legacy-assistant-director", role: "A.D", name: plan.assistantDirector, contact: meta.assistantDirectorContact },
+    { id: "legacy-producer", role: "Producer", name: plan.production, contact: meta.producerContact }
+  ].filter((member) => member.name.trim() || member.contact.trim());
+}
+
+function chunkRows<T>(rows: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function SheetMemoSection({ title, value }: { title: string; value: string }) {

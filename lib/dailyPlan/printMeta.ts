@@ -23,6 +23,13 @@ export type TeamCallSheetRow = {
   notes: string;
 };
 
+export type DailyPlanMainStaffRow = {
+  id: string;
+  role: string;
+  name: string;
+  contact: string;
+};
+
 export type DailyPlanPrintMeta = {
   day: string;
   directorContact: string;
@@ -40,6 +47,7 @@ export type DailyPlanPrintMeta = {
   rainProbability: string;
   timetableRowOrder: DailyPlanTimetableRowType[];
   memoText: string;
+  mainStaff: DailyPlanMainStaffRow[];
   starring: CallSheetPerson[];
   teams: TeamCallSheetRow[];
 };
@@ -82,6 +90,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     rainProbability: "",
     timetableRowOrder: [],
     memoText: "",
+    mainStaff: [],
     starring: [createBlankCallSheetPerson()],
     teams: createDefaultTeamRows()
   };
@@ -161,6 +170,7 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     rainProbability: meta.rainProbability ?? "",
     timetableRowOrder: normalizeTimetableRowOrder(meta.timetableRowOrder),
     memoText: meta.memoText ?? "",
+    mainStaff: normalizeMainStaff(meta.mainStaff),
     starring: normalizePeople(meta.starring),
     teams: normalizeTeams(meta.teams)
   };
@@ -187,6 +197,16 @@ export function mergeDailyPlanTimetableRows<TScene, TEvent>(
 function normalizeTimetableRowOrder(value: DailyPlanTimetableRowType[] | undefined) {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is DailyPlanTimetableRowType => item === "scene" || item === "event");
+}
+
+function normalizeMainStaff(rows: DailyPlanMainStaffRow[] | undefined) {
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, 200).map((row, index) => ({
+    id: String(row?.id ?? "") || `daily_main_staff_${index}`,
+    role: String(row?.role ?? "").trim().slice(0, 100),
+    name: String(row?.name ?? "").trim().slice(0, 100),
+    contact: formatKoreanPhoneNumber(row?.contact ?? "")
+  })).filter((row) => row.role || row.name);
 }
 
 function normalizePeople(rows: CallSheetPerson[] | undefined) {

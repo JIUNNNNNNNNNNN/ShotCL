@@ -51,8 +51,12 @@ export type LegacyShotStatus = ShotStatus | "todo" | "shooting" | "done" | "hold
 export type ProjectRole = "admin" | "progress" | "crew";
 
 export type ProjectMainStaffMember = {
+  id: string;
+  role: string;
   name: string;
   phone: string;
+  includeInDailyPlan: boolean;
+  sortOrder: number;
 };
 
 export type ProjectActor = {
@@ -64,11 +68,7 @@ export type ProjectBasicInfo = {
   totalEpisodes: number;
   shootingStartDate: string;
   shootingEndDate: string;
-  mainStaff: {
-    director: ProjectMainStaffMember;
-    assistantDirector: ProjectMainStaffMember;
-    producer: ProjectMainStaffMember;
-  };
+  mainStaff: ProjectMainStaffMember[];
   actors: ProjectActor[];
 };
 
