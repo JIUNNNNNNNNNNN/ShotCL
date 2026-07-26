@@ -108,6 +108,8 @@ export async function uploadProjectReferenceAsset(
     targetColumn?: "storyboard";
     includeContext?: false;
     folderId?: string | null;
+    originalFolderName?: string;
+    relativePath?: string;
     thumbnailFile?: File;
   } = {}
 ): Promise<ProjectReferenceAsset> {

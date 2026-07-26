@@ -191,6 +191,8 @@ export type ProjectReferenceCrop = {
   thumbnailUrl?: string;
   thumbnailPath?: string;
   folderId?: string | null;
+  originalFolderName?: string;
+  relativePath?: string;
 };
 
 export type ProjectArchiveFolder = {

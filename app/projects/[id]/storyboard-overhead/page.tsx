@@ -17,6 +17,7 @@ import {
   Clapperboard,
   FileImage,
   FileText,
+  Folder,
   FolderInput,
   FolderPlus,
   ImagePlus,
@@ -48,9 +49,13 @@ import {
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
 import {
+  scanArchiveDrop,
+  scanArchiveFileList,
+  type ArchiveFolderFile
+} from "@/lib/client/archiveFolderDrop";
+import {
   createProjectArchiveFolder,
   deleteProjectArchiveFolder,
-  deleteProjectReferenceAsset,
   deleteProjectReferenceAssets,
   listProjectArchiveFolders,
   listProjectReferenceAssets,
@@ -87,7 +92,21 @@ type PendingImport = {
   sourceFiles: File[];
   sourceLabel: string;
   pages: ArchiveImportPage[];
+  folderId: string | null;
+  fileMetadata: Array<{ originalFolderName: string; relativePath: string }>;
+  existingSourceAssetIds?: string[];
 };
+
+type FolderEditor = {
+  mode: "create" | "rename";
+  folderId?: string;
+  value: string;
+};
+
+type PendingConfirm =
+  | { kind: "folder"; folder: ProjectArchiveFolder; assetIds: string[] }
+  | { kind: "assets"; assetIds: string[]; label: string }
+  | { kind: "diagram"; item: OverheadDiagramArchiveItem };
 
 type DiagramDraft = {
   item: OverheadDiagramArchiveItem | null;
@@ -135,7 +154,10 @@ export default function ProjectStoryboardOverheadPage() {
   const [isPreparing, setIsPreparing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
+  const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [folderEditor, setFolderEditor] = useState<FolderEditor | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
   const preparingRef = useRef(false);
@@ -192,14 +214,36 @@ export default function ProjectStoryboardOverheadPage() {
     setSelectionMode(false);
   }, [activeType, activeFolderId, query, sortMode]);
 
+  useEffect(() => {
+    if (!statusMessage) return;
+    const timeout = window.setTimeout(() => setStatusMessage(""), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (
+      activeFolderId !== "all"
+      && activeFolderId !== "unfiled"
+      && !folders.some((folder) => folder.id === activeFolderId)
+    ) {
+      setActiveFolderId("all");
+    }
+  }, [activeFolderId, folders]);
+
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
   const folderNameById = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders]
   );
   const sourceAssets = useMemo(
-    () => activeAssets.filter((asset) => asset.mimeType === "application/pdf" || asset.groupId?.startsWith("source:")),
-    [activeAssets]
+    () => activeAssets.filter((asset) => {
+      const isSource = asset.mimeType === "application/pdf" || asset.groupId?.startsWith("source:");
+      const folderMatches = activeFolderId === "all"
+        || activeFolderId === "unfiled" && !asset.crop.folderId
+        || asset.crop.folderId === activeFolderId;
+      return isSource && folderMatches && matchesAssetQuery(asset, query);
+    }),
+    [activeAssets, activeFolderId, query]
   );
   const imageAssets = useMemo(
     () => activeAssets.filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:")),
@@ -233,6 +277,18 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }, [activeFolderId, folderNameById, imageAssets, query, sortMode]);
   const visibleAssets = filteredAssets.slice(0, visibleCount);
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    let unfiled = 0;
+    activeAssets.forEach((asset) => {
+      if (asset.groupId?.startsWith("source:") && asset.mimeType !== "application/pdf") return;
+      const folderId = asset.crop.folderId;
+      if (!folderId) unfiled += 1;
+      else counts.set(folderId, (counts.get(folderId) ?? 0) + 1);
+    });
+    const diagramCount = activeType === "overhead" ? diagramArchives.length : 0;
+    return { all: activeAssets.length + diagramCount, unfiled: unfiled + diagramCount, byId: counts };
+  }, [activeAssets, activeType, diagramArchives.length]);
   const filteredDiagrams = useMemo(
     () => activeType === "overhead" && (activeFolderId === "all" || activeFolderId === "unfiled")
       ? diagramArchives.filter((item) => matchesDiagramQuery(item, query))
@@ -256,25 +312,28 @@ export default function ProjectStoryboardOverheadPage() {
     assetType: ArchiveType,
     rawFiles: File[],
     expectedKind?: PendingImport["sourceKind"],
-    directImageUpload = false
+    directImageUpload = false,
+    context?: {
+      folderId?: string | null;
+      fileMetadata?: Array<{ originalFolderName: string; relativePath: string }>;
+      existingSourceAssetIds?: string[];
+    }
   ) {
     if (!projectId || rawFiles.length === 0 || preparingRef.current || isSaving) return;
-    const files = uniqueFiles(rawFiles);
-    const unsupported = files.find((file) => !isAcceptedArchiveFile(file));
-    if (unsupported) {
-      setErrorMessage(`"${unsupported.name}"은 PDF, JPG, JPEG, PNG, WebP 파일이 아닙니다.`);
+    const candidates = uniqueFiles(rawFiles);
+    const files = candidates.filter((file) => {
+      if (!isAcceptedArchiveFile(file) || file.size <= 0) return false;
+      if (expectedKind === "pdf") return isPdfFile(file);
+      if (expectedKind === "images") return isImageFile(file);
+      return true;
+    });
+    let excludedCount = candidates.length - files.length;
+    if (files.length === 0) {
+      setErrorMessage("PDF, JPG, JPEG, PNG, WebP 중 읽을 수 있는 파일을 선택해주세요.");
       return;
     }
     const pdfFiles = files.filter(isPdfFile);
     const imageFiles = files.filter(isImageFile);
-    if (expectedKind === "pdf" && imageFiles.length > 0) {
-      setErrorMessage("PDF 선택에서는 PDF 파일만 추가할 수 있습니다.");
-      return;
-    }
-    if (expectedKind === "images" && pdfFiles.length > 0) {
-      setErrorMessage("이미지 선택에서는 JPG, JPEG, PNG, WebP 파일만 추가할 수 있습니다.");
-      return;
-    }
     if (pdfFiles.length > 0 && imageFiles.length > 0) {
       setErrorMessage("PDF와 이미지는 각각의 가져오기 흐름으로 나누어 놓아주세요.");
       return;
@@ -293,45 +352,91 @@ export default function ProjectStoryboardOverheadPage() {
           .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
           .length;
         let completed = 0;
+        let failed = 0;
         await mapWithConcurrency(files, 3, async (file, index) => {
-          setProgressMessage(`이미지 최적화 중 · ${file.name}`);
-          const optimized = await optimizeArchiveImage(file);
-          setProgressMessage(`썸네일 생성 완료 · 업로드 중 ${completed + 1}/${files.length}`);
-          await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
-            thumbnailFile: optimized.thumbnailFile,
-            sourceType: "upload_image",
-            groupId: batchId,
-            folderId: selectedFolderValue(activeFolderId),
-            sortOrder: existingCount + index
-          });
-          completed += 1;
-          setProgressMessage(`저장 중 ${completed}/${files.length}`);
+          try {
+            setProgressMessage(`이미지 최적화 중 · ${file.name}`);
+            const optimized = await optimizeArchiveImage(file);
+            setProgressMessage(`썸네일 생성 완료 · 업로드 중 ${completed + 1}/${files.length}`);
+            const metadata = context?.fileMetadata?.[index];
+            await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
+              thumbnailFile: optimized.thumbnailFile,
+              sourceType: "upload_image",
+              groupId: batchId,
+              folderId: context?.folderId ?? selectedFolderValue(activeFolderId),
+              originalFolderName: metadata?.originalFolderName,
+              relativePath: metadata?.relativePath,
+              sortOrder: existingCount + index
+            });
+            completed += 1;
+            setProgressMessage(`저장 중 ${completed}/${files.length}`);
+          } catch {
+            failed += 1;
+          }
         });
+        excludedCount += failed;
         await loadArchive();
         setProgressMessage("");
+        if (completed === 0) {
+          setErrorMessage(`이미지를 업로드하지 못했습니다. ${excludedCount}개 파일을 제외했습니다.`);
+        } else if (excludedCount > 0) {
+          setStatusMessage(`${completed}개 업로드됨 · ${excludedCount}개 제외`);
+        }
         return;
       }
       const pages: ArchiveImportPage[] = [];
+      const readableFiles: File[] = [];
+      const readableMetadata: Array<{ originalFolderName: string; relativePath: string }> = [];
+      const readableSourceIds: string[] = [];
       if (sourceKind === "pdf") {
         for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
           const file = files[fileIndex];
-          const rendered = await renderArchivePdfPages(file, (current, total) => {
-            setProgressMessage(`PDF ${fileIndex + 1}/${files.length} · 페이지 ${current}/${total}`);
-          }, fileIndex);
-          pages.push(...rendered);
+          try {
+            if (!await hasPdfSignature(file)) throw new Error("Invalid PDF");
+            const sourceFileIndex = readableFiles.length;
+            const rendered = await renderArchivePdfPages(file, (current, total) => {
+              setProgressMessage(`PDF ${fileIndex + 1}/${files.length} · 페이지 ${current}/${total}`);
+            }, sourceFileIndex);
+            if (rendered.length === 0) throw new Error("Empty PDF");
+            readableFiles.push(file);
+            readableMetadata.push(context?.fileMetadata?.[fileIndex] ?? {
+              originalFolderName: "",
+              relativePath: file.name
+            });
+            readableSourceIds.push(context?.existingSourceAssetIds?.[fileIndex] ?? "");
+            pages.push(...rendered);
+          } catch {
+            excludedCount += 1;
+          }
         }
       } else {
         setProgressMessage("이미지 묶음을 준비하는 중입니다.");
         pages.push(...await loadArchiveImagePages(files));
+        readableFiles.push(...files);
+        readableMetadata.push(...files.map((file, index) => context?.fileMetadata?.[index] ?? {
+          originalFolderName: "",
+          relativePath: file.name
+        }));
+      }
+      if (pages.length === 0 || readableFiles.length === 0) {
+        setErrorMessage("읽을 수 있는 자료가 없습니다.");
+        setProgressMessage("");
+        return;
       }
       setPendingImport({
         assetType,
         sourceKind,
-        sourceFiles: files,
-        sourceLabel: files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}개`,
-        pages
+        sourceFiles: readableFiles,
+        sourceLabel: readableFiles.length === 1
+          ? readableFiles[0].name
+          : `${readableFiles[0].name} 외 ${readableFiles.length - 1}개`,
+        pages,
+        folderId: context?.folderId ?? selectedFolderValue(activeFolderId),
+        fileMetadata: readableMetadata,
+        existingSourceAssetIds: readableSourceIds.length > 0 ? readableSourceIds : undefined
       });
       setProgressMessage("");
+      if (excludedCount > 0) setStatusMessage(`${readableFiles.length}개 준비됨 · ${excludedCount}개 제외`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "자료를 준비하지 못했습니다.");
       setProgressMessage("");
@@ -348,11 +453,18 @@ export default function ProjectStoryboardOverheadPage() {
     }));
   }
 
-  function handleDrop(assetType: ArchiveType, event: DragEvent<HTMLDivElement>) {
+  async function handleDrop(assetType: ArchiveType, event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     setDragDepth((current) => ({ ...current, [assetType]: 0 }));
     if (!supportsDesktopDrop || !canEdit) return;
-    void prepareFiles(assetType, Array.from(event.dataTransfer.files), undefined, true);
+    try {
+      setProgressMessage("폴더 읽는 중");
+      const scan = await scanArchiveDrop(event.dataTransfer);
+      await uploadScannedFiles(assetType, scan.files, scan.excludedCount);
+    } catch (error) {
+      setProgressMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "폴더를 읽지 못했습니다.");
+    }
   }
 
   function closeImport() {
@@ -369,19 +481,28 @@ export default function ProjectStoryboardOverheadPage() {
       : `${Date.now()}`;
     try {
       if (pendingImport.sourceKind === "pdf") {
-        const sourceAssetsByIndex = new Map<number, ProjectReferenceAsset>();
+        const sourceAssetsByIndex = new Map<number, string>();
         for (let fileIndex = 0; fileIndex < pendingImport.sourceFiles.length; fileIndex += 1) {
           const sourceFile = pendingImport.sourceFiles[fileIndex];
+          const existingSourceId = pendingImport.existingSourceAssetIds?.[fileIndex];
+          if (existingSourceId) {
+            sourceAssetsByIndex.set(fileIndex, existingSourceId);
+            continue;
+          }
+          const sourceMetadata = pendingImport.fileMetadata[fileIndex];
           setProgressMessage(`원본 PDF 보존 ${fileIndex + 1}/${pendingImport.sourceFiles.length}`);
           const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_pdf",
             groupId: `source:${batchId}`,
+            folderId: pendingImport.folderId,
+            originalFolderName: sourceMetadata?.originalFolderName,
+            relativePath: sourceMetadata?.relativePath,
             title: value.title,
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo
           });
-          sourceAssetsByIndex.set(fileIndex, original);
+          sourceAssetsByIndex.set(fileIndex, original.id);
         }
         let completed = 0;
         await mapWithConcurrency(value.results, 3, async (result, index) => {
@@ -395,10 +516,12 @@ export default function ProjectStoryboardOverheadPage() {
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
             thumbnailFile,
             sourceType: crop ? "pdf_crop" : "pdf_page",
-            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
+            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex),
             pageIndex: page.index,
             groupId: batchId,
-            folderId: selectedFolderValue(activeFolderId),
+            folderId: pendingImport.folderId,
+            originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
+            relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             ...cropMetadata(crop, page, value.cropTemplate),
             cropOrderIndex: index,
             title: pageTitle(value.title, index, value.results.length),
@@ -411,7 +534,7 @@ export default function ProjectStoryboardOverheadPage() {
           setProgressMessage(`저장 중 ${completed}/${value.results.length}`);
         });
       } else if (value.results.some((result) => result.crop)) {
-        const sourceAssetsByIndex = new Map<number, ProjectReferenceAsset>();
+        const sourceAssetsByIndex = new Map<number, string>();
         for (let index = 0; index < pendingImport.pages.length; index += 1) {
           const page = pendingImport.pages[index];
           const sourceFile = page.originalFile ?? pendingImport.sourceFiles[index];
@@ -420,12 +543,15 @@ export default function ProjectStoryboardOverheadPage() {
           const source = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_image",
             groupId: `source:${batchId}`,
+            folderId: pendingImport.folderId,
+            originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
+            relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             title: value.title,
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo
           });
-          sourceAssetsByIndex.set(page.sourceFileIndex, source);
+          sourceAssetsByIndex.set(page.sourceFileIndex, source.id);
         }
         const cropResults = value.results.filter((result) => result.crop);
         let completed = 0;
@@ -438,10 +564,12 @@ export default function ProjectStoryboardOverheadPage() {
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
             thumbnailFile,
             sourceType: "image_crop",
-            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
+            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex),
             pageIndex: page.index,
             groupId: batchId,
-            folderId: selectedFolderValue(activeFolderId),
+            folderId: pendingImport.folderId,
+            originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
+            relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             ...cropMetadata(crop, page, value.cropTemplate),
             cropOrderIndex: index,
             title: pageTitle(value.title, index, value.results.length),
@@ -464,7 +592,9 @@ export default function ProjectStoryboardOverheadPage() {
             thumbnailFile,
             sourceType: "upload_image",
             groupId: batchId,
-            folderId: selectedFolderValue(activeFolderId),
+            folderId: pendingImport.folderId,
+            originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
+            relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
@@ -486,86 +616,182 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  async function createFolder(nameOverride?: string) {
+  async function ensureArchiveFolder(
+    name: string,
+    cache = new Map(folders.map((folder) => [folder.name.trim().toLocaleLowerCase("ko-KR"), folder]))
+  ) {
     if (!projectId || !canEdit) return null;
-    const name = (nameOverride ?? window.prompt("새 폴더 이름을 입력하세요.") ?? "").trim();
-    if (!name) return null;
+    const normalizedName = name.trim().replace(/\/{2,}/g, "/").slice(0, 80);
+    if (!normalizedName) return null;
+    const key = normalizedName.toLocaleLowerCase("ko-KR");
+    const existing = cache.get(key);
+    if (existing) return existing;
     try {
-      const folder = await createProjectArchiveFolder(projectId, name, folders.length);
-      setFolders((current) => [...current, folder]);
+      const folder = await createProjectArchiveFolder(projectId, normalizedName, folders.length + cache.size);
+      cache.set(key, folder);
+      setFolders((current) => current.some((entry) => entry.id === folder.id) ? current : [...current, folder]);
       return folder;
     } catch (error) {
+      if (error instanceof Error && /같은 이름/.test(error.message)) {
+        const refreshed = await listProjectArchiveFolders(projectId);
+        setFolders(refreshed);
+        const duplicate = refreshed.find(
+          (folder) => folder.name.trim().toLocaleLowerCase("ko-KR") === key
+        );
+        if (duplicate) {
+          cache.set(key, duplicate);
+          return duplicate;
+        }
+      }
       setErrorMessage(error instanceof Error ? error.message : "폴더를 만들지 못했습니다.");
       return null;
     }
   }
 
-  async function renameActiveFolder() {
-    if (!projectId || !canEdit || activeFolderId === "all" || activeFolderId === "unfiled") return;
-    const folder = folders.find((entry) => entry.id === activeFolderId);
-    if (!folder) return;
-    const name = (window.prompt("폴더 이름을 변경하세요.", folder.name) ?? "").trim();
-    if (!name || name === folder.name) return;
+  async function submitFolderEditor() {
+    if (!projectId || !canEdit || !folderEditor) return;
+    const name = folderEditor.value.trim().replace(/\/{2,}/g, "/").slice(0, 80);
+    if (!name) return;
+    const duplicate = folders.find(
+      (folder) => folder.name.trim().toLocaleLowerCase("ko-KR") === name.toLocaleLowerCase("ko-KR")
+        && folder.id !== folderEditor.folderId
+    );
+    if (duplicate) {
+      setActiveFolderId(duplicate.id);
+      setFolderEditor(null);
+      return;
+    }
     try {
-      const updated = await renameProjectArchiveFolder(projectId, folder.id, name);
-      setFolders((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      if (folderEditor.mode === "create") {
+        const folder = await ensureArchiveFolder(name);
+        if (folder) setActiveFolderId(folder.id);
+      } else if (folderEditor.folderId) {
+        const updated = await renameProjectArchiveFolder(projectId, folderEditor.folderId, name);
+        setFolders((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      }
+      setFolderEditor(null);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "폴더 이름을 바꾸지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "폴더를 저장하지 못했습니다.");
     }
   }
 
-  async function removeActiveFolder() {
-    if (!projectId || !canEdit || activeFolderId === "all" || activeFolderId === "unfiled") return;
-    const folder = folders.find((entry) => entry.id === activeFolderId);
-    if (!folder || !window.confirm(`"${folder.name}" 폴더를 삭제할까요? 폴더 안 자료는 자동 삭제되지 않습니다.`)) return;
+  async function confirmPendingAction() {
+    if (!projectId || !pendingConfirm || !canEdit) return;
+    setIsSaving(true);
+    setErrorMessage("");
     try {
-      await deleteProjectArchiveFolder(projectId, folder.id);
-      setFolders((current) => current.filter((entry) => entry.id !== folder.id));
-      setActiveFolderId("all");
+      if (pendingConfirm.kind === "folder") {
+        if (pendingConfirm.assetIds.length > 0) {
+          await moveProjectReferenceAssets(projectId, pendingConfirm.assetIds, null);
+        }
+        await deleteProjectArchiveFolder(projectId, pendingConfirm.folder.id);
+        setFolders((current) => current.filter((entry) => entry.id !== pendingConfirm.folder.id));
+        setActiveFolderId("unfiled");
+      } else if (pendingConfirm.kind === "assets") {
+        await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
+        setSelectedIds(new Set());
+        setSelectionMode(false);
+      } else if (!pendingConfirm.item.legacy) {
+        await deleteOverheadDiagramArchive(projectId, pendingConfirm.item.id);
+      }
+      setPendingConfirm(null);
+      await loadArchive();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "폴더를 삭제하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "삭제 작업을 완료하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
   async function uploadFolder(event: ChangeEvent<HTMLInputElement>) {
     if (!projectId || !canEdit) return;
-    const files = Array.from(event.target.files ?? []).filter(isImageFile);
+    const scan = scanArchiveFileList(Array.from(event.target.files ?? []));
     event.target.value = "";
-    if (files.length === 0) {
-      setErrorMessage("선택한 폴더에 지원하는 이미지가 없습니다.");
+    await uploadScannedFiles(activeType, scan.files, scan.excludedCount);
+  }
+
+  async function uploadScannedFiles(
+    assetType: ArchiveType,
+    entries: ArchiveFolderFile[],
+    initialExcludedCount: number
+  ) {
+    if (!projectId || !canEdit || preparingRef.current || isSaving) return;
+    if (entries.length === 0) {
+      setProgressMessage("");
+      setErrorMessage("선택한 폴더에 읽을 수 있는 PDF 또는 이미지가 없습니다.");
       return;
     }
     setIsPreparing(true);
     preparingRef.current = true;
+    setErrorMessage("");
+    setActiveType(assetType);
     try {
-      const groups = new Map<string, File[]>();
-      files.forEach((file) => {
-        const relativePath = file.webkitRelativePath || file.name;
-        const folderName = relativePath.split("/")[0] || "업로드 폴더";
-        groups.set(folderName, [...(groups.get(folderName) ?? []), file]);
+      setProgressMessage("지원 파일 선별 중");
+      const groups = new Map<string, ArchiveFolderFile[]>();
+      entries.forEach((entry) => {
+        const folderPath = entry.folderPath || "";
+        groups.set(folderPath, [...(groups.get(folderPath) ?? []), entry]);
       });
-      for (const [folderName, folderFiles] of groups) {
-        let folder = folders.find((entry) => entry.name === folderName);
-        folder ??= await createFolder(folderName) ?? undefined;
-        if (!folder) continue;
-        let completed = 0;
-        await mapWithConcurrency(folderFiles, 3, async (file, index) => {
-          setProgressMessage(`이미지 최적화 중 · ${file.name}`);
-          const optimized = await optimizeArchiveImage(file);
-          setProgressMessage(`폴더 업로드 중 ${completed + 1}/${folderFiles.length}`);
-          await uploadProjectReferenceAsset(projectId, activeType, optimized.displayFile, {
-            thumbnailFile: optimized.thumbnailFile,
-            sourceType: "upload_image",
-            folderId: folder.id,
-            groupId: `folder:${folder.id}`,
-            sortOrder: imageAssets.length + index
-          });
-          completed += 1;
-          setProgressMessage(`저장 중 ${completed}/${folderFiles.length}`);
+
+      const folderCache = new Map(
+        folders.map((folder) => [folder.name.trim().toLocaleLowerCase("ko-KR"), folder])
+      );
+      let completed = 0;
+      let excludedCount = initialExcludedCount;
+      let firstFolderId: string | null = null;
+      let sortOffset = imageAssets.length;
+
+      for (const [folderPath, folderEntries] of groups) {
+        const folder = folderPath ? await ensureArchiveFolder(folderPath, folderCache) : null;
+        const folderId = folder?.id ?? selectedFolderValue(activeFolderId);
+        if (folderPath && !folder) {
+          excludedCount += folderEntries.length;
+          continue;
+        }
+        if (!firstFolderId && folderId) firstFolderId = folderId;
+        await mapWithConcurrency(folderEntries, 3, async (entry, index) => {
+          try {
+            if (isPdfFile(entry.file)) {
+              setProgressMessage(`PDF 확인 중 · ${entry.file.name}`);
+              if (!await hasPdfSignature(entry.file)) throw new Error("Invalid PDF");
+              await uploadProjectReferenceAsset(projectId, assetType, entry.file, {
+                sourceType: "upload_pdf",
+                folderId,
+                groupId: `source:folder:${folderId || "unfiled"}`,
+                originalFolderName: entry.originalFolderName,
+                relativePath: entry.relativePath,
+                sortOrder: sortOffset + index
+              });
+            } else {
+              setProgressMessage(`이미지 최적화 중 · ${entry.file.name}`);
+              const optimized = await optimizeArchiveImage(entry.file);
+              setProgressMessage(`업로드 중 ${completed + 1}/${entries.length}`);
+              await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
+                thumbnailFile: optimized.thumbnailFile,
+                sourceType: "upload_image",
+                folderId,
+                groupId: `folder:${folderId || "unfiled"}`,
+                originalFolderName: entry.originalFolderName,
+                relativePath: entry.relativePath,
+                sortOrder: sortOffset + index
+              });
+            }
+            completed += 1;
+            setProgressMessage(`저장 중 ${completed}/${entries.length}`);
+          } catch {
+            excludedCount += 1;
+          }
         });
+        sortOffset += folderEntries.length;
       }
       await loadArchive();
       setProgressMessage("");
+      if (firstFolderId) setActiveFolderId(firstFolderId);
+      if (completed === 0) {
+        setErrorMessage(`폴더에서 업로드할 수 있는 자료가 없었습니다. ${excludedCount}개 파일을 제외했습니다.`);
+      } else {
+        setStatusMessage(`${completed}개 업로드됨${excludedCount > 0 ? ` · ${excludedCount}개 제외` : ""}`);
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "폴더를 업로드하지 못했습니다.");
       setProgressMessage("");
@@ -601,18 +827,11 @@ export default function ProjectStoryboardOverheadPage() {
 
   async function deleteSelectedAssets() {
     if (!projectId || selectedIds.size === 0) return;
-    if (!window.confirm(`선택한 자료 ${selectedIds.size}개를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`)) return;
-    try {
-      setIsSaving(true);
-      await deleteProjectReferenceAssets(projectId, [...selectedIds]);
-      setSelectedIds(new Set());
-      setSelectionMode(false);
-      await loadArchive();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "선택한 자료를 삭제하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
-    }
+    setPendingConfirm({
+      kind: "assets",
+      assetIds: [...selectedIds],
+      label: `선택한 자료 ${selectedIds.size}개`
+    });
   }
 
   function beginLasso(event: ReactPointerEvent<HTMLDivElement>) {
@@ -704,23 +923,43 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  async function deleteDiagram(item: OverheadDiagramArchiveItem) {
-    if (!projectId || item.legacy || !window.confirm(`"${item.title}" 부감도를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`)) return;
-    try {
-      await deleteOverheadDiagramArchive(projectId, item.id);
-      await loadArchive();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
-    }
+  function deleteDiagram(item: OverheadDiagramArchiveItem) {
+    if (!projectId || item.legacy) return;
+    setPendingConfirm({ kind: "diagram", item });
   }
 
-  async function deleteAsset(asset: ProjectReferenceAsset) {
-    if (!projectId || !window.confirm(`"${asset.crop.title || asset.filename}" 자료를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`)) return;
+  function deleteAsset(asset: ProjectReferenceAsset) {
+    if (!projectId) return;
+    setPendingConfirm({
+      kind: "assets",
+      assetIds: [asset.id],
+      label: `"${asset.crop.title || asset.filename}" 자료`
+    });
+  }
+
+  async function cropStoredPdf(asset: ProjectReferenceAsset) {
+    if (!canEdit || asset.mimeType !== "application/pdf") return;
+    setIsPreparing(true);
+    setErrorMessage("");
+    setProgressMessage("PDF를 준비하는 중");
     try {
-      await deleteProjectReferenceAsset(projectId, asset.id);
-      await loadArchive();
+      const response = await fetch(asset.publicUrl);
+      if (!response.ok) throw new Error("원본 PDF를 불러오지 못했습니다.");
+      const blob = await response.blob();
+      const file = new File([blob], asset.filename, { type: "application/pdf" });
+      setIsPreparing(false);
+      await prepareFiles(activeType, [file], "pdf", false, {
+        folderId: asset.crop.folderId ?? null,
+        fileMetadata: [{
+          originalFolderName: asset.crop.originalFolderName ?? "",
+          relativePath: asset.crop.relativePath ?? asset.filename
+        }],
+        existingSourceAssetIds: [asset.id]
+      });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "자료를 삭제하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "원본 PDF를 준비하지 못했습니다.");
+      setProgressMessage("");
+      setIsPreparing(false);
     }
   }
 
@@ -762,6 +1001,11 @@ export default function ProjectStoryboardOverheadPage() {
         </div>
 
         {errorMessage ? <p role="alert" className="rounded-xl border border-field-danger bg-red-50 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}
+        {statusMessage ? (
+          <p role="status" className="rounded-xl border border-field-border bg-field-soft/55 px-3 py-2 text-xs font-bold text-field-muted">
+            {statusMessage}
+          </p>
+        ) : null}
         {isPreparing || progressMessage ? (
           <div className="grid justify-items-center gap-2 py-2">
             <PixelDogLoader size="sm" />
@@ -798,8 +1042,8 @@ export default function ProjectStoryboardOverheadPage() {
                 >
                   <div className="pointer-events-none grid justify-items-center gap-1.5">
                     {type === "overhead" ? <MapIcon className="h-6 w-6" aria-hidden /> : <Clapperboard className="h-6 w-6" aria-hidden />}
-                    <p className="text-sm font-black">{label} 파일 놓기</p>
-                    <p className="text-[11px] font-bold text-field-muted">PDF · JPG · JPEG · PNG · WebP · 여러 파일 가능</p>
+                    <p className="text-sm font-black">{label} 파일 또는 폴더 놓기</p>
+                    <p className="text-[11px] font-bold text-field-muted">하위 폴더를 포함해 PDF · JPG · JPEG · PNG · WebP만 선별</p>
                   </div>
                 </div>
               );
@@ -841,17 +1085,37 @@ export default function ProjectStoryboardOverheadPage() {
               </div>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-field-border pt-3">
-            <select
-              value={activeFolderId}
-              onChange={(event) => setActiveFolderId(event.target.value)}
-              className="min-h-9 min-w-36 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-text"
-              aria-label="아카이브 폴더 필터"
-            >
-              <option value="all">모든 폴더</option>
-              <option value="unfiled">미분류</option>
-              {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-            </select>
+          <div className="grid gap-2 border-t border-field-border pt-3" aria-label="아카이브 폴더">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-black text-field-primary">
+                <Folder className="h-4 w-4" aria-hidden />
+                폴더
+              </span>
+              <div className="-mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-1 pb-1">
+                <FolderFilterChip
+                  active={activeFolderId === "all"}
+                  label="전체"
+                  count={folderCounts.all}
+                  onClick={() => setActiveFolderId("all")}
+                />
+                <FolderFilterChip
+                  active={activeFolderId === "unfiled"}
+                  label="미분류"
+                  count={folderCounts.unfiled}
+                  onClick={() => setActiveFolderId("unfiled")}
+                />
+                {folders.map((folder) => (
+                  <FolderFilterChip
+                    key={folder.id}
+                    active={activeFolderId === folder.id}
+                    label={folder.name}
+                    count={folderCounts.byId.get(folder.id) ?? 0}
+                    onClick={() => setActiveFolderId(folder.id)}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
             <select
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
@@ -865,14 +1129,36 @@ export default function ProjectStoryboardOverheadPage() {
             </select>
             {canEdit ? (
               <>
-                <button type="button" onClick={() => void createFolder()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                <button type="button" onClick={() => setFolderEditor({ mode: "create", value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden />
-                  폴더
+                  새 폴더
                 </button>
                 {activeFolderId !== "all" && activeFolderId !== "unfiled" ? (
                   <>
-                    <button type="button" onClick={() => void renameActiveFolder()} className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">이름 변경</button>
-                    <button type="button" onClick={() => void removeActiveFolder()} className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-danger">폴더 삭제</button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const folder = folders.find((entry) => entry.id === activeFolderId);
+                        if (folder) setFolderEditor({ mode: "rename", folderId: folder.id, value: folder.name });
+                      }}
+                      className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
+                    >
+                      이름 변경
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const folder = folders.find((entry) => entry.id === activeFolderId);
+                        if (!folder) return;
+                        const assetIds = [...overheads, ...storyboards]
+                          .filter((asset) => asset.crop.folderId === folder.id)
+                          .map((asset) => asset.id);
+                        setPendingConfirm({ kind: "folder", folder, assetIds });
+                      }}
+                      className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-danger"
+                    >
+                      폴더 삭제
+                    </button>
                   </>
                 ) : null}
                 {supportsDesktopDrop ? (
@@ -884,7 +1170,7 @@ export default function ProjectStoryboardOverheadPage() {
                     <input
                       ref={folderUploadRef}
                       type="file"
-                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"
                       multiple
                       className="sr-only"
                       disabled={isPreparing || isSaving}
@@ -909,6 +1195,29 @@ export default function ProjectStoryboardOverheadPage() {
                   {selectionMode ? "선택 종료" : "선택"}
                 </button>
               </>
+            ) : null}
+            </div>
+            {folderEditor ? (
+              <form
+                className="flex max-w-md items-center gap-2 rounded-xl border border-field-border bg-field-soft/55 p-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void submitFolderEditor();
+                }}
+              >
+                <input
+                  autoFocus
+                  value={folderEditor.value}
+                  onChange={(event) => setFolderEditor({ ...folderEditor, value: event.target.value })}
+                  className="min-h-9 min-w-0 flex-1 rounded-lg border border-field-border bg-white px-3 text-sm"
+                  placeholder={folderEditor.mode === "create" ? "새 폴더 이름" : "폴더 이름"}
+                  maxLength={80}
+                />
+                <button type="submit" className="min-h-9 rounded-full bg-field-primary px-3 text-xs font-black text-white">확인</button>
+                <button type="button" onClick={() => setFolderEditor(null)} className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white" aria-label="폴더 편집 취소">
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </form>
             ) : null}
           </div>
           {canEdit && selectedIds.size > 0 ? (
@@ -1053,9 +1362,21 @@ export default function ProjectStoryboardOverheadPage() {
                   {asset.mimeType === "application/pdf" ? <FileText className="h-7 w-7 shrink-0 text-field-primary" aria-hidden /> : <FileImage className="h-7 w-7 shrink-0 text-field-primary" aria-hidden />}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-black text-field-text">{asset.filename}</p>
+                    {asset.crop.relativePath ? (
+                      <p className="truncate text-[10px] font-bold text-field-muted">{asset.crop.relativePath}</p>
+                    ) : null}
                     <a href={asset.publicUrl} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-field-primary underline underline-offset-2">원본 보기</a>
                   </div>
-                  {canEdit ? <button type="button" onClick={() => deleteAsset(asset)} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-field-danger" aria-label={`${asset.filename} 원본 삭제`}><Trash2 className="h-4 w-4" aria-hidden /></button> : null}
+                  {canEdit ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      {asset.mimeType === "application/pdf" ? (
+                        <button type="button" onClick={() => void cropStoredPdf(asset)} className="min-h-9 rounded-full border border-field-border px-3 text-[11px] font-black text-field-primary">
+                          crop
+                        </button>
+                      ) : null}
+                      <button type="button" onClick={() => deleteAsset(asset)} className="grid h-9 w-9 place-items-center rounded-full text-field-danger" aria-label={`${asset.filename} 원본 삭제`}><Trash2 className="h-4 w-4" aria-hidden /></button>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -1077,6 +1398,20 @@ export default function ProjectStoryboardOverheadPage() {
       {editingAsset ? (
         <MetadataDialog value={metadataDraft} isSaving={isSaving} onChange={setMetadataDraft} onClose={() => setEditingAsset(null)} onSave={saveMetadata} />
       ) : null}
+      {pendingConfirm ? (
+        <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
+          <CompactConfirm
+            message={pendingConfirm.kind === "folder"
+              ? `"${pendingConfirm.folder.name}" 폴더를 삭제할까요? 안의 자료 ${pendingConfirm.assetIds.length}개는 미분류로 이동합니다.`
+              : pendingConfirm.kind === "assets"
+                ? `${pendingConfirm.label}를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`
+                : `"${pendingConfirm.item.title}" 부감도를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`}
+            isSaving={isSaving}
+            onConfirm={() => void confirmPendingAction()}
+            onCancel={() => setPendingConfirm(null)}
+          />
+        </div>
+      ) : null}
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? "자료"} onClose={() => setPreview(null)} />
     </>
   );
@@ -1088,6 +1423,60 @@ function ArchiveText({ title, sceneNo, cutNo, memo }: { title: string; sceneNo: 
       <p className="truncate text-xs font-black text-field-text">{title}</p>
       <p className="truncate text-[10px] font-bold text-field-muted">{[sceneNo && `S#${sceneNo}`, cutNo && `C#${cutNo}`, memo].filter(Boolean).join(" · ") || "태그 없음"}</p>
     </div>
+  );
+}
+
+function FolderFilterChip({
+  active,
+  label,
+  count,
+  onClick
+}: {
+  active: boolean;
+  label: string;
+  count: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-black transition-colors ${
+        active
+          ? "border-field-primary bg-field-primary text-white"
+          : "border-field-border bg-white text-field-primary"
+      }`}
+    >
+      <span className="max-w-44 truncate">{label}</span>
+      <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20 text-white" : "bg-field-soft text-field-muted"}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function CompactConfirm({
+  message,
+  isSaving,
+  onConfirm,
+  onCancel
+}: {
+  message: string;
+  isSaving: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <section className="flex flex-wrap items-center gap-2 rounded-2xl border border-field-border bg-white p-3 shadow-lg" role="alertdialog" aria-label="삭제 확인">
+      <p className="min-w-0 flex-1 text-xs font-bold leading-5 text-field-text">{message}</p>
+      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 rounded-full border border-field-border px-3 text-xs font-black text-field-muted disabled:opacity-50">
+        취소
+      </button>
+      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 rounded-full bg-field-danger px-3 text-xs font-black text-white disabled:opacity-50">
+        {isSaving ? "처리 중" : "삭제"}
+      </button>
+    </section>
   );
 }
 
@@ -1272,4 +1661,10 @@ function isImageFile(file: File) {
 
 function isAcceptedArchiveFile(file: File) {
   return isPdfFile(file) || isImageFile(file);
+}
+
+async function hasPdfSignature(file: File) {
+  if (file.size < 5) return false;
+  const bytes = new Uint8Array(await file.slice(0, Math.min(1_024, file.size)).arrayBuffer());
+  return String.fromCharCode(...bytes).includes("%PDF-");
 }

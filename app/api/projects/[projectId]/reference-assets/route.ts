@@ -446,7 +446,13 @@ function normalizeCrop(value: unknown) {
     ...(source.includeContext === false || source.includeContext === "false" ? { includeContext: false as const } : {}),
     ...(cleanText(source.thumbnailUrl, 2_000) ? { thumbnailUrl: cleanText(source.thumbnailUrl, 2_000) } : {}),
     ...(cleanText(source.thumbnailPath, 1_000) ? { thumbnailPath: cleanText(source.thumbnailPath, 1_000) } : {}),
-    ...("folderId" in source ? { folderId: cleanText(source.folderId, 100) || null } : {})
+    ...("folderId" in source ? { folderId: cleanText(source.folderId, 100) || null } : {}),
+    ...(cleanText(source.originalFolderName, 240)
+      ? { originalFolderName: cleanText(source.originalFolderName, 240) }
+      : {}),
+    ...(cleanText(source.relativePath, 1_000)
+      ? { relativePath: cleanText(source.relativePath, 1_000) }
+      : {})
   };
 }
 
@@ -475,7 +481,9 @@ function parseCropFormData(formData: FormData, sourceType: ReturnType<typeof nor
     rowsPerPage: formData.get("rowsPerPage"),
     targetColumn: formData.get("targetColumn"),
     includeContext: formData.get("includeContext"),
-    folderId: formData.get("folderId")
+    folderId: formData.get("folderId"),
+    originalFolderName: formData.get("originalFolderName"),
+    relativePath: formData.get("relativePath")
   };
 }
 
