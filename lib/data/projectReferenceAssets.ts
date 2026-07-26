@@ -11,6 +11,54 @@ import type {
 
 type ApiError = { error?: string; detail?: string };
 
+export type ProjectCostumeBulkSaveInput = {
+  scenes: Array<{
+    id: string;
+    sceneNo: string;
+    sceneTitle: string;
+    episodeNumbers: number[];
+    sortOrder: number;
+    items: Array<{
+      id: string;
+      actorRole: string;
+      actorName: string;
+      costumeContent: string;
+      provider: string;
+      hair: string;
+      sortOrder: number;
+      keepCostumeImagePaths: string[];
+      keepHairImagePaths: string[];
+    }>;
+  }>;
+  deletedSceneIds: string[];
+  deletedItemIds: string[];
+};
+
+export type ProjectCostumeBulkSaveResult = {
+  scenes: ProjectCostumeScene[];
+  sceneIdMap: Record<string, string>;
+  itemIdMap: Record<string, string>;
+  verification: {
+    expectedSceneCount: number;
+    actualSceneCount: number;
+    expectedItemCount: number;
+    actualItemCount: number;
+    missingScenes: string[];
+    itemCountMismatches: string[];
+  };
+  timings: Record<string, number>;
+};
+
+export class ProjectCostumeBulkSaveError extends Error {
+  readonly partialResult: ProjectCostumeBulkSaveResult | null;
+
+  constructor(message: string, partialResult: ProjectCostumeBulkSaveResult | null = null) {
+    super(message);
+    this.name = "ProjectCostumeBulkSaveError";
+    this.partialResult = partialResult;
+  }
+}
+
 export async function listProjectReferenceAssets(
   projectId: string,
   assetType: ProjectReferenceAssetType,
@@ -132,6 +180,44 @@ export async function getProjectCostumeSceneOverview(
     scenes: payload.scenes ?? [],
     totalEpisodes: Math.max(0, Number(payload.totalEpisodes ?? 0))
   };
+}
+
+/** 현재 의상 local state 전체를 한 요청으로 저장하고 서버 재조회 검증 결과를 돌려받습니다. */
+export async function saveProjectCostumeSnapshot(
+  projectId: string,
+  value: ProjectCostumeBulkSaveInput
+): Promise<ProjectCostumeBulkSaveResult> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value)
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError
+    & Partial<ProjectCostumeBulkSaveResult>
+    & { step?: string };
+  const partialResult = (
+    !payload.scenes
+    || !payload.sceneIdMap
+    || !payload.itemIdMap
+    || !payload.verification
+    || !payload.timings
+  )
+    ? null
+    : {
+        scenes: payload.scenes,
+        sceneIdMap: payload.sceneIdMap,
+        itemIdMap: payload.itemIdMap,
+        verification: payload.verification,
+        timings: payload.timings
+      };
+  if (!response.ok || !partialResult) {
+    const context = [payload.step ? `단계: ${payload.step}` : "", payload.detail].filter(Boolean).join(" · ");
+    throw new ProjectCostumeBulkSaveError(
+      [payload.error || "의상 전체 저장을 완료하지 못했습니다.", context].filter(Boolean).join(" · "),
+      partialResult
+    );
+  }
+  return partialResult;
 }
 
 export async function createProjectCostumeScene(

@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ImagePlus, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useParams } from "next/navigation";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -8,12 +8,12 @@ import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { Button } from "@/components/ui/Button";
 import {
-  createProjectCostumeScene,
-  deleteProjectCostume,
-  deleteProjectCostumeScene,
   getProjectCostumeSceneOverview,
+  ProjectCostumeBulkSaveError,
+  saveProjectCostumeSnapshot,
   saveProjectCostume,
-  updateProjectCostumeScene
+  type ProjectCostumeBulkSaveInput,
+  type ProjectCostumeBulkSaveResult
 } from "@/lib/data/projectReferenceAssets";
 import {
   listDailyPlans,
@@ -22,7 +22,7 @@ import {
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
-import { auditQuery } from "@/lib/queryAudit";
+import { auditQuery, isQueryAuditEnabled } from "@/lib/queryAudit";
 import type {
   CostumeImage,
   ProjectActor,
@@ -81,12 +81,18 @@ export default function ProjectCostumesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [saveProgress, setSaveProgress] = useState<{ scenes: number; items: number; stage: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
+  const saveLockRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || saveLockRef.current || dirtyRef.current) return;
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
     setIsLoading(true);
     try {
       const [project, costumeOverview, basicInfo, plans, sceneList] = await Promise.all([
@@ -116,6 +122,7 @@ export default function ProjectCostumesPage() {
           () => getProjectSceneList(projectId)
         ).catch(() => null)
       ]);
+      if (requestId !== loadRequestRef.current || saveLockRef.current || dirtyRef.current) return;
       const costumeScenes = costumeOverview.scenes;
       const automaticEpisodes = buildAutomaticEpisodesByScene(plans);
       const scenesWithAutomaticEpisodes = costumeScenes.map((scene) => ({
@@ -144,7 +151,9 @@ export default function ProjectCostumesPage() {
       setDrafts(Object.fromEntries(costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))));
       setDeletedSceneIds(new Set());
       setDeletedItemIds(new Set());
-      setIsDirty(canEdit && automaticEpisodesAdded);
+      const hasAutomaticChanges = canEdit && automaticEpisodesAdded;
+      dirtyRef.current = hasAutomaticChanges;
+      setIsDirty(hasAutomaticChanges);
       setExpandedSceneIds((current) => new Set(
         [...current].filter((id) => costumeScenes.some((scene) => scene.id === id))
       ));
@@ -155,9 +164,11 @@ export default function ProjectCostumesPage() {
           : ""
       );
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "씬별 의상 자료를 불러오지 못했습니다.");
+      if (requestId === loadRequestRef.current && !saveLockRef.current && !dirtyRef.current) {
+        setErrorMessage(error instanceof Error ? error.message : "씬별 의상 자료를 불러오지 못했습니다.");
+      }
     } finally {
-      setIsLoading(false);
+      if (requestId === loadRequestRef.current) setIsLoading(false);
     }
   }, [canEdit, projectId]);
 
@@ -213,12 +224,15 @@ export default function ProjectCostumesPage() {
   }, [dailyPlanSceneKeys, scenes, selectedDailyPlanId]);
 
   function markDirty(message = "") {
+    if (saveLockRef.current) return;
+    dirtyRef.current = true;
     setIsDirty(true);
     setNoticeMessage(message);
     setErrorMessage("");
   }
 
   function updateDraft(id: string, patch: Partial<CostumeDraft>) {
+    if (saveLockRef.current) return;
     setDrafts((current) => ({ ...current, [id]: { ...current[id], ...patch } }));
     markDirty();
   }
@@ -233,7 +247,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleImportAllScenes() {
-    if (!projectId || !canEdit) return;
+    if (!projectId || !canEdit || saveLockRef.current) return;
     const existingKeys = new Set(scenes.map((scene) => normalizeSceneNumber(scene.sceneNo)));
     const addedKeys = new Set<string>();
     const now = new Date().toISOString();
@@ -283,7 +297,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleEpisodeToggle(scene: ProjectCostumeScene, episode: number) {
-    if (!canEdit) return;
+    if (!canEdit || saveLockRef.current) return;
     const sceneKey = normalizeSceneNumber(scene.sceneNo);
     if (automaticEpisodesByScene.get(sceneKey)?.has(episode)) return;
     setScenes((current) => current.map((entry) => {
@@ -312,7 +326,7 @@ export default function ProjectCostumesPage() {
 
   function handleSceneSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!projectId || !sceneDraft || !canEdit) return;
+    if (!projectId || !sceneDraft || !canEdit || saveLockRef.current) return;
     if (!sceneDraft.sceneNo.trim()) {
       setErrorMessage("씬 번호 또는 씬 이름을 입력해주세요.");
       return;
@@ -374,7 +388,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleSceneActorSeed(scene: ProjectCostumeScene) {
-    if (!projectId || !canEdit) return;
+    if (!projectId || !canEdit || saveLockRef.current) return;
     const sourceScene = findMatchingSceneOption(scene.sceneNo, sceneOptions);
     const presentActors = sourceScene
       ? getPresentSceneActors(sourceScene, actors, sceneActorRoles)
@@ -420,7 +434,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleDirectActorAdd(scene: ProjectCostumeScene) {
-    if (!projectId || !canEdit) return;
+    if (!projectId || !canEdit || saveLockRef.current) return;
     const now = new Date().toISOString();
     const item = createTemporaryCostume(
       projectId,
@@ -440,7 +454,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleSceneDelete(scene: ProjectCostumeScene) {
-    if (!canEdit || !window.confirm(`"${sceneLabel(scene)}" 씬의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
+    if (!canEdit || saveLockRef.current || !window.confirm(`"${sceneLabel(scene)}" 씬의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
     setScenes((current) => current.filter((item) => item.id !== scene.id));
     if (!isTemporaryId(scene.id)) {
       setDeletedSceneIds((current) => new Set([...current, scene.id]));
@@ -454,6 +468,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleFiles(id: string, fieldType: ImageFieldType, event: ChangeEvent<HTMLInputElement>) {
+    if (saveLockRef.current) return;
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     const current = drafts[id];
@@ -467,7 +482,7 @@ export default function ProjectCostumesPage() {
   }
 
   function handleItemDelete(scene: ProjectCostumeScene, item: ProjectCostume) {
-    if (!canEdit || !window.confirm(`"${item.actorRole || item.actorName}" 배역의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
+    if (!canEdit || saveLockRef.current || !window.confirm(`"${item.actorRole || item.actorName}" 배역의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
     setScenes((current) => current.map((entry) => entry.id === scene.id
       ? { ...entry, items: entry.items.filter((costume) => costume.id !== item.id) }
       : entry));
@@ -483,7 +498,7 @@ export default function ProjectCostumesPage() {
   }
 
   async function handleSaveAll() {
-    if (!projectId || !canEdit || !isDirty || isSaving) return;
+    if (!projectId || !canEdit || !isDirty || isSaving || saveLockRef.current) return;
     for (const scene of scenes) {
       for (const item of scene.items) {
         const draft = drafts[item.id];
@@ -494,93 +509,145 @@ export default function ProjectCostumesPage() {
       }
     }
 
+    saveLockRef.current = true;
     setIsSaving(true);
     setErrorMessage("");
     setNoticeMessage("");
+    const snapshotScenes = scenes.map((scene) => ({
+      ...scene,
+      items: scene.items.map((item) => ({ ...item }))
+    }));
+    const snapshotDrafts = { ...drafts };
+    const saveInput = buildCostumeSaveInput(
+      snapshotScenes,
+      snapshotDrafts,
+      deletedSceneIds,
+      deletedItemIds
+    );
+    const sceneCount = saveInput.scenes.length;
+    const itemCount = saveInput.scenes.reduce((total, scene) => total + scene.items.length, 0);
+    setSaveProgress({ scenes: sceneCount, items: itemCount, stage: "DB 일괄 저장" });
+    logCostumeSaveAudit({
+      event: "save_start",
+      scenes: sceneCount,
+      items: itemCount,
+      deletedScenes: saveInput.deletedSceneIds.length,
+      deletedItems: saveInput.deletedItemIds.length,
+      pendingFileItems: countPendingFileItems(snapshotScenes, snapshotDrafts)
+    });
+
+    let bulkResult: ProjectCostumeBulkSaveResult | null = null;
+    const uploadedItems = new Map<string, ProjectCostume>();
     try {
-      for (const itemId of deletedItemIds) {
-        await deleteProjectCostume(projectId, itemId);
-      }
-      setDeletedItemIds(new Set());
+      bulkResult = await auditQuery(
+        "costume.save.batchMetadata",
+        "app/projects/[id]/costumes/page.tsx:handleSaveAll",
+        () => saveProjectCostumeSnapshot(projectId, saveInput)
+      );
+      logCostumeSaveAudit({
+        event: "batch_saved",
+        ...bulkResult.verification,
+        ...bulkResult.timings
+      });
 
-      for (const sceneId of deletedSceneIds) {
-        await deleteProjectCostumeScene(projectId, sceneId);
-      }
       setDeletedSceneIds(new Set());
-
-      for (const scene of scenes) {
-        const savedScene = isTemporaryId(scene.id)
-          ? await createProjectCostumeScene(projectId, {
-              sceneNo: scene.sceneNo,
-              sceneTitle: scene.sceneTitle,
-              episodeNumbers: scene.episodeNumbers,
-              actors: []
-            })
-          : await updateProjectCostumeScene(projectId, {
-              id: scene.id,
-              sceneNo: scene.sceneNo,
-              sceneTitle: scene.sceneTitle,
-              episodeNumbers: scene.episodeNumbers
-            });
-
-        if (isTemporaryId(scene.id)) {
-          setScenes((current) => current.map((entry) => entry.id === scene.id
-            ? {
-                ...entry,
-                id: savedScene.id,
-                items: entry.items.map((item) => ({ ...item, costumeSceneId: savedScene.id }))
-              }
-            : entry));
-          setExpandedSceneIds((current) => new Set(
-            [...current].map((id) => id === scene.id ? savedScene.id : id)
-          ));
+      setDeletedItemIds(new Set());
+      setSaveProgress({ scenes: sceneCount, items: itemCount, stage: "이미지 저장" });
+      const pendingUploads = collectPendingUploads(
+        snapshotScenes,
+        snapshotDrafts,
+        bulkResult.sceneIdMap,
+        bulkResult.itemIdMap
+      );
+      const uploadResults = await settleInBatches(pendingUploads, 4, async (upload) => (
+        auditQuery(
+          "costume.save.uploadItemFiles",
+          `app/projects/[id]/costumes/page.tsx:${upload.sceneNo}/${upload.actorLabel}`,
+          () => saveProjectCostume(projectId, upload.value)
+        )
+      ));
+      const uploadFailures: string[] = [];
+      uploadResults.forEach(({ input, result }) => {
+        if (result.status === "fulfilled") {
+          uploadedItems.set(result.value.id, result.value);
+        } else {
+          uploadFailures.push(
+            `${input.sceneNo} · ${input.actorLabel}: ${
+              result.reason instanceof Error ? result.reason.message : String(result.reason)
+            }`
+          );
         }
+      });
 
-        for (const item of scene.items) {
-          const draft = drafts[item.id];
-          if (!draft) continue;
-          const savedItem = await saveProjectCostume(projectId, {
-            id: isTemporaryId(item.id) ? undefined : item.id,
-            clientItemId: item.id,
-            costumeSceneId: savedScene.id,
-            actorRole: draft.actorRole,
-            actorName: draft.actorName,
-            costumeContent: draft.costumeContent,
-            provider: draft.provider,
-            hair: draft.hair,
-            sortOrder: item.sortOrder,
-            keepCostumeImagePaths: draft.costumeImages.map((image) => image.path),
-            keepHairImagePaths: draft.hairImages.map((image) => image.path),
-            costumeFiles: draft.costumeFiles.map(({ file }) => file),
-            hairFiles: draft.hairFiles.map(({ file }) => file)
-          });
-          if (isTemporaryId(item.id)) {
-            setScenes((current) => current.map((entry) => (
-              entry.id === savedScene.id || entry.id === scene.id
-                ? { ...entry, items: entry.items.map((value) => value.id === item.id ? savedItem : value) }
-                : entry
-            )));
-            setDrafts((current) => {
-              const next = { ...current, [savedItem.id]: toDraft(savedItem) };
-              delete next[item.id];
-              return next;
-            });
-          } else {
-            setScenes((current) => current.map((entry) => entry.id === savedScene.id
-              ? { ...entry, items: entry.items.map((value) => value.id === item.id ? savedItem : value) }
-              : entry));
-            setDrafts((current) => ({ ...current, [item.id]: toDraft(savedItem) }));
-          }
-        }
+      if (uploadFailures.length > 0) {
+        const mapped = remapCostumeLocalState(snapshotScenes, snapshotDrafts, bulkResult, uploadedItems);
+        setScenes(mapped.scenes);
+        setDrafts(mapped.drafts);
+        setExpandedSceneIds((current) => new Set(
+          [...current].map((id) => bulkResult?.sceneIdMap[id] ?? id)
+        ));
+        throw new Error(`이미지 저장 실패 항목: ${uploadFailures.join(" / ")}`);
       }
 
-      await load();
+      setSaveProgress({ scenes: sceneCount, items: itemCount, stage: "DB 저장 검증" });
+      const verifiedOverview = await auditQuery(
+        "costume.save.verify",
+        "app/projects/[id]/costumes/page.tsx:handleSaveAll",
+        () => getProjectCostumeSceneOverview(projectId)
+      );
+      const verificationErrors = verifyCostumeSave(
+        saveInput,
+        snapshotDrafts,
+        verifiedOverview.scenes,
+        bulkResult.sceneIdMap,
+        bulkResult.itemIdMap
+      );
+      logCostumeSaveAudit({
+        event: "save_verify",
+        scenes: verifiedOverview.scenes.length,
+        items: verifiedOverview.scenes.reduce((total, scene) => total + scene.items.length, 0),
+        errors: verificationErrors.length
+      });
+      if (verificationErrors.length > 0) {
+        const mapped = remapCostumeLocalState(snapshotScenes, snapshotDrafts, bulkResult, uploadedItems);
+        setScenes(mapped.scenes);
+        setDrafts(mapped.drafts);
+        setExpandedSceneIds((current) => new Set(
+          [...current].map((id) => bulkResult?.sceneIdMap[id] ?? id)
+        ));
+        throw new Error(`저장 검증 실패: ${verificationErrors.join(" / ")}`);
+      }
+
+      setScenes(verifiedOverview.scenes);
+      setDrafts(Object.fromEntries(
+        verifiedOverview.scenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))
+      ));
+      setExpandedSceneIds((current) => new Set(
+        [...current].map((id) => bulkResult?.sceneIdMap[id] ?? id)
+      ));
+      dirtyRef.current = false;
+      setIsDirty(false);
       setNoticeMessage("의상 변경사항을 모두 저장했습니다.");
     } catch (error) {
+      if (!bulkResult && error instanceof ProjectCostumeBulkSaveError && error.partialResult) {
+        bulkResult = error.partialResult;
+        const mapped = remapCostumeLocalState(snapshotScenes, snapshotDrafts, bulkResult, uploadedItems);
+        setScenes(mapped.scenes);
+        setDrafts(mapped.drafts);
+        setExpandedSceneIds((current) => new Set(
+          [...current].map((id) => bulkResult?.sceneIdMap[id] ?? id)
+        ));
+        // DB 일괄 요청이 실행된 뒤 검증 단계에서 실패한 경우, 같은 삭제를 재요청하지 않습니다.
+        setDeletedSceneIds(new Set());
+        setDeletedItemIds(new Set());
+      }
+      dirtyRef.current = true;
       setIsDirty(true);
       setErrorMessage(error instanceof Error ? error.message : "의상 변경사항을 저장하지 못했습니다.");
     } finally {
+      saveLockRef.current = false;
       setIsSaving(false);
+      setSaveProgress(null);
     }
   }
 
@@ -624,7 +691,9 @@ export default function ProjectCostumesPage() {
               </Button>
               <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={() => void handleSaveAll()} disabled={!isDirty || isSaving}>
                 <Save className="h-4 w-4" aria-hidden />
-                {isSaving ? "전체 저장 중" : "전체 저장"}
+                {isSaving && saveProgress
+                  ? `${saveProgress.stage} · 씬 ${saveProgress.scenes} / 항목 ${saveProgress.items}`
+                  : "전체 저장"}
               </Button>
             </>
           ) : (
@@ -1271,6 +1340,194 @@ function CompactField({ label, children }: { label: string; children: React.Reac
       {children}
     </label>
   );
+}
+
+function buildCostumeSaveInput(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>,
+  deletedSceneIds: Set<string>,
+  deletedItemIds: Set<string>
+): ProjectCostumeBulkSaveInput {
+  return {
+    scenes: scenes.map((scene, sceneIndex) => ({
+      id: scene.id,
+      sceneNo: scene.sceneNo,
+      sceneTitle: scene.sceneTitle,
+      episodeNumbers: scene.episodeNumbers,
+      sortOrder: sceneIndex,
+      items: scene.items.map((item, itemIndex) => {
+        const draft = drafts[item.id] ?? toDraft(item);
+        return {
+          id: item.id,
+          actorRole: draft.actorRole,
+          actorName: draft.actorName,
+          costumeContent: draft.costumeContent,
+          provider: draft.provider,
+          hair: draft.hair,
+          sortOrder: itemIndex,
+          keepCostumeImagePaths: draft.costumeImages.map((image) => image.path),
+          keepHairImagePaths: draft.hairImages.map((image) => image.path)
+        };
+      })
+    })),
+    deletedSceneIds: [...deletedSceneIds],
+    deletedItemIds: [...deletedItemIds]
+  };
+}
+
+type PendingCostumeUpload = {
+  sceneNo: string;
+  actorLabel: string;
+  value: Parameters<typeof saveProjectCostume>[1];
+};
+
+function collectPendingUploads(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>,
+  sceneIdMap: Record<string, string>,
+  itemIdMap: Record<string, string>
+): PendingCostumeUpload[] {
+  return scenes.flatMap((scene) => scene.items.flatMap((item) => {
+    const draft = drafts[item.id];
+    if (!draft || (draft.costumeFiles.length === 0 && draft.hairFiles.length === 0)) return [];
+    return [{
+      sceneNo: scene.sceneNo,
+      actorLabel: draft.actorRole || draft.actorName || "배역 이름 없음",
+      value: {
+        id: itemIdMap[item.id],
+        clientItemId: item.id,
+        costumeSceneId: sceneIdMap[scene.id],
+        actorRole: draft.actorRole,
+        actorName: draft.actorName,
+        costumeContent: draft.costumeContent,
+        provider: draft.provider,
+        hair: draft.hair,
+        sortOrder: item.sortOrder,
+        keepCostumeImagePaths: draft.costumeImages.map((image) => image.path),
+        keepHairImagePaths: draft.hairImages.map((image) => image.path),
+        costumeFiles: draft.costumeFiles.map(({ file }) => file),
+        hairFiles: draft.hairFiles.map(({ file }) => file)
+      }
+    }];
+  }));
+}
+
+async function settleInBatches<T, R>(
+  values: T[],
+  concurrency: number,
+  operation: (value: T) => Promise<R>
+): Promise<Array<{ input: T; result: PromiseSettledResult<R> }>> {
+  const settled: Array<{ input: T; result: PromiseSettledResult<R> }> = [];
+  for (let index = 0; index < values.length; index += concurrency) {
+    const batch = values.slice(index, index + concurrency);
+    const results = await Promise.allSettled(batch.map(operation));
+    results.forEach((result, resultIndex) => {
+      settled.push({ input: batch[resultIndex], result });
+    });
+  }
+  return settled;
+}
+
+function remapCostumeLocalState(
+  originalScenes: ProjectCostumeScene[],
+  originalDrafts: Record<string, CostumeDraft>,
+  result: ProjectCostumeBulkSaveResult,
+  uploadedItems: Map<string, ProjectCostume>
+) {
+  const savedScenesById = new Map(result.scenes.map((scene) => [scene.id, scene]));
+  const drafts: Record<string, CostumeDraft> = {};
+  const scenes = originalScenes.map((originalScene) => {
+    const savedSceneId = result.sceneIdMap[originalScene.id] ?? originalScene.id;
+    const returnedScene = savedScenesById.get(savedSceneId);
+    const returnedItemsById = new Map(
+      (returnedScene?.items ?? []).map((item) => [item.id, item])
+    );
+    const items = originalScene.items.map((originalItem) => {
+      const savedItemId = result.itemIdMap[originalItem.id] ?? originalItem.id;
+      const returnedItem = returnedItemsById.get(savedItemId);
+      const savedItem = uploadedItems.get(savedItemId)
+        ?? returnedItem
+        ?? { ...originalItem, id: savedItemId, costumeSceneId: savedSceneId };
+      const originalDraft = originalDrafts[originalItem.id];
+      drafts[savedItem.id] = uploadedItems.has(savedItemId) || !originalDraft
+        ? toDraft(savedItem)
+        : {
+            ...originalDraft,
+            costumeImages: savedItem.images.filter((image) => image.fieldType !== "hair"),
+            hairImages: savedItem.images.filter((image) => image.fieldType === "hair")
+          };
+      return savedItem;
+    });
+    return returnedScene
+      ? { ...returnedScene, items }
+      : { ...originalScene, id: savedSceneId, items };
+  });
+  return { scenes, drafts };
+}
+
+function verifyCostumeSave(
+  expected: ProjectCostumeBulkSaveInput,
+  expectedDrafts: Record<string, CostumeDraft>,
+  actualScenes: ProjectCostumeScene[],
+  sceneIdMap: Record<string, string>,
+  itemIdMap: Record<string, string>
+) {
+  const errors: string[] = [];
+  const expectedItemCount = expected.scenes.reduce((total, scene) => total + scene.items.length, 0);
+  const actualItemCount = actualScenes.reduce((total, scene) => total + scene.items.length, 0);
+  if (expected.scenes.length !== actualScenes.length) {
+    errors.push(`씬 ${expected.scenes.length}개 중 ${actualScenes.length}개 확인`);
+  }
+  if (expectedItemCount !== actualItemCount) {
+    errors.push(`배역 ${expectedItemCount}개 중 ${actualItemCount}개 확인`);
+  }
+
+  const actualScenesById = new Map(actualScenes.map((scene) => [scene.id, scene]));
+  expected.scenes.forEach((scene) => {
+    const actualScene = actualScenesById.get(sceneIdMap[scene.id]);
+    if (!actualScene) {
+      errors.push(`${scene.sceneNo} 씬 누락`);
+      return;
+    }
+    if (scene.items.length !== actualScene.items.length) {
+      errors.push(`${scene.sceneNo} 배역 ${scene.items.length}개 중 ${actualScene.items.length}개 확인`);
+    }
+    const actualItems = new Map(actualScene.items.map((item) => [item.id, item]));
+    scene.items.forEach((item) => {
+      const actualItem = actualItems.get(itemIdMap[item.id]);
+      if (!actualItem) {
+        errors.push(`${scene.sceneNo} · ${item.actorRole || item.actorName} 누락`);
+        return;
+      }
+      const draft = expectedDrafts[item.id];
+      if (!draft) return;
+      const expectedCostumeImages = draft.costumeImages.length + draft.costumeFiles.length;
+      const expectedHairImages = draft.hairImages.length + draft.hairFiles.length;
+      const actualCostumeImages = actualItem.images.filter((image) => image.fieldType !== "hair").length;
+      const actualHairImages = actualItem.images.filter((image) => image.fieldType === "hair").length;
+      if (expectedCostumeImages !== actualCostumeImages || expectedHairImages !== actualHairImages) {
+        errors.push(
+          `${scene.sceneNo} · ${draft.actorRole || draft.actorName}: 의상 이미지 ${expectedCostumeImages}/${actualCostumeImages}, 헤어 이미지 ${expectedHairImages}/${actualHairImages}`
+        );
+      }
+    });
+  });
+  return errors;
+}
+
+function countPendingFileItems(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>
+) {
+  return scenes.reduce((total, scene) => total + scene.items.filter((item) => {
+    const draft = drafts[item.id];
+    return Boolean(draft && (draft.costumeFiles.length > 0 || draft.hairFiles.length > 0));
+  }).length, 0);
+}
+
+function logCostumeSaveAudit(values: Record<string, unknown>) {
+  if (!isQueryAuditEnabled()) return;
+  console.table([values]);
 }
 
 function toDraft(item: ProjectCostume): CostumeDraft {

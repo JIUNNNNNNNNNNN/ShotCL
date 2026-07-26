@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   canAdministerProject,
@@ -9,6 +10,44 @@ import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 type ActorSeed = { role: string; name: string };
+type BulkItemInput = {
+  id?: unknown;
+  actorRole?: unknown;
+  actorName?: unknown;
+  costumeContent?: unknown;
+  provider?: unknown;
+  hair?: unknown;
+  sortOrder?: unknown;
+  keepCostumeImagePaths?: unknown;
+  keepHairImagePaths?: unknown;
+};
+type BulkSceneInput = {
+  id?: unknown;
+  sceneNo?: unknown;
+  sceneTitle?: unknown;
+  episodeNumbers?: unknown;
+  sortOrder?: unknown;
+  items?: unknown;
+};
+type NormalizedBulkItem = {
+  id: string;
+  actorRole: string;
+  actorName: string;
+  costumeContent: string;
+  provider: string;
+  hair: string;
+  sortOrder: number;
+  keepCostumeImagePaths: string[];
+  keepHairImagePaths: string[];
+};
+type NormalizedBulkScene = {
+  id: string;
+  sceneNo: string;
+  sceneTitle: string;
+  episodeNumbers: number[];
+  sortOrder: number;
+  items: NormalizedBulkItem[];
+};
 
 const SCENE_COLUMNS = "id,project_id,scene_no,scene_title,episode_numbers,sort_order,created_at,updated_at";
 const ITEM_COLUMNS = "id,project_id,costume_scene_id,scene_no,actor_role,actor_name,costume_content,provider,hair,image_paths,sort_order,created_at,updated_at";
@@ -28,6 +67,238 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ ok: true, scenes, totalEpisodes });
   } catch (error) {
     return costumeSceneError(error, "씬별 의상 자료를 불러오지 못했습니다.");
+  }
+}
+
+/**
+ * 화면의 전체 local state를 한 번에 저장합니다.
+ * 이미지 바이너리는 기존 costumes POST가 담당하고, 이 요청은 씬/배역/이미지 metadata를 batch 처리합니다.
+ */
+export async function PUT(request: NextRequest, context: RouteContext) {
+  const timings: Record<string, number> = {};
+  let step = "validate";
+  try {
+    const projectId = await getProjectId(context);
+    if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
+    if ((await getMaterialRole(request, projectId)) !== "admin") {
+      return NextResponse.json({ error: "의상 수정은 Key staff만 할 수 있습니다." }, { status: 403 });
+    }
+
+    const body = await request.json().catch(() => ({})) as {
+      scenes?: unknown;
+      deletedSceneIds?: unknown;
+      deletedItemIds?: unknown;
+    };
+    const rawScenes = body.scenes;
+    if (!Array.isArray(rawScenes) || rawScenes.length > 500) {
+      return NextResponse.json({ error: "의상 씬 저장 데이터가 올바르지 않습니다.", step, timings }, { status: 400 });
+    }
+    const inputScenes = normalizeBulkScenes(rawScenes);
+    if (
+      inputScenes.length !== rawScenes.length
+      || inputScenes.some((scene, index) => (
+        scene.items.length !== (
+          rawScenes[index]
+          && typeof rawScenes[index] === "object"
+          && Array.isArray((rawScenes[index] as BulkSceneInput).items)
+            ? ((rawScenes[index] as BulkSceneInput).items as unknown[]).length
+            : 0
+        )
+      ))
+    ) {
+      return NextResponse.json({ error: "의상 씬 또는 배역 저장 데이터가 올바르지 않습니다.", step, timings }, { status: 400 });
+    }
+    const deletedSceneIds = normalizeUuidArray(body.deletedSceneIds);
+    const deletedItemIds = normalizeUuidArray(body.deletedItemIds);
+    const validationError = validateBulkScenes(inputScenes);
+    if (validationError) {
+      return NextResponse.json({ error: validationError, step, timings }, { status: 400 });
+    }
+
+    const supabase = requireProjectAccessDb();
+    step = "read_existing";
+    const [{ data: existingSceneRows, error: sceneReadError }, { data: existingItemRows, error: itemReadError }] = await timed(
+      timings,
+      step,
+      () => Promise.all([
+        supabase
+          .from("project_costume_scenes")
+          .select(SCENE_COLUMNS)
+          .eq("project_id", projectId),
+        supabase
+          .from("project_costumes")
+          .select(ITEM_COLUMNS)
+          .eq("project_id", projectId)
+          .not("costume_scene_id", "is", null)
+      ])
+    );
+    if (sceneReadError) throw sceneReadError;
+    if (itemReadError) throw itemReadError;
+
+    const existingScenes = new Map(
+      (existingSceneRows ?? []).map((row) => [String(row.id), row as Record<string, unknown>])
+    );
+    const existingItems = new Map(
+      (existingItemRows ?? []).map((row) => [String(row.id), row as Record<string, unknown>])
+    );
+    const sceneIdMap = Object.fromEntries(
+      inputScenes.map((scene) => [
+        scene.id,
+        isUuid(scene.id) && existingScenes.has(scene.id) ? scene.id : randomUUID()
+      ])
+    );
+    const itemIdMap = Object.fromEntries(
+      inputScenes.flatMap((scene) => scene.items.map((item) => [
+        item.id,
+        isUuid(item.id) && existingItems.has(item.id) ? item.id : randomUUID()
+      ]))
+    );
+
+    const sceneRows = inputScenes.map((scene) => ({
+      id: sceneIdMap[scene.id],
+      project_id: projectId,
+      scene_no: scene.sceneNo,
+      scene_title: scene.sceneTitle,
+      episode_numbers: scene.episodeNumbers,
+      sort_order: scene.sortOrder
+    }));
+    const storagePathsToDelete = new Set<string>();
+    const itemRows = inputScenes.flatMap((scene) => scene.items.map((item) => {
+      const currentImages = normalizeImages(existingItems.get(item.id)?.image_paths);
+      const keepPaths = new Set([
+        ...item.keepCostumeImagePaths,
+        ...item.keepHairImagePaths
+      ]);
+      currentImages.forEach((image) => {
+        if (!keepPaths.has(image.path)) storagePathsToDelete.add(image.path);
+      });
+      return {
+        id: itemIdMap[item.id],
+        project_id: projectId,
+        costume_scene_id: sceneIdMap[scene.id],
+        scene_no: scene.sceneNo,
+        actor_role: item.actorRole,
+        actor_name: item.actorName,
+        costume_content: item.costumeContent,
+        provider: item.provider,
+        hair: item.hair,
+        character_name: item.actorRole,
+        costume_name: item.costumeContent,
+        description: "",
+        memo: "",
+        image_paths: currentImages.filter((image) => keepPaths.has(image.path)),
+        sort_order: item.sortOrder
+      };
+    }));
+
+    step = "upsert_scenes";
+    if (sceneRows.length > 0) {
+      const { error } = await timed(
+        timings,
+        step,
+        () => supabase.from("project_costume_scenes").upsert(sceneRows, { onConflict: "id" })
+      );
+      if (error) throw error;
+    }
+
+    step = "upsert_items";
+    if (itemRows.length > 0) {
+      const { error } = await timed(
+        timings,
+        step,
+        () => supabase.from("project_costumes").upsert(itemRows, { onConflict: "id" })
+      );
+      if (error) throw error;
+    }
+
+    const liveItemIds = new Set(Object.values(itemIdMap));
+    const itemIdsToDelete = deletedItemIds.filter((id) => existingItems.has(id) && !liveItemIds.has(id));
+    itemIdsToDelete.forEach((id) => {
+      normalizeImages(existingItems.get(id)?.image_paths).forEach((image) => storagePathsToDelete.add(image.path));
+    });
+    step = "delete_items";
+    if (itemIdsToDelete.length > 0) {
+      const { error } = await timed(
+        timings,
+        step,
+        () => supabase.from("project_costumes").delete().eq("project_id", projectId).in("id", itemIdsToDelete)
+      );
+      if (error) throw error;
+    }
+
+    const liveSceneIds = new Set(Object.values(sceneIdMap));
+    const sceneIdsToDelete = deletedSceneIds.filter((id) => existingScenes.has(id) && !liveSceneIds.has(id));
+    if (sceneIdsToDelete.length > 0) {
+      const deletedSceneIdSet = new Set(sceneIdsToDelete);
+      existingItems.forEach((item) => {
+        if (!deletedSceneIdSet.has(String(item.costume_scene_id ?? ""))) return;
+        normalizeImages(item.image_paths).forEach((image) => storagePathsToDelete.add(image.path));
+      });
+    }
+    step = "delete_scenes";
+    if (sceneIdsToDelete.length > 0) {
+      const { error } = await timed(
+        timings,
+        step,
+        () => supabase.from("project_costume_scenes").delete().eq("project_id", projectId).in("id", sceneIdsToDelete)
+      );
+      if (error) throw error;
+    }
+
+    step = "verify";
+    const savedScenes = await timed(timings, step, () => readScenes(projectId));
+    const verification = verifyBulkSave(inputScenes, savedScenes, sceneIdMap);
+    if (
+      verification.expectedSceneCount !== verification.actualSceneCount
+      || verification.expectedItemCount !== verification.actualItemCount
+      || verification.missingScenes.length > 0
+      || verification.itemCountMismatches.length > 0
+    ) {
+      console.error("[costume-bulk-save:verification]", verification);
+      return NextResponse.json({
+        ok: false,
+        error: `저장 검증 실패: 씬 ${verification.expectedSceneCount}개 중 ${verification.actualSceneCount}개, 배역 ${verification.expectedItemCount}개 중 ${verification.actualItemCount}개가 확인되었습니다.`,
+        step,
+        scenes: savedScenes,
+        sceneIdMap,
+        itemIdMap,
+        verification,
+        timings
+      }, { status: 500 });
+    }
+
+    // DB 저장과 재조회 검증이 모두 끝난 뒤에만 더 이상 참조하지 않는 파일을 정리합니다.
+    step = "cleanup_storage";
+    if (storagePathsToDelete.size > 0) {
+      const { error } = await timed(
+        timings,
+        step,
+        () => supabase.storage.from("storyboards").remove([...storagePathsToDelete])
+      );
+      if (error) {
+        console.error("[costume-bulk-save:storage-cleanup]", safeError(error));
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      status: "saved",
+      scenes: savedScenes,
+      sceneIdMap,
+      itemIdMap,
+      verification,
+      timings
+    });
+  } catch (error) {
+    const source = safeError(error);
+    console.error("[costume-bulk-save]", { step, ...source, timings });
+    return NextResponse.json({
+      ok: false,
+      error: "의상 전체 저장을 완료하지 못했습니다.",
+      detail: source.message,
+      step,
+      timings
+    }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }
 }
 
@@ -262,6 +533,121 @@ async function getMaterialRole(request: NextRequest, projectId: string) {
   const grant = await getAccessGrant(request, projectId);
   if (grant) return grant.role;
   return (await canAdministerProject(request, projectId)) ? "admin" : null;
+}
+
+function normalizeBulkScenes(value: unknown): NormalizedBulkScene[] {
+  if (!Array.isArray(value) || value.length > 500) return [];
+  return value.flatMap((entry, sceneIndex) => {
+    if (!entry || typeof entry !== "object") return [];
+    const scene = entry as BulkSceneInput;
+    const rawItems = Array.isArray(scene.items) ? scene.items.slice(0, 5_000) : [];
+    const items = rawItems.flatMap((entryItem, itemIndex) => {
+      if (!entryItem || typeof entryItem !== "object") return [];
+      const item = entryItem as BulkItemInput;
+      return [{
+        id: cleanText(item.id, 160),
+        actorRole: cleanText(item.actorRole, 200),
+        actorName: cleanText(item.actorName, 200),
+        costumeContent: cleanText(item.costumeContent, 2_000),
+        provider: cleanText(item.provider, 200),
+        hair: cleanText(item.hair, 1_000),
+        sortOrder: toInteger(item.sortOrder, itemIndex),
+        keepCostumeImagePaths: normalizePathArray(item.keepCostumeImagePaths),
+        keepHairImagePaths: normalizePathArray(item.keepHairImagePaths)
+      }];
+    });
+    return [{
+      id: cleanText(scene.id, 160),
+      sceneNo: cleanText(scene.sceneNo, 80),
+      sceneTitle: cleanText(scene.sceneTitle, 300),
+      episodeNumbers: normalizeEpisodeNumbers(scene.episodeNumbers),
+      sortOrder: toInteger(scene.sortOrder, sceneIndex),
+      items
+    }];
+  });
+}
+
+function validateBulkScenes(scenes: NormalizedBulkScene[]) {
+  const sceneIds = new Set<string>();
+  const sceneKeys = new Set<string>();
+  const itemIds = new Set<string>();
+  for (const scene of scenes) {
+    if (!scene.id || !scene.sceneNo) return "씬 ID와 씬 번호가 필요합니다.";
+    const sceneKey = normalizeSceneKey(scene.sceneNo);
+    if (!sceneKey || sceneIds.has(scene.id) || sceneKeys.has(sceneKey)) {
+      return `"${scene.sceneNo || "이름 없음"}" 씬의 ID 또는 씬 번호가 중복되었습니다.`;
+    }
+    sceneIds.add(scene.id);
+    sceneKeys.add(sceneKey);
+    for (const item of scene.items) {
+      if (!item.id || itemIds.has(item.id)) return `"${scene.sceneNo}" 씬의 배역 ID가 중복되었습니다.`;
+      if (!item.actorRole && !item.actorName) return `"${scene.sceneNo}" 씬에 배역과 배우 이름이 모두 비어 있는 항목이 있습니다.`;
+      itemIds.add(item.id);
+    }
+  }
+  return "";
+}
+
+function normalizeUuidArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.map(String).filter(isUuid))).slice(0, 5_000);
+}
+
+function normalizePathArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(
+    value.map((entry) => cleanText(entry, 1_000)).filter(Boolean)
+  )).slice(0, 100);
+}
+
+function verifyBulkSave(
+  expectedScenes: NormalizedBulkScene[],
+  actualScenes: Awaited<ReturnType<typeof readScenes>>,
+  sceneIdMap: Record<string, string>
+) {
+  const actualById = new Map(actualScenes.map((scene) => [scene.id, scene]));
+  const missingScenes: string[] = [];
+  const itemCountMismatches: string[] = [];
+  expectedScenes.forEach((scene) => {
+    const actual = actualById.get(sceneIdMap[scene.id]);
+    if (!actual) {
+      missingScenes.push(scene.sceneNo);
+      return;
+    }
+    if (actual.items.length !== scene.items.length) {
+      itemCountMismatches.push(`${scene.sceneNo}: ${scene.items.length}개 → ${actual.items.length}개`);
+    }
+  });
+  return {
+    expectedSceneCount: expectedScenes.length,
+    actualSceneCount: actualScenes.length,
+    expectedItemCount: expectedScenes.reduce((total, scene) => total + scene.items.length, 0),
+    actualItemCount: actualScenes.reduce((total, scene) => total + scene.items.length, 0),
+    missingScenes,
+    itemCountMismatches
+  };
+}
+
+async function timed<T>(
+  timings: Record<string, number>,
+  label: string,
+  operation: () => PromiseLike<T>
+) {
+  const started = performance.now();
+  try {
+    return await operation();
+  } finally {
+    timings[label] = Math.round((performance.now() - started) * 10) / 10;
+  }
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function toInteger(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : fallback;
 }
 
 function normalizeActors(value: unknown): ActorSeed[] {
