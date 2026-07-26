@@ -8,6 +8,7 @@ import {
   OVERHEAD_CANVAS_HEIGHT,
   OVERHEAD_CANVAS_WIDTH
 } from "@/lib/shotOverhead";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import type {
   Shot,
   ShotOverheadDiagram,
@@ -192,6 +193,9 @@ export function ShotOverheadEditor({
   const [selected, setSelected] = useState<Selection>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [lineStart, setLineStart] = useState<CanvasPoint | null>(null);
+  const hasUnsavedChanges = !readOnly
+    && JSON.stringify(diagram) !== JSON.stringify(cloneDiagram(shot.overheadDiagram));
+  useUnsavedChangesGuard(hasUnsavedChanges);
 
   useEffect(() => {
     setDiagram(cloneDiagram(shot.overheadDiagram));

@@ -29,6 +29,7 @@ import {
   moveProjectStaffMember,
 } from "@/lib/dailyPlan/staffList";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const inputClassName =
   "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
@@ -89,6 +90,7 @@ export default function StaffListPage() {
     [staffGroups]
   );
   const notesSummary = useMemo(() => buildStaffNotesSummary(members), [members]);
+  useUnsavedChangesGuard(isDirty);
 
   const load = useCallback(async () => {
     if (!projectId || role === "progress") return;

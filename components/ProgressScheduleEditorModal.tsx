@@ -4,6 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { ImageIcon, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { DailyPlanMealTime } from "@/lib/types";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 export type ProgressScheduleEditorValues = {
   progressMemo: string;
@@ -33,6 +34,19 @@ export function ProgressScheduleEditorModal({
     imageFile: null
   });
   const [temporaryImageUrl, setTemporaryImageUrl] = useState<string | null>(null);
+  const initialFingerprint = JSON.stringify({
+    progressMemo: item.progressMemo ?? "",
+    imageUrl: item.imageUrl ?? null,
+    imageFile: null
+  });
+  const currentFingerprint = JSON.stringify({
+    progressMemo: values.progressMemo,
+    imageUrl: values.imageUrl,
+    imageFile: values.imageFile
+      ? `${values.imageFile.name}:${values.imageFile.size}:${values.imageFile.lastModified}`
+      : null
+  });
+  useUnsavedChangesGuard(!readOnly && currentFingerprint !== initialFingerprint);
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {

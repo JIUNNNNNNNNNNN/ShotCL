@@ -23,6 +23,7 @@ import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
 import { auditQuery, isQueryAuditEnabled } from "@/lib/queryAudit";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import type {
   CostumeImage,
   ProjectActor,
@@ -176,15 +177,7 @@ export default function ProjectCostumesPage() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!isDirty) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [isDirty]);
+  useUnsavedChangesGuard(isDirty);
 
   useEffect(() => {
     if (!projectId || !selectedDailyPlanId) {

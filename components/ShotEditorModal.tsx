@@ -5,6 +5,7 @@ import { ImageIcon, Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { Shot, ShotStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 export type ShotEditorValues = {
   sceneNumber: string;
@@ -81,10 +82,18 @@ export function ShotEditorModal({
   onDelete
 }: ShotEditorModalProps) {
   const [values, setValues] = useState<ShotEditorValues>(() => emptyValues(defaultOrderIndex));
+  const [savedFingerprint, setSavedFingerprint] = useState(() => (
+    shotEditorFingerprint(shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex))
+  ));
+  useUnsavedChangesGuard(
+    open && !readOnly && shotEditorFingerprint(values) !== savedFingerprint
+  );
 
   useEffect(() => {
     if (!open) return;
-    setValues(shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex));
+    const nextValues = shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex);
+    setValues(nextValues);
+    setSavedFingerprint(shotEditorFingerprint(nextValues));
   }, [defaultOrderIndex, open, shot]);
 
   useEffect(() => {
@@ -308,4 +317,13 @@ export function ShotEditorModal({
       </form>
     </div>
   );
+}
+
+function shotEditorFingerprint(values: ShotEditorValues) {
+  return JSON.stringify({
+    ...values,
+    imageFile: values.imageFile
+      ? `${values.imageFile.name}:${values.imageFile.size}:${values.imageFile.lastModified}`
+      : null
+  });
 }

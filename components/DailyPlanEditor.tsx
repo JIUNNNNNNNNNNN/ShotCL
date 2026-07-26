@@ -36,6 +36,7 @@ import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopL
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Button } from "@/components/ui/Button";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 
@@ -232,6 +233,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [locations, setLocations] = useState<DailyPlanLocation[]>(initialLocations);
   const [mealTimes, setMealTimes] = useState<DailyPlanMealTime[]>(initialMeals);
   const [scenes, setScenes] = useState<SceneBlockInput[]>(initialScenes);
+  const [savedEditorFingerprint, setSavedEditorFingerprint] = useState(() => (
+    createDailyPlanEditorFingerprint(
+      initialEditablePlanDraft,
+      initialPrintMeta,
+      initialLocations,
+      initialMeals,
+      initialScenes
+    )
+  ));
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
@@ -256,6 +266,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     [locations, mealTimes, plan, printMeta, scenes]
   );
   const deferredPreviewSource = useDeferredValue(previewSource);
+  const currentEditorFingerprint = useMemo(
+    () => createDailyPlanEditorFingerprint(plan, printMeta, locations, mealTimes, scenes),
+    [locations, mealTimes, plan, printMeta, scenes]
+  );
+  useUnsavedChangesGuard(currentEditorFingerprint !== savedEditorFingerprint);
   const previewData = useMemo(() => {
     const printablePlan = buildPlanForSave(
       deferredPreviewSource.plan,
@@ -749,12 +764,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
       const nextMeals = buildInitialMeals(savedDraft);
+      const nextScenes = shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations);
       setDailyPlanId(saved.plan.id);
       setPlan({ ...savedDraft, memo: savedMeta.memoText });
       setPrintMeta(savedMeta);
       setLocations(nextLocations);
       setMealTimes(nextMeals);
-      setScenes(shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations));
+      setScenes(nextScenes);
+      setSavedEditorFingerprint(createDailyPlanEditorFingerprint(
+        { ...savedDraft, memo: savedMeta.memoText },
+        savedMeta,
+        nextLocations,
+        nextMeals,
+        nextScenes
+      ));
 
       if (!dailyPlanId) {
         router.replace(`/projects/${project.id}/daily-plans/${saved.plan.id}`);
@@ -3599,6 +3622,16 @@ function formatTimeToHHMM(value: string) {
 function formatTimeDisplay(value: string) {
   const digits = formatTimeToHHMM(value);
   return digits ? `${digits.slice(0, 2)}:${digits.slice(2)}` : "";
+}
+
+function createDailyPlanEditorFingerprint(
+  plan: DailyPlanDraft,
+  printMeta: DailyPlanPrintMeta,
+  locations: DailyPlanLocation[],
+  mealTimes: DailyPlanMealTime[],
+  scenes: SceneBlockInput[]
+) {
+  return JSON.stringify({ plan, printMeta, locations, mealTimes, scenes });
 }
 
 function parseDurationMinutes(value: string) {

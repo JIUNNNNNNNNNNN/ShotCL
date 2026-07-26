@@ -33,6 +33,7 @@ import {
 } from "@/lib/data/projectReferenceAssets";
 import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
@@ -59,6 +60,7 @@ export default function ProjectScenarioPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  useUnsavedChangesGuard(hasChanges);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedId) ?? null,

@@ -19,6 +19,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { SceneReorderList } from "@/components/SceneReorderList";
 import {
   createBlankProjectSceneItem,
@@ -175,6 +176,7 @@ export default function ProjectSceneListPage() {
   const deletePopoverRef = useRef<HTMLDivElement | null>(null);
   const headerHelpPopoverRef = useRef<HTMLDivElement | null>(null);
   const actorCellTextPopoverRef = useRef<HTMLDivElement | null>(null);
+  useUnsavedChangesGuard(isDirty);
 
   const load = useCallback(async () => {
     if (!projectId) return;

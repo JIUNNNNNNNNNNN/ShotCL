@@ -1,11 +1,12 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useState } from "react";
+import { FormEvent, memo, useCallback, useRef, useState } from "react";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { validateProjectBasicInfo } from "@/lib/projectBasicInfo";
 import type { ProjectActor, ProjectBasicInfo } from "@/lib/types";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 type ProjectBasicInfoFormProps = {
   projectName: string;
@@ -33,6 +34,10 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   const [totalEpisodesDraft, setTotalEpisodesDraft] = useState(String(initialValue.totalEpisodes));
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const savedFingerprintRef = useRef(JSON.stringify({ value, totalEpisodesDraft }));
+  useUnsavedChangesGuard(
+    JSON.stringify({ value, totalEpisodesDraft }) !== savedFingerprintRef.current
+  );
 
   const updateStaff = useCallback((role: keyof ProjectBasicInfo["mainStaff"], field: "name" | "phone", nextValue: string) => {
     setValue((current) => ({
