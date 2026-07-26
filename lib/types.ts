@@ -365,6 +365,11 @@ export type ProjectStaffDepartment = {
   updatedAt: string;
 };
 
+export type ProjectSceneActorCell = {
+  mode: "color" | "text";
+  text?: string;
+};
+
 export type ProjectSceneItem = {
   id: string;
   projectId: string;
@@ -377,6 +382,7 @@ export type ProjectSceneItem = {
   sceneContent: string;
   characters: string;
   characterNotes: string;
+  actorCells: Record<string, ProjectSceneActorCell>;
   props: string;
   sortOrder: number;
   createdAt: string;

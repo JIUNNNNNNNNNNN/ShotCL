@@ -1,5 +1,9 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
-import type { ProjectSceneItem, ProjectSceneList } from "@/lib/types";
+import type {
+  ProjectSceneActorCell,
+  ProjectSceneItem,
+  ProjectSceneList
+} from "@/lib/types";
 
 const LOCAL_SCENE_LIST_KEY = "today-storyboard-project-scene-lists";
 
@@ -33,6 +37,7 @@ export function createBlankProjectSceneItem(
     sceneContent: "",
     characters: "",
     characterNotes: "",
+    actorCells: {},
     props: "",
     sortOrder,
     createdAt: now,
@@ -114,6 +119,7 @@ function normalizeSceneList(
       sceneContent: item.sceneContent.slice(0, 4000),
       characters: item.characters.slice(0, 1000),
       characterNotes: String(item.characterNotes ?? "").slice(0, 4000),
+      actorCells: normalizeActorCells(item.actorCells),
       props: String(item.props ?? "").slice(0, 1000),
       sortOrder: index + 1,
       updatedAt: new Date().toISOString()
@@ -135,6 +141,7 @@ function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
     sceneContent: String(row.scene_content ?? ""),
     characters: String(row.characters ?? ""),
     characterNotes: String(row.character_notes ?? ""),
+    actorCells: normalizeActorCells(row.actor_cells),
     props: String(row.props ?? ""),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
@@ -169,6 +176,7 @@ function readLocalSceneList(projectId: string): ProjectSceneList {
           items: sortSceneItems((current.items ?? []).map((item) => ({
             ...item,
             characterNotes: String(item.characterNotes ?? ""),
+            actorCells: normalizeActorCells(item.actorCells),
             props: String(item.props ?? "")
           }))),
           scenarioReference: current.scenarioReference ?? ""
@@ -195,6 +203,25 @@ function writeLocalSceneList(
   buckets[projectId] = sceneList;
   window.localStorage.setItem(LOCAL_SCENE_LIST_KEY, JSON.stringify(buckets));
   return sceneList;
+}
+
+function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCell> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized: Record<string, ProjectSceneActorCell> = {};
+  for (const [rawRole, rawCell] of Object.entries(value)) {
+    const role = rawRole.trim().slice(0, 120);
+    if (!role || !rawCell || typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
+    const record = rawCell as Record<string, unknown>;
+    if (record.mode === "color") {
+      normalized[role] = { mode: "color" };
+      continue;
+    }
+    if (record.mode === "text") {
+      const text = String(record.text ?? "").replace(/\r\n?/g, "\n").slice(0, 120);
+      if (text.trim()) normalized[role] = { mode: "text", text };
+    }
+  }
+  return normalized;
 }
 
 function createUuid() {

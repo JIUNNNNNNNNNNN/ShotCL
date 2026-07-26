@@ -20,6 +20,7 @@ type SceneItemInput = {
   sceneContent?: unknown;
   characters?: unknown;
   characterNotes?: unknown;
+  actorCells?: unknown;
   props?: unknown;
 };
 
@@ -35,6 +36,7 @@ const SCENE_COLUMNS = [
   "scene_content",
   "characters",
   "character_notes",
+  "actor_cells",
   "props",
   "sort_order",
   "created_at",
@@ -227,6 +229,7 @@ function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
     scene_content: normalizeText(item.sceneContent, 4000),
     characters: normalizeText(item.characters, 1000),
     character_notes: normalizeMultilineText(item.characterNotes, 4000),
+    actor_cells: normalizeActorCells(item.actorCells),
     props: normalizeMultilineText(item.props, 1000),
     sort_order: index + 1
   };
@@ -251,6 +254,25 @@ function normalizeText(value: unknown, maxLength: number) {
 
 function normalizeMultilineText(value: unknown, maxLength: number) {
   return String(value ?? "").replace(/\r\n?/g, "\n").slice(0, maxLength);
+}
+
+function normalizeActorCells(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const normalized: Record<string, { mode: "color" | "text"; text?: string }> = {};
+  for (const [rawRole, rawCell] of Object.entries(value)) {
+    const role = normalizeText(rawRole, 120);
+    if (!role || !rawCell || typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
+    const record = rawCell as Record<string, unknown>;
+    if (record.mode === "color") {
+      normalized[role] = { mode: "color" };
+      continue;
+    }
+    if (record.mode === "text") {
+      const text = normalizeMultilineText(record.text, 120);
+      if (text.trim()) normalized[role] = { mode: "text", text };
+    }
+  }
+  return normalized;
 }
 
 function isUuid(value: string) {
@@ -294,6 +316,16 @@ function sceneListError(error: unknown, fallback: string) {
   if (characterNotesColumnMissing) {
     return NextResponse.json(
       { error: "씬리스트 Characters 메모 migration을 먼저 적용해주세요." },
+      { status: 503 }
+    );
+  }
+  const actorCellsColumnMissing = (
+    code === "42703" ||
+    code === "PGRST204"
+  ) && /actor_cells/i.test(message);
+  if (actorCellsColumnMissing) {
+    return NextResponse.json(
+      { error: "씬리스트 배우칸 상태 migration을 먼저 적용해주세요." },
       { status: 503 }
     );
   }

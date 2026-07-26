@@ -26,7 +26,11 @@ import {
   saveProjectSceneList
 } from "@/lib/data/sceneList";
 import { getProject } from "@/lib/data/projects";
-import type { Project, ProjectSceneItem } from "@/lib/types";
+import type {
+  Project,
+  ProjectSceneActorCell,
+  ProjectSceneItem
+} from "@/lib/types";
 
 const inputClassName =
   "h-full min-h-8 w-full min-w-0 select-text border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none [-webkit-touch-callout:default] focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary";
@@ -47,6 +51,13 @@ type SceneCellColumn = SceneValueColumn | SceneActorColumn;
 type SceneFillColumn =
   Exclude<SceneValueColumn, "sceneNo" | "sceneContent">;
 type SceneVisualMergeColumn = SceneFillColumn | SceneActorColumn;
+type ActorCellState =
+  | { mode: "empty"; text: "" }
+  | { mode: "color"; text: "" }
+  | { mode: "text"; text: string };
+
+const ACTOR_COLOR_CELL_VALUE = "__actor_color__";
+const ACTOR_TEXT_CELL_PREFIX = "__actor_text__:";
 
 type SelectedSceneCell = {
   rowId: string;
@@ -103,8 +114,9 @@ type HeaderHelpPopoverState = {
   top: number;
 };
 
-type CharacterNotesPopoverState = {
+type ActorCellTextPopoverState = {
   rowId: string;
+  role: string;
   left: number;
   top: number;
   readOnly: boolean;
@@ -146,8 +158,8 @@ export default function ProjectSceneListPage() {
   const [editingCell, setEditingCell] = useState<SelectedSceneCell | null>(null);
   const [deletePopover, setDeletePopover] = useState<DeletePopoverState | null>(null);
   const [headerHelpPopover, setHeaderHelpPopover] = useState<HeaderHelpPopoverState | null>(null);
-  const [characterNotesPopover, setCharacterNotesPopover] =
-    useState<CharacterNotesPopoverState | null>(null);
+  const [actorCellTextPopover, setActorCellTextPopover] =
+    useState<ActorCellTextPopoverState | null>(null);
   const itemsRef = useRef(items);
   const selectedCellRef = useRef(selectedCell);
   const selectedRangeRef = useRef(selectedRange);
@@ -157,11 +169,11 @@ export default function ProjectSceneListPage() {
   const cellDragCleanupRef = useRef<(() => void) | null>(null);
   const sceneLongPressCleanupRef = useRef<(() => void) | null>(null);
   const headerLongPressCleanupRef = useRef<(() => void) | null>(null);
-  const characterLongPressCleanupRef = useRef<(() => void) | null>(null);
-  const suppressCharacterClickRef = useRef<string | null>(null);
+  const actorCellLongPressCleanupRef = useRef<(() => void) | null>(null);
+  const suppressActorCellClickRef = useRef<string | null>(null);
   const deletePopoverRef = useRef<HTMLDivElement | null>(null);
   const headerHelpPopoverRef = useRef<HTMLDivElement | null>(null);
-  const characterNotesPopoverRef = useRef<HTMLDivElement | null>(null);
+  const actorCellTextPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -222,7 +234,7 @@ export default function ProjectSceneListPage() {
       cellDragCleanupRef.current?.();
       sceneLongPressCleanupRef.current?.();
       headerLongPressCleanupRef.current?.();
-      characterLongPressCleanupRef.current?.();
+      actorCellLongPressCleanupRef.current?.();
       selectedCellRef.current = null;
       selectedRangeRef.current = null;
       setSelectedCell(null);
@@ -230,7 +242,7 @@ export default function ProjectSceneListPage() {
       setEditingCell(null);
       setDeletePopover(null);
       setHeaderHelpPopover(null);
-      setCharacterNotesPopover(null);
+      setActorCellTextPopover(null);
     };
     clearDesktopInteractions();
     mobileQuery.addEventListener("change", clearDesktopInteractions);
@@ -241,7 +253,7 @@ export default function ProjectSceneListPage() {
     cellDragCleanupRef.current?.();
     sceneLongPressCleanupRef.current?.();
     headerLongPressCleanupRef.current?.();
-    characterLongPressCleanupRef.current?.();
+    actorCellLongPressCleanupRef.current?.();
     document.body.style.removeProperty("user-select");
     document.body.style.removeProperty("cursor");
   }, []);
@@ -257,23 +269,23 @@ export default function ProjectSceneListPage() {
   }, [deletePopover]);
 
   useEffect(() => {
-    if (!headerHelpPopover && !characterNotesPopover) return;
+    if (!headerHelpPopover && !actorCellTextPopover) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (
         event.target instanceof Node &&
         (
           headerHelpPopoverRef.current?.contains(event.target) ||
-          characterNotesPopoverRef.current?.contains(event.target)
+          actorCellTextPopoverRef.current?.contains(event.target)
         )
       ) {
         return;
       }
       setHeaderHelpPopover(null);
-      setCharacterNotesPopover(null);
+      setActorCellTextPopover(null);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [characterNotesPopover, headerHelpPopover]);
+  }, [actorCellTextPopover, headerHelpPopover]);
 
   const cellColumns = useMemo<SceneCellColumn[]>(
     () => [
@@ -910,29 +922,43 @@ export default function ProjectSceneListPage() {
     });
   }, []);
 
-  const startCharacterNotesLongPress = useCallback((
+  const startActorCellTextLongPress = useCallback((
     event: ReactPointerEvent<HTMLElement>,
     item: ProjectSceneItem,
+    role: string,
     readOnly: boolean
   ) => {
-    if (isMobileSceneListInteraction(event)) return;
-    characterLongPressCleanupRef.current?.();
-    setCharacterNotesPopover(null);
-    characterLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
-      suppressCharacterClickRef.current = item.id;
+    actorCellLongPressCleanupRef.current?.();
+    setActorCellTextPopover(null);
+    actorCellLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
+      const cellKey = getActorCellKey(item.id, role);
+      suppressActorCellClickRef.current = cellKey;
+      const currentState = getActorCellState(item, role);
+      if (!readOnly) {
+        const nextItem = setActorCellState(item, role, {
+          mode: "text",
+          text: currentState.mode === "text" ? currentState.text : ""
+        });
+        updateItem(item.id, {
+          characters: nextItem.characters,
+          actorCells: nextItem.actorCells
+        });
+      }
       const width = 280;
-      setCharacterNotesPopover({
+      setActorCellTextPopover({
         rowId: item.id,
+        role,
         left: clampPopoverLeft(x, width),
-        top: getPopoverTop(y, 210),
+        top: getPopoverTop(y, 132),
         readOnly
       });
     });
-  }, []);
+  }, [updateItem]);
 
-  const consumeCharacterClickSuppression = useCallback((itemId: string) => {
-    if (suppressCharacterClickRef.current !== itemId) return false;
-    suppressCharacterClickRef.current = null;
+  const consumeActorCellClickSuppression = useCallback((rowId: string, role: string) => {
+    const cellKey = getActorCellKey(rowId, role);
+    if (suppressActorCellClickRef.current !== cellKey) return false;
+    suppressActorCellClickRef.current = null;
     return true;
   }, []);
 
@@ -1134,8 +1160,8 @@ export default function ProjectSceneListPage() {
                 onCellEditEnd={stopEditingCell}
                 onSceneLongPress={startSceneDeleteLongPress}
                 onHeaderLongPress={startHeaderHelpLongPress}
-                onCharacterNotesLongPress={startCharacterNotesLongPress}
-                onConsumeCharacterClickSuppression={consumeCharacterClickSuppression}
+                onActorCellTextLongPress={startActorCellTextLongPress}
+                onConsumeActorCellClickSuppression={consumeActorCellClickSuppression}
                 onUpdate={updateItem}
               />
             )}
@@ -1191,15 +1217,28 @@ export default function ProjectSceneListPage() {
         </div>
       ) : null}
 
-      {characterNotesPopover ? (
-        <CharacterNotesPopover
-          ref={characterNotesPopoverRef}
-          item={items.find((item) => item.id === characterNotesPopover.rowId)}
-          canEdit={canEdit && !characterNotesPopover.readOnly}
-          left={characterNotesPopover.left}
-          top={characterNotesPopover.top}
-          onChange={(characterNotes) => {
-            updateItem(characterNotesPopover.rowId, { characterNotes });
+      {actorCellTextPopover ? (
+        <ActorCellTextPopover
+          ref={actorCellTextPopoverRef}
+          item={items.find((item) => item.id === actorCellTextPopover.rowId)}
+          role={actorCellTextPopover.role}
+          canEdit={canEdit && !actorCellTextPopover.readOnly}
+          left={actorCellTextPopover.left}
+          top={actorCellTextPopover.top}
+          onChange={(text) => {
+            const item = items.find((candidate) => candidate.id === actorCellTextPopover.rowId);
+            if (!item) return;
+            const nextItem = setActorCellState(
+              item,
+              actorCellTextPopover.role,
+              text
+                ? { mode: "text", text }
+                : { mode: "empty", text: "" }
+            );
+            updateItem(actorCellTextPopover.rowId, {
+              characters: nextItem.characters,
+              actorCells: nextItem.actorCells
+            });
           }}
         />
       ) : null}
@@ -1324,7 +1363,13 @@ function MobileSceneRow({
   actorRoles: string[];
   locationStyle: PaletteStyle;
 }) {
-  const selectedCharacters = parseCharacters(item.characters);
+  const actorCells = actorRoles
+    .map((role, actorIndex) => ({
+      role,
+      actorIndex,
+      state: getActorCellState(item, role)
+    }))
+    .filter(({ state }) => state.mode !== "empty");
   const mergedLocation = isSameHorizontalLocation(item);
   return (
     <div
@@ -1362,18 +1407,20 @@ function MobileSceneRow({
       >
         <span className="flex w-full min-w-0 max-w-full flex-col items-start gap-0.5 overflow-hidden">
           <span className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-0.5">
-          {selectedCharacters.map((role) => {
-            const actorIndex = actorRoles.findIndex(
-              (candidate) => candidate.toLocaleLowerCase() === role.toLocaleLowerCase()
-            );
-            const actorStyle = getActorStyle(Math.max(actorIndex, 0));
+          {actorCells.map(({ role, actorIndex, state }) => {
+            const actorStyle = getActorStyle(actorIndex);
+            const isColored = state.mode === "color";
             return (
               <span
                 key={role}
-                className="max-w-full rounded px-0.5 py-px font-bold [overflow-wrap:anywhere]"
-                style={{ backgroundColor: actorStyle.background, color: actorStyle.color }}
+                className={`max-w-full px-0.5 py-px font-bold [overflow-wrap:anywhere] ${
+                  isColored ? "rounded" : ""
+                }`}
+                style={isColored
+                  ? { backgroundColor: actorStyle.background, color: actorStyle.color }
+                  : { color: "#2d332f" }}
               >
-                {role}
+                {state.mode === "text" ? `${role}: ${state.text}` : role}
               </span>
             );
           })}
@@ -1496,50 +1543,49 @@ function SceneHeaderCell({
   );
 }
 
-const CharacterNotesPopover = forwardRef<HTMLDivElement, {
+const ActorCellTextPopover = forwardRef<HTMLDivElement, {
   item: ProjectSceneItem | undefined;
+  role: string;
   canEdit: boolean;
   left: number;
   top: number;
   onChange: (value: string) => void;
-}>(function CharacterNotesPopover({
+}>(function ActorCellTextPopover({
   item,
+  role,
   canEdit,
   left,
   top,
   onChange
 }, ref) {
   if (!item) return null;
+  const cellState = getActorCellState(item, role);
+  const text = cellState.mode === "text" ? cellState.text : "";
   return (
     <div
       ref={ref}
       role="dialog"
-      aria-label={`${item.sceneNo || "현재"} Scene Characters 세부 메모`}
+      aria-label={`${item.sceneNo || "현재"} Scene ${role} 메모`}
       className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden rounded-xl border border-field-border bg-white shadow-[0_10px_28px_rgba(15,61,46,0.16)]"
       style={{ left, top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
       <p className="border-b border-field-border bg-field-soft px-3 py-2 text-xs font-black text-field-primary">
-        Characters · Scene {item.sceneNo || "—"}
+        {role} · Scene {item.sceneNo || "—"}
       </p>
       {canEdit ? (
-        <textarea
-          value={item.characterNotes}
+        <input
+          autoFocus
+          value={text}
           onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => handleMultilineEnterShortcut(
-            event,
-            item.characterNotes,
-            onChange
-          )}
-          rows={5}
-          maxLength={4000}
-          aria-label="Characters 세부 메모"
-          placeholder="예: 상아 V.O, 수연 실루엣"
-          className="block w-full resize-y bg-white px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
+          maxLength={120}
+          aria-label={`${role} 배우칸 메모`}
+          placeholder="V.O. / 실루엣 / 대역"
+          className="block min-h-11 w-full bg-white px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
         />
       ) : (
-        <p className="max-h-44 min-h-16 overflow-y-auto whitespace-pre-wrap px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
-          {item.characterNotes || "등록된 세부 메모가 없습니다."}
+        <p className="min-h-11 px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
+          {text || "등록된 메모가 없습니다."}
         </p>
       )}
     </div>
@@ -1562,8 +1608,8 @@ const SceneTableRow = memo(function SceneTableRow({
   onCellEditEnd,
   onSceneLongPress,
   onHeaderLongPress,
-  onCharacterNotesLongPress,
-  onConsumeCharacterClickSuppression,
+  onActorCellTextLongPress,
+  onConsumeActorCellClickSuppression,
   onUpdate,
 }: {
   item: ProjectSceneItem;
@@ -1590,18 +1636,15 @@ const SceneTableRow = memo(function SceneTableRow({
     item: ProjectSceneItem
   ) => void;
   onHeaderLongPress: HeaderLongPressHandler;
-  onCharacterNotesLongPress: (
+  onActorCellTextLongPress: (
     event: ReactPointerEvent<HTMLElement>,
     item: ProjectSceneItem,
+    role: string,
     readOnly: boolean
   ) => void;
-  onConsumeCharacterClickSuppression: (itemId: string) => boolean;
+  onConsumeActorCellClickSuppression: (itemId: string, role: string) => boolean;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
 }) {
-  const selectedCharacters = useMemo(
-    () => parseCharacters(item.characters),
-    [item.characters]
-  );
   const getCellInteraction = (
     column: SceneCellColumn,
     mergeRangeOverride?: SceneCellRange
@@ -1665,17 +1708,20 @@ const SceneTableRow = memo(function SceneTableRow({
   const sceneContentInteraction = getCellInteraction("sceneContent");
   const propsInteraction = getCellInteraction("props");
 
-  function toggleCharacter(role: string) {
-    const normalizedRole = role.trim();
-    const exists = selectedCharacters.some(
-      (character) => character.toLocaleLowerCase() === normalizedRole.toLocaleLowerCase()
+  function toggleActorColor(role: string) {
+    const currentState = getActorCellState(item, role);
+    if (currentState.mode === "text") return;
+    const nextItem = setActorCellState(
+      item,
+      role,
+      currentState.mode === "color"
+        ? { mode: "empty", text: "" }
+        : { mode: "color", text: "" }
     );
-    const next = exists
-      ? selectedCharacters.filter(
-          (character) => character.toLocaleLowerCase() !== normalizedRole.toLocaleLowerCase()
-        )
-      : [...selectedCharacters, normalizedRole];
-    onUpdate(item.id, { characters: next.join(", ") });
+    onUpdate(item.id, {
+      characters: nextItem.characters,
+      actorCells: nextItem.actorCells
+    });
   }
 
   return (
@@ -1858,9 +1904,7 @@ const SceneTableRow = memo(function SceneTableRow({
           }}
         >
           {actorRoles.map((role, actorIndex) => {
-            const selected = selectedCharacters.some(
-              (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
-            );
+            const state = getActorCellState(item, role);
             const column: SceneActorColumn = `actor:${role}`;
             const mergeRange = getVisualMergeRange(allItems, index, column);
             const mergePosition = getMergePosition(index, mergeRange);
@@ -1889,7 +1933,7 @@ const SceneTableRow = memo(function SceneTableRow({
                 column={column}
                 role={role}
                 sceneLabel={item.sceneNo || String(index + 1)}
-                selected={selected}
+                state={state}
                 canEdit={canEdit}
                 actorStyle={actorStyle}
                 mergePosition={mergePosition}
@@ -1897,10 +1941,10 @@ const SceneTableRow = memo(function SceneTableRow({
                 selectionPosition={selectionPosition}
                 onSelect={onCellSelect}
                 onToggle={() => {
-                  if (onConsumeCharacterClickSuppression(item.id)) return;
-                  toggleCharacter(role);
+                  if (onConsumeActorCellClickSuppression(item.id, role)) return;
+                  toggleActorColor(role);
                 }}
-                onLongPress={(event) => onCharacterNotesLongPress(event, item, !canEdit)}
+                onLongPress={(event) => onActorCellTextLongPress(event, item, role, !canEdit)}
               />
             );
           })}
@@ -1945,7 +1989,7 @@ function ActorSceneCell({
   column,
   role,
   sceneLabel,
-  selected,
+  state,
   canEdit,
   actorStyle,
   mergePosition,
@@ -1960,7 +2004,7 @@ function ActorSceneCell({
   column: SceneActorColumn;
   role: string;
   sceneLabel: string;
-  selected: boolean;
+  state: ActorCellState;
   canEdit: boolean;
   actorStyle: ActorPaletteStyle;
   mergePosition: MergePosition;
@@ -1970,10 +2014,13 @@ function ActorSceneCell({
   onToggle: () => void;
   onLongPress: (event: ReactPointerEvent<HTMLElement>) => void;
 }) {
-  const showValue = selected &&
-    (mergePosition === "single" || mergePosition === "start");
-  const mergesWithNext = selected &&
+  const isColored = state.mode === "color";
+  const showText = state.mode === "text";
+  const mergesWithNext = isColored &&
     (mergePosition === "start" || mergePosition === "middle");
+  const ariaLabel = showText
+    ? `${sceneLabel} Scene Character ${role} 메모 ${state.text}`
+    : `${sceneLabel} Scene Character ${role} ${isColored ? "색 제거" : "색 지정"}`;
 
   return (
     <div
@@ -1993,8 +2040,8 @@ function ActorSceneCell({
           : "border-b border-b-[#cbd0cb]"
       } ${canEdit ? "cursor-pointer" : "cursor-default"}`}
       style={{
-        backgroundColor: selected ? actorStyle.background : "#ffffff",
-        color: actorStyle.color,
+        backgroundColor: isColored ? actorStyle.background : "#ffffff",
+        color: showText ? "#2d332f" : actorStyle.color,
         boxShadow: isInRange
           ? getSelectionBoxShadow(selectionPosition)
           : undefined
@@ -2004,16 +2051,18 @@ function ActorSceneCell({
         <button
           type="button"
           onClick={onToggle}
-          aria-label={`${sceneLabel} Scene Character ${role} ${selected ? "제외" : "포함"}`}
-          aria-pressed={selected}
-          className="grid h-full min-h-9 w-full min-w-0 place-items-center bg-transparent text-[11px] font-black transition active:scale-95"
-          style={{ color: showValue ? actorStyle.color : "transparent" }}
+          aria-label={ariaLabel}
+          aria-pressed={isColored}
+          className="grid h-full min-h-9 w-full min-w-0 place-items-center overflow-hidden bg-transparent px-1 text-[10px] font-bold leading-4 transition active:scale-95"
+          title={showText ? state.text : undefined}
         >
-          O
+          {showText ? (
+            <span className="block w-full truncate">{state.text}</span>
+          ) : null}
         </button>
       ) : (
-        <span className="font-black" aria-hidden={!showValue}>
-          {showValue ? "O" : ""}
+        <span className="block w-full truncate px-1 text-center text-[10px] font-bold">
+          {showText ? state.text : ""}
         </span>
       )}
     </div>
@@ -2348,6 +2397,7 @@ function getVisualMergeRange(
   if (!isVisualMergeColumn(column)) return single;
   const value = getSceneCellValue(items[rowIndex], column).trim();
   if (!value) return single;
+  if (isActorColumn(column) && value !== ACTOR_COLOR_CELL_VALUE) return single;
   if (isEditingCell(items[rowIndex], column, editingCell)) return single;
 
   let startIndex = rowIndex;
@@ -2578,10 +2628,10 @@ function getSceneCellValue(item: ProjectSceneItem | undefined, column: SceneCell
   if (!item) return "";
   if (!isActorColumn(column)) return item[column];
   const role = column.slice("actor:".length);
-  const selected = parseCharacters(item.characters).some(
-    (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
-  );
-  return selected ? "O" : "";
+  const state = getActorCellState(item, role);
+  if (state.mode === "color") return ACTOR_COLOR_CELL_VALUE;
+  if (state.mode === "text") return `${ACTOR_TEXT_CELL_PREFIX}${state.text}`;
+  return "";
 }
 
 function setSceneCellValue(
@@ -2592,17 +2642,18 @@ function setSceneCellValue(
   if (isActorColumn(column)) {
     const role = column.slice("actor:".length).trim();
     if (!role) return item;
-    const selectedCharacters = parseCharacters(item.characters);
-    const hasRole = selectedCharacters.some(
-      (character) => character.toLocaleLowerCase() === role.toLocaleLowerCase()
-    );
-    const shouldSelect = /^(o|1|true)$/i.test(rawValue.trim());
-    const nextCharacters = shouldSelect
-      ? (hasRole ? selectedCharacters : [...selectedCharacters, role])
-      : selectedCharacters.filter(
-          (character) => character.toLocaleLowerCase() !== role.toLocaleLowerCase()
-        );
-    return { ...item, characters: nextCharacters.join(", ") };
+    const value = rawValue.trim();
+    if (!value) return setActorCellState(item, role, { mode: "empty", text: "" });
+    if (
+      value === ACTOR_COLOR_CELL_VALUE ||
+      /^(o|color|1|true)$/i.test(value)
+    ) {
+      return setActorCellState(item, role, { mode: "color", text: "" });
+    }
+    const text = value.startsWith(ACTOR_TEXT_CELL_PREFIX)
+      ? value.slice(ACTOR_TEXT_CELL_PREFIX.length)
+      : value;
+    return setActorCellState(item, role, { mode: "text", text });
   }
 
   let value = rawValue.replace(/\r?\n/g, " ");
@@ -2614,6 +2665,60 @@ function setSceneCellValue(
     value = normalized === "I" || normalized === "E" ? normalized : "";
   }
   return { ...item, [column]: value };
+}
+
+function getActorCellState(item: ProjectSceneItem, role: string): ActorCellState {
+  const normalizedRole = role.trim().toLocaleLowerCase();
+  const storedEntry = Object.entries(item.actorCells ?? {}).find(
+    ([key]) => key.trim().toLocaleLowerCase() === normalizedRole
+  );
+  const stored = storedEntry?.[1];
+  if (stored?.mode === "text" && String(stored.text ?? "").trim()) {
+    return { mode: "text", text: String(stored.text).slice(0, 120) };
+  }
+  if (stored?.mode === "color") return { mode: "color", text: "" };
+  const legacyColor = parseCharacters(item.characters).some(
+    (character) => character.toLocaleLowerCase() === normalizedRole
+  );
+  return legacyColor
+    ? { mode: "color", text: "" }
+    : { mode: "empty", text: "" };
+}
+
+function setActorCellState(
+  item: ProjectSceneItem,
+  role: string,
+  state: ActorCellState
+): ProjectSceneItem {
+  const normalizedRole = role.trim();
+  if (!normalizedRole) return item;
+  const roleKey = normalizedRole.toLocaleLowerCase();
+  const actorCells: Record<string, ProjectSceneActorCell> = { ...(item.actorCells ?? {}) };
+  for (const key of Object.keys(actorCells)) {
+    if (key.trim().toLocaleLowerCase() === roleKey) delete actorCells[key];
+  }
+
+  let characters = parseCharacters(item.characters).filter(
+    (character) => character.toLocaleLowerCase() !== roleKey
+  );
+  if (state.mode === "color") {
+    actorCells[normalizedRole] = { mode: "color" };
+    characters = [...characters, normalizedRole];
+  } else if (state.mode === "text" && state.text.trim()) {
+    actorCells[normalizedRole] = {
+      mode: "text",
+      text: state.text.slice(0, 120)
+    };
+  }
+  return {
+    ...item,
+    characters: characters.join(", "),
+    actorCells
+  };
+}
+
+function getActorCellKey(rowId: string, role: string) {
+  return `${rowId}::${role.trim().toLocaleLowerCase()}`;
 }
 
 function setVisualSceneCellValue(
