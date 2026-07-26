@@ -1,4 +1,3 @@
-import { getShotDiagramKey } from "@/lib/data/shotDiagrams";
 import type {
   ProjectCostume,
   ProjectCostumeScene,
@@ -6,7 +5,6 @@ import type {
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
   ProjectScenarioScene,
-  Shot
 } from "@/lib/types";
 
 type ApiError = { error?: string; detail?: string };
@@ -85,6 +83,15 @@ export async function uploadProjectReferenceAsset(
     shotRef?: string;
     groupId?: string;
     cropRatio?: number | null;
+    cropX?: number;
+    cropY?: number;
+    cropWidth?: number;
+    cropHeight?: number;
+    sourceType?: ProjectReferenceCrop["sourceType"];
+    sourceAssetId?: string;
+    pageIndex?: number;
+    title?: string;
+    memo?: string;
     sortOrder?: number;
   } = {}
 ): Promise<ProjectReferenceAsset> {
@@ -111,6 +118,10 @@ export async function updateProjectReferenceAsset(
   patch: {
     groupId?: string;
     crop?: Partial<ProjectReferenceCrop>;
+    title?: string;
+    memo?: string;
+    sceneNo?: string;
+    cutNo?: string;
     sortOrder?: number;
     scenarioScenes?: ProjectScenarioScene[];
     scenarioParseError?: string | null;
@@ -134,24 +145,6 @@ export async function deleteProjectReferenceAsset(projectId: string, id: string)
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError;
   if (!response.ok) throw new Error(payload.error || "자료를 삭제하지 못했습니다.");
-}
-
-/** 업로드형 부감도를 기존 JSON 부감도보다 우선 표시하도록 컷 ID별 URL을 만듭니다. */
-export async function loadShotOverheadImageUrls(shots: Shot[]): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  const firstShot = shots[0];
-  if (!firstShot?.dailyPlanId) return result;
-  const assets = await listProjectReferenceAssets(firstShot.projectId, "overhead", firstShot.dailyPlanId);
-  const byRef = new Map(
-    assets
-      .filter((asset) => asset.shotRef && asset.publicUrl)
-      .map((asset) => [asset.shotRef as string, asset.publicUrl])
-  );
-  shots.forEach((shot) => {
-    const url = byRef.get(getShotDiagramKey(shot).shotRef);
-    if (url) result.set(shot.id, url);
-  });
-  return result;
 }
 
 export async function listProjectCostumes(projectId: string): Promise<ProjectCostume[]> {

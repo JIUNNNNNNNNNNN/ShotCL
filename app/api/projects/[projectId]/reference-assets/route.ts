@@ -69,13 +69,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const sceneNo = cleanText(formData.get("sceneNo"), 100);
     const cutNo = cleanText(formData.get("cutNo"), 100);
     const shotRef = cleanText(formData.get("shotRef"), 500);
-    if (assetType === "overhead" && (!dailyPlanId || !shotRef)) {
-      return NextResponse.json({ error: "부감도에는 회차와 컷 식별값이 필요합니다." }, { status: 400 });
-    }
 
     const supabase = requireProjectAccessDb();
     const safeFilename = safeName(file.name);
-    uploadedPath = `project-assets/${projectId}/${assetType}/${Date.now()}-${randomUUID()}-${safeFilename}`;
+    const sourceType = normalizeSourceType(formData.get("sourceType"), file);
+    const storageFolder = sourceType === "upload_pdf"
+      ? "pdf"
+      : sourceType === "image_crop" || sourceType === "pdf_crop"
+        ? "crops"
+        : "images";
+    uploadedPath = `projects/${projectId}/archive/${assetType}/${storageFolder}/${Date.now()}-${randomUUID()}-${safeFilename}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const scenarioExtraction = assetType === "scenario"
       ? extractScenarioScenesFromPdf(fileBuffer)
@@ -101,16 +104,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
       cut_no: cutNo || null,
       shot_ref: shotRef || null,
       group_id: cleanText(formData.get("groupId"), 200) || null,
-      crop_data: normalizeCrop({
-        ratio: formData.get("cropRatio")
-      }),
+      crop_data: normalizeCrop(parseCropFormData(formData, sourceType)),
       scenario_scenes: scenarioExtraction?.scenes ?? [],
       scenario_parse_error: scenarioExtraction?.error ?? null,
       sort_order: toInteger(formData.get("sortOrder"))
     };
 
     let savedRow: Record<string, unknown> | null = null;
-    if (assetType === "overhead") {
+    if (assetType === "overhead" && dailyPlanId && shotRef) {
       const { data: existing, error: existingError } = await supabase
         .from("project_reference_assets")
         .select(SELECT_COLUMNS)
@@ -171,6 +172,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       id?: unknown;
       groupId?: unknown;
       crop?: unknown;
+      title?: unknown;
+      memo?: unknown;
+      sceneNo?: unknown;
+      cutNo?: unknown;
       sortOrder?: unknown;
       scenarioScenes?: unknown;
       scenarioParseError?: unknown;
@@ -182,6 +187,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const updatePayload: Record<string, unknown> = {};
     if ("groupId" in body) updatePayload.group_id = cleanText(body.groupId, 200) || null;
     if ("crop" in body) updatePayload.crop_data = normalizeCrop(body.crop);
+    if ("title" in body || "memo" in body) {
+      const { data: existingMetadata, error: metadataError } = await supabase
+        .from("project_reference_assets")
+        .select("crop_data")
+        .eq("id", id)
+        .eq("project_id", projectId)
+        .maybeSingle();
+      if (metadataError) throw metadataError;
+      const currentCrop = "crop" in body
+        ? normalizeCrop(body.crop)
+        : normalizeCrop(existingMetadata?.crop_data);
+      updatePayload.crop_data = normalizeCrop({
+        ...currentCrop,
+        ...(body.title !== undefined ? { title: cleanText(body.title, 240) } : {}),
+        ...(body.memo !== undefined ? { memo: cleanText(body.memo, 1_000) } : {})
+      });
+    }
+    if ("sceneNo" in body) updatePayload.scene_no = cleanText(body.sceneNo, 100) || null;
+    if ("cutNo" in body) updatePayload.cut_no = cleanText(body.cutNo, 100) || null;
     if ("sortOrder" in body) updatePayload.sort_order = toInteger(body.sortOrder);
 
     if ("scenarioScenes" in body || body.reanalyzeScenario === true) {
@@ -249,6 +273,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       .maybeSingle();
     if (readError) throw readError;
     if (!existing) return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
+    const { error: linkDeleteError } = await supabase
+      .from("shot_diagrams")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("diagram_type", "overhead")
+      .contains("data", { kind: "media_link", assetId: id, source: "reference" });
+    if (linkDeleteError && linkDeleteError.code !== "42P01") throw linkDeleteError;
     const { error: deleteError } = await supabase
       .from("project_reference_assets")
       .delete()
@@ -287,8 +318,11 @@ function validateFile(assetType: AssetType, file: File) {
     if (file.size > 50 * 1024 * 1024) return "PDF는 50MB 이하만 업로드할 수 있습니다.";
     return "";
   }
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    return file.size > 50 * 1024 * 1024 ? "PDF는 50MB 이하만 업로드할 수 있습니다." : "";
+  }
   if (!file.type.startsWith("image/") && !/\.(?:jpe?g|png|gif|webp|heic|heif)$/i.test(file.name)) {
-    return "이미지 파일만 업로드할 수 있습니다.";
+    return "PDF 또는 이미지 파일만 업로드할 수 있습니다.";
   }
   return file.size > 20 * 1024 * 1024 ? "이미지는 장당 20MB 이하만 업로드할 수 있습니다." : "";
 }
@@ -315,13 +349,52 @@ function normalizeCrop(value: unknown) {
     return Number.isFinite(parsed) ? parsed : fallback;
   };
   const ratio = number("ratio", 0);
+  const sourceType = normalizeStoredSourceType(source.sourceType);
+  const hasPageIndex = source.pageIndex !== null && source.pageIndex !== undefined && source.pageIndex !== "";
+  const pageIndexValue = Number(source.pageIndex);
   return {
     x: Math.min(1, Math.max(0, number("x", 0))),
     y: Math.min(1, Math.max(0, number("y", 0))),
     width: Math.min(1, Math.max(0.01, number("width", 1))),
     height: Math.min(1, Math.max(0.01, number("height", 1))),
-    ratio: ratio > 0 ? ratio : null
+    ratio: ratio > 0 ? ratio : null,
+    ...(sourceType ? { sourceType } : {}),
+    ...(cleanText(source.sourceAssetId, 100) ? { sourceAssetId: cleanText(source.sourceAssetId, 100) } : {}),
+    ...(hasPageIndex && Number.isInteger(pageIndexValue) && pageIndexValue >= 0 ? { pageIndex: pageIndexValue } : {}),
+    ...(cleanText(source.title, 240) ? { title: cleanText(source.title, 240) } : {}),
+    ...(cleanText(source.memo, 1_000) ? { memo: cleanText(source.memo, 1_000) } : {})
   };
+}
+
+function parseCropFormData(formData: FormData, sourceType: ReturnType<typeof normalizeSourceType>) {
+  return {
+    x: formData.get("cropX"),
+    y: formData.get("cropY"),
+    width: formData.get("cropWidth"),
+    height: formData.get("cropHeight"),
+    ratio: formData.get("cropRatio"),
+    sourceType,
+    sourceAssetId: formData.get("sourceAssetId"),
+    pageIndex: formData.get("pageIndex"),
+    title: formData.get("title"),
+    memo: formData.get("memo")
+  };
+}
+
+function normalizeSourceType(value: FormDataEntryValue | null, file: File) {
+  const normalized = normalizeStoredSourceType(value);
+  if (normalized) return normalized;
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name) ? "upload_pdf" : "upload_image";
+}
+
+function normalizeStoredSourceType(value: unknown) {
+  return value === "upload_image"
+    || value === "upload_pdf"
+    || value === "pdf_page"
+    || value === "image_crop"
+    || value === "pdf_crop"
+    ? value
+    : null;
 }
 
 function mapAssetRow(row: Record<string, unknown>) {

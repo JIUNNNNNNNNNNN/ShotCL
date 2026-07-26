@@ -170,6 +170,11 @@ export type ProjectReferenceCrop = {
   width: number;
   height: number;
   ratio: number | null;
+  sourceType?: "upload_image" | "upload_pdf" | "pdf_page" | "image_crop" | "pdf_crop";
+  sourceAssetId?: string | null;
+  pageIndex?: number | null;
+  title?: string;
+  memo?: string;
 };
 
 export type ProjectScenarioImageSegment = {
@@ -208,6 +213,33 @@ export type ProjectReferenceAsset = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type OverheadDiagramArchiveItem = {
+  id: string;
+  projectId: string;
+  title: string;
+  memo: string;
+  sceneNo: string;
+  cutNo: string;
+  diagram: ShotOverheadDiagram;
+  legacy?: boolean;
+  sourceDailyPlanId?: string;
+  sourceShotRef?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShotMediaType = "overhead" | "storyboard";
+
+export type ShotMediaLink = {
+  shotRef: string;
+  mediaType: ShotMediaType;
+  assetId: string;
+  source: "reference" | "diagram";
+  publicUrl: string | null;
+  filename: string;
+  diagram: ShotOverheadDiagram | null;
 };
 
 export type CostumeImage = {

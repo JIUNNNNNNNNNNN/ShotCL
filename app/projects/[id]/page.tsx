@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
@@ -14,16 +14,16 @@ import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
-import { loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
-import { loadShotOverheadImageUrls } from "@/lib/data/projectReferenceAssets";
+import { getShotDiagramKey, loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
+import { applyShotMediaLinks, loadShotMediaLinks } from "@/lib/data/shotMediaArchive";
 import { listDailyPlans, updateDailyPlanScheduleItem, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
-import { saveScheduleImage, saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
+import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
+import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
 const ShotEditorModal = dynamic(
   () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
@@ -35,6 +35,10 @@ const ImagePreviewModal = dynamic(
 );
 const ProgressScheduleEditorModal = dynamic(
   () => import("@/components/ProgressScheduleEditorModal").then((module) => module.ProgressScheduleEditorModal),
+  { ssr: false, loading: ModalLoadingFallback }
+);
+const ShotArchivePicker = dynamic(
+  () => import("@/components/ShotArchivePicker").then((module) => module.ShotArchivePicker),
   { ssr: false, loading: ModalLoadingFallback }
 );
 
@@ -109,7 +113,6 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 export default function ProjectDetailPage() {
   const { role } = useProjectAccess();
   const progressOnly = role === "progress";
-  const router = useRouter();
   const projectId = useProjectId();
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
@@ -125,6 +128,8 @@ export default function ProjectDetailPage() {
   const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
+  const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
+  const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -159,26 +164,29 @@ export default function ProjectDetailPage() {
       let shotsWithDiagrams = selectedShots;
       if (selectedShots.length > 0) {
         try {
-          const [diagrams, overheadImages] = await Promise.all([
+          const [diagrams, linksByRef] = await Promise.all([
             auditQuery(
               "progress.loadOverheadDiagrams",
               "app/projects/[id]/page.tsx:refresh",
               () => loadShotOverheadDiagrams(selectedShots)
             ),
             auditQuery(
-              "progress.loadOverheadImages",
+              "progress.loadMediaLinks",
               "app/projects/[id]/page.tsx:refresh",
-              () => loadShotOverheadImageUrls(selectedShots)
+              () => loadShotMediaLinks(selectedShots)
             )
           ]);
-          shotsWithDiagrams = selectedShots.map((shot) => ({
-            ...shot,
-            overheadDiagram: diagrams.get(shot.id) ?? null,
-            overheadImageUrl: overheadImages.get(shot.id) ?? null
-          }));
+          shotsWithDiagrams = applyShotMediaLinks(selectedShots, linksByRef, diagrams);
+          setMediaLinksByShotId(new Map(selectedShots.map((shot) => [
+            shot.id,
+            linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
+          ])));
         } catch {
-          // 부감도 미리보기 실패가 컷 진행표 자체를 막지 않도록 카드 데이터는 그대로 표시합니다.
+          // 자료 연결 조회 실패가 진행표 자체를 막지 않도록 기존 컷 데이터는 그대로 표시합니다.
+          setMediaLinksByShotId(new Map());
         }
+      } else {
+        setMediaLinksByShotId(new Map());
       }
       setDailyPlans(planData);
       setShots(shotsWithDiagrams);
@@ -202,11 +210,7 @@ export default function ProjectDetailPage() {
         "app/projects/[id]/page.tsx:refreshSelectedShots",
         () => listShots(projectId, dailyPlanId)
       );
-      setShots((current) => refreshedShots.map((shot) => ({
-        ...shot,
-        overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null,
-        overheadImageUrl: current.find((item) => item.id === shot.id)?.overheadImageUrl ?? null
-      })));
+      setShots((current) => refreshedShots.map((shot) => preserveShotMedia(shot, current.find((item) => item.id === shot.id))));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
     }
@@ -236,7 +240,7 @@ export default function ProjectDetailPage() {
       const savedShot = await updateShotStatus(targetShot, status);
       setShots((current) => current.map((shot) => (
         shot.id === savedShot.id
-          ? { ...savedShot, overheadDiagram: shot.overheadDiagram }
+          ? preserveShotMedia(savedShot, shot)
           : shot
       )));
     } catch (error) {
@@ -267,11 +271,7 @@ export default function ProjectDetailPage() {
         }
       ];
 
-      const [createdShot] = await createShotsFromDrafts(projectId, drafts, dailyPlanId);
-      if (createdShot && values.imageFile) {
-        const imageUrl = await saveShotStoryboardImage(projectId, createdShot.id, values.imageFile);
-        await updateShot(createdShot.id, { storyboardImageUrl: imageUrl }, projectId);
-      }
+      await createShotsFromDrafts(projectId, drafts, dailyPlanId);
 
       setIsAddOpen(false);
       setSuccessMessage("새 컷을 추가했습니다.");
@@ -291,11 +291,6 @@ export default function ProjectDetailPage() {
     setSuccessMessage("");
 
     try {
-      let imageUrl = values.storyboardImageUrl;
-      if (values.imageFile) {
-        imageUrl = await saveShotStoryboardImage(projectId, editingShot.id, values.imageFile);
-      }
-
       await updateShot(editingShot.id, {
         sceneNumber: values.sceneNumber.trim() || "1",
         cutNumber: values.cutNumber.trim() || "1",
@@ -305,8 +300,7 @@ export default function ProjectDetailPage() {
         characters: parseCharacters(values.charactersText),
         memo: editingShot.memo,
         orderIndex: editingShot.orderIndex,
-        status: editingShot.status,
-        storyboardImageUrl: imageUrl
+        status: editingShot.status
       }, projectId);
 
       setEditingShot(null);
@@ -365,25 +359,20 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const handleOpenOverhead = useCallback((shot: Shot) => {
-    const plan = shot.dailyPlanId || dailyPlanId;
-    const params = new URLSearchParams();
-    if (plan) params.set("dailyPlanId", plan);
-    params.set("shotRef", shot.id);
-    const query = `?${params.toString()}`;
-    router.push(`/projects/${encodeURIComponent(projectId)}/storyboard-overhead${query}`);
-  }, [dailyPlanId, projectId, router]);
+  const handleOpenMedia = useCallback((shot: Shot, type: ShotMediaType) => {
+    setMediaPicker({ shot, type });
+  }, []);
 
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
       onOpen={setEditingShot}
-      onOpenOverhead={handleOpenOverhead}
+      onOpenMedia={handleOpenMedia}
       onImagePreview={handleImagePreview}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
     />
-  ), [handleImagePreview, handleOpenOverhead, handleStatusChange, progressOnly]);
+  ), [handleImagePreview, handleOpenMedia, handleStatusChange, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -395,7 +384,7 @@ export default function ProjectDetailPage() {
 
     try {
       const savedShots = await reorderShots(projectId, dailyPlanId, nextShots.map((shot) => shot.id));
-      setShots(savedShots);
+      setShots((current) => savedShots.map((shot) => preserveShotMedia(shot, current.find((item) => item.id === shot.id))));
     } catch {
       setShots(previousShots);
       setErrorMessage("컷 순서를 저장하지 못했습니다.");
@@ -588,8 +577,30 @@ export default function ProjectDetailPage() {
       ) : null}
 
       {preview ? <ImagePreviewModal imageUrl={preview.url} title={preview.title} onClose={() => setPreview(null)} /> : null}
+      {mediaPicker ? (
+        <ShotArchivePicker
+          shot={mediaPicker.shot}
+          initialType={mediaPicker.type}
+          selectedLinks={mediaLinksByShotId.get(mediaPicker.shot.id) ?? []}
+          readOnly={progressOnly}
+          onClose={() => setMediaPicker(null)}
+          onSaved={async () => {
+            await refresh();
+          }}
+        />
+      ) : null}
     </>
   );
+}
+
+function preserveShotMedia(next: Shot, previous: Shot | undefined): Shot {
+  if (!previous) return next;
+  return {
+    ...next,
+    storyboardImageUrl: previous.storyboardImageUrl,
+    overheadImageUrl: previous.overheadImageUrl ?? null,
+    overheadDiagram: previous.overheadDiagram
+  };
 }
 
 function EpisodeSelection({

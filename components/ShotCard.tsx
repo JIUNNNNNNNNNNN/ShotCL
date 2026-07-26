@@ -1,16 +1,16 @@
 "use client";
 
 import { memo } from "react";
-import { Map } from "lucide-react";
+import { Images, Map } from "lucide-react";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
-import { type Shot, type ShotStatus } from "@/lib/types";
+import { type Shot, type ShotMediaType, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
 
 type ShotCardProps = {
   shot: Shot;
   onOpen: (shot: Shot) => void;
-  onOpenOverhead: (shot: Shot) => void;
+  onOpenMedia: (shot: Shot, type: ShotMediaType) => void;
   onImagePreview: (url: string, title: string) => void;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
   progressOnly?: boolean;
@@ -21,7 +21,7 @@ type ShotCardProps = {
 export const ShotCard = memo(function ShotCard({
   shot,
   onOpen,
-  onOpenOverhead,
+  onOpenMedia,
   onImagePreview,
   onStatusChange,
   progressOnly = false,
@@ -71,13 +71,13 @@ export const ShotCard = memo(function ShotCard({
     >
       <div className={cn("grid min-w-0 max-w-full gap-2 overflow-hidden", hasMedia && "sm:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] sm:items-center")}>
         {hasMedia ? (
-          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-hidden rounded-none gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
+          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-visible rounded-none gap-1.5 sm:h-32", shot.storyboardImageUrl && hasOverhead ? "grid-cols-2" : "grid-cols-1")}>
             {shot.storyboardImageUrl ? (
               <button
                 type="button"
                 onClick={handleImageClick}
                 data-no-drag="true"
-                className="flex h-full w-full max-w-full min-w-0 items-center justify-center overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                className="flex h-full w-full max-w-full min-w-0 items-center justify-center overflow-visible !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="콘티 크게 보기"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -97,7 +97,7 @@ export const ShotCard = memo(function ShotCard({
                   onImagePreview(shot.overheadImageUrl as string, `${displayText || shot.title} 부감도`);
                 }}
                 data-no-drag="true"
-                className="h-full w-full max-w-full min-w-0 overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                className="h-full w-full max-w-full min-w-0 overflow-visible !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="업로드 부감도 크게 보기"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -113,10 +113,10 @@ export const ShotCard = memo(function ShotCard({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onOpenOverhead(shot);
+                  onOpenMedia(shot, "overhead");
                 }}
                 data-no-drag="true"
-                className="h-full w-full max-w-full min-w-0 overflow-hidden !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
+                className="h-full w-full max-w-full min-w-0 overflow-visible !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="부감도&콘티 페이지로 이동"
               >
                 <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
@@ -130,22 +130,39 @@ export const ShotCard = memo(function ShotCard({
           <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenOverhead(shot);
-            }}
-            disabled={isOverheadLoading}
-            className={cn(
-              "ml-auto inline-flex min-h-7 shrink-0 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
-              hasOverhead ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
-            )}
-            title={progressOnly ? "부감도&콘티 보기" : "부감도&콘티에서 수정"}
-          >
-            <Map className="h-3.5 w-3.5" aria-hidden />
-            부감도
-          </button>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenMedia(shot, "storyboard");
+              }}
+              className={cn(
+                "inline-flex min-h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+                shot.storyboardImageUrl ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
+              )}
+              title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
+            >
+              <Images className="h-3.5 w-3.5" aria-hidden />
+              콘티
+            </button>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenMedia(shot, "overhead");
+              }}
+              disabled={isOverheadLoading}
+              className={cn(
+                "inline-flex min-h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
+                hasOverhead ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
+              )}
+              title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
+            >
+              <Map className="h-3.5 w-3.5" aria-hidden />
+              부감도
+            </button>
+          </div>
         </div>
 
         {displayText ? (

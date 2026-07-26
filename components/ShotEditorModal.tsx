@@ -1,7 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { ImageIcon, Save, Trash2, X } from "lucide-react";
+import { FormEvent, useEffect, useState } from "react";
+import { Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import type { Shot, ShotStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -111,15 +111,6 @@ export function ShotEditorModal({
     setValues((current) => ({ ...current, [field]: value }));
   }
 
-  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    event.target.value = "";
-
-    if (!file) return;
-    updateField("imageFile", file);
-    updateField("storyboardImageUrl", URL.createObjectURL(file));
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!readOnly) onSave?.(values);
@@ -168,40 +159,6 @@ export function ShotEditorModal({
           </div>
 
           <div className={cn("grid", mode === "add" ? "gap-3" : "gap-2")}>
-            <div className={cn("grid gap-1.5", mode === "edit" && readOnly && !values.storyboardImageUrl && "hidden")}>
-              <span className="text-[11px] font-black text-field-muted">콘티</span>
-              <div className={cn(
-                "grid items-center gap-2",
-                readOnly ? "grid-cols-1" : mode === "add" ? "grid-cols-[96px_1fr]" : "grid-cols-[80px_1fr]"
-              )}>
-                <div className={cn(
-                  "flex aspect-[4/3] items-center justify-center rounded-none text-[11px] font-black text-field-muted",
-                  readOnly ? "w-full max-w-[11rem] justify-self-center" : mode === "add" ? "w-24" : "w-20"
-                )}>
-                  {values.storyboardImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={values.storyboardImageUrl} alt="콘티 미리보기" className="block h-full max-h-full w-full max-w-full rounded-none object-contain" />
-                  ) : (
-                    <span className="grid place-items-center gap-1">
-                      <ImageIcon className="h-5 w-5" aria-hidden />
-                      콘티 없음
-                    </span>
-                  )}
-                </div>
-                {!readOnly ? <div className="grid gap-1.5">
-                  <label className="flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-field-border bg-white px-2 text-xs font-black text-field-primary">
-                    이미지 선택
-                    <input type="file" accept="image/*,.heic,.heif" className="sr-only" onChange={handleImageChange} />
-                  </label>
-                  {values.storyboardImageUrl ? (
-                    <Button variant="ghost" onClick={() => updateField("storyboardImageUrl", null)} className="!min-h-9 py-1 text-xs">
-                      이미지 삭제
-                    </Button>
-                  ) : null}
-                </div> : null}
-              </div>
-            </div>
-
             {mode === "add" ? <div className="grid grid-cols-3 gap-3">
               <label className="grid gap-2">
                 <span className="text-xs font-black text-field-muted">씬 번호</span>
