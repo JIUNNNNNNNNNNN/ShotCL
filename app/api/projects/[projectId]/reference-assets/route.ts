@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
-  let uploadedPath = "";
+  const uploadedPaths: string[] = [];
   try {
     const projectId = await getProjectId(context);
     if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
@@ -59,6 +59,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const formData = await request.formData();
     const assetType = normalizeAssetType(formData.get("assetType"));
     const file = formData.get("file");
+    const thumbnail = formData.get("thumbnail");
     if (!assetType || !(file instanceof File)) {
       return NextResponse.json({ error: "업로드할 자료가 없습니다." }, { status: 400 });
     }
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       : sourceType === "image_crop" || sourceType === "pdf_crop"
         ? "crops"
         : "images";
-    uploadedPath = `projects/${projectId}/archive/${assetType}/${storageFolder}/${Date.now()}-${randomUUID()}-${safeFilename}`;
+    const uploadedPath = `projects/${projectId}/archive/${assetType}/${storageFolder}/${Date.now()}-${randomUUID()}-${safeFilename}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const scenarioExtraction = assetType === "scenario"
       ? extractScenarioScenesFromPdf(fileBuffer)
@@ -90,7 +91,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
         upsert: false
       });
     if (uploadError) throw uploadError;
+    uploadedPaths.push(uploadedPath);
     const { data: publicData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(uploadedPath);
+    let thumbnailPath = "";
+    let thumbnailUrl = "";
+    if (thumbnail instanceof File && thumbnail.size > 0 && thumbnail.type.startsWith("image/")) {
+      thumbnailPath = `projects/${projectId}/archive/${assetType}/thumbnails/${Date.now()}-${randomUUID()}-${safeName(thumbnail.name)}`;
+      const { error: thumbnailError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(thumbnailPath, Buffer.from(await thumbnail.arrayBuffer()), {
+          contentType: thumbnail.type || "image/jpeg",
+          upsert: false
+        });
+      if (thumbnailError) throw thumbnailError;
+      uploadedPaths.push(thumbnailPath);
+      thumbnailUrl = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(thumbnailPath).data.publicUrl;
+    }
+    const cropData = parseCropFormData(formData, sourceType);
     const payload = {
       project_id: projectId,
       asset_type: assetType,
@@ -104,7 +121,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       cut_no: cutNo || null,
       shot_ref: shotRef || null,
       group_id: cleanText(formData.get("groupId"), 200) || null,
-      crop_data: normalizeCrop(parseCropFormData(formData, sourceType)),
+      crop_data: normalizeCrop({
+        ...cropData,
+        ...(thumbnailPath ? { thumbnailPath, thumbnailUrl } : {})
+      }),
       scenario_scenes: scenarioExtraction?.scenes ?? [],
       scenario_parse_error: scenarioExtraction?.error ?? null,
       sort_order: toInteger(formData.get("sortOrder"))
@@ -132,9 +152,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
           .single();
         if (error) throw error;
         savedRow = data;
-        const previousPath = String(existing.storage_path ?? "");
-        if (previousPath && previousPath !== uploadedPath) {
-          await supabase.storage.from(STORAGE_BUCKET).remove([previousPath]);
+        const previousPaths = [
+          String(existing.storage_path ?? ""),
+          cleanText(normalizeCrop(existing.crop_data).thumbnailPath, 1_000)
+        ].filter((path) => path && !uploadedPaths.includes(path));
+        if (previousPaths.length > 0) {
+          await supabase.storage.from(STORAGE_BUCKET).remove(previousPaths);
         }
       }
     }
@@ -150,9 +173,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     return NextResponse.json({ ok: true, asset: mapAssetRow(savedRow) }, { status: 201 });
   } catch (error) {
-    if (uploadedPath) {
+    if (uploadedPaths.length > 0) {
       try {
-        await requireProjectAccessDb().storage.from(STORAGE_BUCKET).remove([uploadedPath]);
+        await requireProjectAccessDb().storage.from(STORAGE_BUCKET).remove(uploadedPaths);
       } catch {
         // 메타데이터 저장 실패 응답을 우선합니다.
       }
@@ -170,6 +193,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     const body = (await request.json()) as {
       id?: unknown;
+      ids?: unknown;
+      operation?: unknown;
+      folderId?: unknown;
       groupId?: unknown;
       crop?: unknown;
       title?: unknown;
@@ -181,9 +207,40 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       scenarioParseError?: unknown;
       reanalyzeScenario?: unknown;
     };
+    const supabase = requireProjectAccessDb();
+    if (body.operation === "move_many") {
+      const ids = normalizeIds(body.ids);
+      if (ids.length === 0) return NextResponse.json({ error: "이동할 자료를 선택해주세요." }, { status: 400 });
+      const folderId = cleanText(body.folderId, 100) || null;
+      if (folderId) {
+        const { data: folder, error: folderError } = await supabase
+          .from("project_archive_folders")
+          .select("id")
+          .eq("id", folderId)
+          .eq("project_id", projectId)
+          .maybeSingle();
+        if (folderError) throw folderError;
+        if (!folder) return NextResponse.json({ error: "이동할 폴더를 찾을 수 없습니다." }, { status: 404 });
+      }
+      const { data: assets, error: readError } = await supabase
+        .from("project_reference_assets")
+        .select("id,crop_data")
+        .eq("project_id", projectId)
+        .in("id", ids);
+      if (readError) throw readError;
+      await mapWithLimit(assets ?? [], 6, async (asset) => {
+        const { error } = await supabase
+          .from("project_reference_assets")
+          .update({ crop_data: normalizeCrop({ ...normalizeCrop(asset.crop_data), folderId }) })
+          .eq("id", asset.id)
+          .eq("project_id", projectId);
+        if (error) throw error;
+      });
+      return NextResponse.json({ ok: true, moved: (assets ?? []).length, folderId });
+    }
+
     const id = cleanText(body.id, 100);
     if (!id) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
-    const supabase = requireProjectAccessDb();
     const updatePayload: Record<string, unknown> = {};
     if ("groupId" in body) updatePayload.group_id = cleanText(body.groupId, 200) || null;
     if ("crop" in body) updatePayload.crop_data = normalizeCrop(body.crop);
@@ -262,35 +319,46 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if ((await getMaterialRole(request, projectId)) !== "admin") {
       return NextResponse.json({ error: "자료 삭제는 Key staff만 할 수 있습니다." }, { status: 403 });
     }
-    const id = cleanText(request.nextUrl.searchParams.get("id"), 100);
-    if (!id) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
+    const body = await request.json().catch(() => ({})) as { ids?: unknown };
+    const queryId = cleanText(request.nextUrl.searchParams.get("id"), 100);
+    const ids = normalizeIds(body.ids);
+    if (queryId) ids.unshift(queryId);
+    const uniqueIds = [...new Set(ids)].slice(0, 500);
+    if (uniqueIds.length === 0) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
     const supabase = requireProjectAccessDb();
     const { data: existing, error: readError } = await supabase
       .from("project_reference_assets")
-      .select("id,storage_path")
-      .eq("id", id)
+      .select("id,storage_path,crop_data")
       .eq("project_id", projectId)
-      .maybeSingle();
+      .in("id", uniqueIds);
     if (readError) throw readError;
-    if (!existing) return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
-    const { error: linkDeleteError } = await supabase
-      .from("shot_diagrams")
-      .delete()
-      .eq("project_id", projectId)
-      .eq("diagram_type", "overhead")
-      .contains("data", { kind: "media_link", assetId: id, source: "reference" });
-    if (linkDeleteError && linkDeleteError.code !== "42P01") throw linkDeleteError;
+    if (!existing || existing.length === 0) {
+      return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
+    }
+    await mapWithLimit(existing, 6, async (asset) => {
+      const { error: linkDeleteError } = await supabase
+        .from("shot_diagrams")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("diagram_type", "overhead")
+        .contains("data", { kind: "media_link", assetId: asset.id, source: "reference" });
+      if (linkDeleteError && linkDeleteError.code !== "42P01") throw linkDeleteError;
+    });
     const { error: deleteError } = await supabase
       .from("project_reference_assets")
       .delete()
-      .eq("id", id)
-      .eq("project_id", projectId);
+      .eq("project_id", projectId)
+      .in("id", existing.map((asset) => asset.id));
     if (deleteError) throw deleteError;
-    if (existing.storage_path) {
-      const { error: storageError } = await supabase.storage.from(STORAGE_BUCKET).remove([existing.storage_path]);
+    const storagePaths = existing.flatMap((asset) => [
+      cleanText(asset.storage_path, 1_000),
+      cleanText(normalizeCrop(asset.crop_data).thumbnailPath, 1_000)
+    ]).filter(Boolean);
+    if (storagePaths.length > 0) {
+      const { error: storageError } = await supabase.storage.from(STORAGE_BUCKET).remove(storagePaths);
       if (storageError) console.error("[reference-assets:storage-delete]", safeError(storageError));
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deleted: existing.length });
   } catch (error) {
     return materialError(error, "자료를 삭제하지 못했습니다.");
   }
@@ -365,10 +433,20 @@ function normalizeCrop(value: unknown) {
     ...(cleanText(source.memo, 1_000) ? { memo: cleanText(source.memo, 1_000) } : {}),
     ...(positiveNumber(source.basePageWidth) ? { basePageWidth: positiveNumber(source.basePageWidth) } : {}),
     ...(positiveNumber(source.basePageHeight) ? { basePageHeight: positiveNumber(source.basePageHeight) } : {}),
+    ...(positiveNumber(source.cropWidth) ? { cropWidth: Math.min(1, positiveNumber(source.cropWidth)) } : {}),
+    ...(positiveNumber(source.cropHeight) ? { cropHeight: Math.min(1, positiveNumber(source.cropHeight)) } : {}),
+    ...(positiveNumber(source.aspectRatio) ? { aspectRatio: positiveNumber(source.aspectRatio) } : {}),
+    ...(source.clickPlacementMode === "center" ? { clickPlacementMode: "center" as const } : {}),
+    ...(unitNumber(source.centerX) !== null ? { centerX: unitNumber(source.centerX) as number } : {}),
+    ...(unitNumber(source.centerY) !== null ? { centerY: unitNumber(source.centerY) as number } : {}),
+    ...(nonNegativeInteger(source.orderIndex) !== null ? { orderIndex: nonNegativeInteger(source.orderIndex) as number } : {}),
     ...(positiveNumber(source.rowStep) ? { rowStep: Math.min(1, positiveNumber(source.rowStep)) } : {}),
     ...(positiveInteger(source.rowsPerPage) ? { rowsPerPage: positiveInteger(source.rowsPerPage) } : {}),
     ...(source.targetColumn === "storyboard" ? { targetColumn: "storyboard" as const } : {}),
-    ...(source.includeContext === false || source.includeContext === "false" ? { includeContext: false as const } : {})
+    ...(source.includeContext === false || source.includeContext === "false" ? { includeContext: false as const } : {}),
+    ...(cleanText(source.thumbnailUrl, 2_000) ? { thumbnailUrl: cleanText(source.thumbnailUrl, 2_000) } : {}),
+    ...(cleanText(source.thumbnailPath, 1_000) ? { thumbnailPath: cleanText(source.thumbnailPath, 1_000) } : {}),
+    ...("folderId" in source ? { folderId: cleanText(source.folderId, 100) || null } : {})
   };
 }
 
@@ -386,10 +464,18 @@ function parseCropFormData(formData: FormData, sourceType: ReturnType<typeof nor
     memo: formData.get("memo"),
     basePageWidth: formData.get("basePageWidth"),
     basePageHeight: formData.get("basePageHeight"),
+    cropWidth: formData.get("templateCropWidth"),
+    cropHeight: formData.get("templateCropHeight"),
+    aspectRatio: formData.get("aspectRatio"),
+    clickPlacementMode: formData.get("clickPlacementMode"),
+    centerX: formData.get("centerX"),
+    centerY: formData.get("centerY"),
+    orderIndex: formData.get("cropOrderIndex"),
     rowStep: formData.get("rowStep"),
     rowsPerPage: formData.get("rowsPerPage"),
     targetColumn: formData.get("targetColumn"),
-    includeContext: formData.get("includeContext")
+    includeContext: formData.get("includeContext"),
+    folderId: formData.get("folderId")
   };
 }
 
@@ -401,6 +487,18 @@ function positiveNumber(value: unknown) {
 function positiveInteger(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
+}
+
+function unitNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : null;
+}
+
+function nonNegativeInteger(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : null;
 }
 
 function normalizeSourceType(value: FormDataEntryValue | null, file: File) {
@@ -516,4 +614,28 @@ function safeError(error: unknown) {
     code: typeof value.code === "string" ? value.code : "",
     message: typeof value.message === "string" ? value.message : "Unknown error"
   };
+}
+
+function normalizeIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => cleanText(entry, 100))
+    .filter(Boolean)
+    .slice(0, 500);
+}
+
+async function mapWithLimit<T>(
+  values: T[],
+  limit: number,
+  worker: (value: T) => Promise<void>
+) {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      await worker(values[index]);
+    }
+  });
+  await Promise.all(runners);
 }

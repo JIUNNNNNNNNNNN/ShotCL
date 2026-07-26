@@ -1,15 +1,30 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChangeEvent,
+  DragEvent,
+  PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
+import {
+  Check,
+  CheckSquare,
   Clapperboard,
   FileImage,
   FileText,
+  FolderInput,
+  FolderPlus,
   ImagePlus,
   Map as MapIcon,
+  Move,
   Pencil,
   Search,
+  Square,
   Trash2,
   Upload,
   X
@@ -23,15 +38,24 @@ import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { Card } from "@/components/ui/Card";
 import {
   createCroppedArchiveFile,
+  createArchiveThumbnail,
   loadArchiveImagePages,
+  mapWithConcurrency,
+  optimizeArchiveImage,
   releaseArchivePages,
   renderArchivePdfPages,
   type ArchiveImportPage,
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
 import {
+  createProjectArchiveFolder,
+  deleteProjectArchiveFolder,
   deleteProjectReferenceAsset,
+  deleteProjectReferenceAssets,
+  listProjectArchiveFolders,
   listProjectReferenceAssets,
+  moveProjectReferenceAssets,
+  renameProjectArchiveFolder,
   updateProjectReferenceAsset,
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
@@ -44,6 +68,7 @@ import {
 import { createEmptyShotOverheadDiagram } from "@/lib/shotOverhead";
 import type {
   OverheadDiagramArchiveItem,
+  ProjectArchiveFolder,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   Shot,
@@ -73,6 +98,15 @@ type DiagramDraft = {
   shot: Shot;
 };
 
+type LassoBox = {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+};
+
+const PAGE_SIZE = 48;
+
 export default function ProjectStoryboardOverheadPage() {
   const params = useParams<{ id: string | string[] }>();
   const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
@@ -82,8 +116,16 @@ export default function ProjectStoryboardOverheadPage() {
   const [activeType, setActiveType] = useState<ArchiveType>("overhead");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
   const [storyboards, setStoryboards] = useState<ProjectReferenceAsset[]>([]);
+  const [folders, setFolders] = useState<ProjectArchiveFolder[]>([]);
   const [diagramArchives, setDiagramArchives] = useState<OverheadDiagramArchiveItem[]>([]);
   const [query, setQuery] = useState("");
+  const [activeFolderId, setActiveFolderId] = useState("all");
+  const [sortMode, setSortMode] = useState<"newest" | "name" | "scene" | "folder">("newest");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [moveFolderId, setMoveFolderId] = useState("");
+  const [lasso, setLasso] = useState<LassoBox | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
@@ -97,22 +139,34 @@ export default function ProjectStoryboardOverheadPage() {
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
   const preparingRef = useRef(false);
+  const folderUploadRef = useRef<HTMLInputElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLElement>());
+  const lassoBaseSelectionRef = useRef<Set<string>>(new Set());
+  const lassoMovedRef = useRef(false);
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
     setIsLoading(true);
     try {
-      const [project, overheadAssets, storyboardAssets, diagrams] = await Promise.all([
+      const [project, overheadAssets, storyboardAssets, diagrams, folderResult] = await Promise.all([
         getProject(projectId),
         listProjectReferenceAssets(projectId, "overhead"),
         listProjectReferenceAssets(projectId, "storyboard"),
-        listOverheadDiagramArchive(projectId)
+        listOverheadDiagramArchive(projectId),
+        listProjectArchiveFolders(projectId)
+          .then((value) => ({ value, error: "" }))
+          .catch((error: unknown) => ({
+            value: [] as ProjectArchiveFolder[],
+            error: error instanceof Error ? error.message : "아카이브 폴더를 불러오지 못했습니다."
+          }))
       ]);
       setProjectName(project?.name ?? "프로젝트");
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
       setDiagramArchives(diagrams);
-      setErrorMessage("");
+      setFolders(folderResult.value);
+      setErrorMessage(folderResult.error);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "부감도와 콘티 아카이브를 불러오지 못했습니다.");
     } finally {
@@ -132,7 +186,17 @@ export default function ProjectStoryboardOverheadPage() {
     return () => media.removeEventListener("change", update);
   }, []);
 
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }, [activeType, activeFolderId, query, sortMode]);
+
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
+  const folderNameById = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, folder.name])),
+    [folders]
+  );
   const sourceAssets = useMemo(
     () => activeAssets.filter((asset) => asset.mimeType === "application/pdf" || asset.groupId?.startsWith("source:")),
     [activeAssets]
@@ -141,15 +205,39 @@ export default function ProjectStoryboardOverheadPage() {
     () => activeAssets.filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:")),
     [activeAssets]
   );
-  const filteredAssets = useMemo(
-    () => imageAssets.filter((asset) => matchesAssetQuery(asset, query)),
-    [imageAssets, query]
-  );
+  const filteredAssets = useMemo(() => {
+    const filtered = imageAssets.filter((asset) => {
+      const folderMatches = activeFolderId === "all"
+        || activeFolderId === "unfiled" && !asset.crop.folderId
+        || asset.crop.folderId === activeFolderId;
+      return folderMatches && matchesAssetQuery(asset, query);
+    });
+    return [...filtered].sort((left, right) => {
+      if (sortMode === "name") {
+        return (left.crop.title || left.filename).localeCompare(right.crop.title || right.filename, "ko-KR");
+      }
+      if (sortMode === "scene") {
+        return `${left.sceneNo || ""}-${left.cutNo || ""}`.localeCompare(
+          `${right.sceneNo || ""}-${right.cutNo || ""}`,
+          "ko-KR",
+          { numeric: true }
+        );
+      }
+      if (sortMode === "folder") {
+        return (folderNameById.get(left.crop.folderId || "") || "미분류").localeCompare(
+          folderNameById.get(right.crop.folderId || "") || "미분류",
+          "ko-KR"
+        );
+      }
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    });
+  }, [activeFolderId, folderNameById, imageAssets, query, sortMode]);
+  const visibleAssets = filteredAssets.slice(0, visibleCount);
   const filteredDiagrams = useMemo(
-    () => activeType === "overhead"
+    () => activeType === "overhead" && (activeFolderId === "all" || activeFolderId === "unfiled")
       ? diagramArchives.filter((item) => matchesDiagramQuery(item, query))
       : [],
-    [activeType, diagramArchives, query]
+    [activeFolderId, activeType, diagramArchives, query]
   );
 
   async function preparePdf(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
@@ -161,7 +249,7 @@ export default function ProjectStoryboardOverheadPage() {
   async function prepareImages(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    await prepareFiles(assetType, files, "images");
+    await prepareFiles(assetType, files, "images", true);
   }
 
   async function prepareFiles(
@@ -204,16 +292,23 @@ export default function ProjectStoryboardOverheadPage() {
         const existingCount = (assetType === "overhead" ? overheads : storyboards)
           .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
           .length;
-        for (let index = 0; index < files.length; index += 1) {
-          setProgressMessage(`${assetType === "overhead" ? "부감도" : "콘티"} 이미지 업로드 ${index + 1}/${files.length}`);
-          await uploadProjectReferenceAsset(projectId, assetType, files[index], {
+        let completed = 0;
+        await mapWithConcurrency(files, 3, async (file, index) => {
+          setProgressMessage(`이미지 최적화 중 · ${file.name}`);
+          const optimized = await optimizeArchiveImage(file);
+          setProgressMessage(`썸네일 생성 완료 · 업로드 중 ${completed + 1}/${files.length}`);
+          await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
+            thumbnailFile: optimized.thumbnailFile,
             sourceType: "upload_image",
             groupId: batchId,
+            folderId: selectedFolderValue(activeFolderId),
             sortOrder: existingCount + index
           });
-        }
-        setProgressMessage("");
+          completed += 1;
+          setProgressMessage(`저장 중 ${completed}/${files.length}`);
+        });
         await loadArchive();
+        setProgressMessage("");
         return;
       }
       const pages: ArchiveImportPage[] = [];
@@ -288,26 +383,33 @@ export default function ProjectStoryboardOverheadPage() {
           });
           sourceAssetsByIndex.set(fileIndex, original);
         }
-        for (let index = 0; index < value.results.length; index += 1) {
-          const result = value.results[index];
+        let completed = 0;
+        await mapWithConcurrency(value.results, 3, async (result, index) => {
           const { page, crop } = result;
-          setProgressMessage(`선택 결과 저장 ${index + 1}/${value.results.length}`);
+          setProgressMessage(`crop 이미지 생성 중 ${index + 1}/${value.results.length}`);
           const resultFile = crop
             ? await createCroppedArchiveFile(page, crop, page.name)
             : new File([page.blob], page.name, { type: "image/jpeg" });
+          setProgressMessage(`썸네일 생성 중 ${index + 1}/${value.results.length}`);
+          const thumbnailFile = await createArchiveThumbnail(resultFile);
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
+            thumbnailFile,
             sourceType: crop ? "pdf_crop" : "pdf_page",
             sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
             pageIndex: page.index,
             groupId: batchId,
+            folderId: selectedFolderValue(activeFolderId),
             ...cropMetadata(crop, page, value.cropTemplate),
+            cropOrderIndex: index,
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
             sortOrder: imageAssets.length + index
           });
-        }
+          completed += 1;
+          setProgressMessage(`저장 중 ${completed}/${value.results.length}`);
+        });
       } else if (value.results.some((result) => result.crop)) {
         const sourceAssetsByIndex = new Map<number, ProjectReferenceAsset>();
         for (let index = 0; index < pendingImport.pages.length; index += 1) {
@@ -325,40 +427,53 @@ export default function ProjectStoryboardOverheadPage() {
           });
           sourceAssetsByIndex.set(page.sourceFileIndex, source);
         }
-        for (let index = 0; index < value.results.length; index += 1) {
-          const result = value.results[index];
+        const cropResults = value.results.filter((result) => result.crop);
+        let completed = 0;
+        await mapWithConcurrency(cropResults, 3, async (result, index) => {
           const { page, crop } = result;
-          if (!crop) continue;
-          setProgressMessage(`crop 결과 저장 ${index + 1}/${value.results.length}`);
+          if (!crop) return;
+          setProgressMessage(`crop 이미지 생성 중 ${index + 1}/${cropResults.length}`);
           const resultFile = await createCroppedArchiveFile(page, crop, page.name);
+          const thumbnailFile = await createArchiveThumbnail(resultFile);
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
+            thumbnailFile,
             sourceType: "image_crop",
             sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
             pageIndex: page.index,
             groupId: batchId,
+            folderId: selectedFolderValue(activeFolderId),
             ...cropMetadata(crop, page, value.cropTemplate),
+            cropOrderIndex: index,
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
             sortOrder: imageAssets.length + index
           });
-        }
+          completed += 1;
+          setProgressMessage(`저장 중 ${completed}/${cropResults.length}`);
+        });
       } else {
-        for (let index = 0; index < value.results.length; index += 1) {
-          const page = value.results[index].page;
-          const sourceFile = page.originalFile ?? new File([page.blob], page.name, { type: "image/jpeg" });
-          setProgressMessage(`이미지 저장 ${index + 1}/${value.results.length}`);
-          await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
+        let completed = 0;
+        await mapWithConcurrency(value.results, 3, async (result, index) => {
+          const page = result.page;
+          const displayFile = new File([page.blob], page.name, { type: "image/jpeg" });
+          const thumbnailFile = await createArchiveThumbnail(displayFile);
+          setProgressMessage(`업로드 중 ${index + 1}/${value.results.length}`);
+          await uploadProjectReferenceAsset(projectId, pendingImport.assetType, displayFile, {
+            thumbnailFile,
             sourceType: "upload_image",
             groupId: batchId,
+            folderId: selectedFolderValue(activeFolderId),
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
             sortOrder: imageAssets.length + index
           });
-        }
+          completed += 1;
+          setProgressMessage(`저장 중 ${completed}/${value.results.length}`);
+        });
       }
       closeImport();
       setProgressMessage("");
@@ -369,6 +484,181 @@ export default function ProjectStoryboardOverheadPage() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function createFolder(nameOverride?: string) {
+    if (!projectId || !canEdit) return null;
+    const name = (nameOverride ?? window.prompt("새 폴더 이름을 입력하세요.") ?? "").trim();
+    if (!name) return null;
+    try {
+      const folder = await createProjectArchiveFolder(projectId, name, folders.length);
+      setFolders((current) => [...current, folder]);
+      return folder;
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "폴더를 만들지 못했습니다.");
+      return null;
+    }
+  }
+
+  async function renameActiveFolder() {
+    if (!projectId || !canEdit || activeFolderId === "all" || activeFolderId === "unfiled") return;
+    const folder = folders.find((entry) => entry.id === activeFolderId);
+    if (!folder) return;
+    const name = (window.prompt("폴더 이름을 변경하세요.", folder.name) ?? "").trim();
+    if (!name || name === folder.name) return;
+    try {
+      const updated = await renameProjectArchiveFolder(projectId, folder.id, name);
+      setFolders((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "폴더 이름을 바꾸지 못했습니다.");
+    }
+  }
+
+  async function removeActiveFolder() {
+    if (!projectId || !canEdit || activeFolderId === "all" || activeFolderId === "unfiled") return;
+    const folder = folders.find((entry) => entry.id === activeFolderId);
+    if (!folder || !window.confirm(`"${folder.name}" 폴더를 삭제할까요? 폴더 안 자료는 자동 삭제되지 않습니다.`)) return;
+    try {
+      await deleteProjectArchiveFolder(projectId, folder.id);
+      setFolders((current) => current.filter((entry) => entry.id !== folder.id));
+      setActiveFolderId("all");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "폴더를 삭제하지 못했습니다.");
+    }
+  }
+
+  async function uploadFolder(event: ChangeEvent<HTMLInputElement>) {
+    if (!projectId || !canEdit) return;
+    const files = Array.from(event.target.files ?? []).filter(isImageFile);
+    event.target.value = "";
+    if (files.length === 0) {
+      setErrorMessage("선택한 폴더에 지원하는 이미지가 없습니다.");
+      return;
+    }
+    setIsPreparing(true);
+    preparingRef.current = true;
+    try {
+      const groups = new Map<string, File[]>();
+      files.forEach((file) => {
+        const relativePath = file.webkitRelativePath || file.name;
+        const folderName = relativePath.split("/")[0] || "업로드 폴더";
+        groups.set(folderName, [...(groups.get(folderName) ?? []), file]);
+      });
+      for (const [folderName, folderFiles] of groups) {
+        let folder = folders.find((entry) => entry.name === folderName);
+        folder ??= await createFolder(folderName) ?? undefined;
+        if (!folder) continue;
+        let completed = 0;
+        await mapWithConcurrency(folderFiles, 3, async (file, index) => {
+          setProgressMessage(`이미지 최적화 중 · ${file.name}`);
+          const optimized = await optimizeArchiveImage(file);
+          setProgressMessage(`폴더 업로드 중 ${completed + 1}/${folderFiles.length}`);
+          await uploadProjectReferenceAsset(projectId, activeType, optimized.displayFile, {
+            thumbnailFile: optimized.thumbnailFile,
+            sourceType: "upload_image",
+            folderId: folder.id,
+            groupId: `folder:${folder.id}`,
+            sortOrder: imageAssets.length + index
+          });
+          completed += 1;
+          setProgressMessage(`저장 중 ${completed}/${folderFiles.length}`);
+        });
+      }
+      await loadArchive();
+      setProgressMessage("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "폴더를 업로드하지 못했습니다.");
+      setProgressMessage("");
+    } finally {
+      preparingRef.current = false;
+      setIsPreparing(false);
+    }
+  }
+
+  function toggleAssetSelection(assetId: string, additive = true) {
+    setSelectedIds((current) => {
+      const next = additive ? new Set(current) : new Set<string>();
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }
+
+  async function moveSelectedAssets() {
+    if (!projectId || selectedIds.size === 0) return;
+    try {
+      setIsSaving(true);
+      await moveProjectReferenceAssets(projectId, [...selectedIds], moveFolderId || null);
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      await loadArchive();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "선택한 자료를 이동하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deleteSelectedAssets() {
+    if (!projectId || selectedIds.size === 0) return;
+    if (!window.confirm(`선택한 자료 ${selectedIds.size}개를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`)) return;
+    try {
+      setIsSaving(true);
+      await deleteProjectReferenceAssets(projectId, [...selectedIds]);
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      await loadArchive();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "선택한 자료를 삭제하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function beginLasso(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!canEdit || !supportsDesktopDrop || event.pointerType !== "mouse" || event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("input,textarea,select,a,[data-no-lasso]")) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    lassoBaseSelectionRef.current = event.metaKey || event.ctrlKey || event.shiftKey
+      ? new Set(selectedIds)
+      : new Set();
+    lassoMovedRef.current = false;
+    setLasso({
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY
+    });
+  }
+
+  function moveLasso(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!lasso) return;
+    event.preventDefault();
+    const next = { ...lasso, currentX: event.clientX, currentY: event.clientY };
+    const bounds = clientBounds(next);
+    if (Math.abs(next.currentX - next.startX) > 4 || Math.abs(next.currentY - next.startY) > 4) {
+      lassoMovedRef.current = true;
+      setSelectionMode(true);
+    }
+    const ids = new Set(lassoBaseSelectionRef.current);
+    cardRefs.current.forEach((node, id) => {
+      if (rectanglesIntersect(bounds, node.getBoundingClientRect())) ids.add(id);
+    });
+    setSelectedIds(ids);
+    setLasso(next);
+  }
+
+  function endLasso(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!lasso) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setLasso(null);
+    window.setTimeout(() => {
+      lassoMovedRef.current = false;
+    }, 0);
   }
 
   function openNewDiagram() {
@@ -551,6 +841,99 @@ export default function ProjectStoryboardOverheadPage() {
               </div>
             ) : null}
           </div>
+          <div className="flex flex-wrap items-center gap-2 border-t border-field-border pt-3">
+            <select
+              value={activeFolderId}
+              onChange={(event) => setActiveFolderId(event.target.value)}
+              className="min-h-9 min-w-36 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-text"
+              aria-label="아카이브 폴더 필터"
+            >
+              <option value="all">모든 폴더</option>
+              <option value="unfiled">미분류</option>
+              {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            </select>
+            <select
+              value={sortMode}
+              onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
+              className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-text"
+              aria-label="아카이브 정렬"
+            >
+              <option value="newest">최신순</option>
+              <option value="name">이름순</option>
+              <option value="scene">씬/컷순</option>
+              <option value="folder">폴더순</option>
+            </select>
+            {canEdit ? (
+              <>
+                <button type="button" onClick={() => void createFolder()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                  <FolderPlus className="h-3.5 w-3.5" aria-hidden />
+                  폴더
+                </button>
+                {activeFolderId !== "all" && activeFolderId !== "unfiled" ? (
+                  <>
+                    <button type="button" onClick={() => void renameActiveFolder()} className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">이름 변경</button>
+                    <button type="button" onClick={() => void removeActiveFolder()} className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-danger">폴더 삭제</button>
+                  </>
+                ) : null}
+                {supportsDesktopDrop ? (
+                  <>
+                    <button type="button" onClick={() => folderUploadRef.current?.click()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                      <FolderInput className="h-3.5 w-3.5" aria-hidden />
+                      폴더 업로드
+                    </button>
+                    <input
+                      ref={folderUploadRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                      multiple
+                      className="sr-only"
+                      disabled={isPreparing || isSaving}
+                      onChange={(event) => void uploadFolder(event)}
+                      {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                    />
+                  </>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectionMode((current) => !current);
+                    setSelectedIds(new Set());
+                  }}
+                  className={`ml-auto inline-flex min-h-9 items-center gap-1 rounded-full border px-3 text-xs font-black ${
+                    selectionMode
+                      ? "border-field-primary bg-field-primary text-white"
+                      : "border-field-border bg-white text-field-primary"
+                  }`}
+                >
+                  <CheckSquare className="h-3.5 w-3.5" aria-hidden />
+                  {selectionMode ? "선택 종료" : "선택"}
+                </button>
+              </>
+            ) : null}
+          </div>
+          {canEdit && selectedIds.size > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 border-t border-field-border bg-field-soft/55 px-2 py-2">
+              <span className="text-xs font-black text-field-primary">{selectedIds.size}개 선택</span>
+              <select
+                value={moveFolderId}
+                onChange={(event) => setMoveFolderId(event.target.value)}
+                className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-bold"
+                aria-label="선택 자료 이동 폴더"
+              >
+                <option value="">미분류로 이동</option>
+                {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              </select>
+              <button type="button" disabled={isSaving} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
+                <Move className="h-3.5 w-3.5" aria-hidden />
+                이동
+              </button>
+              <button type="button" disabled={isSaving} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
+                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                일괄 삭제
+              </button>
+              <button type="button" onClick={() => setSelectedIds(new Set())} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">선택 해제</button>
+            </div>
+          ) : null}
           <p className="text-xs font-bold text-field-muted">업로드한 자료는 진행도에 자동 적용되지 않습니다. 진행도 컷 카드에서 명시적으로 선택해야 표시됩니다.</p>
         </Card>
 
@@ -562,38 +945,100 @@ export default function ProjectStoryboardOverheadPage() {
           {filteredDiagrams.length + filteredAssets.length === 0 ? (
             <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            <div
+              ref={gridRef}
+              className="relative grid select-none grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
+              onPointerDown={beginLasso}
+              onPointerMove={moveLasso}
+              onPointerUp={endLasso}
+              onPointerCancel={endLasso}
+              onContextMenu={(event) => event.preventDefault()}
+            >
               {filteredDiagrams.map((item) => (
                 <article key={item.id} className="grid min-w-0 gap-2 border border-field-border bg-white p-2">
-                  <button type="button" onClick={() => openDiagram(item, false)} className="grid aspect-[4/3] place-items-center bg-field-soft">
+                  <button type="button" data-no-lasso onClick={() => openDiagram(item, false)} className="grid aspect-[4/3] place-items-center bg-field-soft">
                     <ShotOverheadPreview diagram={item.diagram} label={`${item.title} 부감도`} />
                   </button>
                   <ArchiveText title={item.title} sceneNo={item.sceneNo} cutNo={item.cutNo} memo={item.legacy ? `기존 컷 자료 · ${item.sourceShotRef || ""}` : item.memo} />
                   {canEdit && !item.legacy ? (
                     <div className="grid grid-cols-2 gap-1">
-                      <button type="button" onClick={() => openDiagram(item, true)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />수정</button>
-                      <button type="button" onClick={() => deleteDiagram(item)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
+                      <button type="button" data-no-lasso onClick={() => openDiagram(item, true)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />수정</button>
+                      <button type="button" data-no-lasso onClick={() => deleteDiagram(item)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
                     </div>
                   ) : null}
                 </article>
               ))}
-              {filteredAssets.map((asset) => (
-                <article key={asset.id} className="grid min-w-0 gap-2 border border-field-border bg-white p-2">
-                  <button type="button" onClick={() => setPreview({ url: asset.publicUrl, title: asset.crop.title || asset.filename })} className="grid aspect-[4/3] place-items-center bg-field-soft">
+              {visibleAssets.map((asset) => {
+                const selected = selectedIds.has(asset.id);
+                return (
+                <article
+                  key={asset.id}
+                  ref={(node) => {
+                    if (node) cardRefs.current.set(asset.id, node);
+                    else cardRefs.current.delete(asset.id);
+                  }}
+                  className={`relative grid min-w-0 select-none gap-2 border bg-white p-2 ${
+                    selected ? "border-[#ef8f39] ring-2 ring-[#ef8f39]/35" : "border-field-border"
+                  }`}
+                  onContextMenu={(event) => event.preventDefault()}
+                >
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      if (lassoMovedRef.current) return;
+                      if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
+                        event.preventDefault();
+                        toggleAssetSelection(asset.id);
+                        return;
+                      }
+                      setPreview({ url: asset.publicUrl, title: asset.crop.title || asset.filename });
+                    }}
+                    className="grid aspect-[4/3] place-items-center bg-field-soft"
+                    aria-pressed={selectionMode ? selected : undefined}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={asset.publicUrl} alt={asset.crop.title || asset.filename} className="block h-full w-full rounded-none object-contain" />
+                    <img
+                      src={asset.crop.thumbnailUrl || asset.publicUrl}
+                      alt={asset.crop.title || asset.filename}
+                      loading="lazy"
+                      decoding="async"
+                      draggable={false}
+                      className="block h-full w-full rounded-none object-contain"
+                    />
                   </button>
+                  {selectionMode || selected ? (
+                    <span className={`pointer-events-none absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border ${
+                      selected ? "border-[#ef8f39] bg-[#ef8f39] text-white" : "border-field-border bg-white text-field-muted"
+                    }`} aria-hidden>
+                      {selected ? <Check className="h-4 w-4" /> : <Square className="h-3.5 w-3.5" />}
+                    </span>
+                  ) : null}
                   <ArchiveText title={asset.crop.title || asset.filename} sceneNo={asset.sceneNo || ""} cutNo={asset.cutNo || ""} memo={asset.crop.memo || ""} />
+                  <p className="truncate px-1 text-[10px] font-bold text-field-muted">
+                    {folderNameById.get(asset.crop.folderId || "") || "미분류"}
+                  </p>
                   {canEdit ? (
                     <div className="grid grid-cols-2 gap-1">
-                      <button type="button" onClick={() => openMetadata(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />정보</button>
-                      <button type="button" onClick={() => deleteAsset(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
+                      <button type="button" data-no-lasso onClick={() => openMetadata(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />정보</button>
+                      <button type="button" data-no-lasso onClick={() => deleteAsset(asset)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-danger"><Trash2 className="h-3.5 w-3.5" aria-hidden />삭제</button>
                     </div>
                   ) : null}
                 </article>
-              ))}
+              )})}
+              {lasso && gridRef.current ? (
+                <div
+                  className="pointer-events-none absolute z-20 border border-[#ef8f39] bg-[#ef8f39]/15"
+                  style={lassoStyle(lasso, gridRef.current.getBoundingClientRect())}
+                  aria-hidden
+                />
+              ) : null}
             </div>
           )}
+          {visibleAssets.length < filteredAssets.length ? (
+            <button type="button" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)} className="mx-auto min-h-9 rounded-full border border-field-border bg-white px-4 text-xs font-black text-field-primary">
+              더 보기 · {visibleAssets.length}/{filteredAssets.length}
+            </button>
+          ) : null}
         </Card>
 
         {sourceAssets.length > 0 ? (
@@ -758,14 +1203,51 @@ function cropMetadata(
     cropWidth: crop.width,
     cropHeight: crop.height,
     cropRatio: cropPixelRatio(crop, page),
+    centerX: crop.x + crop.width / 2,
+    centerY: crop.y + crop.height / 2,
     ...(template ? {
       basePageWidth: template.basePageWidth,
       basePageHeight: template.basePageHeight,
-      rowStep: template.rowStep,
-      rowsPerPage: template.rowsPerPage,
+      templateCropWidth: template.cropWidth,
+      templateCropHeight: template.cropHeight,
+      aspectRatio: template.aspectRatio,
+      clickPlacementMode: template.clickPlacementMode,
       targetColumn: template.targetColumn,
       includeContext: template.includeContext
     } : {})
+  };
+}
+
+function selectedFolderValue(value: string) {
+  return value === "all" || value === "unfiled" ? null : value;
+}
+
+function clientBounds(value: LassoBox) {
+  return {
+    left: Math.min(value.startX, value.currentX),
+    right: Math.max(value.startX, value.currentX),
+    top: Math.min(value.startY, value.currentY),
+    bottom: Math.max(value.startY, value.currentY)
+  };
+}
+
+function rectanglesIntersect(
+  left: { left: number; right: number; top: number; bottom: number },
+  right: DOMRect
+) {
+  return left.left <= right.right
+    && left.right >= right.left
+    && left.top <= right.bottom
+    && left.bottom >= right.top;
+}
+
+function lassoStyle(value: LassoBox, grid: DOMRect) {
+  const bounds = clientBounds(value);
+  return {
+    left: bounds.left - grid.left,
+    top: bounds.top - grid.top,
+    width: Math.max(1, bounds.right - bounds.left),
+    height: Math.max(1, bounds.bottom - bounds.top)
   };
 }
 

@@ -177,10 +177,29 @@ export type ProjectReferenceCrop = {
   memo?: string;
   basePageWidth?: number;
   basePageHeight?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  aspectRatio?: number;
+  clickPlacementMode?: "center";
+  centerX?: number;
+  centerY?: number;
+  orderIndex?: number;
   rowStep?: number;
   rowsPerPage?: number;
   targetColumn?: "storyboard";
   includeContext?: false;
+  thumbnailUrl?: string;
+  thumbnailPath?: string;
+  folderId?: string | null;
+};
+
+export type ProjectArchiveFolder = {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ProjectScenarioImageSegment = {

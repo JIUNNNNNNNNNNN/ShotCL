@@ -1,6 +1,7 @@
 import type {
   ProjectCostume,
   ProjectCostumeScene,
+  ProjectArchiveFolder,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
@@ -95,16 +96,31 @@ export async function uploadProjectReferenceAsset(
     sortOrder?: number;
     basePageWidth?: number;
     basePageHeight?: number;
+    templateCropWidth?: number;
+    templateCropHeight?: number;
+    aspectRatio?: number;
+    clickPlacementMode?: "center";
+    centerX?: number;
+    centerY?: number;
+    cropOrderIndex?: number;
     rowStep?: number;
     rowsPerPage?: number;
     targetColumn?: "storyboard";
     includeContext?: false;
+    folderId?: string | null;
+    thumbnailFile?: File;
   } = {}
 ): Promise<ProjectReferenceAsset> {
   const formData = new FormData();
   formData.set("assetType", assetType);
   formData.set("file", file);
+  if (metadata.thumbnailFile) formData.set("thumbnail", metadata.thumbnailFile);
   Object.entries(metadata).forEach(([key, value]) => {
+    if (key === "thumbnailFile") return;
+    if (key === "folderId" && value === null) {
+      formData.set(key, "");
+      return;
+    }
     if (value !== undefined && value !== null && value !== "") formData.set(key, String(value));
   });
   const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
@@ -151,6 +167,80 @@ export async function deleteProjectReferenceAsset(projectId: string, id: string)
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError;
   if (!response.ok) throw new Error(payload.error || "자료를 삭제하지 못했습니다.");
+}
+
+export async function moveProjectReferenceAssets(
+  projectId: string,
+  ids: string[],
+  folderId: string | null
+) {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "move_many", ids, folderId })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { moved?: number };
+  if (!response.ok) throw new Error(payload.error || "선택한 자료를 이동하지 못했습니다.");
+  return payload.moved ?? 0;
+}
+
+export async function deleteProjectReferenceAssets(projectId: string, ids: string[]) {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { deleted?: number };
+  if (!response.ok) throw new Error(payload.error || "선택한 자료를 삭제하지 못했습니다.");
+  return payload.deleted ?? 0;
+}
+
+export async function listProjectArchiveFolders(projectId: string): Promise<ProjectArchiveFolder[]> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    cache: "no-store"
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { folders?: ProjectArchiveFolder[] };
+  if (!response.ok) throw new Error(payload.error || "아카이브 폴더를 불러오지 못했습니다.");
+  return payload.folders ?? [];
+}
+
+export async function createProjectArchiveFolder(
+  projectId: string,
+  name: string,
+  sortOrder = 0
+): Promise<ProjectArchiveFolder> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, sortOrder })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { folder?: ProjectArchiveFolder };
+  if (!response.ok || !payload.folder) throw new Error(payload.error || "폴더를 만들지 못했습니다.");
+  return payload.folder;
+}
+
+export async function renameProjectArchiveFolder(
+  projectId: string,
+  id: string,
+  name: string
+): Promise<ProjectArchiveFolder> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, name })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { folder?: ProjectArchiveFolder };
+  if (!response.ok || !payload.folder) throw new Error(payload.error || "폴더 이름을 바꾸지 못했습니다.");
+  return payload.folder;
+}
+
+export async function deleteProjectArchiveFolder(projectId: string, id: string) {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/archive-folders?id=${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  const payload = (await response.json().catch(() => ({}))) as ApiError;
+  if (!response.ok) throw new Error(payload.error || "폴더를 삭제하지 못했습니다.");
 }
 
 export async function listProjectCostumes(projectId: string): Promise<ProjectCostume[]> {
