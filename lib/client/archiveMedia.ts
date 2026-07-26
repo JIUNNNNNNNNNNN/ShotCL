@@ -3,6 +3,7 @@
 export type ArchiveImportPage = {
   id: string;
   index: number;
+  sourceFileIndex: number;
   name: string;
   width: number;
   height: number;
@@ -18,13 +19,29 @@ export type RelativeCrop = {
   height: number;
 };
 
+export type StoryboardCropCandidate = {
+  id: string;
+  page: ArchiveImportPage;
+  crop: RelativeCrop;
+};
+
+export type StoryboardCropTemplate = {
+  basePageWidth: number;
+  basePageHeight: number;
+  rowStep: number;
+  rowsPerPage: number;
+  targetColumn: "storyboard";
+  includeContext: false;
+};
+
 let configuredPdfJs:
   | Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")>
   | null = null;
 
 export async function renderArchivePdfPages(
   file: File,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  sourceFileIndex = 0
 ): Promise<ArchiveImportPage[]> {
   const pdfjs = await loadPdfJs();
   const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
@@ -41,8 +58,9 @@ export async function renderArchivePdfPages(
       await page.render({ canvas, canvasContext: context, viewport }).promise;
       const blob = await canvasBlob(canvas, "image/jpeg", 0.9);
       pages.push({
-        id: `pdf-${pageIndex}`,
+        id: `pdf-${sourceFileIndex}-${pageIndex}`,
         index: pageIndex,
+        sourceFileIndex,
         name: `${stripExtension(file.name)}-${pageIndex + 1}.jpg`,
         width: canvas.width,
         height: canvas.height,
@@ -66,6 +84,7 @@ export async function loadArchiveImagePages(files: File[]): Promise<ArchiveImpor
       return {
         id: `image-${index}-${file.lastModified}`,
         index,
+        sourceFileIndex: index,
         name: file.name,
         width: image.naturalWidth,
         height: image.naturalHeight,
@@ -78,6 +97,46 @@ export async function loadArchiveImagePages(files: File[]): Promise<ArchiveImpor
       throw error;
     }
   }));
+}
+
+export function generateStoryboardCropCandidates(
+  pages: ArchiveImportPage[],
+  firstCrop: RelativeCrop,
+  rowStep: number
+): { candidates: StoryboardCropCandidate[]; template: StoryboardCropTemplate | null } {
+  const referencePage = pages[0];
+  const safeCrop = normalizeRelativeCrop(firstCrop);
+  const safeStep = Math.min(1, Math.max(0.01, Number.isFinite(rowStep) ? rowStep : safeCrop.height));
+  if (!referencePage || safeCrop.width <= 0 || safeCrop.height <= 0) {
+    return { candidates: [], template: null };
+  }
+
+  const candidates: StoryboardCropCandidate[] = [];
+  let rowsPerPage = 0;
+  pages.forEach((page) => {
+    for (let row = 0; row < 100; row += 1) {
+      const y = safeCrop.y + row * safeStep;
+      if (y + safeCrop.height > 1.000001) break;
+      candidates.push({
+        id: `${page.id}-storyboard-${row}`,
+        page,
+        crop: { ...safeCrop, y }
+      });
+      if (page.id === referencePage.id) rowsPerPage += 1;
+    }
+  });
+
+  return {
+    candidates,
+    template: {
+      basePageWidth: referencePage.width,
+      basePageHeight: referencePage.height,
+      rowStep: safeStep,
+      rowsPerPage,
+      targetColumn: "storyboard",
+      includeContext: false
+    }
+  };
 }
 
 export async function createCroppedArchiveFile(
@@ -147,6 +206,17 @@ function ensureJpegName(value: string) {
 
 function clamp(value: number, min = 0) {
   return Math.min(1, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+function normalizeRelativeCrop(value: RelativeCrop): RelativeCrop {
+  const x = clamp(value.x);
+  const y = clamp(value.y);
+  return {
+    x,
+    y,
+    width: Math.min(1 - x, clamp(value.width, 0.01)),
+    height: Math.min(1 - y, clamp(value.height, 0.01))
+  };
 }
 
 async function loadPdfJs() {

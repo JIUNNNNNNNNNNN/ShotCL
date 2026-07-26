@@ -362,7 +362,13 @@ function normalizeCrop(value: unknown) {
     ...(cleanText(source.sourceAssetId, 100) ? { sourceAssetId: cleanText(source.sourceAssetId, 100) } : {}),
     ...(hasPageIndex && Number.isInteger(pageIndexValue) && pageIndexValue >= 0 ? { pageIndex: pageIndexValue } : {}),
     ...(cleanText(source.title, 240) ? { title: cleanText(source.title, 240) } : {}),
-    ...(cleanText(source.memo, 1_000) ? { memo: cleanText(source.memo, 1_000) } : {})
+    ...(cleanText(source.memo, 1_000) ? { memo: cleanText(source.memo, 1_000) } : {}),
+    ...(positiveNumber(source.basePageWidth) ? { basePageWidth: positiveNumber(source.basePageWidth) } : {}),
+    ...(positiveNumber(source.basePageHeight) ? { basePageHeight: positiveNumber(source.basePageHeight) } : {}),
+    ...(positiveNumber(source.rowStep) ? { rowStep: Math.min(1, positiveNumber(source.rowStep)) } : {}),
+    ...(positiveInteger(source.rowsPerPage) ? { rowsPerPage: positiveInteger(source.rowsPerPage) } : {}),
+    ...(source.targetColumn === "storyboard" ? { targetColumn: "storyboard" as const } : {}),
+    ...(source.includeContext === false || source.includeContext === "false" ? { includeContext: false as const } : {})
   };
 }
 
@@ -377,8 +383,24 @@ function parseCropFormData(formData: FormData, sourceType: ReturnType<typeof nor
     sourceAssetId: formData.get("sourceAssetId"),
     pageIndex: formData.get("pageIndex"),
     title: formData.get("title"),
-    memo: formData.get("memo")
+    memo: formData.get("memo"),
+    basePageWidth: formData.get("basePageWidth"),
+    basePageHeight: formData.get("basePageHeight"),
+    rowStep: formData.get("rowStep"),
+    rowsPerPage: formData.get("rowsPerPage"),
+    targetColumn: formData.get("targetColumn"),
+    includeContext: formData.get("includeContext")
   };
+}
+
+function positiveNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function positiveInteger(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 0;
 }
 
 function normalizeSourceType(value: FormDataEntryValue | null, file: File) {

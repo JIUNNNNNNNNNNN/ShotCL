@@ -93,6 +93,12 @@ export async function uploadProjectReferenceAsset(
     title?: string;
     memo?: string;
     sortOrder?: number;
+    basePageWidth?: number;
+    basePageHeight?: number;
+    rowStep?: number;
+    rowsPerPage?: number;
+    targetColumn?: "storyboard";
+    includeContext?: false;
   } = {}
 ): Promise<ProjectReferenceAsset> {
   const formData = new FormData();

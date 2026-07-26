@@ -175,6 +175,12 @@ export type ProjectReferenceCrop = {
   pageIndex?: number | null;
   title?: string;
   memo?: string;
+  basePageWidth?: number;
+  basePageHeight?: number;
+  rowStep?: number;
+  rowsPerPage?: number;
+  targetColumn?: "storyboard";
+  includeContext?: false;
 };
 
 export type ProjectScenarioImageSegment = {

@@ -1,8 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Clapperboard,
   FileImage,
   FileText,
   ImagePlus,
@@ -25,7 +26,8 @@ import {
   loadArchiveImagePages,
   releaseArchivePages,
   renderArchivePdfPages,
-  type ArchiveImportPage
+  type ArchiveImportPage,
+  type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
 import {
   deleteProjectReferenceAsset,
@@ -92,6 +94,9 @@ export default function ProjectStoryboardOverheadPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
+  const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
+  const preparingRef = useRef(false);
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
@@ -119,6 +124,14 @@ export default function ProjectStoryboardOverheadPage() {
     void loadArchive();
   }, [loadArchive]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const update = () => setSupportsDesktopDrop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
   const sourceAssets = useMemo(
     () => activeAssets.filter((asset) => asset.mimeType === "application/pdf" || asset.groupId?.startsWith("source:")),
@@ -140,52 +153,111 @@ export default function ProjectStoryboardOverheadPage() {
   );
 
   async function preparePdf(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!file) return;
-    setIsPreparing(true);
-    setErrorMessage("");
-    setProgressMessage("PDF 페이지를 준비하는 중입니다.");
-    try {
-      const pages = await renderArchivePdfPages(file, (current, total) => {
-        setProgressMessage(`PDF 페이지 준비 ${current}/${total}`);
-      });
-      setPendingImport({
-        assetType,
-        sourceKind: "pdf",
-        sourceFiles: [file],
-        sourceLabel: file.name,
-        pages
-      });
-      setProgressMessage("");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "PDF 페이지를 준비하지 못했습니다.");
-      setProgressMessage("");
-    } finally {
-      setIsPreparing(false);
-    }
+    await prepareFiles(assetType, files, "pdf");
   }
 
   async function prepareImages(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (files.length === 0) return;
+    await prepareFiles(assetType, files, "images");
+  }
+
+  async function prepareFiles(
+    assetType: ArchiveType,
+    rawFiles: File[],
+    expectedKind?: PendingImport["sourceKind"],
+    directImageUpload = false
+  ) {
+    if (!projectId || rawFiles.length === 0 || preparingRef.current || isSaving) return;
+    const files = uniqueFiles(rawFiles);
+    const unsupported = files.find((file) => !isAcceptedArchiveFile(file));
+    if (unsupported) {
+      setErrorMessage(`"${unsupported.name}"은 PDF, JPG, JPEG, PNG, WebP 파일이 아닙니다.`);
+      return;
+    }
+    const pdfFiles = files.filter(isPdfFile);
+    const imageFiles = files.filter(isImageFile);
+    if (expectedKind === "pdf" && imageFiles.length > 0) {
+      setErrorMessage("PDF 선택에서는 PDF 파일만 추가할 수 있습니다.");
+      return;
+    }
+    if (expectedKind === "images" && pdfFiles.length > 0) {
+      setErrorMessage("이미지 선택에서는 JPG, JPEG, PNG, WebP 파일만 추가할 수 있습니다.");
+      return;
+    }
+    if (pdfFiles.length > 0 && imageFiles.length > 0) {
+      setErrorMessage("PDF와 이미지는 각각의 가져오기 흐름으로 나누어 놓아주세요.");
+      return;
+    }
+    const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 ? "pdf" : "images";
+    preparingRef.current = true;
     setIsPreparing(true);
     setErrorMessage("");
+    setActiveType(assetType);
     try {
-      const pages = await loadArchiveImagePages(files);
+      if (sourceKind === "images" && directImageUpload) {
+        const batchId = typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}`;
+        const existingCount = (assetType === "overhead" ? overheads : storyboards)
+          .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
+          .length;
+        for (let index = 0; index < files.length; index += 1) {
+          setProgressMessage(`${assetType === "overhead" ? "부감도" : "콘티"} 이미지 업로드 ${index + 1}/${files.length}`);
+          await uploadProjectReferenceAsset(projectId, assetType, files[index], {
+            sourceType: "upload_image",
+            groupId: batchId,
+            sortOrder: existingCount + index
+          });
+        }
+        setProgressMessage("");
+        await loadArchive();
+        return;
+      }
+      const pages: ArchiveImportPage[] = [];
+      if (sourceKind === "pdf") {
+        for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+          const file = files[fileIndex];
+          const rendered = await renderArchivePdfPages(file, (current, total) => {
+            setProgressMessage(`PDF ${fileIndex + 1}/${files.length} · 페이지 ${current}/${total}`);
+          }, fileIndex);
+          pages.push(...rendered);
+        }
+      } else {
+        setProgressMessage("이미지 묶음을 준비하는 중입니다.");
+        pages.push(...await loadArchiveImagePages(files));
+      }
       setPendingImport({
         assetType,
-        sourceKind: "images",
+        sourceKind,
         sourceFiles: files,
         sourceLabel: files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}개`,
         pages
       });
+      setProgressMessage("");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "이미지 묶음을 준비하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "자료를 준비하지 못했습니다.");
+      setProgressMessage("");
     } finally {
+      preparingRef.current = false;
       setIsPreparing(false);
     }
+  }
+
+  function updateDragDepth(assetType: ArchiveType, delta: number) {
+    setDragDepth((current) => ({
+      ...current,
+      [assetType]: Math.max(0, current[assetType] + delta)
+    }));
+  }
+
+  function handleDrop(assetType: ArchiveType, event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragDepth((current) => ({ ...current, [assetType]: 0 }));
+    if (!supportsDesktopDrop || !canEdit) return;
+    void prepareFiles(assetType, Array.from(event.dataTransfer.files), undefined, true);
   }
 
   function closeImport() {
@@ -202,43 +274,41 @@ export default function ProjectStoryboardOverheadPage() {
       : `${Date.now()}`;
     try {
       if (pendingImport.sourceKind === "pdf") {
-        const original = await uploadProjectReferenceAsset(
-          projectId,
-          pendingImport.assetType,
-          pendingImport.sourceFiles[0],
-          {
+        const sourceAssetsByIndex = new Map<number, ProjectReferenceAsset>();
+        for (let fileIndex = 0; fileIndex < pendingImport.sourceFiles.length; fileIndex += 1) {
+          const sourceFile = pendingImport.sourceFiles[fileIndex];
+          setProgressMessage(`원본 PDF 보존 ${fileIndex + 1}/${pendingImport.sourceFiles.length}`);
+          const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_pdf",
             groupId: `source:${batchId}`,
             title: value.title,
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo
-          }
-        );
-        for (let index = 0; index < value.selectedPages.length; index += 1) {
-          const page = value.selectedPages[index];
-          setProgressMessage(`선택 페이지 저장 ${index + 1}/${value.selectedPages.length}`);
-          const resultFile = value.applyCrop
-            ? await createCroppedArchiveFile(page, value.crop, page.name)
+          });
+          sourceAssetsByIndex.set(fileIndex, original);
+        }
+        for (let index = 0; index < value.results.length; index += 1) {
+          const result = value.results[index];
+          const { page, crop } = result;
+          setProgressMessage(`선택 결과 저장 ${index + 1}/${value.results.length}`);
+          const resultFile = crop
+            ? await createCroppedArchiveFile(page, crop, page.name)
             : new File([page.blob], page.name, { type: "image/jpeg" });
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
-            sourceType: value.applyCrop ? "pdf_crop" : "pdf_page",
-            sourceAssetId: original.id,
+            sourceType: crop ? "pdf_crop" : "pdf_page",
+            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
             pageIndex: page.index,
             groupId: batchId,
-            cropX: value.crop.x,
-            cropY: value.crop.y,
-            cropWidth: value.crop.width,
-            cropHeight: value.crop.height,
-            cropRatio: cropPixelRatio(value.crop, page),
-            title: pageTitle(value.title, page.index, value.selectedPages.length),
+            ...cropMetadata(crop, page, value.cropTemplate),
+            title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
             sortOrder: imageAssets.length + index
           });
         }
-      } else if (value.applyCrop) {
+      } else if (value.results.some((result) => result.crop)) {
         const sourceAssetsByIndex = new Map<number, ProjectReferenceAsset>();
         for (let index = 0; index < pendingImport.pages.length; index += 1) {
           const page = pendingImport.pages[index];
@@ -253,23 +323,21 @@ export default function ProjectStoryboardOverheadPage() {
             sceneNo: value.sceneNo,
             cutNo: value.cutNo
           });
-          sourceAssetsByIndex.set(page.index, source);
+          sourceAssetsByIndex.set(page.sourceFileIndex, source);
         }
-        for (let index = 0; index < value.selectedPages.length; index += 1) {
-          const page = value.selectedPages[index];
-          setProgressMessage(`crop 결과 저장 ${index + 1}/${value.selectedPages.length}`);
-          const resultFile = await createCroppedArchiveFile(page, value.crop, page.name);
+        for (let index = 0; index < value.results.length; index += 1) {
+          const result = value.results[index];
+          const { page, crop } = result;
+          if (!crop) continue;
+          setProgressMessage(`crop 결과 저장 ${index + 1}/${value.results.length}`);
+          const resultFile = await createCroppedArchiveFile(page, crop, page.name);
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
             sourceType: "image_crop",
-            sourceAssetId: sourceAssetsByIndex.get(page.index)?.id,
+            sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex)?.id,
             pageIndex: page.index,
             groupId: batchId,
-            cropX: value.crop.x,
-            cropY: value.crop.y,
-            cropWidth: value.crop.width,
-            cropHeight: value.crop.height,
-            cropRatio: cropPixelRatio(value.crop, page),
-            title: pageTitle(value.title, page.index, value.selectedPages.length),
+            ...cropMetadata(crop, page, value.cropTemplate),
+            title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
@@ -277,14 +345,14 @@ export default function ProjectStoryboardOverheadPage() {
           });
         }
       } else {
-        for (let index = 0; index < value.selectedPages.length; index += 1) {
-          const page = value.selectedPages[index];
+        for (let index = 0; index < value.results.length; index += 1) {
+          const page = value.results[index].page;
           const sourceFile = page.originalFile ?? new File([page.blob], page.name, { type: "image/jpeg" });
-          setProgressMessage(`이미지 저장 ${index + 1}/${value.selectedPages.length}`);
+          setProgressMessage(`이미지 저장 ${index + 1}/${value.results.length}`);
           await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_image",
             groupId: batchId,
-            title: pageTitle(value.title, page.index, value.selectedPages.length),
+            title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
             sceneNo: value.sceneNo,
             cutNo: value.cutNo,
@@ -411,6 +479,44 @@ export default function ProjectStoryboardOverheadPage() {
           </div>
         ) : null}
 
+        {canEdit && supportsDesktopDrop ? (
+          <div className="hidden grid-cols-2 gap-3 md:grid" aria-label="데스크탑 자료 드롭 영역">
+            {(["overhead", "storyboard"] as const).map((type) => {
+              const active = dragDepth[type] > 0;
+              const label = type === "overhead" ? "부감도" : "콘티";
+              return (
+                <div
+                  key={type}
+                  className={`grid min-h-28 place-items-center border-2 border-dashed px-4 py-5 text-center transition-colors ${
+                    active
+                      ? "border-[#ef8f39] bg-[#fff3e7] text-[#a75412]"
+                      : "border-field-border bg-field-soft/45 text-field-primary"
+                  }`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    updateDragDepth(type, 1);
+                  }}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    updateDragDepth(type, -1);
+                  }}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                  }}
+                  onDrop={(event) => handleDrop(type, event)}
+                >
+                  <div className="pointer-events-none grid justify-items-center gap-1.5">
+                    {type === "overhead" ? <MapIcon className="h-6 w-6" aria-hidden /> : <Clapperboard className="h-6 w-6" aria-hidden />}
+                    <p className="text-sm font-black">{label} 파일 놓기</p>
+                    <p className="text-[11px] font-bold text-field-muted">PDF · JPG · JPEG · PNG · WebP · 여러 파일 가능</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
         <Card className="grid gap-3">
           <div className="grid gap-2 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center">
             <div className="grid grid-cols-2 gap-2">
@@ -440,7 +546,7 @@ export default function ProjectStoryboardOverheadPage() {
                 <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white">
                   <Upload className="h-4 w-4" aria-hidden />
                   PDF
-                  <input type="file" accept="application/pdf,.pdf" className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(activeType, event)} />
+                  <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(activeType, event)} />
                 </label>
               </div>
             ) : null}
@@ -634,8 +740,54 @@ function pageTitle(base: string, pageIndex: number, count: number) {
   return count > 1 ? `${title} ${pageIndex + 1}` : title;
 }
 
-function cropPixelRatio(crop: ArchiveImportCommit["crop"], page: ArchiveImportPage) {
+function cropPixelRatio(crop: NonNullable<ArchiveImportCommit["results"][number]["crop"]>, page: ArchiveImportPage) {
   const width = crop.width * page.width;
   const height = crop.height * page.height;
   return height > 0 ? width / height : null;
+}
+
+function cropMetadata(
+  crop: ArchiveImportCommit["results"][number]["crop"],
+  page: ArchiveImportPage,
+  template: StoryboardCropTemplate | null
+) {
+  if (!crop) return {};
+  return {
+    cropX: crop.x,
+    cropY: crop.y,
+    cropWidth: crop.width,
+    cropHeight: crop.height,
+    cropRatio: cropPixelRatio(crop, page),
+    ...(template ? {
+      basePageWidth: template.basePageWidth,
+      basePageHeight: template.basePageHeight,
+      rowStep: template.rowStep,
+      rowsPerPage: template.rowsPerPage,
+      targetColumn: template.targetColumn,
+      includeContext: template.includeContext
+    } : {})
+  };
+}
+
+function uniqueFiles(files: File[]) {
+  const seen = new Set<string>();
+  return files.filter((file) => {
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isPdfFile(file: File) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+function isImageFile(file: File) {
+  return /^(?:image\/jpeg|image\/png|image\/webp)$/i.test(file.type)
+    || /\.(?:jpe?g|png|webp)$/i.test(file.name);
+}
+
+function isAcceptedArchiveFile(file: File) {
+  return isPdfFile(file) || isImageFile(file);
 }
