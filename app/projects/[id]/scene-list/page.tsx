@@ -26,6 +26,7 @@ import {
   saveProjectSceneList
 } from "@/lib/data/sceneList";
 import { getProject } from "@/lib/data/projects";
+import { auditQuery } from "@/lib/queryAudit";
 import type {
   Project,
   ProjectSceneActorCell,
@@ -180,8 +181,16 @@ export default function ProjectSceneListPage() {
     setIsLoading(true);
     try {
       const [projectData, sceneList] = await Promise.all([
-        getProject(projectId),
-        getProjectSceneList(projectId)
+        auditQuery(
+          "sceneList.loadProject",
+          "app/projects/[id]/scene-list/page.tsx:load",
+          () => getProject(projectId)
+        ),
+        auditQuery(
+          "sceneList.loadSceneItems",
+          "app/projects/[id]/scene-list/page.tsx:load",
+          () => getProjectSceneList(projectId)
+        )
       ]);
       setProject(projectData);
       setItems(sceneList.items);

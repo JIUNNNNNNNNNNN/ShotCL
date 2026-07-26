@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 import { HomeButton } from "@/components/HomeButton";
+import { QueryAuditPanel } from "@/components/QueryAuditPanel";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
 
 type AppShellProps = {
@@ -31,6 +32,7 @@ export function AppShell({ children }: AppShellProps) {
         {children}
       </main>
       {!isHome ? <DevRuntimeInfo /> : null}
+      <QueryAuditPanel />
     </div>
   );
 }

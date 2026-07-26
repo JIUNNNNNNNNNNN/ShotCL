@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { loadScenarioPdfDocument } from "@/lib/client/scenarioPdfImages";
+import { auditQuery } from "@/lib/queryAudit";
 import type { ProjectScenarioImageSegment } from "@/lib/types";
 
 type Props = {
@@ -42,7 +43,11 @@ export function ScenarioPdfSceneSegments({
         setState("error");
         return;
       }
-      const pdfDocument = await loadScenarioPdfDocument(pdfUrl);
+      const pdfDocument = await auditQuery(
+        "scenario.renderExpandedScenePdf",
+        "components/ScenarioPdfSceneSegments.tsx:render",
+        () => loadScenarioPdfDocument(pdfUrl)
+      );
       try {
         for (let index = 0; index < renderSegments.length; index += 1) {
           if (cancelled) return;

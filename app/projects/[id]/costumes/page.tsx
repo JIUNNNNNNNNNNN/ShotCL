@@ -16,13 +16,13 @@ import {
   updateProjectCostumeScene
 } from "@/lib/data/projectReferenceAssets";
 import {
-  getDailyPlanWithShots,
   listDailyPlans,
   type DailyPlanListItem
 } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
+import { auditQuery } from "@/lib/queryAudit";
 import type {
   CostumeImage,
   ProjectActor,
@@ -90,18 +90,34 @@ export default function ProjectCostumesPage() {
     setIsLoading(true);
     try {
       const [project, costumeOverview, basicInfo, plans, sceneList] = await Promise.all([
-        getProject(projectId),
-        getProjectCostumeSceneOverview(projectId),
-        getProjectBasicInfo(projectId).catch(() => null),
-        listDailyPlans(projectId).catch(() => []),
-        getProjectSceneList(projectId).catch(() => null)
+        auditQuery(
+          "costume.loadProject",
+          "app/projects/[id]/costumes/page.tsx:load",
+          () => getProject(projectId)
+        ),
+        auditQuery(
+          "costume.loadCostumeScenesAndItems",
+          "app/projects/[id]/costumes/page.tsx:load",
+          () => getProjectCostumeSceneOverview(projectId)
+        ),
+        auditQuery(
+          "costume.loadProjectBasicInfo",
+          "app/projects/[id]/costumes/page.tsx:load",
+          () => getProjectBasicInfo(projectId)
+        ).catch(() => null),
+        auditQuery(
+          "costume.loadDailyPlans",
+          "app/projects/[id]/costumes/page.tsx:load",
+          () => listDailyPlans(projectId)
+        ).catch(() => []),
+        auditQuery(
+          "costume.loadSceneList",
+          "app/projects/[id]/costumes/page.tsx:load",
+          () => getProjectSceneList(projectId)
+        ).catch(() => null)
       ]);
       const costumeScenes = costumeOverview.scenes;
-      const dailyPlanDetails = await Promise.all(plans.map(async (plan) => ({
-        plan,
-        detail: await getDailyPlanWithShots(projectId, plan.id).catch(() => null)
-      })));
-      const automaticEpisodes = buildAutomaticEpisodesByScene(dailyPlanDetails);
+      const automaticEpisodes = buildAutomaticEpisodesByScene(plans);
       const scenesWithAutomaticEpisodes = costumeScenes.map((scene) => ({
         ...scene,
         episodeNumbers: mergeEpisodeNumbers(
@@ -167,7 +183,11 @@ export default function ProjectCostumesPage() {
     }
     let cancelled = false;
     setIsFiltering(true);
-    void listShots(projectId, selectedDailyPlanId)
+    void auditQuery(
+      "costume.filter.loadSelectedPlanShots",
+      "app/projects/[id]/costumes/page.tsx:selectedDailyPlanId effect",
+      () => listShots(projectId, selectedDailyPlanId)
+    )
       .then((shots) => {
         if (!cancelled) {
           setDailyPlanSceneKeys(new Set(shots.map((shot) => normalizeSceneNumber(shot.sceneNumber)).filter(Boolean)));
@@ -1311,19 +1331,13 @@ function dedupeActors(actors: ProjectActor[]) {
   });
 }
 
-function buildAutomaticEpisodesByScene(
-  entries: Array<{
-    plan: DailyPlanListItem;
-    detail: Awaited<ReturnType<typeof getDailyPlanWithShots>>;
-  }>
-) {
+function buildAutomaticEpisodesByScene(plans: DailyPlanListItem[]) {
   const episodesByScene = new Map<string, Set<number>>();
-  entries.forEach(({ plan, detail }) => {
-    if (!detail) return;
-    const episode = parseEpisodeNumber(detail.plan.episode || plan.episode || plan.title);
+  plans.forEach((plan) => {
+    const episode = parseEpisodeNumber(plan.episode || plan.title);
     if (!episode) return;
-    detail.shots.forEach((shot) => {
-      const sceneKey = normalizeSceneNumber(shot.sceneNumber);
+    plan.sceneNumbers.forEach((sceneNumber) => {
+      const sceneKey = normalizeSceneNumber(sceneNumber);
       if (!sceneKey) return;
       const episodes = episodesByScene.get(sceneKey) ?? new Set<number>();
       episodes.add(episode);

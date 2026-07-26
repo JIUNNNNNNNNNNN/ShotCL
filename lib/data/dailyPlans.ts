@@ -35,6 +35,7 @@ export type DailyPlanListItem = DailyPlan & {
   shotCount: number;
   progressTotal: number;
   progressCompleted: number;
+  sceneNumbers: string[];
 };
 
 const dailyPlanListRequests = new Map<string, Promise<DailyPlanListItem[]>>();
@@ -191,16 +192,19 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
       const payload = (await response.json()) as {
         plans: Record<string, unknown>[];
         shotPlanIds: string[];
+        dailyPlanShots?: Array<{ daily_plan_id?: unknown; scene_number?: unknown }>;
         progressShots?: Array<{ daily_plan_id?: unknown; status?: unknown }>;
       };
       const counts = new Map<string, number>();
       payload.shotPlanIds.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));
+      const sceneNumbers = collectSceneNumbersByPlan(payload.dailyPlanShots ?? []);
       const progress = summarizeProgressRows(payload.progressShots ?? []);
       return payload.plans.map(dailyPlanFromRow).map((plan) => ({
         ...plan,
         shotCount: counts.get(plan.id) ?? 0,
         progressTotal: progress.get(plan.id)?.total ?? 0,
-        progressCompleted: progress.get(plan.id)?.completed ?? 0
+        progressCompleted: progress.get(plan.id)?.completed ?? 0,
+        sceneNumbers: sceneNumbers.get(plan.id) ?? []
       }));
     }
     if (response.status === 403) throw new Error("Key staff 권한이 필요합니다.");
@@ -223,7 +227,7 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
       { data: shotRows, error: shotError },
       { data: progressRows, error: progressError }
     ] = await Promise.all([
-      supabase.from("daily_plan_shots").select("daily_plan_id").eq("project_id", projectId),
+      supabase.from("daily_plan_shots").select("daily_plan_id,scene_number").eq("project_id", projectId),
       supabase.from("shots").select("daily_plan_id,status").eq("project_id", projectId)
     ]);
     if (shotError) throw shotError;
@@ -231,12 +235,14 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
 
     const counts = new Map<string, number>();
     shotRows.forEach((row) => counts.set(row.daily_plan_id, (counts.get(row.daily_plan_id) ?? 0) + 1));
+    const sceneNumbers = collectSceneNumbersByPlan(shotRows);
     const progress = summarizeProgressRows(progressRows ?? []);
     return plans.map((plan) => ({
       ...plan,
       shotCount: counts.get(plan.id) ?? 0,
       progressTotal: progress.get(plan.id)?.total ?? 0,
-      progressCompleted: progress.get(plan.id)?.completed ?? 0
+      progressCompleted: progress.get(plan.id)?.completed ?? 0,
+      sceneNumbers: sceneNumbers.get(plan.id) ?? []
     }));
   }
 
@@ -256,8 +262,29 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
       ...plan,
       shotCount: dailyPlanShots.filter((shot) => shot.dailyPlanId === plan.id).length,
       progressTotal: progress.get(plan.id)?.total ?? 0,
-      progressCompleted: progress.get(plan.id)?.completed ?? 0
+      progressCompleted: progress.get(plan.id)?.completed ?? 0,
+      sceneNumbers: Array.from(new Set(
+        dailyPlanShots
+          .filter((shot) => shot.dailyPlanId === plan.id)
+          .map((shot) => shot.sceneNumber.trim())
+          .filter(Boolean)
+      ))
     }));
+}
+
+function collectSceneNumbersByPlan(
+  rows: Array<{ daily_plan_id?: unknown; scene_number?: unknown }>
+) {
+  const byPlan = new Map<string, Set<string>>();
+  rows.forEach((row) => {
+    const dailyPlanId = String(row.daily_plan_id ?? "");
+    const sceneNumber = String(row.scene_number ?? "").trim();
+    if (!dailyPlanId || !sceneNumber) return;
+    const values = byPlan.get(dailyPlanId) ?? new Set<string>();
+    values.add(sceneNumber);
+    byPlan.set(dailyPlanId, values);
+  });
+  return new Map([...byPlan].map(([dailyPlanId, values]) => [dailyPlanId, [...values]]));
 }
 
 function summarizeProgressRows(rows: Array<{ daily_plan_id?: unknown; status?: unknown }>) {

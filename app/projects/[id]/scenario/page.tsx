@@ -32,6 +32,7 @@ import {
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
 import { getProject } from "@/lib/data/projects";
+import { auditQuery } from "@/lib/queryAudit";
 import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
@@ -69,8 +70,16 @@ export default function ProjectScenarioPage() {
     setIsLoading(true);
     try {
       const [project, scenarioAssets] = await Promise.all([
-        getProject(projectId),
-        listProjectReferenceAssets(projectId, "scenario")
+        auditQuery(
+          "scenario.loadProject",
+          "app/projects/[id]/scenario/page.tsx:load",
+          () => getProject(projectId)
+        ),
+        auditQuery(
+          "scenario.loadFilesAndSceneMetadata",
+          "app/projects/[id]/scenario/page.tsx:load",
+          () => listProjectReferenceAssets(projectId, "scenario")
+        )
       ]);
       setProjectName(project?.name ?? "프로젝트");
       setAssets(scenarioAssets);

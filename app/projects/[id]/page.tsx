@@ -21,6 +21,7 @@ import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { saveScheduleImage, saveShotStoryboardImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
+import { auditQuery } from "@/lib/queryAudit";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
@@ -130,9 +131,23 @@ export default function ProjectDetailPage() {
 
     try {
       const [projectData, planData, selectedShots] = await Promise.all([
-        getProject(projectId),
-        listDailyPlans(projectId),
-        dailyPlanId ? listShots(projectId, dailyPlanId) : Promise.resolve([])
+        auditQuery(
+          "progress.loadProject",
+          "app/projects/[id]/page.tsx:refresh",
+          () => getProject(projectId)
+        ),
+        auditQuery(
+          "progress.loadDailyPlans",
+          "app/projects/[id]/page.tsx:refresh",
+          () => listDailyPlans(projectId)
+        ),
+        dailyPlanId
+          ? auditQuery(
+              "progress.loadCuts",
+              "app/projects/[id]/page.tsx:refresh",
+              () => listShots(projectId, dailyPlanId)
+            )
+          : Promise.resolve([])
       ]);
       setProject(projectData);
       if (!projectData) {
@@ -145,8 +160,16 @@ export default function ProjectDetailPage() {
       if (selectedShots.length > 0) {
         try {
           const [diagrams, overheadImages] = await Promise.all([
-            loadShotOverheadDiagrams(selectedShots),
-            loadShotOverheadImageUrls(selectedShots)
+            auditQuery(
+              "progress.loadOverheadDiagrams",
+              "app/projects/[id]/page.tsx:refresh",
+              () => loadShotOverheadDiagrams(selectedShots)
+            ),
+            auditQuery(
+              "progress.loadOverheadImages",
+              "app/projects/[id]/page.tsx:refresh",
+              () => loadShotOverheadImageUrls(selectedShots)
+            )
           ]);
           shotsWithDiagrams = selectedShots.map((shot) => ({
             ...shot,
@@ -174,7 +197,11 @@ export default function ProjectDetailPage() {
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
     try {
-      const refreshedShots = await listShots(projectId, dailyPlanId);
+      const refreshedShots = await auditQuery(
+        "progress.realtime.reloadCuts",
+        "app/projects/[id]/page.tsx:refreshSelectedShots",
+        () => listShots(projectId, dailyPlanId)
+      );
       setShots((current) => refreshedShots.map((shot) => ({
         ...shot,
         overheadDiagram: current.find((item) => item.id === shot.id)?.overheadDiagram ?? null,
