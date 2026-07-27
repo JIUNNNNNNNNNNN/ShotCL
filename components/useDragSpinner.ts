@@ -273,7 +273,9 @@ export function useDragSpinner({
   const dragStateRef = useRef<{
     pointerId: number;
     pointerType: string;
-    captureTarget: HTMLElement;
+    captureTarget: Element;
+    centerX: number;
+    centerY: number;
     startX: number;
     startY: number;
     lastAngle: number;
@@ -281,6 +283,7 @@ export function useDragSpinner({
     moved: boolean;
     captured: boolean;
   } | null>(null);
+  const pointerSessionCleanupRef = useRef<(() => void) | null>(null);
   const suppressClickRef = useRef(false);
 
   useEffect(() => {
@@ -641,6 +644,8 @@ export function useDragSpinner({
 
   const resetInteraction = useCallback(() => {
     cancelPending();
+    pointerSessionCleanupRef.current?.();
+    pointerSessionCleanupRef.current = null;
     const dragState = dragStateRef.current;
     dragStateRef.current = null;
     if (
@@ -699,38 +704,92 @@ export function useDragSpinner({
     if (!isAnimatingRef.current) refreshActivation();
   }, [activationKey, refreshActivation, renderedRotation]);
 
-  function getPointerAngle(event: ReactPointerEvent<HTMLElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const centerX = bounds.left + bounds.width / 2;
-    const centerY = bounds.top + bounds.height / 2;
-    return Math.atan2(event.clientY - centerY, event.clientX - centerX) * (180 / Math.PI);
+  function getPointerAngle(clientX: number, clientY: number, centerX: number, centerY: number) {
+    return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLElement>) {
     if (itemCount <= 0 || (event.button !== 0 && event.pointerType === "mouse")) return;
+    if (dragStateRef.current) return;
+
     const interruptedAnimation = isAnimatingRef.current;
     flushRotationFrame();
     cancelPending();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    const captureTarget = event.target instanceof Element ? event.target : event.currentTarget;
+    let captured = false;
+    try {
+      captureTarget.setPointerCapture(event.pointerId);
+      captured = captureTarget.hasPointerCapture(event.pointerId);
+    } catch {
+      // iOS 구버전처럼 capture가 불안정한 환경도 window 추적으로 drag를 이어갑니다.
+    }
+
     dragStateRef.current = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
-      captureTarget: event.currentTarget,
+      captureTarget,
+      centerX,
+      centerY,
       startX: event.clientX,
       startY: event.clientY,
-      lastAngle: getPointerAngle(event),
+      lastAngle: getPointerAngle(event.clientX, event.clientY, centerX, centerY),
       samples: [{
         rotation: rotationRef.current,
         time: event.timeStamp
       }],
       moved: false,
-      captured: false
+      captured
     };
     suppressClickRef.current = interruptedAnimation;
+    setIsDragging(true);
+    setMotionState("dragging");
+
+    function preventActiveTouchScroll(touchEvent: TouchEvent) {
+      if (dragStateRef.current?.pointerId === event.pointerId) {
+        touchEvent.preventDefault();
+      }
+    }
+
+    function handleWindowPointerMove(pointerEvent: PointerEvent) {
+      onPointerMove(pointerEvent);
+    }
+
+    function handleWindowPointerUp(pointerEvent: PointerEvent) {
+      finishPointer(pointerEvent);
+    }
+
+    function handleWindowPointerCancel(pointerEvent: PointerEvent) {
+      finishPointer(pointerEvent, true);
+    }
+
+    const cleanupPointerSession = () => {
+      window.removeEventListener("pointermove", handleWindowPointerMove);
+      window.removeEventListener("pointerup", handleWindowPointerUp);
+      window.removeEventListener("pointercancel", handleWindowPointerCancel);
+      if (event.pointerType !== "mouse") {
+        window.removeEventListener("touchmove", preventActiveTouchScroll);
+      }
+      if (pointerSessionCleanupRef.current === cleanupPointerSession) {
+        pointerSessionCleanupRef.current = null;
+      }
+    };
+
+    pointerSessionCleanupRef.current = cleanupPointerSession;
+    window.addEventListener("pointermove", handleWindowPointerMove, { passive: false });
+    window.addEventListener("pointerup", handleWindowPointerUp);
+    window.addEventListener("pointercancel", handleWindowPointerCancel);
+    if (event.pointerType !== "mouse") {
+      window.addEventListener("touchmove", preventActiveTouchScroll, { passive: false });
+    }
   }
 
-  function onPointerMove(event: ReactPointerEvent<HTMLElement>) {
+  function onPointerMove(event: PointerEvent) {
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
+    if (event.cancelable && dragState.pointerType !== "mouse") event.preventDefault();
 
     const dragDistance = Math.hypot(
       event.clientX - dragState.startX,
@@ -739,18 +798,17 @@ export function useDragSpinner({
     const dragThreshold = dragState.pointerType === "mouse" ? 5 : 10;
     if (!dragState.moved && dragDistance < dragThreshold) return;
 
-    if (!dragState.captured) {
-      event.currentTarget.setPointerCapture(event.pointerId);
-      dragState.captured = true;
-    }
     if (!dragState.moved) {
       dragState.moved = true;
       suppressClickRef.current = true;
-      setIsDragging(true);
-      setMotionState("dragging");
     }
 
-    const nextPointerAngle = getPointerAngle(event);
+    const nextPointerAngle = getPointerAngle(
+      event.clientX,
+      event.clientY,
+      dragState.centerX,
+      dragState.centerY
+    );
     const delta = normalizeSpinnerAngle(nextPointerAngle - dragState.lastAngle);
     if (Math.abs(delta) < 0.15) return;
 
@@ -774,13 +832,19 @@ export function useDragSpinner({
     }, 0);
   }
 
-  function finishPointer(event: ReactPointerEvent<HTMLElement>, cancelled = false) {
+  function finishPointer(event: PointerEvent, cancelled = false) {
     const dragState = dragStateRef.current;
     if (!dragState || dragState.pointerId !== event.pointerId) return;
 
+    pointerSessionCleanupRef.current?.();
+    pointerSessionCleanupRef.current = null;
     dragStateRef.current = null;
     if (dragState.captured && dragState.captureTarget.hasPointerCapture(event.pointerId)) {
-      dragState.captureTarget.releasePointerCapture(event.pointerId);
+      try {
+        dragState.captureTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // 브라우저가 pointerup 직전에 capture를 해제했어도 종료 흐름은 유지합니다.
+      }
     }
     setIsDragging(false);
     setMotionState("idle");
@@ -824,12 +888,12 @@ export function useDragSpinner({
     resetInteraction,
     pointerHandlers: {
       onPointerDown,
-      onPointerMove,
-      onPointerUp: (event: ReactPointerEvent<HTMLElement>) => finishPointer(event),
-      onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => finishPointer(event, true),
       onLostPointerCapture: (event: ReactPointerEvent<HTMLElement>) => {
         const dragState = dragStateRef.current;
-        if (dragState?.pointerId === event.pointerId) finishPointer(event, true);
+        if (dragState?.pointerId === event.pointerId) {
+          // capture가 예기치 않게 풀려도 window 추적으로 손을 뗄 때까지 drag를 유지합니다.
+          dragState.captured = false;
+        }
       }
     }
   };
