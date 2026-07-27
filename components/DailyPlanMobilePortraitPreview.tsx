@@ -218,11 +218,11 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         headers={["Team", "Total", "CALL", "Call Location", "Notes"]}
         spans={[1, 1, 1, 2, 5]}
         rows={teamRows.map((row) => row ? [
-          [row.team, row.name].filter(Boolean).join(" · "),
+          row.team,
           row.total,
           row.callTime,
           row.callLocation,
-          [row.contact, row.notes].filter(Boolean).join(" · ")
+          row.notes
         ] : ["", "", "", "", ""])}
       />
     </article>

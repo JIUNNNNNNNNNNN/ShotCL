@@ -52,23 +52,6 @@ export type DailyPlanPrintMeta = {
   teams: TeamCallSheetRow[];
 };
 
-/** 일촬표 PDF/콜시트 안에서만 사용하는 기본 부서 목록입니다. */
-export const dailyPlanTeamDepartments = [
-  "연출",
-  "제작",
-  "촬영",
-  "조명",
-  "미술",
-  "의상",
-  "녹음",
-  "데이터",
-  "엔터",
-  "보조 출연",
-  "분장",
-  "배우",
-  "기타"
-] as const;
-
 const META_START = "[[TODAY_BOARD_DAILY_PLAN_PRINT_META_V1]]";
 const META_END = "[[/TODAY_BOARD_DAILY_PLAN_PRINT_META_V1]]";
 
@@ -92,7 +75,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     memoText: "",
     mainStaff: [],
     starring: [createBlankCallSheetPerson()],
-    teams: createDefaultTeamRows()
+    teams: []
   };
 }
 
@@ -101,18 +84,6 @@ export function createBlankCallSheetPerson(): CallSheetPerson {
     id: createMetaId("star"),
     name: "",
     role: "",
-    callTime: "",
-    callLocation: "",
-    notes: ""
-  };
-}
-
-export function createBlankTeamCallSheetRow(team = ""): TeamCallSheetRow {
-  return {
-    id: createMetaId("team"),
-    team,
-    name: "",
-    total: "",
     callTime: "",
     callLocation: "",
     notes: ""
@@ -235,11 +206,7 @@ function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {
     notes: row.notes ?? ""
   }));
 
-  return next.length > 0 ? next : createDefaultTeamRows();
-}
-
-function createDefaultTeamRows() {
-  return dailyPlanTeamDepartments.slice(0, 10).map(createBlankTeamCallSheetRow);
+  return next;
 }
 
 function createMetaId(prefix: string) {

@@ -7,7 +7,7 @@ import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
-import type { Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
+import type { Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -26,6 +26,7 @@ export default function NewDailyPlanPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
+  const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -42,6 +43,7 @@ export default function NewDailyPlanPage() {
         setProject(data);
         setProjectBasicInfo(data ? basicInfo : null);
         setProjectStaffMembers(data ? staffList?.members ?? [] : []);
+        setProjectStaffDepartments(data ? staffList?.departments ?? [] : []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -66,6 +68,7 @@ export default function NewDailyPlanPage() {
       project={project}
       projectBasicInfo={projectBasicInfo}
       projectStaffMembers={projectStaffMembers}
+      projectStaffDepartments={projectStaffDepartments}
     />
   );
 }

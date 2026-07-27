@@ -198,18 +198,11 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           <tbody>
             {teamRows.map((team, index) => (
               <tr key={`landscape-team-${index}`}>
-                <td colSpan={2} className={cellClass}>
-                  {team?.team || ""}
-                  {team?.name ? <span className="block text-[9px]">{team.name}</span> : null}
-                </td>
+                <td colSpan={2} className={cellClass}>{team?.team || ""}</td>
                 <td className={cellClass}>{team?.total || ""}</td>
                 <td className={cellClass}>{team?.callTime || ""}</td>
                 <td colSpan={2} className={cellClass}>{team?.callLocation || ""}</td>
-                <td colSpan={2} className={cellClass}>
-                  {team?.contact || ""}
-                  {team?.contact && team?.notes ? <br /> : null}
-                  {team?.notes || ""}
-                </td>
+                <td colSpan={2} className={cellClass}>{team?.notes || ""}</td>
               </tr>
             ))}
           </tbody>

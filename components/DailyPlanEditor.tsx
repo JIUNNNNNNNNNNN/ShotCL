@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,7 +18,6 @@ import {
 import { getShotIdentityKey, syncShotsFromDrafts } from "@/lib/data/shots";
 import {
   createBlankCallSheetPerson,
-  createBlankTeamCallSheetRow,
   decodeDailyPlanMemo,
   encodeDailyPlanMemo,
   mergeDailyPlanTimetableRows,
@@ -32,7 +31,7 @@ import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
 import { MAX_DAILY_PLAN_MAIN_STAFF } from "@/lib/projectBasicInfo";
-import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
+import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
@@ -46,6 +45,7 @@ type DailyPlanEditorProps = {
   project: Project;
   projectBasicInfo?: ProjectBasicInfo | null;
   projectStaffMembers?: ProjectStaffMember[];
+  projectStaffDepartments?: ProjectStaffDepartment[];
   initialPlan?: DailyPlan | null;
   initialShots?: DailyPlanShot[];
   initialDraft?: DailyPlanDraft;
@@ -144,7 +144,7 @@ type WindowWithDaumPostcode = Window & {
   };
 };
 
-type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring" | "teams";
+type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring";
 
 type EditorTimetableRow =
   | { type: "scene"; sourceIndex: number; item: SceneBlockInput }
@@ -185,10 +185,11 @@ const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:round
 const maxRuntimeMinutes = 1440;
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
+const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const initialEditorState = useMemo(() => {
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
@@ -204,7 +205,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const initialPrintMeta = applyProjectStaffDefaults(
       initialDefaults.printMeta,
       projectStaffMembers,
-      activeProjectBasicInfo?.actors ?? []
+      activeProjectBasicInfo?.actors ?? [],
+      projectStaffDepartments
     );
     const initialLocations = buildInitialLocations(initialPlanDraft);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
@@ -223,7 +225,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       initialScenes,
       managedShotKeys
     };
-  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffMembers]);
+  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffDepartments, projectStaffMembers]);
   const {
     activeProjectBasicInfo,
     initialPrintMeta,
@@ -348,14 +350,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }));
   }
 
-  function addTeam() {
-    setPrintMeta((current) => ({ ...current, teams: [...current.teams, createBlankTeamCallSheetRow()] }));
-  }
-
-  function deleteTeam(index: number) {
-    setPrintMeta((current) => ({ ...current, teams: current.teams.filter((_, teamIndex) => teamIndex !== index) }));
-  }
-
   function addLocation() {
     setLocations((current) => [...current, createBlankLocation()]);
   }
@@ -441,7 +435,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
   function addMealTime() {
     setMealTimes((current) => [...current, createBlankOtherSchedule()]);
-    setPrintMeta((current) => ({ ...current, timetableRowOrder: [...timetableRows.map((row) => row.type), "event"] }));
+    setPrintMeta((current) => ({
+      ...current,
+      timetableRowOrder: current.timetableRowOrder.length > 0
+        ? [...timetableRows.map((row) => row.type), "event"]
+        : []
+    }));
   }
 
   function updateMealTime(index: number, patch: Partial<DailyPlanMealTime>) {
@@ -452,7 +451,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setMealTimes((current) => current.filter((_, mealIndex) => mealIndex !== index));
     setPrintMeta((current) => ({
       ...current,
-      timetableRowOrder: timetableRows.filter((row) => !(row.type === "event" && row.sourceIndex === index)).map((row) => row.type)
+      timetableRowOrder: current.timetableRowOrder.length > 0
+        ? timetableRows.filter((row) => !(row.type === "event" && row.sourceIndex === index)).map((row) => row.type)
+        : []
     }));
   }
 
@@ -468,7 +469,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
   function addScene() {
     setScenes((current) => [...current, createBlankScene(current.length + 1, locations[0])]);
-    setPrintMeta((current) => ({ ...current, timetableRowOrder: [...timetableRows.map((row) => row.type), "scene"] }));
+    setPrintMeta((current) => ({
+      ...current,
+      timetableRowOrder: current.timetableRowOrder.length > 0
+        ? [...timetableRows.map((row) => row.type), "scene"]
+        : []
+    }));
   }
 
   function copyScene(sceneIndex: number) {
@@ -482,7 +488,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     if (timetableIndex >= 0) {
       const nextOrder = timetableRows.map((row) => row.type);
       nextOrder.splice(timetableIndex + 1, 0, "scene");
-      setPrintMeta((current) => ({ ...current, timetableRowOrder: nextOrder }));
+      setPrintMeta((current) => ({
+        ...current,
+        timetableRowOrder: current.timetableRowOrder.length > 0 ? nextOrder : []
+      }));
     }
   }
 
@@ -490,7 +499,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     if (scenes.length > 1) {
       setPrintMeta((current) => ({
         ...current,
-        timetableRowOrder: timetableRows.filter((row) => !(row.type === "scene" && row.sourceIndex === sceneIndex)).map((row) => row.type)
+        timetableRowOrder: current.timetableRowOrder.length > 0
+          ? timetableRows.filter((row) => !(row.type === "scene" && row.sourceIndex === sceneIndex)).map((row) => row.type)
+          : []
       }));
     }
     setScenes((current) => {
@@ -570,9 +581,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     if (collection === "scenes") setScenes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "starring") {
       setPrintMeta((current) => ({ ...current, starring: moveArrayItemToIndex(current.starring, sourceIndex, targetIndex) }));
-    }
-    if (collection === "teams") {
-      setPrintMeta((current) => ({ ...current, teams: moveArrayItemToIndex(current.teams, sourceIndex, targetIndex) }));
     }
   }
 
@@ -743,6 +751,17 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     if (constraintMessage) {
       setMessage("");
       setErrorMessage(constraintMessage);
+      return null;
+    }
+    const invalidShootingOrder = scenes
+      .map((scene, index) => ({
+        label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${index + 1}`,
+        validation: getShootingOrderValidation(scene.shootingOrder, scene.cutCount)
+      }))
+      .find((item) => item.validation.error);
+    if (invalidShootingOrder) {
+      setMessage("");
+      setErrorMessage(`${invalidShootingOrder.label} 촬영 순서: ${invalidShootingOrder.validation.error}`);
       return null;
     }
 
@@ -1227,7 +1246,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     const mealIndex = row.sourceIndex;
                     return (
                       <tr key={meal.id} className={`bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                        <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
+                        <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="기타 일정" ariaLabel={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
                         <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
@@ -1254,7 +1273,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const sceneIndex = row.sourceIndex;
                   return (
                     <tr key={scene.id} className={`align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                      <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
+                      <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
@@ -1300,7 +1319,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         </section>
 
         <div className="flex flex-col">
-        <section className="field-section order-2 mt-5 hidden p-5 text-center md:block">
+        <section className="field-section order-2 mt-5 p-3 text-center md:p-5">
           <div className="flex flex-col items-center justify-center gap-3 text-center">
             <h2 className="text-center text-lg font-black text-field-primary">스태프&amp;배우</h2>
             <Button variant="secondary" onClick={() => setIsStaffOpen((current) => !current)} aria-expanded={isStaffOpen}>
@@ -1345,57 +1364,52 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </section>
 
             <section className="rounded-md border border-field-border bg-field-soft p-4 text-center">
-              <div className="flex flex-col items-center justify-center gap-3 text-center">
-                <div>
-                  <h3 className="text-center text-base font-black text-field-primary">스태프 / 부서</h3>
-                  <p className="mt-1 text-center text-sm font-bold text-field-muted">스탭별 부서, 이름, 연락처와 콜 정보를 입력합니다.</p>
-                </div>
-                <Button variant="secondary" onClick={addTeam}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  부서 추가
-                </Button>
+              <div>
+                <h3 className="text-center text-base font-black text-field-primary">스태프 / 부서</h3>
+                <p className="mt-1 text-center text-sm font-bold text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
               </div>
               <div className="mt-4 grid gap-2">
+                {printMeta.teams.length > 0 ? (
+                  <div className="hidden grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)] items-center gap-2 px-2 text-[11px] font-black text-field-primary md:grid">
+                    <span>부서</span>
+                    <span>인원</span>
+                    <span>집합시간</span>
+                    <span>집합장소</span>
+                    <span>주의사항</span>
+                  </div>
+                ) : (
+                  <p className="rounded-md border border-dashed border-field-border bg-white px-3 py-4 text-sm font-bold text-field-muted">
+                    스탭리스트에 등록된 부서가 없습니다.
+                  </p>
+                )}
                 {printMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_0.9fr_0.9fr_3.5rem_1fr_1fr_1.1fr_1.1fr_auto]"
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => finishReorder(event, "teams", index)}
+                    className="grid grid-cols-2 items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)]"
                   >
-                    <div className="flex items-center justify-center"><DragHandle label={`부서 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "teams", index)} /></div>
-                    <DraftInput className={compactInputClass} value={team.team} onCommit={(value) => updateTeam(index, { team: value })} placeholder="부서" />
-                    <DraftInput className={compactInputClass} value={team.name} onCommit={(value) => updateTeam(index, { name: value })} placeholder="이름" />
-                    <DraftInput
-                      className={`${compactInputClass} px-1 text-center`}
-                      value={sanitizeNumericInput(team.total, 4)}
-                      onCommit={(value) => updateTeam(index, { total: value })}
-                      sanitize={(value) => sanitizeNumericInput(value, 4)}
-                      numericOnly
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={4}
-                      placeholder="인원"
-                      aria-label={`${team.team || `부서 ${index + 1}`} 인원`}
-                    />
-                    <DraftInput
-                      className={compactInputClass}
-                      value={team.contact ?? ""}
-                      onCommit={(value) => updateTeam(index, { contact: value })}
-                      sanitize={formatKoreanPhoneNumber}
-                      inputMode="tel"
-                      placeholder="연락처"
-                      aria-label={`${team.team || `부서 ${index + 1}`} 연락처`}
-                    />
-                    <TimeWheelPicker label="콜 시간" value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
-                    <CallLocationSelect
-                      ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
-                      value={team.callLocation}
-                      locations={locations}
-                      onChange={(value) => updateTeam(index, { callLocation: value })}
-                    />
-                    <MemoPopoverField value={team.notes} placeholder="주의사항" ariaLabel={`${team.team || `부서 ${index + 1}`} 주의사항 수정`} onChange={(value) => updateTeam(index, { notes: value })} />
-                    <div className="flex items-center justify-center"><CircularDeleteButton label={`부서 ${index + 1} 삭제`} onClick={() => deleteTeam(index)} /></div>
+                    <div className="flex min-h-[38px] items-center justify-center rounded-md bg-field-soft px-2 text-sm font-black text-field-primary">
+                      {team.team || "미분류"}
+                    </div>
+                    <div className="flex min-h-[38px] items-center justify-center rounded-md border border-field-border bg-white px-1 text-sm font-black text-field-text" aria-label={`${team.team || "미분류"} 인원 ${team.total || "0"}명`}>
+                      {team.total || "0"}명
+                    </div>
+                    <div>
+                      <span className={mobileTimetableLabelClass}>집합시간</span>
+                      <TimeWheelPicker label={`${team.team || "미분류"} 집합시간`} value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
+                    </div>
+                    <div>
+                      <span className={mobileTimetableLabelClass}>집합장소</span>
+                      <CallLocationSelect
+                        ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
+                        value={team.callLocation}
+                        locations={locations}
+                        onChange={(value) => updateTeam(index, { callLocation: value })}
+                      />
+                    </div>
+                    <div className="col-span-2 md:col-span-1">
+                      <span className={mobileTimetableLabelClass}>주의사항</span>
+                      <MemoPopoverField value={team.notes} placeholder="주의사항" ariaLabel={`${team.team || `부서 ${index + 1}`} 주의사항 수정`} onChange={(value) => updateTeam(index, { notes: value })} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2013,19 +2027,26 @@ function CallLocationSelect({
   locations: DailyPlanLocation[];
   onChange: (value: string) => void;
 }) {
-  const locationNames = locations.map((location) => location.name.trim()).filter(Boolean);
-  const hasLegacyValue = Boolean(value && !locationNames.includes(value));
+  const listId = useId();
+  const locationNames = Array.from(new Set(locations.map((location) => location.name.trim()).filter(Boolean)));
 
   return (
-    <select className={`${compactInputClass} appearance-none bg-none pr-2 [background-image:none] ${value ? "text-field-text" : "!text-field-muted"}`} value={value} onChange={(event) => onChange(event.target.value)} aria-label={ariaLabel}>
-      <option value="">집합장소</option>
-      {hasLegacyValue ? <option value={value}>{value} (기존 값)</option> : null}
+    <>
+      <input
+        type="text"
+        className={compactInputClass}
+        value={value}
+        list={listId}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder="집합장소"
+        aria-label={ariaLabel}
+      />
+      <datalist id={listId}>
       {locationNames.map((locationName) => (
-        <option key={locationName} value={locationName}>
-          {locationName}
-        </option>
+          <option key={locationName} value={locationName} />
       ))}
-    </select>
+      </datalist>
+    </>
   );
 }
 
@@ -2041,26 +2062,53 @@ function ShootingOrderField({
   ariaLabel: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [draftValue, setDraftValue] = useState(value);
+  const initialDisplayValue = formatShootingOrderForDisplay(value, totalCut);
+  const [draftValue, setDraftValue] = useState(initialDisplayValue);
   const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const draftValueRef = useRef(value);
-  const displayValue = value;
+  const draftValueRef = useRef(initialDisplayValue);
+  const totalCutCount = parseCutCount(totalCut);
+  const savedValidation = getShootingOrderValidation(value, totalCut);
+  const savedNumbers = savedValidation.numbers;
+  const draftValidation = getShootingOrderValidation(draftValue, totalCut);
+  const displayValue = savedNumbers.join("-");
 
   function updateDraft(nextValue: string) {
     const sanitized = sanitizeShootingOrderInput(nextValue);
     draftValueRef.current = sanitized;
     setDraftValue(sanitized);
-    const normalized = normalizeShootingOrder(sanitized, totalCut);
-    if (normalized !== value) onChange(normalized);
+    const validation = getShootingOrderValidation(sanitized, totalCut);
+    if (!validation.error) {
+      const normalized = validation.numbers.join("-");
+      if (normalized !== value) onChange(normalized);
+    }
   }
 
   function commitAndClose() {
-    const normalized = normalizeShootingOrder(draftValueRef.current, totalCut);
-    if (normalized !== value) onChange(normalized);
+    const validation = getShootingOrderValidation(draftValueRef.current, totalCut);
+    if (!validation.error) {
+      const normalized = validation.numbers.join("-");
+      if (normalized !== value) onChange(normalized);
+    }
     setIsOpen(false);
+  }
+
+  function updateFromSlots(nextNumbers: number[]) {
+    onChange(nextNumbers.join("-"));
+  }
+
+  function handleSlotClick(slotIndex: number) {
+    if (savedValidation.error) return;
+    if (slotIndex < savedNumbers.length) {
+      updateFromSlots(savedNumbers.filter((_, index) => index !== slotIndex));
+      return;
+    }
+    const usedNumbers = new Set(savedNumbers);
+    const nextNumber = Array.from({ length: totalCutCount }, (_, index) => index + 1)
+      .find((cutNumber) => !usedNumbers.has(cutNumber));
+    if (nextNumber !== undefined) updateFromSlots([...savedNumbers, nextNumber]);
   }
 
   function updatePosition() {
@@ -2131,23 +2179,54 @@ function ShootingOrderField({
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={`${timetableInputClass} block max-w-full overflow-hidden whitespace-nowrap !text-left`}
-        onClick={() => {
-          draftValueRef.current = value;
-          setDraftValue(value);
-          setIsOpen((current) => !current);
-        }}
+      <div
+        className={`flex min-h-[38px] w-full min-w-0 flex-wrap items-center justify-center gap-1 rounded-md border bg-white px-1 py-1 ${
+          savedValidation.error ? "border-field-danger ring-1 ring-field-danger/20" : "border-field-border"
+        }`}
         aria-label={ariaLabel}
-        aria-expanded={isOpen}
-        title={displayValue}
+        aria-invalid={Boolean(savedValidation.error)}
       >
-        <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-center text-field-text">
-          {displayValue}
-        </span>
-      </button>
+        {totalCutCount > 0 ? Array.from({ length: totalCutCount }, (_, slotIndex) => (
+          <span key={slotIndex} className="inline-flex items-center gap-1">
+            {slotIndex > 0 ? <span className="text-[11px] font-black text-field-muted" aria-hidden>-</span> : null}
+            <button
+              type="button"
+              className={`flex h-7 min-h-7 w-7 min-w-7 items-center justify-center rounded border text-[11px] font-black ${
+                slotIndex < savedNumbers.length
+                  ? "border-field-primary bg-field-soft text-field-primary"
+                  : "border-dashed border-field-border bg-white text-field-muted hover:border-field-primary hover:bg-field-soft"
+              }`}
+              onClick={() => handleSlotClick(slotIndex)}
+              disabled={Boolean(savedValidation.error)}
+              aria-label={slotIndex < savedNumbers.length
+                ? `${ariaLabel} ${slotIndex + 1}번째 값 ${savedNumbers[slotIndex]} 삭제`
+                : `${ariaLabel} ${slotIndex + 1}번째 빈 칸 자동 입력`}
+              title={slotIndex < savedNumbers.length ? "눌러서 삭제" : "가장 낮은 미사용 컷 번호 입력"}
+            >
+              {savedNumbers[slotIndex] ?? ""}
+            </button>
+          </span>
+        )) : <span className="text-xs font-bold text-field-muted">—</span>}
+        <button
+          ref={triggerRef}
+          type="button"
+          className="ml-0.5 flex h-7 min-h-7 w-7 min-w-7 items-center justify-center rounded border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+          onClick={() => {
+            const normalizedDisplay = formatShootingOrderForDisplay(value, totalCut);
+            draftValueRef.current = normalizedDisplay;
+            setDraftValue(normalizedDisplay);
+            setIsOpen((current) => !current);
+          }}
+          aria-label={`${ariaLabel} 직접 입력`}
+          aria-expanded={isOpen}
+          title={displayValue || "촬영 순서 직접 입력"}
+        >
+          <MoreHorizontal className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+      {savedValidation.error ? (
+        <p className="mt-1 text-[10px] font-bold leading-[1.35] text-field-danger">{savedValidation.error}</p>
+      ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
           ref={popoverRef}
@@ -2168,7 +2247,7 @@ function ShootingOrderField({
               value={draftValue}
               onChange={(event) => updateDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/[0-9,\-\/ ]/.test(event.key)) {
+                if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/[0-9-]/.test(event.key)) {
                   event.preventDefault();
                 }
                 if (event.key === "Enter") {
@@ -2183,19 +2262,21 @@ function ShootingOrderField({
                   window.setTimeout(() => focusAdjacentElement(trigger, event.shiftKey ? -1 : 1));
                 }
               }}
-              placeholder="예: 11,10,9"
+              placeholder="예: 4-2"
               aria-label={`${ariaLabel} 값`}
+              aria-invalid={Boolean(draftValidation.error)}
             />
             <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-field-border text-field-muted" onClick={commitAndClose} aria-label={`${ariaLabel} 닫기`}>
               <X className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <div className="mt-2 grid grid-cols-5 gap-1.5">
-            {["-", ",", "/"].map((separator) => (
-              <button key={separator} type="button" className="min-h-[38px] rounded border border-field-border bg-field-soft py-1.5 text-sm font-black leading-[1.35] text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor(separator)}>
-                {separator}
-              </button>
-            ))}
+          {draftValidation.error ? (
+            <p className="mt-1 text-[11px] font-bold leading-[1.35] text-field-danger">{draftValidation.error}</p>
+          ) : null}
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            <button type="button" className="min-h-[38px] rounded border border-field-border bg-field-soft py-1.5 text-sm font-black leading-[1.35] text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor("-")}>
+              -
+            </button>
             <button type="button" className="min-h-[38px] rounded border border-field-border bg-white px-1 py-1.5 text-[11px] font-black leading-[1.35] text-field-text" onPointerDown={(event) => event.preventDefault()} onClick={deleteAtCursor}>
               지우기
             </button>
@@ -2241,6 +2322,7 @@ function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragSta
 
 function TimetableOrderControls({
   label,
+  ariaLabel = label,
   rowIndex,
   rowCount,
   onMove,
@@ -2248,6 +2330,7 @@ function TimetableOrderControls({
   onDelete
 }: {
   label: string;
+  ariaLabel?: string;
   rowIndex: number;
   rowCount: number;
   onMove: (rowIndex: number, direction: "up" | "down") => void;
@@ -2257,13 +2340,13 @@ function TimetableOrderControls({
   return (
     <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2 max-md:gap-0.5 max-md:border-b-0 max-md:pb-0 max-md:[&_button]:h-7 max-md:[&_button]:w-7">
       <span className="mr-auto text-[11px] font-black text-field-primary lg:hidden max-md:text-[9px]">{label} 순서</span>
-      <DragHandle label={`${label} 드래그로 순서 변경`} onDragStart={onDragStart} tabIndex={-1} />
+      <DragHandle label={`${ariaLabel} 드래그로 순서 변경`} onDragStart={onDragStart} tabIndex={-1} />
       <button
         type="button"
         onClick={() => onMove(rowIndex, "up")}
         disabled={rowIndex === 0}
         className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
-        aria-label={`${label} 위로 이동`}
+        aria-label={`${ariaLabel} 위로 이동`}
         title="위로 이동"
         tabIndex={-1}
       >
@@ -2274,13 +2357,13 @@ function TimetableOrderControls({
         onClick={() => onMove(rowIndex, "down")}
         disabled={rowIndex === rowCount - 1}
         className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
-        aria-label={`${label} 아래로 이동`}
+        aria-label={`${ariaLabel} 아래로 이동`}
         title="아래로 이동"
         tabIndex={-1}
       >
         <ArrowDown className="h-4 w-4" aria-hidden />
       </button>
-      <CircularDeleteButton label={`${label} 삭제`} onClick={onDelete} tabIndex={-1} />
+      <CircularDeleteButton label={`${ariaLabel} 삭제`} onClick={onDelete} tabIndex={-1} />
     </div>
   );
 }
@@ -2798,18 +2881,11 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 <td className="border border-black">{person?.callTime || ""}</td>
                 <td colSpan={2} className="border border-black">{person?.callLocation || ""}</td>
                 <td className="border border-black">{person?.notes || ""}</td>
-                <td colSpan={2} className="border border-black">
-                  {team?.team || ""}
-                  {team?.name ? <span className="block text-[9px]">{team.name}</span> : null}
-                </td>
+                <td colSpan={2} className="border border-black">{team?.team || ""}</td>
                 <td className="border border-black">{team?.total || ""}</td>
                 <td className="border border-black">{team?.callTime || ""}</td>
                 <td colSpan={2} className="border border-black">{team?.callLocation || ""}</td>
-                <td colSpan={2} className="border border-black">
-                  {team?.contact || ""}
-                  {team?.contact && team?.notes ? <br /> : null}
-                  {team?.notes || ""}
-                </td>
+                <td colSpan={2} className="border border-black">{team?.notes || ""}</td>
               </tr>
             );
           })}
@@ -2822,7 +2898,11 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
 type PrintTimetableRow = MobileDailyPlanTimetableRow;
 
 function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] {
-  const sceneRows: PrintTimetableRow[] = data.scenes.map((scene) => ({
+  const hasExplicitTimetableOrder = data.meta.timetableRowOrder.length > 0;
+  const previewScenes = hasExplicitTimetableOrder
+    ? data.scenes
+    : sortScenesNaturallyForPreview(data.scenes);
+  const sceneRows: PrintTimetableRow[] = previewScenes.map((scene) => ({
     type: "scene",
     start: scene.startTime || "",
     end: scene.endTime || "",
@@ -2846,8 +2926,37 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     description: meal.memo || "기타 일정"
   }));
 
-  const orderedRows = mergeDailyPlanTimetableRows(sceneRows, breakRows, data.meta.timetableRowOrder);
+  const orderedRows = hasExplicitTimetableOrder
+    ? mergeDailyPlanTimetableRows(sceneRows, breakRows, data.meta.timetableRowOrder)
+    : [...sceneRows, ...breakRows];
   return orderedRows.concat(createBlankPrintRows(Math.max(0, 7 - orderedRows.length)));
+}
+
+function sortScenesNaturallyForPreview(scenes: DailyPlanPreviewScene[]) {
+  const collator = new Intl.Collator("ko-KR", { numeric: true, sensitivity: "base" });
+  return scenes
+    .map((scene, sourceIndex) => ({
+      scene,
+      sourceIndex,
+      numericValue: getSceneNaturalNumber(scene.sceneNumber)
+    }))
+    .sort((left, right) => {
+      if (left.numericValue !== null || right.numericValue !== null) {
+        if (left.numericValue === null) return 1;
+        if (right.numericValue === null) return -1;
+        if (left.numericValue !== right.numericValue) return left.numericValue - right.numericValue;
+      }
+      const labelOrder = collator.compare(left.scene.sceneNumber, right.scene.sceneNumber);
+      return labelOrder || left.sourceIndex - right.sourceIndex;
+    })
+    .map(({ scene }) => scene);
+}
+
+function getSceneNaturalNumber(value: string) {
+  const match = String(value ?? "").match(/\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function createBlankPrintRows(count: number): PrintTimetableRow[] {
@@ -2923,8 +3032,6 @@ function replaceSceneCastValue(value: string, previousValue: string, nextValue: 
 }
 
 function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
-  const orderCount = scene.shootingOrder.split(/[-,/\s]+/).filter(Boolean).length;
-  if (orderCount > 0) return String(orderCount);
   if (scene.cuts.length > 0) return String(scene.cuts.length);
   return "";
 }
@@ -3233,7 +3340,7 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
       scene?.cuts.push({ id: makeLocalId("cut"), cutNumber, description: shot.description, memo: shot.memo });
     });
     if (!scene.shootingOrder && /[-,/\s]/.test(shot.cutNumber)) {
-      scene.shootingOrder = sanitizeShootingOrderInput(shot.cutNumber).trim();
+      scene.shootingOrder = shot.cutNumber.trim();
     }
     scene.cutCount = String(scene.cuts.length);
     scene.description = scene.description || shot.description;
@@ -3402,16 +3509,53 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
 }
 
 function normalizeShootingOrder(value: string, totalCut: string) {
+  const validation = getShootingOrderValidation(value, totalCut);
+  return validation.error ? "" : validation.numbers.join("-");
+}
+
+function formatShootingOrderForDisplay(value: string, totalCut: string) {
+  return getShootingOrderValidation(value, totalCut).numbers.join("-");
+}
+
+function getShootingOrderValidation(value: string, totalCut: string): {
+  numbers: number[];
+  error: string;
+} {
+  const source = String(value ?? "").trim();
+  if (!source) return { numbers: [], error: "" };
   const count = parseCutCount(totalCut);
-  const sanitized = sanitizeShootingOrderInput(String(value ?? "")).trim();
-  if (!sanitized || count === 0) return "";
+  if (count === 0) {
+    return { numbers: [], error: "총 컷수를 먼저 입력해주세요." };
+  }
+  if (/[^0-9,\-\/\s]/.test(source)) {
+    return { numbers: [], error: "촬영 순서는 숫자와 하이픈만 사용할 수 있습니다." };
+  }
 
-  const hasSeparator = /[-,/ ]/.test(sanitized);
-  const cutNumbers = hasSeparator
-    ? sanitized.split(/[-,/ ]+/).filter(Boolean).map(Number).filter((cutNumber) => cutNumber >= 1 && cutNumber <= count)
-    : parseCompactShootingOrder(sanitized, count);
+  const hasSeparator = /[-,/\s]/.test(source);
+  const tokens = hasSeparator
+    ? source.split(/[-,/\s]+/).filter(Boolean)
+    : [];
+  const numbers = hasSeparator
+    ? tokens.map(Number)
+    : parseCompactShootingOrder(source, count);
 
-  return cutNumbers.join("-");
+  if (numbers.length === 0) {
+    return { numbers: [], error: `1부터 ${count}까지의 컷 번호를 입력해주세요.` };
+  }
+  const outOfRange = numbers.find((cutNumber) => (
+    !Number.isInteger(cutNumber) || cutNumber < 1 || cutNumber > count
+  ));
+  if (outOfRange !== undefined) {
+    return {
+      numbers,
+      error: `${outOfRange}은(는) 총 컷수 ${count}의 범위를 벗어납니다.`
+    };
+  }
+  const duplicate = numbers.find((cutNumber, index) => numbers.indexOf(cutNumber) !== index);
+  if (duplicate !== undefined) {
+    return { numbers, error: `컷 ${duplicate}이(가) 중복되었습니다.` };
+  }
+  return { numbers, error: "" };
 }
 
 const sceneShootingOrderPrefix = "[[SHOTCL_SHOOTING_ORDER:";
@@ -3584,7 +3728,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDayNight(scene.dayNight),
         storyDay: scene.storyDay,
-        shootingOrder: scene.shootingOrder,
+        shootingOrder: formatShootingOrderForDisplay(scene.shootingOrder, scene.cutCount),
         notes: scene.notes || cuts[0]?.memo || "",
         subject: scene.subject,
         props: scene.props,
@@ -3631,7 +3775,7 @@ function formatProgressSyncFailure(saved: SaveDailyPlanResult) {
 }
 
 function sanitizeShootingOrderInput(value: string) {
-  return value.replace(/[^0-9,\-\/ ]/g, "");
+  return value.replace(/[^0-9-]/g, "");
 }
 
 function parseCompactShootingOrder(value: string, totalCut: number) {

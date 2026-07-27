@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/Card";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
-import type { DailyPlanWithShots, Project, ProjectBasicInfo, ProjectStaffMember } from "@/lib/types";
+import type { DailyPlanWithShots, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -29,6 +29,7 @@ export default function DailyPlanDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
+  const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
   const [dailyPlan, setDailyPlan] = useState<DailyPlanWithShots | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -49,12 +50,14 @@ export default function DailyPlanDetailPage() {
           setDailyPlan(null);
           setProjectBasicInfo(null);
           setProjectStaffMembers([]);
+          setProjectStaffDepartments([]);
           setErrorMessage("");
           return;
         }
         setDailyPlan(planData);
         setProjectBasicInfo(basicInfo);
         setProjectStaffMembers(staffList?.members ?? []);
+        setProjectStaffDepartments(staffList?.departments ?? []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다.");
@@ -86,6 +89,7 @@ export default function DailyPlanDetailPage() {
       project={project}
       projectBasicInfo={projectBasicInfo}
       projectStaffMembers={projectStaffMembers}
+      projectStaffDepartments={projectStaffDepartments}
       initialPlan={dailyPlan.plan}
       initialShots={dailyPlan.shots}
     />
