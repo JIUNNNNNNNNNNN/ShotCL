@@ -12,20 +12,21 @@ import {
   useState
 } from "react";
 import {
-  Check,
-  CheckSquare,
+  ArrowUp,
+  ChevronRight,
   Clapperboard,
   FileImage,
   FileText,
   Folder,
   FolderInput,
+  FolderOpen,
   FolderPlus,
+  Home,
   ImagePlus,
+  Info,
   Map as MapIcon,
   Move,
-  Pencil,
   Search,
-  Square,
   Trash2,
   Upload,
   X
@@ -100,12 +101,12 @@ type PendingImport = {
 
 type FolderEditor = {
   mode: "create" | "rename";
-  folderId?: string;
+  folderPath?: string;
   value: string;
 };
 
 type PendingConfirm =
-  | { kind: "folder"; folder: ProjectArchiveFolder; assetIds: string[] }
+  | { kind: "folder"; folderPath: string; folderIds: string[]; assetIds: string[] }
   | {
     kind: "selection";
     assetIds: string[];
@@ -120,13 +121,6 @@ type DiagramDraft = {
   sceneNo: string;
   cutNo: string;
   shot: Shot;
-};
-
-type LassoBox = {
-  startPageX: number;
-  startPageY: number;
-  currentPageX: number;
-  currentPageY: number;
 };
 
 type MetadataDraft = {
@@ -153,11 +147,15 @@ type AssetLongPress = {
   startY: number;
   triggered: boolean;
   timeoutId: number;
+  target: HTMLButtonElement;
+  clientX: number;
+  clientY: number;
 };
 
 const PAGE_SIZE = 48;
 const LONG_PRESS_MS = 600;
 const LONG_PRESS_MOVE_TOLERANCE = 9;
+const SELECTION_SCROLL_EDGE = 72;
 
 export default function ProjectStoryboardOverheadPage() {
   const params = useParams<{ id: string | string[] }>();
@@ -171,13 +169,12 @@ export default function ProjectStoryboardOverheadPage() {
   const [folders, setFolders] = useState<ProjectArchiveFolder[]>([]);
   const [diagramArchives, setDiagramArchives] = useState<OverheadDiagramArchiveItem[]>([]);
   const [query, setQuery] = useState("");
-  const [activeFolderId, setActiveFolderId] = useState("all");
-  const [sortMode, setSortMode] = useState<"newest" | "name" | "scene" | "folder">("newest");
+  const [currentFolderPath, setCurrentFolderPath] = useState("");
+  const [sortMode, setSortMode] = useState<"newest" | "name" | "scene">("newest");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [moveFolderId, setMoveFolderId] = useState("");
-  const [lasso, setLasso] = useState<LassoBox | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
@@ -203,16 +200,9 @@ export default function ProjectStoryboardOverheadPage() {
   const [folderUploadReport, setFolderUploadReport] = useState<FolderUploadReport | null>(null);
   const preparingRef = useRef(false);
   const folderUploadRef = useRef<HTMLInputElement | null>(null);
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  const cardRefs = useRef(new Map<string, HTMLElement>());
-  const lassoBaseSelectionRef = useRef<Set<string>>(new Set());
-  const lassoMovedRef = useRef(false);
-  const lassoRef = useRef<LassoBox | null>(null);
-  const lassoPointerRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
-  const lassoCleanupRef = useRef<(() => void) | null>(null);
-  const lassoAnimationRef = useRef<number | null>(null);
-  const previousBodyUserSelectRef = useRef("");
   const longPressRef = useRef<AssetLongPress | null>(null);
+  const selectionPointerCleanupRef = useRef<(() => void) | null>(null);
+  const selectionScrollFrameRef = useRef<number | null>(null);
   const suppressAssetClickRef = useRef<string | null>(null);
 
   const loadArchive = useCallback(async () => {
@@ -260,7 +250,7 @@ export default function ProjectStoryboardOverheadPage() {
     setVisibleCount(PAGE_SIZE);
     setSelectedIds(new Set());
     setSelectionMode(false);
-  }, [activeType, activeFolderId, query, sortMode]);
+  }, [activeType, currentFolderPath, query, sortMode]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -270,35 +260,49 @@ export default function ProjectStoryboardOverheadPage() {
 
   useEffect(() => {
     if (
-      activeFolderId !== "all"
-      && activeFolderId !== "unfiled"
-      && !folders.some((folder) => folder.id === activeFolderId)
+      currentFolderPath
+      && !folders.some((folder) => (
+        isArchivePathWithin(normalizeArchiveFolderPath(folder.name), currentFolderPath)
+      ))
     ) {
-      setActiveFolderId("all");
+      setCurrentFolderPath("");
     }
-  }, [activeFolderId, folders]);
+  }, [currentFolderPath, folders]);
 
   useEffect(() => () => {
-    lassoCleanupRef.current?.();
-    if (lassoAnimationRef.current !== null) cancelAnimationFrame(lassoAnimationRef.current);
+    selectionPointerCleanupRef.current?.();
+    if (selectionScrollFrameRef.current !== null) cancelAnimationFrame(selectionScrollFrameRef.current);
     const longPress = longPressRef.current;
     if (longPress) window.clearTimeout(longPress.timeoutId);
   }, []);
 
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
-  const folderNameById = useMemo(
-    () => new Map(folders.map((folder) => [folder.id, folder.name])),
+  const folderPathById = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, normalizeArchiveFolderPath(folder.name)])),
     [folders]
+  );
+  const folderByPath = useMemo(
+    () => new Map(folders.map((folder) => [normalizeArchiveFolderPath(folder.name), folder])),
+    [folders]
+  );
+  const currentFolder = folderByPath.get(currentFolderPath) ?? null;
+  const currentFolderId = currentFolder?.id ?? null;
+  const childFolders = useMemo(
+    () => getArchiveChildFolders(folders, activeAssets, currentFolderPath, folderPathById),
+    [activeAssets, currentFolderPath, folderPathById, folders]
+  );
+  const breadcrumbs = useMemo(
+    () => archiveBreadcrumbs(currentFolderPath),
+    [currentFolderPath]
   );
   const sourceAssets = useMemo(
     () => activeAssets.filter((asset) => {
       const isSource = asset.mimeType === "application/pdf" || asset.groupId?.startsWith("source:");
-      const folderMatches = activeFolderId === "all"
-        || activeFolderId === "unfiled" && !asset.crop.folderId
-        || asset.crop.folderId === activeFolderId;
+      const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
+      const folderMatches = assetPath === currentFolderPath;
       return isSource && folderMatches && matchesAssetQuery(asset, query);
     }),
-    [activeAssets, activeFolderId, query]
+    [activeAssets, currentFolderPath, folderPathById, query]
   );
   const imageAssets = useMemo(
     () => activeAssets.filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:")),
@@ -306,9 +310,8 @@ export default function ProjectStoryboardOverheadPage() {
   );
   const filteredAssets = useMemo(() => {
     const filtered = imageAssets.filter((asset) => {
-      const folderMatches = activeFolderId === "all"
-        || activeFolderId === "unfiled" && !asset.crop.folderId
-        || asset.crop.folderId === activeFolderId;
+      const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
+      const folderMatches = assetPath === currentFolderPath;
       return folderMatches && matchesAssetQuery(asset, query);
     });
     return [...filtered].sort((left, right) => {
@@ -322,51 +325,27 @@ export default function ProjectStoryboardOverheadPage() {
           { numeric: true }
         );
       }
-      if (sortMode === "folder") {
-        return (folderNameById.get(left.crop.folderId || "") || "미분류").localeCompare(
-          folderNameById.get(right.crop.folderId || "") || "미분류",
-          "ko-KR"
-        );
-      }
       return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
     });
-  }, [activeFolderId, folderNameById, imageAssets, query, sortMode]);
+  }, [currentFolderPath, folderPathById, imageAssets, query, sortMode]);
   const visibleAssets = filteredAssets.slice(0, visibleCount);
-  const folderCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    let unfiled = 0;
-    activeAssets.forEach((asset) => {
-      if (asset.groupId?.startsWith("source:") && asset.mimeType !== "application/pdf") return;
-      const folderId = asset.crop.folderId;
-      if (!folderId) unfiled += 1;
-      else counts.set(folderId, (counts.get(folderId) ?? 0) + 1);
-    });
-    const diagramCount = activeType === "overhead" ? diagramArchives.length : 0;
-    return { all: activeAssets.length + diagramCount, unfiled: unfiled + diagramCount, byId: counts };
-  }, [activeAssets, activeType, diagramArchives.length]);
   const filteredDiagrams = useMemo(
-    () => activeType === "overhead" && (activeFolderId === "all" || activeFolderId === "unfiled")
+    () => activeType === "overhead" && currentFolderPath === ""
       ? diagramArchives.filter((item) => matchesDiagramQuery(item, query))
       : [],
-    [activeFolderId, activeType, diagramArchives, query]
-  );
-  const selectableFilteredIds = useMemo(
-    () => [
-      ...filteredDiagrams.filter((item) => !item.legacy).map((item) => item.id),
-      ...filteredAssets.map((asset) => asset.id)
-    ],
-    [filteredAssets, filteredDiagrams]
+    [activeType, currentFolderPath, diagramArchives, query]
   );
   const selectedReferenceAssetIds = useMemo(
-    () => filteredAssets.filter((asset) => selectedIds.has(asset.id)).map((asset) => asset.id),
-    [filteredAssets, selectedIds]
+    () => [...overheads, ...storyboards]
+      .filter((asset) => selectedIds.has(asset.id))
+      .map((asset) => asset.id),
+    [overheads, selectedIds, storyboards]
   );
   const selectedDiagramItems = useMemo(
-    () => filteredDiagrams.filter((item) => !item.legacy && selectedIds.has(item.id)),
-    [filteredDiagrams, selectedIds]
+    () => diagramArchives.filter((item) => !item.legacy && selectedIds.has(item.id)),
+    [diagramArchives, selectedIds]
   );
-  const allFilteredSelected = selectableFilteredIds.length > 0
-    && selectableFilteredIds.every((id) => selectedIds.has(id));
+  const selectedCount = selectedReferenceAssetIds.length + selectedDiagramItems.length;
 
   function mergeUploadedAssets(assetType: ArchiveType, uploaded: ProjectReferenceAsset[]) {
     if (uploaded.length === 0) return;
@@ -449,6 +428,11 @@ export default function ProjectStoryboardOverheadPage() {
       return;
     }
     const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 ? "pdf" : "images";
+    const destinationFolderId = context?.folderId !== undefined
+      ? context.folderId
+      : currentFolderPath
+        ? currentFolderId ?? (await ensureArchiveFolder(currentFolderPath))?.id ?? null
+        : null;
     preparingRef.current = true;
     setIsPreparing(true);
     setErrorMessage("");
@@ -473,7 +457,7 @@ export default function ProjectStoryboardOverheadPage() {
               thumbnailFile: optimized.thumbnailFile,
               sourceType: "upload_image",
               groupId: batchId,
-              folderId: context?.folderId ?? selectedFolderValue(activeFolderId),
+              folderId: destinationFolderId,
               originalFolderName: metadata?.originalFolderName,
               relativePath: metadata?.relativePath,
               sortOrder: existingCount + index
@@ -541,7 +525,7 @@ export default function ProjectStoryboardOverheadPage() {
           ? readableFiles[0].name
           : `${readableFiles[0].name} 외 ${readableFiles.length - 1}개`,
         pages,
-        folderId: context?.folderId ?? selectedFolderValue(activeFolderId),
+        folderId: destinationFolderId,
         fileMetadata: readableMetadata,
         existingSourceAssetIds: readableSourceIds.length > 0 ? readableSourceIds : undefined
       });
@@ -728,56 +712,101 @@ export default function ProjectStoryboardOverheadPage() {
 
   async function ensureArchiveFolder(
     name: string,
-    cache = new Map(folders.map((folder) => [folder.name.trim().toLocaleLowerCase("ko-KR"), folder]))
+    cache = new Map(
+      folders.map((folder) => [
+        normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
+        folder
+      ])
+    )
   ) {
     if (!projectId || !canEdit) return null;
-    const normalizedName = name.trim().replace(/\/{2,}/g, "/").slice(0, 80);
-    if (!normalizedName) return null;
-    const key = normalizedName.toLocaleLowerCase("ko-KR");
-    const existing = cache.get(key);
-    if (existing) return existing;
-    try {
-      const folder = await createProjectArchiveFolder(projectId, normalizedName, folders.length + cache.size);
-      cache.set(key, folder);
-      setFolders((current) => current.some((entry) => entry.id === folder.id) ? current : [...current, folder]);
-      return folder;
-    } catch (error) {
-      if (error instanceof Error && /같은 이름/.test(error.message)) {
-        const refreshed = await listProjectArchiveFolders(projectId);
-        setFolders(refreshed);
-        const duplicate = refreshed.find(
-          (folder) => folder.name.trim().toLocaleLowerCase("ko-KR") === key
-        );
-        if (duplicate) {
-          cache.set(key, duplicate);
-          return duplicate;
-        }
+    const normalizedPath = normalizeArchiveFolderPath(name).slice(0, 80);
+    if (!normalizedPath) return null;
+    const prefixes = archivePathPrefixes(normalizedPath);
+    let finalFolder: ProjectArchiveFolder | null = null;
+
+    for (const path of prefixes) {
+      const key = path.toLocaleLowerCase("ko-KR");
+      const existing = cache.get(key);
+      if (existing) {
+        finalFolder = existing;
+        continue;
       }
-      setErrorMessage(error instanceof Error ? error.message : "폴더를 만들지 못했습니다.");
-      return null;
+      try {
+        const folder = await createProjectArchiveFolder(projectId, path, folders.length + cache.size);
+        cache.set(key, folder);
+        finalFolder = folder;
+        setFolders((current) => current.some((entry) => entry.id === folder.id) ? current : [...current, folder]);
+      } catch (error) {
+        if (error instanceof Error && /같은 이름/.test(error.message)) {
+          const refreshed = await listProjectArchiveFolders(projectId);
+          setFolders(refreshed);
+          for (const folder of refreshed) {
+            cache.set(
+              normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
+              folder
+            );
+          }
+          const duplicate = cache.get(key);
+          if (duplicate) {
+            finalFolder = duplicate;
+            continue;
+          }
+        }
+        setErrorMessage(error instanceof Error ? error.message : "폴더를 만들지 못했습니다.");
+        return null;
+      }
     }
+    return finalFolder;
   }
 
   async function submitFolderEditor() {
     if (!projectId || !canEdit || !folderEditor) return;
-    const name = folderEditor.value.trim().replace(/\/{2,}/g, "/").slice(0, 80);
-    if (!name) return;
-    const duplicate = folders.find(
-      (folder) => folder.name.trim().toLocaleLowerCase("ko-KR") === name.toLocaleLowerCase("ko-KR")
-        && folder.id !== folderEditor.folderId
-    );
-    if (duplicate) {
-      setActiveFolderId(duplicate.id);
-      setFolderEditor(null);
-      return;
-    }
+    const parentPath = folderEditor.mode === "create"
+      ? currentFolderPath
+      : archiveParentPath(folderEditor.folderPath || "");
+    const maxSegmentLength = Math.max(1, 80 - parentPath.length - (parentPath ? 1 : 0));
+    const segment = cleanArchiveFolderSegment(folderEditor.value).slice(0, maxSegmentLength);
+    if (!segment) return;
     try {
       if (folderEditor.mode === "create") {
-        const folder = await ensureArchiveFolder(name);
-        if (folder) setActiveFolderId(folder.id);
-      } else if (folderEditor.folderId) {
-        const updated = await renameProjectArchiveFolder(projectId, folderEditor.folderId, name);
-        setFolders((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+        const path = joinArchiveFolderPath(currentFolderPath, segment);
+        const duplicate = folderByPath.get(path);
+        if (duplicate) {
+          setCurrentFolderPath(path);
+          setFolderEditor(null);
+          return;
+        }
+        await ensureArchiveFolder(path);
+      } else if (folderEditor.folderPath) {
+        const oldPath = normalizeArchiveFolderPath(folderEditor.folderPath);
+        const nextPath = joinArchiveFolderPath(parentPath, segment);
+        const affected = folders
+          .filter((folder) => isArchivePathWithin(normalizeArchiveFolderPath(folder.name), oldPath))
+          .sort((left, right) => left.name.length - right.name.length);
+        const affectedIds = new Set(affected.map((folder) => folder.id));
+        const collision = folders.some((folder) => {
+          if (affectedIds.has(folder.id)) return false;
+          const path = normalizeArchiveFolderPath(folder.name);
+          return affected.some((entry) => (
+            path === replaceArchivePathPrefix(normalizeArchiveFolderPath(entry.name), oldPath, nextPath)
+          ));
+        });
+        if (collision) {
+          setErrorMessage("같은 위치에 동일한 이름의 폴더가 있습니다.");
+          return;
+        }
+        const updatedFolders: ProjectArchiveFolder[] = [];
+        for (const folder of affected) {
+          updatedFolders.push(await renameProjectArchiveFolder(
+            projectId,
+            folder.id,
+            replaceArchivePathPrefix(normalizeArchiveFolderPath(folder.name), oldPath, nextPath)
+          ));
+        }
+        const updatedById = new Map(updatedFolders.map((folder) => [folder.id, folder]));
+        setFolders((current) => current.map((folder) => updatedById.get(folder.id) ?? folder));
+        setCurrentFolderPath(nextPath);
       }
       setFolderEditor(null);
     } catch (error) {
@@ -798,9 +827,12 @@ export default function ProjectStoryboardOverheadPage() {
             crop: { ...asset.crop, folderId: null }
           }));
         }
-        await deleteProjectArchiveFolder(projectId, pendingConfirm.folder.id);
-        setFolders((current) => current.filter((entry) => entry.id !== pendingConfirm.folder.id));
-        setActiveFolderId("unfiled");
+        for (const folderId of pendingConfirm.folderIds) {
+          await deleteProjectArchiveFolder(projectId, folderId);
+        }
+        const removedIds = new Set(pendingConfirm.folderIds);
+        setFolders((current) => current.filter((entry) => !removedIds.has(entry.id)));
+        setCurrentFolderPath(archiveParentPath(pendingConfirm.folderPath));
       } else {
         if (pendingConfirm.assetIds.length > 0) {
           await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
@@ -862,16 +894,19 @@ export default function ProjectStoryboardOverheadPage() {
       setProgressMessage(`지원 파일 선별 중 · 발견 ${scan.discoveredCount}개 · 지원 ${entries.length}개`);
       const groups = new Map<string, typeof entries>();
       for (const entry of entries) {
-        const folderPath = entry.folderPath || "";
+        const folderPath = joinArchiveFolderPath(currentFolderPath, entry.folderPath || "");
         groups.set(folderPath, [...(groups.get(folderPath) ?? []), entry]);
       }
 
       const folderCache = new Map(
-        folders.map((folder) => [folder.name.trim().toLocaleLowerCase("ko-KR"), folder])
+        folders.map((folder) => [
+          normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
+          folder
+        ])
       );
       const uploadedAssets: ProjectReferenceAsset[] = [];
       const failed: ArchiveFolderIssue[] = [];
-      let firstFolderId: string | null = null;
+      let firstFolderPath = "";
       const entryOrder = new Map(entries.map((entry, index) => [
         `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`,
         index
@@ -879,14 +914,14 @@ export default function ProjectStoryboardOverheadPage() {
 
       for (const [folderPath, folderEntries] of groups) {
         const folder = folderPath ? await ensureArchiveFolder(folderPath, folderCache) : null;
-        const folderId = folder?.id ?? selectedFolderValue(activeFolderId);
+        const folderId = folder?.id ?? currentFolderId;
         if (folderPath && !folder) {
           for (const entry of folderEntries) {
             failed.push({ path: entry.relativePath, reason: "아카이브 폴더 생성 실패" });
           }
           continue;
         }
-        if (!firstFolderId && folderId) firstFolderId = folderId;
+        if (!firstFolderPath && folder) firstFolderPath = normalizeArchiveFolderPath(folder.name);
         await mapWithConcurrency(folderEntries, 3, async (entry) => {
           try {
             const sourceOrder = entryOrder.get(
@@ -899,7 +934,7 @@ export default function ProjectStoryboardOverheadPage() {
               uploaded = await uploadProjectReferenceAsset(projectId, assetType, entry.file, {
                 sourceType: "upload_pdf",
                 folderId,
-                groupId: `source:folder:${folderId || "unfiled"}`,
+                groupId: `source:folder:${folderId || "root"}`,
                 originalFolderName: entry.originalFolderName,
                 relativePath: entry.relativePath,
                 sortOrder: imageAssets.length + sourceOrder
@@ -912,7 +947,7 @@ export default function ProjectStoryboardOverheadPage() {
                 thumbnailFile: optimized.thumbnailFile,
                 sourceType: "upload_image",
                 folderId,
-                groupId: `folder:${folderId || "unfiled"}`,
+                groupId: `folder:${folderId || "root"}`,
                 originalFolderName: entry.originalFolderName,
                 relativePath: entry.relativePath,
                 sortOrder: imageAssets.length + sourceOrder
@@ -941,7 +976,7 @@ export default function ProjectStoryboardOverheadPage() {
       }
       mergeUploadedAssets(assetType, uploadedAssets);
       setProgressMessage("");
-      if (firstFolderId) setActiveFolderId(firstFolderId);
+      if (firstFolderPath) setCurrentFolderPath(firstFolderPath);
       setFolderUploadReport({
         discoveredCount: scan.discoveredCount,
         supportedCount: entries.length,
@@ -973,11 +1008,6 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  function selectAllFilteredAssets() {
-    setSelectionMode(true);
-    setSelectedIds(new Set(selectableFilteredIds));
-  }
-
   async function moveSelectedAssets() {
     if (!projectId || selectedReferenceAssetIds.length === 0) return;
     try {
@@ -1006,135 +1036,146 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  function beginLasso(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!canEdit || !supportsDesktopDrop || event.pointerType !== "mouse" || event.button !== 0) return;
-    const target = event.target as HTMLElement;
-    if (target.closest("input,textarea,select,a,button,[contenteditable='true'],[data-no-lasso]")) return;
-    event.preventDefault();
-    lassoCleanupRef.current?.();
-    lassoBaseSelectionRef.current = event.metaKey || event.ctrlKey || event.shiftKey
-      ? new Set(selectedIds)
-      : new Set();
-    lassoMovedRef.current = false;
-    lassoPointerRef.current = {
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }
+
+  function editSingleSelectedItem() {
+    if (selectedCount !== 1) return;
+    const selectedAsset = [...overheads, ...storyboards]
+      .find((asset) => selectedIds.has(asset.id));
+    if (selectedAsset) {
+      clearSelection();
+      openMetadata(selectedAsset);
+      return;
+    }
+    const selectedDiagram = diagramArchives.find(
+      (item) => !item.legacy && selectedIds.has(item.id)
+    );
+    if (selectedDiagram) {
+      clearSelection();
+      openDiagram(selectedDiagram, true);
+    }
+  }
+
+  function beginAssetSelectionPress(assetId: string, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!canEdit || event.button !== 0) return;
+    const selectionWasActive = selectionMode;
+    cancelAssetLongPress();
+    selectionPointerCleanupRef.current?.();
+
+    const state: AssetLongPress = {
+      assetId,
       pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
       clientX: event.clientX,
-      clientY: event.clientY
+      clientY: event.clientY,
+      triggered: false,
+      timeoutId: 0,
+      target: event.currentTarget
     };
-    const initial = {
-      startPageX: event.clientX + window.scrollX,
-      startPageY: event.clientY + window.scrollY,
-      currentPageX: event.clientX + window.scrollX,
-      currentPageY: event.clientY + window.scrollY
+
+    const activateSelection = () => {
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== event.pointerId) return;
+      current.triggered = true;
+      suppressAssetClickRef.current = current.assetId;
+      setSelectionMode(true);
+      setPressedAssetId(null);
+      setSelectedIds((selected) => new Set(selected).add(current.assetId));
+      try {
+        current.target.setPointerCapture(current.pointerId);
+      } catch {
+        // Some mobile browsers can reject capture after the native long-press delay.
+      }
+      if (navigator.vibrate) navigator.vibrate(18);
+      runSelectionAutoScroll();
     };
-    lassoRef.current = initial;
-    setLasso(initial);
-    previousBodyUserSelectRef.current = document.body.style.userSelect;
-    document.body.style.userSelect = "none";
+
+    longPressRef.current = state;
+    if (!selectionWasActive) {
+      state.timeoutId = window.setTimeout(activateSelection, LONG_PRESS_MS);
+      setPressedAssetId(assetId);
+    }
 
     const handlePointerMove = (pointerEvent: PointerEvent) => {
-      if (pointerEvent.pointerId !== lassoPointerRef.current?.pointerId) return;
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== pointerEvent.pointerId) return;
+      current.clientX = pointerEvent.clientX;
+      current.clientY = pointerEvent.clientY;
+      if (!current.triggered) {
+        const distance = Math.hypot(
+          pointerEvent.clientX - current.startX,
+          pointerEvent.clientY - current.startY
+        );
+        if (selectionWasActive && distance > 4) {
+          activateSelection();
+          addSelectionAtPoint(pointerEvent.clientX, pointerEvent.clientY);
+          return;
+        }
+        if (!selectionWasActive && distance > LONG_PRESS_MOVE_TOLERANCE) {
+          cancelAssetLongPress();
+        }
+        return;
+      }
       if (pointerEvent.cancelable) pointerEvent.preventDefault();
-      lassoPointerRef.current = {
-        pointerId: pointerEvent.pointerId,
-        clientX: pointerEvent.clientX,
-        clientY: pointerEvent.clientY
-      };
-      updateLassoFromClient(pointerEvent.clientX, pointerEvent.clientY);
+      addSelectionAtPoint(pointerEvent.clientX, pointerEvent.clientY);
     };
-    const handlePointerUp = (pointerEvent: PointerEvent) => {
-      if (pointerEvent.pointerId !== lassoPointerRef.current?.pointerId) return;
-      finishLasso();
-    };
-    const handleScroll = () => {
-      const pointer = lassoPointerRef.current;
-      if (pointer) updateLassoFromClient(pointer.clientX, pointer.clientY);
-    };
-    const handleBlur = () => finishLasso();
-    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape") finishLasso();
+    const handlePointerEnd = (pointerEvent: PointerEvent) => {
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== pointerEvent.pointerId) return;
+      const wasTriggered = current.triggered;
+      if (wasTriggered) suppressAssetClickRef.current = current.assetId;
+      cancelAssetLongPress();
+      if (wasTriggered) {
+        window.setTimeout(() => {
+          if (suppressAssetClickRef.current === assetId) suppressAssetClickRef.current = null;
+        }, 700);
+      }
     };
     const cleanup = () => {
       document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("pointerup", handlePointerUp);
-      document.removeEventListener("pointercancel", handlePointerUp);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("blur", handleBlur);
-      document.body.style.userSelect = previousBodyUserSelectRef.current;
-      if (lassoAnimationRef.current !== null) {
-        cancelAnimationFrame(lassoAnimationRef.current);
-        lassoAnimationRef.current = null;
+      document.removeEventListener("pointerup", handlePointerEnd);
+      document.removeEventListener("pointercancel", handlePointerEnd);
+      if (selectionScrollFrameRef.current !== null) {
+        cancelAnimationFrame(selectionScrollFrameRef.current);
+        selectionScrollFrameRef.current = null;
       }
-      lassoCleanupRef.current = null;
+      selectionPointerCleanupRef.current = null;
     };
-    lassoCleanupRef.current = cleanup;
+    selectionPointerCleanupRef.current = cleanup;
     document.addEventListener("pointermove", handlePointerMove, { passive: false });
-    document.addEventListener("pointerup", handlePointerUp);
-    document.addEventListener("pointercancel", handlePointerUp);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("blur", handleBlur);
-    runLassoAutoScroll();
+    document.addEventListener("pointerup", handlePointerEnd);
+    document.addEventListener("pointercancel", handlePointerEnd);
   }
 
-  function updateLassoFromClient(clientX: number, clientY: number) {
-    const current = lassoRef.current;
-    if (!current) return;
-    const next = {
-      ...current,
-      currentPageX: clientX + window.scrollX,
-      currentPageY: clientY + window.scrollY
-    };
-    const bounds = pageBounds(next);
-    if (
-      Math.abs(next.currentPageX - next.startPageX) > 4
-      || Math.abs(next.currentPageY - next.startPageY) > 4
-    ) {
-      lassoMovedRef.current = true;
-      setSelectionMode(true);
-    }
-    const ids = new Set(lassoBaseSelectionRef.current);
-    cardRefs.current.forEach((node, id) => {
-      const rect = node.getBoundingClientRect();
-      const pageRect = {
-        left: rect.left + window.scrollX,
-        right: rect.right + window.scrollX,
-        top: rect.top + window.scrollY,
-        bottom: rect.bottom + window.scrollY
-      };
-      if (rectanglesIntersect(bounds, pageRect)) ids.add(id);
-    });
-    lassoRef.current = next;
-    setSelectedIds(ids);
-    setLasso(next);
+  function addSelectionAtPoint(clientX: number, clientY: number) {
+    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(
+      "[data-archive-select-id]"
+    );
+    const assetId = target?.dataset.archiveSelectId;
+    if (!assetId) return;
+    setSelectedIds((current) => current.has(assetId) ? current : new Set(current).add(assetId));
   }
 
-  function runLassoAutoScroll() {
-    if (!lassoRef.current || !lassoPointerRef.current) return;
-    const pointer = lassoPointerRef.current;
-    const edge = 72;
+  function runSelectionAutoScroll() {
+    const current = longPressRef.current;
+    if (!current?.triggered) return;
     let deltaY = 0;
-    if (pointer.clientY < edge) deltaY = -Math.ceil((edge - pointer.clientY) / 6);
-    else if (pointer.clientY > window.innerHeight - edge) {
-      deltaY = Math.ceil((pointer.clientY - (window.innerHeight - edge)) / 6);
+    if (current.clientY < SELECTION_SCROLL_EDGE) {
+      deltaY = -Math.ceil((SELECTION_SCROLL_EDGE - current.clientY) / 7);
+    } else if (current.clientY > window.innerHeight - SELECTION_SCROLL_EDGE) {
+      deltaY = Math.ceil(
+        (current.clientY - (window.innerHeight - SELECTION_SCROLL_EDGE)) / 7
+      );
     }
     if (deltaY !== 0) {
       window.scrollBy(0, deltaY);
-      updateLassoFromClient(pointer.clientX, pointer.clientY);
+      addSelectionAtPoint(current.clientX, current.clientY);
     }
-    lassoAnimationRef.current = requestAnimationFrame(runLassoAutoScroll);
-  }
-
-  function finishLasso() {
-    if (!lassoRef.current) return;
-    lassoCleanupRef.current?.();
-    lassoRef.current = null;
-    lassoPointerRef.current = null;
-    setLasso(null);
-    window.setTimeout(() => {
-      lassoMovedRef.current = false;
-    }, 0);
+    selectionScrollFrameRef.current = requestAnimationFrame(runSelectionAutoScroll);
   }
 
   function openNewDiagram() {
@@ -1180,48 +1221,17 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  function beginAssetLongPress(asset: ProjectReferenceAsset, event: ReactPointerEvent<HTMLButtonElement>) {
-    if (selectionMode || event.button !== 0) return;
-    cancelAssetLongPress();
-    const state: AssetLongPress = {
-      assetId: asset.id,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      triggered: false,
-      timeoutId: window.setTimeout(() => {
-        const current = longPressRef.current;
-        if (!current || current.assetId !== asset.id) return;
-        current.triggered = true;
-        suppressAssetClickRef.current = asset.id;
-        longPressRef.current = null;
-        setPressedAssetId(null);
-        openMetadata(asset);
-        window.setTimeout(() => {
-          if (suppressAssetClickRef.current === asset.id) suppressAssetClickRef.current = null;
-        }, 1_000);
-      }, LONG_PRESS_MS)
-    };
-    longPressRef.current = state;
-    setPressedAssetId(asset.id);
-  }
-
-  function moveAssetLongPress(event: ReactPointerEvent<HTMLButtonElement>) {
-    const current = longPressRef.current;
-    if (!current || current.pointerId !== event.pointerId || current.triggered) return;
-    if (
-      Math.hypot(event.clientX - current.startX, event.clientY - current.startY)
-      > LONG_PRESS_MOVE_TOLERANCE
-    ) {
-      cancelAssetLongPress();
-    }
-  }
-
   function cancelAssetLongPress() {
     const current = longPressRef.current;
-    if (current) window.clearTimeout(current.timeoutId);
+    if (current) {
+      window.clearTimeout(current.timeoutId);
+      if (current.target.hasPointerCapture(current.pointerId)) {
+        current.target.releasePointerCapture(current.pointerId);
+      }
+    }
     longPressRef.current = null;
     setPressedAssetId(null);
+    selectionPointerCleanupRef.current?.();
   }
 
   async function cropStoredPdf(asset: ProjectReferenceAsset) {
@@ -1380,35 +1390,51 @@ export default function ProjectStoryboardOverheadPage() {
               </div>
             ) : null}
           </div>
-          <div className="grid gap-2 border-t border-field-border pt-3" aria-label="아카이브 폴더">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-black text-field-primary">
-                <Folder className="h-4 w-4" aria-hidden />
-                폴더
+          <div className="grid gap-2 border-t border-field-border pt-3" aria-label="아카이브 탐색기">
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto pb-1" aria-label="현재 폴더 경로">
+              <button
+                type="button"
+                onClick={() => setCurrentFolderPath("")}
+                className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
+                aria-label="아카이브 홈으로 이동"
+              >
+                <Home className="h-3.5 w-3.5" aria-hidden />
+                홈
+              </button>
+              {breadcrumbs.map((crumb) => (
+                <div key={crumb.path} className="flex shrink-0 items-center gap-1">
+                  <ChevronRight className="h-3.5 w-3.5 text-field-muted" aria-hidden />
+                  <button
+                    type="button"
+                    onClick={() => setCurrentFolderPath(crumb.path)}
+                    className={`min-h-9 rounded-full px-2.5 text-xs font-black ${
+                      crumb.path === currentFolderPath
+                        ? "bg-field-primary text-white"
+                        : "text-field-primary hover:bg-field-soft"
+                    }`}
+                  >
+                    {crumb.label}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={!currentFolderPath}
+                onClick={() => setCurrentFolderPath(archiveParentPath(currentFolderPath))}
+                className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white text-field-primary disabled:opacity-35"
+                aria-label="상위 폴더로 이동"
+              >
+                <ArrowUp className="h-4 w-4" aria-hidden />
+              </button>
+              <span className="inline-flex min-w-0 items-center gap-1 text-xs font-black text-field-primary">
+                <FolderOpen className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="truncate">{archiveBaseName(currentFolderPath) || "홈"}</span>
               </span>
-              <div className="-mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-1 pb-1">
-                <FolderFilterChip
-                  active={activeFolderId === "all"}
-                  label="전체"
-                  count={folderCounts.all}
-                  onClick={() => setActiveFolderId("all")}
-                />
-                <FolderFilterChip
-                  active={activeFolderId === "unfiled"}
-                  label="미분류"
-                  count={folderCounts.unfiled}
-                  onClick={() => setActiveFolderId("unfiled")}
-                />
-                {folders.map((folder) => (
-                  <FolderFilterChip
-                    key={folder.id}
-                    active={activeFolderId === folder.id}
-                    label={folder.name}
-                    count={folderCounts.byId.get(folder.id) ?? 0}
-                    onClick={() => setActiveFolderId(folder.id)}
-                  />
-                ))}
-              </div>
+              <span className="text-[11px] font-bold text-field-muted">
+                폴더 {childFolders.length} · 자료 {filteredAssets.length + filteredDiagrams.length}
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
             <select
@@ -1420,21 +1446,23 @@ export default function ProjectStoryboardOverheadPage() {
               <option value="newest">최신순</option>
               <option value="name">이름순</option>
               <option value="scene">씬/컷순</option>
-              <option value="folder">폴더순</option>
             </select>
             {canEdit ? (
               <>
-                <button type="button" onClick={() => setFolderEditor({ mode: "create", value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                <button type="button" onClick={() => setFolderEditor({ mode: "create", folderPath: currentFolderPath, value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden />
                   새 폴더
                 </button>
-                {activeFolderId !== "all" && activeFolderId !== "unfiled" ? (
+                {currentFolderPath ? (
                   <>
                     <button
                       type="button"
                       onClick={() => {
-                        const folder = folders.find((entry) => entry.id === activeFolderId);
-                        if (folder) setFolderEditor({ mode: "rename", folderId: folder.id, value: folder.name });
+                        setFolderEditor({
+                          mode: "rename",
+                          folderPath: currentFolderPath,
+                          value: archiveBaseName(currentFolderPath)
+                        });
                       }}
                       className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
                     >
@@ -1443,12 +1471,28 @@ export default function ProjectStoryboardOverheadPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const folder = folders.find((entry) => entry.id === activeFolderId);
-                        if (!folder) return;
+                        const affectedFolders = folders
+                          .filter((folder) => (
+                            isArchivePathWithin(
+                              normalizeArchiveFolderPath(folder.name),
+                              currentFolderPath
+                            )
+                          ))
+                          .sort((left, right) => right.name.length - left.name.length);
+                        if (affectedFolders.length === 0) return;
+                        const affectedFolderIds = new Set(affectedFolders.map((folder) => folder.id));
                         const assetIds = [...overheads, ...storyboards]
-                          .filter((asset) => asset.crop.folderId === folder.id)
+                          .filter((asset) => (
+                            Boolean(asset.crop.folderId)
+                            && affectedFolderIds.has(asset.crop.folderId || "")
+                          ))
                           .map((asset) => asset.id);
-                        setPendingConfirm({ kind: "folder", folder, assetIds });
+                        setPendingConfirm({
+                          kind: "folder",
+                          folderPath: currentFolderPath,
+                          folderIds: affectedFolders.map((folder) => folder.id),
+                          assetIds
+                        });
                       }}
                       className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-danger"
                     >
@@ -1474,21 +1518,6 @@ export default function ProjectStoryboardOverheadPage() {
                     />
                   </>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectionMode((current) => !current);
-                    setSelectedIds(new Set());
-                  }}
-                  className={`ml-auto inline-flex min-h-9 items-center gap-1 rounded-full border px-3 text-xs font-black ${
-                    selectionMode
-                      ? "border-field-primary bg-field-primary text-white"
-                      : "border-field-border bg-white text-field-primary"
-                  }`}
-                >
-                  <CheckSquare className="h-3.5 w-3.5" aria-hidden />
-                  {selectionMode ? "선택 종료" : "선택"}
-                </button>
               </>
             ) : null}
             </div>
@@ -1515,38 +1544,36 @@ export default function ProjectStoryboardOverheadPage() {
               </form>
             ) : null}
           </div>
-          {canEdit && selectionMode ? (
-            <div className="flex flex-wrap items-center gap-2 border-t border-field-border bg-field-soft/55 px-2 py-2">
+          {canEdit && selectedCount > 0 ? (
+            <div className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-2xl border border-field-border bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
               <span className="text-xs font-black text-field-primary">
-                {selectedReferenceAssetIds.length + selectedDiagramItems.length}개 선택
+                {selectedCount}개 선택
               </span>
-              <button
-                type="button"
-                disabled={selectableFilteredIds.length === 0 || allFilteredSelected}
-                onClick={selectAllFilteredAssets}
-                className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-45"
-              >
-                현재 결과 전체 선택 · {selectableFilteredIds.length}
-              </button>
-              <button type="button" onClick={() => setSelectedIds(new Set())} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">
-                선택 해제
-              </button>
               <select
                 value={moveFolderId}
                 onChange={(event) => setMoveFolderId(event.target.value)}
                 className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-bold"
                 aria-label="선택 자료 이동 폴더"
               >
-                <option value="">미분류로 이동</option>
+                <option value="">홈으로 이동</option>
                 {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
               </select>
-              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length === 0} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
+              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length === 0 || selectedDiagramItems.length > 0} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
                 <Move className="h-3.5 w-3.5" aria-hidden />
                 이동
               </button>
-              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length + selectedDiagramItems.length === 0} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
+              {selectedCount === 1 ? (
+                <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                  정보
+                </button>
+              ) : null}
+              <button type="button" disabled={isSaving || selectedCount === 0} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                일괄 삭제
+                삭제
+              </button>
+              <button type="button" onClick={clearSelection} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">
+                선택 해제
               </button>
             </div>
           ) : null}
@@ -1558,34 +1585,50 @@ export default function ProjectStoryboardOverheadPage() {
             <h2 className="font-display text-lg font-black text-field-primary">{activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
             <p className="text-xs font-bold text-field-muted">이미지 원본 비율을 유지하며 모서리를 자르지 않습니다.</p>
           </div>
-          {filteredDiagrams.length + filteredAssets.length === 0 ? (
+          {childFolders.length + filteredDiagrams.length + filteredAssets.length === 0 ? (
             <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
             <div
-              ref={gridRef}
-              className="relative grid select-none grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
-              onPointerDown={beginLasso}
+              className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
               onContextMenu={(event) => event.preventDefault()}
             >
+              {childFolders.map((folder) => (
+                <button
+                  key={folder.path}
+                  type="button"
+                  onClick={() => setCurrentFolderPath(folder.path)}
+                  className="grid min-w-0 aspect-[4/3] place-items-center gap-2 border border-field-border bg-field-soft/45 p-3 text-field-primary transition-colors hover:border-field-primary hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  aria-label={`${folder.name} 폴더 열기`}
+                >
+                  <Folder className="h-12 w-12 fill-[#e5bd55] text-[#a97813] sm:h-14 sm:w-14" aria-hidden />
+                  <span className="min-w-0 max-w-full truncate text-xs font-black">{folder.name}</span>
+                  <span className="text-[10px] font-bold text-field-muted">{folder.itemCount}개</span>
+                </button>
+              ))}
               {filteredDiagrams.map((item) => {
                 const selected = selectedIds.has(item.id);
                 return (
                 <article
                   key={item.id}
-                  ref={(node) => {
-                    if (node && !item.legacy) cardRefs.current.set(item.id, node);
-                    else cardRefs.current.delete(item.id);
-                  }}
-                  data-no-lasso
                   onContextMenu={(event) => event.preventDefault()}
-                  className={`relative grid min-w-0 select-none gap-2 border bg-white p-2 ${
-                    selected ? "border-[#ef8f39] ring-2 ring-[#ef8f39]/35" : "border-field-border"
-                  }`}
+                  className={`relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
+                    selected
+                      ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
+                      : "border-field-border"
+                  } ${pressedAssetId === item.id ? "scale-[0.985] border-[#ef8f39]" : ""}`}
                 >
                   <button
                     type="button"
-                    data-no-lasso
+                    data-archive-select-id={!item.legacy ? item.id : undefined}
+                    onPointerDown={(event) => {
+                      if (!item.legacy) beginAssetSelectionPress(item.id, event);
+                    }}
                     onClick={(event) => {
+                      if (suppressAssetClickRef.current === item.id) {
+                        suppressAssetClickRef.current = null;
+                        event.preventDefault();
+                        return;
+                      }
                       if (selectionMode && !item.legacy) {
                         event.preventDefault();
                         toggleAssetSelection(item.id);
@@ -1593,24 +1636,14 @@ export default function ProjectStoryboardOverheadPage() {
                       }
                       openDiagram(item, false);
                     }}
-                    className="grid aspect-[4/3] place-items-center bg-field-soft"
+                    className={`grid min-w-0 aspect-[4/3] place-items-center bg-field-soft ${
+                      selectionMode ? "touch-none" : "touch-pan-y"
+                    }`}
                     aria-pressed={selectionMode && !item.legacy ? selected : undefined}
                   >
                     <ShotOverheadPreview diagram={item.diagram} label={`${item.title} 부감도`} />
                   </button>
-                  {selectionMode && !item.legacy ? (
-                    <span className={`pointer-events-none absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border ${
-                      selected ? "border-[#ef8f39] bg-[#ef8f39] text-white" : "border-field-border bg-white text-field-muted"
-                    }`} aria-hidden>
-                      {selected ? <Check className="h-4 w-4" /> : <Square className="h-3.5 w-3.5" />}
-                    </span>
-                  ) : null}
-                  <ArchiveText title={item.title} sceneNo={item.sceneNo} cutNo={item.cutNo} memo={item.legacy ? `기존 컷 자료 · ${item.sourceShotRef || ""}` : item.memo} />
-                  {canEdit && !item.legacy && !selectionMode ? (
-                    <div className="grid">
-                      <button type="button" data-no-lasso onClick={() => openDiagram(item, true)} className="inline-flex min-h-8 items-center justify-center gap-1 rounded-full border border-field-border text-[11px] font-black text-field-primary"><Pencil className="h-3.5 w-3.5" aria-hidden />수정</button>
-                    </div>
-                  ) : null}
+                  <ArchiveText title={item.title} sceneNo={item.sceneNo} cutNo={item.cutNo} />
                 </article>
               )})}
               {visibleAssets.map((asset) => {
@@ -1618,31 +1651,23 @@ export default function ProjectStoryboardOverheadPage() {
                 return (
                 <article
                   key={asset.id}
-                  ref={(node) => {
-                    if (node) cardRefs.current.set(asset.id, node);
-                    else cardRefs.current.delete(asset.id);
-                  }}
-                  className={`relative grid min-w-0 select-none gap-2 border bg-white p-2 ${
-                    selected ? "border-[#ef8f39] ring-2 ring-[#ef8f39]/35" : "border-field-border"
+                  className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
+                    selected
+                      ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
+                      : "border-field-border"
                   } ${pressedAssetId === asset.id ? "scale-[0.985] border-[#ef8f39]" : ""}`}
                   onContextMenu={(event) => event.preventDefault()}
-                  data-no-lasso
                 >
                   <button
                     type="button"
-                    data-no-lasso
-                    onPointerDown={(event) => beginAssetLongPress(asset, event)}
-                    onPointerMove={moveAssetLongPress}
-                    onPointerUp={cancelAssetLongPress}
-                    onPointerCancel={cancelAssetLongPress}
-                    onPointerLeave={cancelAssetLongPress}
+                    data-archive-select-id={asset.id}
+                    onPointerDown={(event) => beginAssetSelectionPress(asset.id, event)}
                     onClick={(event) => {
                       if (suppressAssetClickRef.current === asset.id) {
                         suppressAssetClickRef.current = null;
                         event.preventDefault();
                         return;
                       }
-                      if (lassoMovedRef.current) return;
                       if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
                         event.preventDefault();
                         toggleAssetSelection(asset.id);
@@ -1650,7 +1675,9 @@ export default function ProjectStoryboardOverheadPage() {
                       }
                       setPreview({ url: asset.publicUrl, title: asset.crop.title || asset.filename });
                     }}
-                    className="grid aspect-[4/3] touch-pan-y place-items-center bg-field-soft"
+                    className={`grid min-w-0 max-w-full aspect-[4/3] place-items-center bg-field-soft p-1 ${
+                      selectionMode ? "touch-none" : "touch-pan-y"
+                    }`}
                     aria-pressed={selectionMode ? selected : undefined}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1661,29 +1688,12 @@ export default function ProjectStoryboardOverheadPage() {
                       decoding="async"
                       draggable={false}
                       onDragStart={(event) => event.preventDefault()}
-                      className="block h-full w-full rounded-none object-contain"
+                      className="block h-auto max-h-full w-auto max-w-full rounded-none object-contain"
                     />
                   </button>
-                  {selectionMode || selected ? (
-                    <span className={`pointer-events-none absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full border ${
-                      selected ? "border-[#ef8f39] bg-[#ef8f39] text-white" : "border-field-border bg-white text-field-muted"
-                    }`} aria-hidden>
-                      {selected ? <Check className="h-4 w-4" /> : <Square className="h-3.5 w-3.5" />}
-                    </span>
-                  ) : null}
-                  <ArchiveText title={asset.crop.title || asset.filename} sceneNo={asset.sceneNo || ""} cutNo={asset.cutNo || ""} memo={asset.crop.memo || ""} />
-                  <p className="truncate px-1 text-[10px] font-bold text-field-muted">
-                    {folderNameById.get(asset.crop.folderId || "") || "미분류"}
-                  </p>
+                  <ArchiveText title={asset.crop.title || asset.filename} sceneNo={asset.sceneNo || ""} cutNo={asset.cutNo || ""} />
                 </article>
               )})}
-              {lasso && gridRef.current ? (
-                <div
-                  className="pointer-events-none absolute z-20 border border-[#ef8f39] bg-[#ef8f39]/15"
-                  style={lassoStyle(lasso, gridRef.current.getBoundingClientRect())}
-                  aria-hidden
-                />
-              ) : null}
             </div>
           )}
           {visibleAssets.length < filteredAssets.length ? (
@@ -1748,7 +1758,7 @@ export default function ProjectStoryboardOverheadPage() {
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
           <CompactConfirm
             message={pendingConfirm.kind === "folder"
-              ? `"${pendingConfirm.folder.name}" 폴더를 삭제할까요? 안의 자료 ${pendingConfirm.assetIds.length}개는 미분류로 이동합니다.`
+              ? `"${archiveBaseName(pendingConfirm.folderPath)}" 폴더를 삭제할까요? 안의 자료 ${pendingConfirm.assetIds.length}개는 홈으로 이동합니다.`
               : `${pendingConfirm.label}를 삭제할까요? 연결된 컷에서는 선택이 해제됩니다.`}
             isSaving={isSaving}
             onConfirm={() => void confirmPendingAction()}
@@ -1797,42 +1807,16 @@ function FolderUploadSummary({ report }: { report: FolderUploadReport }) {
   );
 }
 
-function ArchiveText({ title, sceneNo, cutNo, memo }: { title: string; sceneNo: string; cutNo: string; memo: string }) {
+function ArchiveText({ title, sceneNo, cutNo }: { title: string; sceneNo: string; cutNo: string }) {
   return (
     <div className="min-w-0 px-1">
       <p className="truncate text-xs font-black text-field-text">{title}</p>
-      <p className="truncate text-[10px] font-bold text-field-muted">{[sceneNo && `S#${sceneNo}`, cutNo && `C#${cutNo}`, memo].filter(Boolean).join(" · ") || "태그 없음"}</p>
+      {sceneNo || cutNo ? (
+        <p className="truncate text-[10px] font-bold text-field-muted">
+          {[sceneNo && `S#${sceneNo}`, cutNo && `C#${cutNo}`].filter(Boolean).join(" · ")}
+        </p>
+      ) : null}
     </div>
-  );
-}
-
-function FolderFilterChip({
-  active,
-  label,
-  count,
-  onClick
-}: {
-  active: boolean;
-  label: string;
-  count: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-black transition-colors ${
-        active
-          ? "border-field-primary bg-field-primary text-white"
-          : "border-field-border bg-white text-field-primary"
-      }`}
-    >
-      <span className="max-w-44 truncate">{label}</span>
-      <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${active ? "bg-white/20 text-white" : "bg-field-soft text-field-muted"}`}>
-        {count}
-      </span>
-    </button>
   );
 }
 
@@ -1887,7 +1871,7 @@ function MetadataDialog({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <section className="grid w-full max-w-md gap-3 rounded-2xl border border-field-border bg-white p-4" data-no-lasso>
+      <section className="grid w-full max-w-md gap-3 rounded-2xl border border-field-border bg-white p-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-black text-field-primary">자료 정보</h2>
           <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full border border-field-border" aria-label="자료 정보 닫기"><X className="h-4 w-4" aria-hidden /></button>
@@ -1901,7 +1885,7 @@ function MetadataDialog({
         <label className="grid gap-1 text-xs font-black text-field-muted">
           폴더
           <select disabled={readOnly} value={value.folderId} onChange={(event) => onChange({ ...value, folderId: event.target.value })} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft">
-            <option value="">미분류</option>
+            <option value="">홈</option>
             {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
           </select>
         </label>
@@ -2011,37 +1995,84 @@ function cropMetadata(
   };
 }
 
-function selectedFolderValue(value: string) {
-  return value === "all" || value === "unfiled" ? null : value;
+function normalizeArchiveFolderPath(value: string) {
+  return value
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .join("/");
 }
 
-function pageBounds(value: LassoBox) {
-  return {
-    left: Math.min(value.startPageX, value.currentPageX),
-    right: Math.max(value.startPageX, value.currentPageX),
-    top: Math.min(value.startPageY, value.currentPageY),
-    bottom: Math.max(value.startPageY, value.currentPageY)
-  };
+function cleanArchiveFolderSegment(value: string) {
+  return value.trim().replace(/[\\/]+/g, " ").replace(/\s{2,}/g, " ").slice(0, 80);
 }
 
-function rectanglesIntersect(
-  left: { left: number; right: number; top: number; bottom: number },
-  right: { left: number; right: number; top: number; bottom: number }
+function joinArchiveFolderPath(parent: string, child: string) {
+  return normalizeArchiveFolderPath([parent, child].filter(Boolean).join("/"));
+}
+
+function archiveParentPath(path: string) {
+  const segments = normalizeArchiveFolderPath(path).split("/").filter(Boolean);
+  return segments.slice(0, -1).join("/");
+}
+
+function archiveBaseName(path: string) {
+  return normalizeArchiveFolderPath(path).split("/").filter(Boolean).at(-1) ?? "";
+}
+
+function archivePathPrefixes(path: string) {
+  const segments = normalizeArchiveFolderPath(path).split("/").filter(Boolean);
+  return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
+}
+
+function archiveBreadcrumbs(path: string) {
+  return archivePathPrefixes(path).map((crumbPath) => ({
+    path: crumbPath,
+    label: archiveBaseName(crumbPath)
+  }));
+}
+
+function isArchivePathWithin(path: string, parent: string) {
+  const normalizedPath = normalizeArchiveFolderPath(path);
+  const normalizedParent = normalizeArchiveFolderPath(parent);
+  return normalizedPath === normalizedParent || normalizedPath.startsWith(`${normalizedParent}/`);
+}
+
+function replaceArchivePathPrefix(path: string, previous: string, next: string) {
+  const normalizedPath = normalizeArchiveFolderPath(path);
+  const normalizedPrevious = normalizeArchiveFolderPath(previous);
+  const suffix = normalizedPath.slice(normalizedPrevious.length).replace(/^\/+/, "");
+  return joinArchiveFolderPath(next, suffix);
+}
+
+function getArchiveChildFolders(
+  folders: ProjectArchiveFolder[],
+  assets: ProjectReferenceAsset[],
+  currentPath: string,
+  folderPathById: Map<string, string>
 ) {
-  return left.left <= right.right
-    && left.right >= right.left
-    && left.top <= right.bottom
-    && left.bottom >= right.top;
-}
-
-function lassoStyle(value: LassoBox, grid: DOMRect) {
-  const bounds = pageBounds(value);
-  return {
-    left: bounds.left - (grid.left + window.scrollX),
-    top: bounds.top - (grid.top + window.scrollY),
-    width: Math.max(1, bounds.right - bounds.left),
-    height: Math.max(1, bounds.bottom - bounds.top)
-  };
+  const childPaths = new Set<string>();
+  const prefix = currentPath ? `${currentPath}/` : "";
+  for (const folder of folders) {
+    const path = normalizeArchiveFolderPath(folder.name);
+    if (currentPath && !path.startsWith(prefix)) continue;
+    if (!currentPath && !path) continue;
+    const remainder = currentPath ? path.slice(prefix.length) : path;
+    const childName = remainder.split("/")[0];
+    if (childName) childPaths.add(joinArchiveFolderPath(currentPath, childName));
+  }
+  return [...childPaths]
+    .sort((left, right) => left.localeCompare(right, "ko-KR", { numeric: true }))
+    .map((path) => ({
+      path,
+      name: archiveBaseName(path),
+      itemCount: assets.filter((asset) => {
+        const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
+        return isArchivePathWithin(assetPath, path);
+      }).length
+    }));
 }
 
 function uniqueFiles(files: File[]) {

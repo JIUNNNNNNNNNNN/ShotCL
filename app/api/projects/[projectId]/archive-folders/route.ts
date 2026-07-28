@@ -102,7 +102,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (countError) throw countError;
     if ((count ?? 0) > 0) {
       return NextResponse.json(
-        { error: "폴더 안의 자료를 먼저 다른 폴더나 미분류로 이동해주세요." },
+        { error: "폴더 안의 자료를 먼저 다른 폴더나 홈으로 이동해주세요." },
         { status: 409 }
       );
     }
