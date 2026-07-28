@@ -3,14 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Crop, FileImage, Grid2X2, Save, Trash2, Undo2, X } from "lucide-react";
 import {
-  createCenteredStoryboardCrop,
-  createSnappedStoryboardCrop,
   createStoryboardAutoCrops,
+  createStoryboardCellKey,
   createStoryboardCropTemplate,
+  createStoryboardGridCells,
+  findNearestStoryboardGridCell,
+  getStoryboardPageOrigin,
+  selectStoryboardGridCells,
   type ArchiveImportPage,
   type RelativeCrop,
   type StoryboardCropCandidate,
-  type StoryboardCropTemplate
+  type StoryboardCropTemplate,
+  type StoryboardGridCell,
+  type StoryboardGridOrigin
 } from "@/lib/client/archiveMedia";
 import type { ProjectReferenceAssetType } from "@/lib/types";
 
@@ -55,6 +60,7 @@ export function ArchiveImportDialog({
   const [applyCrop, setApplyCrop] = useState(assetType === "storyboard");
   const [cropTemplate, setCropTemplate] = useState<StoryboardCropTemplate | null>(null);
   const [candidates, setCandidates] = useState<StoryboardCropCandidate[]>([]);
+  const [pageOrigins, setPageOrigins] = useState<Record<string, StoryboardGridOrigin>>({});
   const [activePageId, setActivePageId] = useState(pages[0]?.id ?? "");
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -68,59 +74,149 @@ export function ArchiveImportDialog({
   const referencePage = pages[0] ?? null;
   const activePage = pages.find((page) => page.id === activePageId) ?? referencePage;
   const editingCandidate = candidates.find((candidate) => candidate.id === editingCandidateId) ?? null;
+  const orderedCandidates = useMemo(
+    () => [...candidates].sort(compareStoryboardCandidates),
+    [candidates]
+  );
   const results: ArchiveImportResult[] = assetType === "storyboard"
-    ? candidates.map((candidate) => ({ page: candidate.page, crop: candidate.crop }))
+    ? orderedCandidates.map((candidate) => ({ page: candidate.page, crop: candidate.crop }))
     : selectedPages.map((page) => ({ page, crop: applyCrop ? referenceCrop : null }));
 
   function confirmTemplate() {
     if (!referencePage || !referenceSelected) return;
     const template = createStoryboardCropTemplate(referencePage, referenceCrop);
-    const referenceCandidateId = `${referencePage.id}-reference-${Date.now()}`;
+    const cellKey = createStoryboardCellKey(referencePage, 0, 0);
+    const referenceCandidateId = `storyboard-cell-${cellKey}`;
     setCropTemplate(template);
     setActivePageId(referencePage.id);
+    setPageOrigins({
+      [referencePage.id]: getStoryboardPageOrigin(template, referencePage)
+    });
     setCandidates((current) => {
       if (current.length > 0) return current;
       return [{
         id: referenceCandidateId,
         page: referencePage,
-        crop: { ...referenceCrop }
+        crop: { ...referenceCrop },
+        rowIndex: 0,
+        columnIndex: 0,
+        cellKey
       }];
     });
-    setEditingCandidateId(referenceCandidateId);
+    setEditingCandidateId(null);
   }
 
-  function addCandidateAt(page: ArchiveImportPage, _centerX: number, centerY: number) {
+  function originForPage(page: ArchiveImportPage) {
+    if (!cropTemplate) return { x: 0, y: 0 };
+    return pageOrigins[page.id] ?? getStoryboardPageOrigin(cropTemplate, page);
+  }
+
+  function addGridCells(page: ArchiveImportPage, cells: StoryboardGridCell[]) {
+    if (cells.length === 0) return;
+    const orderedCells = [...cells].sort(compareStoryboardGridCells);
+    const knownKeys = new Set(candidates.map((candidate) => candidate.cellKey));
+    const additions = orderedCells.flatMap((cell) => {
+      if (knownKeys.has(cell.key)) return [];
+      knownKeys.add(cell.key);
+      return [{
+        id: `storyboard-cell-${cell.key}`,
+        page,
+        crop: { ...cell.crop },
+        rowIndex: cell.rowIndex,
+        columnIndex: cell.columnIndex,
+        cellKey: cell.key
+      }];
+    });
+    if (additions.length === 0) return;
+    setCandidates((current) => {
+      const existingKeys = new Set(current.map((candidate) => candidate.cellKey));
+      const uniqueAdditions = additions.filter((candidate) => {
+        if (existingKeys.has(candidate.cellKey)) return false;
+        existingKeys.add(candidate.cellKey);
+        return true;
+      });
+      return uniqueAdditions.length > 0 ? [...current, ...uniqueAdditions] : current;
+    });
+    setEditingCandidateId(additions.at(-1)?.id ?? null);
+  }
+
+  function addCandidateAt(page: ArchiveImportPage, centerX: number, centerY: number) {
     if (!cropTemplate) return;
-    const pageCrops = candidates
-      .filter((candidate) => candidate.page.id === page.id)
-      .map((candidate) => candidate.crop);
-    const candidate: StoryboardCropCandidate = {
-      id: `${page.id}-click-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    const cell = findNearestStoryboardGridCell(
+      cropTemplate,
       page,
-      crop: createSnappedStoryboardCrop(cropTemplate, page, centerY, pageCrops)
-    };
-    setCandidates((current) => [...current, candidate]);
-    setEditingCandidateId(candidate.id);
+      { x: centerX, y: centerY },
+      originForPage(page)
+    );
+    if (cell) addGridCells(page, [cell]);
+  }
+
+  function addCandidatesInSelection(page: ArchiveImportPage, selection: RelativeCrop) {
+    if (!cropTemplate) return;
+    addGridCells(
+      page,
+      selectStoryboardGridCells(cropTemplate, page, selection, originForPage(page))
+    );
   }
 
   function addAutomaticCandidates(page: ArchiveImportPage) {
     if (!cropTemplate) return;
-    setCandidates((current) => {
-      const existing = current.filter((candidate) => candidate.page.id === page.id);
-      const crops = createStoryboardAutoCrops(
-        cropTemplate,
-        page,
-        existing.map((candidate) => candidate.crop)
-      );
-      return [
-        ...current,
-        ...crops.map((crop, index) => ({
-          id: `${page.id}-auto-${Date.now()}-${index}`,
-          page,
-          crop
-        }))
-      ];
-    });
+    addGridCells(
+      page,
+      createStoryboardAutoCrops(cropTemplate, page, originForPage(page))
+    );
+  }
+
+  function changeActivePage(id: string) {
+    const nextPage = pages.find((page) => page.id === id);
+    if (!nextPage || !cropTemplate) {
+      setActivePageId(id);
+      return;
+    }
+    setPageOrigins((current) => (
+      current[id]
+        ? current
+        : {
+            ...current,
+            [id]: current[activePageId] ?? getStoryboardPageOrigin(cropTemplate, nextPage)
+          }
+    ));
+    setActivePageId(id);
+  }
+
+  function resetActivePageOrigin(page: ArchiveImportPage, candidate: StoryboardCropCandidate) {
+    if (!cropTemplate) return;
+    const columnStep = cropTemplate.cropWidth
+      + cropTemplate.horizontalGap / cropTemplate.pageNativeWidth;
+    const rowStep = cropTemplate.cropHeight
+      + cropTemplate.verticalGap / cropTemplate.pageNativeHeight;
+    setPageOrigins((current) => ({
+      ...current,
+      [page.id]: {
+        x: candidate.crop.x - candidate.columnIndex * columnStep,
+        y: candidate.crop.y - candidate.rowIndex * rowStep
+      }
+    }));
+  }
+
+  function updateCandidate(
+    id: string,
+    crop: RelativeCrop,
+    gridCell?: StoryboardGridCell
+  ) {
+    setCandidates((current) => current.map((candidate) => (
+      candidate.id === id
+        ? {
+            ...candidate,
+            crop,
+            ...(gridCell ? {
+              rowIndex: gridCell.rowIndex,
+              columnIndex: gridCell.columnIndex,
+              cellKey: gridCell.key
+            } : {})
+          }
+        : candidate
+    )));
   }
 
   function removeCandidate(id: string) {
@@ -152,6 +248,7 @@ export function ArchiveImportDialog({
               candidates={candidates}
               activePage={activePage}
               editingCandidate={editingCandidate}
+              pageOrigin={activePage ? originForPage(activePage) : null}
               isSaving={isSaving}
               onReferenceCropChange={(crop) => {
                 setReferenceCrop(crop);
@@ -159,13 +256,13 @@ export function ArchiveImportDialog({
               }}
               onReferenceSelectionComplete={() => setReferenceSelected(true)}
               onConfirmTemplate={confirmTemplate}
-              onActivePageChange={setActivePageId}
+              onActivePageChange={changeActivePage}
               onAddCandidate={addCandidateAt}
+              onAddCandidates={addCandidatesInSelection}
               onAddAutomaticCandidates={addAutomaticCandidates}
               onEditCandidate={setEditingCandidateId}
-              onCandidateChange={(id, crop) => setCandidates((current) => current.map((candidate) => (
-                candidate.id === id ? { ...candidate, crop } : candidate
-              )))}
+              onCandidateChange={updateCandidate}
+              onResetPageGrid={resetActivePageOrigin}
               onDeleteCandidate={removeCandidate}
               onUndo={() => {
                 const last = candidates.at(-1);
@@ -290,15 +387,18 @@ function StoryboardCropWorkflow({
   candidates,
   activePage,
   editingCandidate,
+  pageOrigin,
   isSaving,
   onReferenceCropChange,
   onReferenceSelectionComplete,
   onConfirmTemplate,
   onActivePageChange,
   onAddCandidate,
+  onAddCandidates,
   onAddAutomaticCandidates,
   onEditCandidate,
   onCandidateChange,
+  onResetPageGrid,
   onDeleteCandidate,
   onUndo,
   onCancel,
@@ -312,15 +412,18 @@ function StoryboardCropWorkflow({
   candidates: StoryboardCropCandidate[];
   activePage: ArchiveImportPage | null;
   editingCandidate: StoryboardCropCandidate | null;
+  pageOrigin: StoryboardGridOrigin | null;
   isSaving: boolean;
   onReferenceCropChange: (crop: RelativeCrop) => void;
   onReferenceSelectionComplete: () => void;
   onConfirmTemplate: () => void;
   onActivePageChange: (id: string) => void;
   onAddCandidate: (page: ArchiveImportPage, centerX: number, centerY: number) => void;
+  onAddCandidates: (page: ArchiveImportPage, selection: RelativeCrop) => void;
   onAddAutomaticCandidates: (page: ArchiveImportPage) => void;
   onEditCandidate: (id: string | null) => void;
-  onCandidateChange: (id: string, crop: RelativeCrop) => void;
+  onCandidateChange: (id: string, crop: RelativeCrop, gridCell?: StoryboardGridCell) => void;
+  onResetPageGrid: (page: ArchiveImportPage, candidate: StoryboardCropCandidate) => void;
   onDeleteCandidate: (id: string) => void;
   onUndo: () => void;
   onCancel: () => void;
@@ -329,7 +432,11 @@ function StoryboardCropWorkflow({
   const activeCandidates = activePage
     ? candidates.filter((candidate) => candidate.page.id === activePage.id)
     : [];
-  const candidateNumbers = new Map(candidates.map((candidate, index) => [candidate.id, index + 1]));
+  const candidateNumbers = new Map(
+    [...candidates]
+      .sort(compareStoryboardCandidates)
+      .map((candidate, index) => [candidate.id, index + 1])
+  );
   const activePageIndex = activePage
     ? Math.max(0, pages.findIndex((page) => page.id === activePage.id))
     : 0;
@@ -357,7 +464,7 @@ function StoryboardCropWorkflow({
     <div className="mx-auto grid max-w-5xl content-start gap-2">
       <div className="flex min-h-8 items-center justify-between gap-2">
         <p className="text-xs font-black text-field-primary sm:text-sm">
-          {cropTemplate ? "나머지 그림칸 중앙을 클릭하세요" : "첫 그림칸을 드래그하세요"}
+          {cropTemplate ? "칸을 누르거나 여러 칸을 드래그하세요" : "첫 그림칸을 드래그하세요"}
         </p>
         <span className="shrink-0 text-[11px] font-bold text-field-muted">
           {activePageIndex + 1}/{pages.length} 페이지 · {activeCandidates.length}개
@@ -370,6 +477,7 @@ function StoryboardCropWorkflow({
           referenceCrop={referenceCrop}
           referenceSelected={referenceSelected}
           cropTemplate={cropTemplate}
+          pageOrigin={pageOrigin}
           candidates={activeCandidates}
           candidateNumbers={candidateNumbers}
           selectedCandidateId={editingCandidate?.page.id === activePage.id ? editingCandidate.id : null}
@@ -378,6 +486,7 @@ function StoryboardCropWorkflow({
           onReferenceSelectionComplete={onReferenceSelectionComplete}
           onConfirmTemplate={onConfirmTemplate}
           onPlace={(x, y) => onAddCandidate(activePage, x, y)}
+          onSelectRange={(selection) => onAddCandidates(activePage, selection)}
           onSelect={onEditCandidate}
           onCandidateChange={onCandidateChange}
         />
@@ -399,6 +508,16 @@ function StoryboardCropWorkflow({
             <Grid2X2 className="h-3.5 w-3.5" aria-hidden />
             자동 후보
           </button>
+          {cropTemplate && activePage && editingCandidate?.page.id === activePage.id ? (
+            <button
+              type="button"
+              onClick={() => onResetPageGrid(activePage, editingCandidate)}
+              disabled={isSaving}
+              className="min-h-9 rounded-full border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+            >
+              격자 재설정
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onUndo}
@@ -450,7 +569,7 @@ type CropResizeHandle = "nw" | "ne" | "sw" | "se";
 
 type CanvasDrag = {
   pointerId: number;
-  mode: "reference-create" | "reference-move" | "reference-resize" | "move" | "resize";
+  mode: "reference-create" | "reference-move" | "reference-resize" | "grid-select" | "move" | "resize";
   startX: number;
   startY: number;
   original: RelativeCrop;
@@ -464,6 +583,7 @@ function StoryboardCropCanvas({
   referenceCrop,
   referenceSelected,
   cropTemplate,
+  pageOrigin,
   candidates,
   candidateNumbers,
   selectedCandidateId,
@@ -472,6 +592,7 @@ function StoryboardCropCanvas({
   onReferenceSelectionComplete,
   onConfirmTemplate,
   onPlace,
+  onSelectRange,
   onSelect,
   onCandidateChange
 }: {
@@ -479,6 +600,7 @@ function StoryboardCropCanvas({
   referenceCrop: RelativeCrop;
   referenceSelected: boolean;
   cropTemplate: StoryboardCropTemplate | null;
+  pageOrigin: StoryboardGridOrigin | null;
   candidates: StoryboardCropCandidate[];
   candidateNumbers: Map<string, number>;
   selectedCandidateId: string | null;
@@ -487,11 +609,34 @@ function StoryboardCropCanvas({
   onReferenceSelectionComplete: () => void;
   onConfirmTemplate: () => void;
   onPlace: (x: number, y: number) => void;
+  onSelectRange: (selection: RelativeCrop) => void;
   onSelect: (id: string | null) => void;
-  onCandidateChange: (id: string, crop: RelativeCrop) => void;
+  onCandidateChange: (id: string, crop: RelativeCrop, gridCell?: StoryboardGridCell) => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CanvasDrag | null>(null);
+  const suppressCandidateClickRef = useRef(false);
+  const [selectionCrop, setSelectionCrop] = useState<RelativeCrop | null>(null);
+  const effectiveOrigin = cropTemplate && pageOrigin
+    ? pageOrigin
+    : cropTemplate
+      ? getStoryboardPageOrigin(cropTemplate, page)
+      : null;
+  const gridCells = useMemo(
+    () => cropTemplate && effectiveOrigin
+      ? createStoryboardGridCells(cropTemplate, page, effectiveOrigin)
+      : [],
+    [cropTemplate, effectiveOrigin, page]
+  );
+  const selectedGuideKeys = useMemo(
+    () => cropTemplate && effectiveOrigin && selectionCrop
+      ? new Set(
+          selectStoryboardGridCells(cropTemplate, page, selectionCrop, effectiveOrigin)
+            .map((cell) => cell.key)
+        )
+      : new Set<string>(),
+    [cropTemplate, effectiveOrigin, page, selectionCrop]
+  );
 
   function relativePoint(event: React.PointerEvent) {
     const rect = frameRef.current?.getBoundingClientRect();
@@ -503,19 +648,30 @@ function StoryboardCropCanvas({
   }
 
   function startReference(event: React.PointerEvent<HTMLDivElement>) {
-    if (disabled || cropTemplate) return;
+    if (disabled) return;
+    event.preventDefault();
     const point = relativePoint(event);
     event.currentTarget.setPointerCapture(event.pointerId);
-    const crop = { x: point.x, y: point.y, width: 0.01, height: 0.01 };
+    const minimumSize = cropTemplate ? 0.001 : 0.01;
+    const crop = {
+      x: point.x,
+      y: point.y,
+      width: minimumSize,
+      height: minimumSize
+    };
     dragRef.current = {
       pointerId: event.pointerId,
-      mode: "reference-create",
+      mode: cropTemplate ? "grid-select" : "reference-create",
       startX: point.x,
       startY: point.y,
       original: crop,
       latest: crop
     };
-    onReferenceCropChange(crop);
+    if (cropTemplate) {
+      setSelectionCrop(crop);
+    } else {
+      onReferenceCropChange(crop);
+    }
   }
 
   function startReferenceAdjustment(
@@ -550,6 +706,19 @@ function StoryboardCropCanvas({
     event.stopPropagation();
     const point = relativePoint(event);
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (mode === "move" && selectedCandidateId !== candidate.id) {
+      const selection = { x: point.x, y: point.y, width: 0.001, height: 0.001 };
+      dragRef.current = {
+        pointerId: event.pointerId,
+        mode: "grid-select",
+        startX: point.x,
+        startY: point.y,
+        original: selection,
+        latest: selection
+      };
+      setSelectionCrop(selection);
+      return;
+    }
     dragRef.current = {
       pointerId: event.pointerId,
       mode,
@@ -577,6 +746,14 @@ function StoryboardCropCanvas({
         height: Math.max(0.01, Math.abs(point.y - drag.startY))
       };
       onReferenceCropChange(next);
+    } else if (drag.mode === "grid-select") {
+      next = {
+        x: Math.min(drag.startX, point.x),
+        y: Math.min(drag.startY, point.y),
+        width: Math.max(0.001, Math.abs(point.x - drag.startX)),
+        height: Math.max(0.001, Math.abs(point.y - drag.startY))
+      };
+      setSelectionCrop(next);
     } else if (drag.mode === "reference-move") {
       next = {
         ...drag.original,
@@ -618,16 +795,35 @@ function StoryboardCropCanvas({
       }
       return;
     }
+    if (drag.mode === "grid-select") {
+      setSelectionCrop(null);
+      const dragWidthPx = drag.latest.width * page.width;
+      const dragHeightPx = drag.latest.height * page.height;
+      if (dragWidthPx < 8 && dragHeightPx < 8) {
+        onPlace(drag.startX, drag.startY);
+      } else {
+        suppressCandidateClickRef.current = true;
+        window.setTimeout(() => {
+          suppressCandidateClickRef.current = false;
+        }, 0);
+        onSelectRange(drag.latest);
+      }
+      return;
+    }
     if (drag.mode === "move" && drag.candidateId && cropTemplate) {
-      onCandidateChange(
-        drag.candidateId,
-        snapMovedCrop(
-          cropTemplate,
-          page,
-          drag.latest,
-          candidates.filter((candidate) => candidate.id !== drag.candidateId).map((candidate) => candidate.crop)
-        )
+      const occupiedKeys = new Set(
+        candidates
+          .filter((candidate) => candidate.id !== drag.candidateId)
+          .map((candidate) => candidate.cellKey)
       );
+      const snappedCell = snapMovedCrop(
+        cropTemplate,
+        page,
+        effectiveOrigin ?? getStoryboardPageOrigin(cropTemplate, page),
+        drag.latest,
+        occupiedKeys
+      );
+      onCandidateChange(drag.candidateId, snappedCell.crop, snappedCell);
     }
   }
 
@@ -644,19 +840,43 @@ function StoryboardCropCanvas({
       onPointerUp={finishDrag}
       onPointerCancel={() => {
         dragRef.current = null;
-      }}
-      onClick={(event) => {
-        if (disabled || !cropTemplate || !frameRef.current) return;
-        const rect = frameRef.current.getBoundingClientRect();
-        onPlace(
-          clamp01((event.clientX - rect.left) / rect.width),
-          clamp01((event.clientY - rect.top) / rect.height)
-        );
+        setSelectionCrop(null);
       }}
       onContextMenu={(event) => event.preventDefault()}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={page.previewUrl} alt="" draggable={false} className="pointer-events-none block h-full w-full select-none rounded-none object-fill" />
+      {selectionCrop && cropTemplate ? (
+        <>
+          {gridCells.map((cell) => (
+            <span
+              key={`guide-${cell.key}`}
+              aria-hidden
+              className={`pointer-events-none absolute border ${
+                selectedGuideKeys.has(cell.key)
+                  ? "border-[#ef8f39] bg-[#ef8f39]/16"
+                  : "border-[#ef8f39]/30"
+              }`}
+              style={{
+                left: `${cell.crop.x * 100}%`,
+                top: `${cell.crop.y * 100}%`,
+                width: `${cell.crop.width * 100}%`,
+                height: `${cell.crop.height * 100}%`
+              }}
+            />
+          ))}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute z-20 border border-dashed border-field-primary bg-field-primary/5"
+            style={{
+              left: `${selectionCrop.x * 100}%`,
+              top: `${selectionCrop.y * 100}%`,
+              width: `${selectionCrop.width * 100}%`,
+              height: `${selectionCrop.height * 100}%`
+            }}
+          />
+        </>
+      ) : null}
       {!cropTemplate && referenceCrop.width > 0 && referenceCrop.height > 0 ? (
         <div
           role="button"
@@ -710,7 +930,11 @@ function StoryboardCropCanvas({
           기준 비율로 적용
         </button>
       ) : null}
-      {candidates.map((candidate, index) => (
+      {candidates.map((candidate, index) => {
+        const overlaps = candidates.some((other) => (
+          other.id !== candidate.id && cropsOverlap(candidate.crop, other.crop)
+        ));
+        return (
         <div
           key={candidate.id}
           role="button"
@@ -719,6 +943,10 @@ function StoryboardCropCanvas({
           onPointerDown={(event) => startCandidateDrag(event, candidate, "move")}
           onClick={(event) => {
             event.stopPropagation();
+            if (suppressCandidateClickRef.current) {
+              suppressCandidateClickRef.current = false;
+              return;
+            }
             onSelect(candidate.id);
           }}
           onKeyDown={(event) => {
@@ -729,8 +957,8 @@ function StoryboardCropCanvas({
           }}
           className={`absolute cursor-move border-2 bg-[#ef8f39]/12 ${
             selectedCandidateId === candidate.id
-              ? "z-10 border-[#d96f18] ring-2 ring-white/90"
-              : "border-[#ef8f39]"
+              ? `z-10 ${overlaps ? "border-field-danger" : "border-[#d96f18]"} ring-2 ring-white/90`
+              : overlaps ? "border-field-danger" : "border-[#ef8f39]"
           }`}
           style={{
             left: `${candidate.crop.x * 100}%`,
@@ -762,7 +990,8 @@ function StoryboardCropCanvas({
             ))
             : null}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -796,27 +1025,50 @@ function resizeCropWithAspect(
 
 function snapMovedCrop(
   template: StoryboardCropTemplate,
-  page: Pick<ArchiveImportPage, "width" | "height">,
+  page: ArchiveImportPage,
+  origin: StoryboardGridOrigin,
   crop: RelativeCrop,
-  otherCrops: RelativeCrop[]
+  occupiedKeys: ReadonlySet<string>
 ) {
-  const centerY = crop.y + crop.height / 2;
-  const snapped = createSnappedStoryboardCrop(template, page, centerY, otherCrops);
-  const templatePosition = createCenteredStoryboardCrop(
+  const snapped = findNearestStoryboardGridCell(
     template,
-    template.columnX + template.cropWidth / 2,
-    centerY,
-    page
+    page,
+    {
+      x: crop.x + crop.width / 2,
+      y: crop.y + crop.height / 2
+    },
+    origin,
+    occupiedKeys
   );
-  const next = { ...crop };
-  if (Math.abs(crop.x - templatePosition.x) <= Math.max(0.025, crop.width * 0.18)) {
-    next.x = templatePosition.x;
-  }
-  const snappedCenterY = snapped.y + snapped.height / 2;
-  if (Math.abs(centerY - snappedCenterY) <= Math.max(0.025, crop.height * 0.32)) {
-    next.y = Math.min(1 - crop.height, Math.max(0, snappedCenterY - crop.height / 2));
-  }
-  return next;
+  if (snapped) return snapped;
+  return {
+    key: createStoryboardCellKey(page, 0, 0),
+    rowIndex: 0,
+    columnIndex: 0,
+    crop
+  };
+}
+
+function cropsOverlap(left: RelativeCrop, right: RelativeCrop) {
+  const overlapWidth = Math.min(left.x + left.width, right.x + right.width)
+    - Math.max(left.x, right.x);
+  const overlapHeight = Math.min(left.y + left.height, right.y + right.height)
+    - Math.max(left.y, right.y);
+  return overlapWidth > 0.000001 && overlapHeight > 0.000001;
+}
+
+function compareStoryboardGridCells(left: StoryboardGridCell, right: StoryboardGridCell) {
+  return left.rowIndex - right.rowIndex || left.columnIndex - right.columnIndex;
+}
+
+function compareStoryboardCandidates(
+  left: StoryboardCropCandidate,
+  right: StoryboardCropCandidate
+) {
+  return left.page.sourceFileIndex - right.page.sourceFileIndex
+    || left.page.index - right.page.index
+    || left.rowIndex - right.rowIndex
+    || left.columnIndex - right.columnIndex;
 }
 
 function clamp01(value: number) {

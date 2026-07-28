@@ -23,11 +23,36 @@ export type StoryboardCropCandidate = {
   id: string;
   page: ArchiveImportPage;
   crop: RelativeCrop;
+  rowIndex: number;
+  columnIndex: number;
+  cellKey: string;
+};
+
+export type StoryboardGridOrigin = {
+  x: number;
+  y: number;
+};
+
+export type StoryboardGridCell = {
+  key: string;
+  rowIndex: number;
+  columnIndex: number;
+  crop: RelativeCrop;
 };
 
 export type StoryboardCropTemplate = {
   basePageWidth: number;
   basePageHeight: number;
+  pageNativeWidth: number;
+  pageNativeHeight: number;
+  templateWidth: number;
+  templateHeight: number;
+  templateX: number;
+  templateY: number;
+  columnOriginX: number;
+  rowOriginY: number;
+  horizontalGap: number;
+  verticalGap: number;
   cropWidth: number;
   cropHeight: number;
   aspectRatio: number;
@@ -121,19 +146,28 @@ export function createStoryboardCropTemplate(
   crop: RelativeCrop
 ): StoryboardCropTemplate {
   const safeCrop = normalizeRelativeCrop(crop);
-  const rowStep = Math.min(1, Math.max(safeCrop.height, safeCrop.height * 1.16));
+  const templateWidth = safeCrop.width * page.width;
+  const templateHeight = safeCrop.height * page.height;
   return {
     basePageWidth: page.width,
     basePageHeight: page.height,
+    pageNativeWidth: page.width,
+    pageNativeHeight: page.height,
+    templateWidth,
+    templateHeight,
+    templateX: safeCrop.x * page.width,
+    templateY: safeCrop.y * page.height,
+    columnOriginX: safeCrop.x * page.width,
+    rowOriginY: safeCrop.y * page.height,
+    horizontalGap: 0,
+    verticalGap: 0,
     cropWidth: safeCrop.width,
     cropHeight: safeCrop.height,
-    aspectRatio: safeCrop.height > 0
-      ? (safeCrop.width * page.width) / (safeCrop.height * page.height)
-      : 1,
+    aspectRatio: templateHeight > 0 ? templateWidth / templateHeight : 1,
     columnX: safeCrop.x,
     rowAnchorCenterY: safeCrop.y + safeCrop.height / 2,
-    rowStep,
-    rowsPerPage: Math.max(1, Math.floor((1 - safeCrop.height) / rowStep) + 1),
+    rowStep: safeCrop.height,
+    rowsPerPage: Math.max(1, Math.floor(1 / safeCrop.height)),
     clickPlacementMode: "center",
     targetColumn: "storyboard",
     includeContext: false
@@ -144,22 +178,10 @@ export function createCenteredStoryboardCrop(
   template: StoryboardCropTemplate,
   centerX: number,
   centerY: number,
-  page?: Pick<ArchiveImportPage, "width" | "height">
+  _page?: Pick<ArchiveImportPage, "width" | "height">
 ): RelativeCrop {
-  const width = Math.min(
-    1,
-    Math.max(
-      0.01,
-      page ? template.cropWidth * template.basePageWidth / page.width : template.cropWidth
-    )
-  );
-  const height = Math.min(
-    1,
-    Math.max(
-      0.01,
-      page ? template.cropHeight * template.basePageHeight / page.height : template.cropHeight
-    )
-  );
+  const width = Math.min(1, Math.max(0.01, template.cropWidth));
+  const height = Math.min(1, Math.max(0.01, template.cropHeight));
   return {
     x: Math.min(1 - width, Math.max(0, centerX - width / 2)),
     y: Math.min(1 - height, Math.max(0, centerY - height / 2)),
@@ -168,62 +190,133 @@ export function createCenteredStoryboardCrop(
   };
 }
 
-export function estimateStoryboardRowStep(
-  template: StoryboardCropTemplate,
-  crops: RelativeCrop[]
+export function createStoryboardCellKey(
+  page: Pick<ArchiveImportPage, "sourceFileIndex" | "index">,
+  rowIndex: number,
+  columnIndex: number
 ) {
-  const centers = crops
-    .map((crop) => crop.y + crop.height / 2)
-    .sort((left, right) => left - right);
-  const minimumGap = Math.max(0.01, template.cropHeight * 0.62);
-  const gaps = centers
-    .slice(1)
-    .map((center, index) => center - centers[index])
-    .filter((gap) => gap >= minimumGap);
-  if (gaps.length === 0) return template.rowStep;
-  const sorted = [...gaps].sort((left, right) => left - right);
-  return sorted[Math.floor(sorted.length / 2)];
+  return `${page.sourceFileIndex}:${page.index}:${rowIndex}:${columnIndex}`;
 }
 
-export function createSnappedStoryboardCrop(
+export function getStoryboardPageOrigin(
   template: StoryboardCropTemplate,
-  page: Pick<ArchiveImportPage, "width" | "height">,
-  centerY: number,
-  existingCrops: RelativeCrop[]
+  _page?: Pick<ArchiveImportPage, "width" | "height">
+): StoryboardGridOrigin {
+  return {
+    x: template.columnOriginX / template.pageNativeWidth,
+    y: template.rowOriginY / template.pageNativeHeight
+  };
+}
+
+export function createStoryboardGridCells(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "sourceFileIndex" | "index" | "width" | "height">,
+  origin = getStoryboardPageOrigin(template, page)
+): StoryboardGridCell[] {
+  const width = template.cropWidth;
+  const height = template.cropHeight;
+  const horizontalGap = template.horizontalGap / template.pageNativeWidth;
+  const verticalGap = template.verticalGap / template.pageNativeHeight;
+  const columnStep = width + horizontalGap;
+  const rowStep = height + verticalGap;
+  if (columnStep <= 0 || rowStep <= 0) return [];
+
+  const firstColumn = Math.ceil((-origin.x - 0.000001) / columnStep);
+  const lastColumn = Math.floor((1 - width - origin.x + 0.000001) / columnStep);
+  const firstRow = Math.ceil((-origin.y - 0.000001) / rowStep);
+  const lastRow = Math.floor((1 - height - origin.y + 0.000001) / rowStep);
+  const cells: StoryboardGridCell[] = [];
+
+  for (let rowIndex = firstRow; rowIndex <= lastRow; rowIndex += 1) {
+    for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex += 1) {
+      cells.push({
+        key: createStoryboardCellKey(page, rowIndex, columnIndex),
+        rowIndex,
+        columnIndex,
+        crop: {
+          x: origin.x + columnIndex * columnStep,
+          y: origin.y + rowIndex * rowStep,
+          width,
+          height
+        }
+      });
+    }
+  }
+
+  return cells;
+}
+
+export function findNearestStoryboardGridCell(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "sourceFileIndex" | "index" | "width" | "height">,
+  point: { x: number; y: number },
+  origin = getStoryboardPageOrigin(template, page),
+  excludedKeys: ReadonlySet<string> = new Set()
 ) {
-  const rowStep = estimateStoryboardRowStep(template, existingCrops);
-  const rowIndex = Math.round((centerY - template.rowAnchorCenterY) / rowStep);
-  const snappedCenterY = template.rowAnchorCenterY + rowIndex * rowStep;
-  const referenceCenterX = template.columnX + template.cropWidth / 2;
-  return createCenteredStoryboardCrop(template, referenceCenterX, snappedCenterY, page);
+  let nearest: StoryboardGridCell | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const cell of createStoryboardGridCells(template, page, origin)) {
+    if (excludedKeys.has(cell.key)) continue;
+    const centerX = cell.crop.x + cell.crop.width / 2;
+    const centerY = cell.crop.y + cell.crop.height / 2;
+    const dx = (centerX - point.x) * page.width;
+    const dy = (centerY - point.y) * page.height;
+    const distance = dx * dx + dy * dy;
+    if (distance < nearestDistance) {
+      nearest = cell;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+export function selectStoryboardGridCells(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "sourceFileIndex" | "index" | "width" | "height">,
+  selection: RelativeCrop,
+  origin = getStoryboardPageOrigin(template, page)
+) {
+  const safeSelection = normalizeRelativeCrop(selection);
+  const toleranceX = Math.min(template.cropWidth * 0.12, 8 / Math.max(1, page.width));
+  const toleranceY = Math.min(template.cropHeight * 0.12, 8 / Math.max(1, page.height));
+  const selectionLeft = safeSelection.x - toleranceX;
+  const selectionTop = safeSelection.y - toleranceY;
+  const selectionRight = safeSelection.x + safeSelection.width + toleranceX;
+  const selectionBottom = safeSelection.y + safeSelection.height + toleranceY;
+
+  return createStoryboardGridCells(template, page, origin).filter((cell) => {
+    const centerX = cell.crop.x + cell.crop.width / 2;
+    const centerY = cell.crop.y + cell.crop.height / 2;
+    if (
+      centerX >= selectionLeft
+      && centerX <= selectionRight
+      && centerY >= selectionTop
+      && centerY <= selectionBottom
+    ) {
+      return true;
+    }
+
+    const overlapWidth = Math.max(
+      0,
+      Math.min(cell.crop.x + cell.crop.width, selectionRight)
+        - Math.max(cell.crop.x, selectionLeft)
+    );
+    const overlapHeight = Math.max(
+      0,
+      Math.min(cell.crop.y + cell.crop.height, selectionBottom)
+        - Math.max(cell.crop.y, selectionTop)
+    );
+    const overlapRatio = (overlapWidth * overlapHeight) / (cell.crop.width * cell.crop.height);
+    return overlapRatio >= 0.18;
+  });
 }
 
 export function createStoryboardAutoCrops(
   template: StoryboardCropTemplate,
-  page: Pick<ArchiveImportPage, "width" | "height">,
-  existingCrops: RelativeCrop[]
+  page: Pick<ArchiveImportPage, "sourceFileIndex" | "index" | "width" | "height">,
+  origin = getStoryboardPageOrigin(template, page)
 ) {
-  const size = createCenteredStoryboardCrop(template, 0.5, 0.5, page);
-  const rowStep = estimateStoryboardRowStep(template, existingCrops);
-  const minimumCenter = size.height / 2;
-  const maximumCenter = 1 - size.height / 2;
-  const firstIndex = Math.ceil((minimumCenter - template.rowAnchorCenterY) / rowStep);
-  const lastIndex = Math.floor((maximumCenter - template.rowAnchorCenterY) / rowStep);
-  const crops: RelativeCrop[] = [];
-
-  for (let rowIndex = firstIndex; rowIndex <= lastIndex; rowIndex += 1) {
-    const centerY = template.rowAnchorCenterY + rowIndex * rowStep;
-    const candidate = createSnappedStoryboardCrop(template, page, centerY, existingCrops);
-    const alreadyExists = existingCrops.some((crop) => (
-      Math.abs(crop.x - candidate.x) < Math.max(0.012, candidate.width * 0.18)
-      && Math.abs(
-        crop.y + crop.height / 2 - (candidate.y + candidate.height / 2)
-      ) < Math.max(0.012, candidate.height * 0.32)
-    ));
-    if (!alreadyExists) crops.push(candidate);
-  }
-
-  return crops;
+  return createStoryboardGridCells(template, page, origin);
 }
 
 export async function createCroppedArchiveFile(
