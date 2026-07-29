@@ -4,6 +4,10 @@ import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import {
+  normalizeExcludedEpisodeNumbers,
+  normalizeStaffTotalEpisodes
+} from "@/lib/staffParticipation";
+import {
   decodeProjectStaffNotes,
   encodeProjectStaffNotes
 } from "@/lib/staffRoleMetadata";
@@ -17,6 +21,7 @@ type StaffMemberInput = {
   phone?: unknown;
   location?: unknown;
   notes?: unknown;
+  excludedEpisodeNumbers?: unknown;
 };
 
 type StaffDepartmentInput = {
@@ -26,12 +31,21 @@ type StaffDepartmentInput = {
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
-    const scope = await requireAdminScope(request, context);
+    const scope = await requireReadScope(request, context);
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
+    const includeTotalEpisodes = request.nextUrl.searchParams.get("includeTotalEpisodes") === "1";
+    const basicInfoRequest = includeTotalEpisodes
+      ? supabase
+        .from("project_basic_info")
+        .select("total_episodes")
+        .eq("project_id", projectId)
+        .maybeSingle()
+      : Promise.resolve({ data: null, error: null });
     const [
       { data: rows, error },
-      { data: departmentRows, error: departmentError }
+      { data: departmentRows, error: departmentError },
+      { data: basicInfoRow, error: basicInfoError }
     ] = await Promise.all([
       supabase
         .from("project_staff_members")
@@ -44,13 +58,16 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
         .select("*")
         .eq("project_id", projectId)
         .order("sort_order")
-        .order("created_at")
+        .order("created_at"),
+      basicInfoRequest
     ]);
     if (error) throw error;
     if (departmentError) throw departmentError;
+    if (basicInfoError) throw basicInfoError;
     return NextResponse.json({
       members: (rows ?? []).map(staffMemberResponseRow),
       departments: departmentRows ?? [],
+      totalEpisodes: normalizeStaffTotalEpisodes(basicInfoRow?.total_episodes),
       warnings: []
     });
   } catch (error) {
@@ -74,7 +91,16 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       return NextResponse.json({ error: "부서 목록 데이터가 올바르지 않습니다." }, { status: 400 });
     }
 
-    const members = body.members.map((member, index) => normalizeMemberInput(member, projectId, index));
+    const { data: basicInfoRow, error: basicInfoError } = await supabase
+      .from("project_basic_info")
+      .select("total_episodes")
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (basicInfoError) throw basicInfoError;
+    const totalEpisodes = normalizeStaffTotalEpisodes(basicInfoRow?.total_episodes);
+    const members = body.members.map((member, index) => (
+      normalizeMemberInput(member, projectId, index, totalEpisodes)
+    ));
     if (members.some((member) => !member)) {
       return NextResponse.json({ error: "스탭 행 ID 또는 입력값이 올바르지 않습니다." }, { status: 400 });
     }
@@ -151,7 +177,11 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       name: member.name,
       phone: member.phone,
       location: member.location,
-      notes: encodeProjectStaffNotes(member.role, member.notes),
+      notes: encodeProjectStaffNotes(
+        member.role,
+        member.notes,
+        member.excludedEpisodeNumbers
+      ),
       sort_order: index + 1
     }));
     if (rows.length > 0) {
@@ -201,6 +231,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     return NextResponse.json({
       members: (savedRows ?? []).map(staffMemberResponseRow),
       departments: savedDepartmentRows ?? [],
+      totalEpisodes,
       warnings: []
     });
   } catch (error) {
@@ -224,10 +255,30 @@ async function requireAdminScope(
   return { projectId, supabase: requireProjectAccessDb() };
 }
 
+async function requireReadScope(
+  request: NextRequest,
+  context: { params: Promise<{ projectId: string }> }
+) {
+  const { projectId: routeProjectId } = await context.params;
+  const projectId = normalizeProjectId(routeProjectId);
+  if (!isValidDatabaseProjectId(projectId)) {
+    return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  const grant = await getAccessGrant(request, projectId);
+  if (!grant || (grant.role !== "admin" && grant.role !== "progress")) {
+    return NextResponse.json(
+      { error: "프로젝트 스탭 리스트를 확인할 권한이 없습니다." },
+      { status: grant ? 403 : 401 }
+    );
+  }
+  return { projectId, supabase: requireProjectAccessDb() };
+}
+
 function normalizeMemberInput(
   member: StaffMemberInput,
   projectId: string,
-  index: number
+  index: number,
+  totalEpisodes: number
 ): ProjectStaffMember | null {
   const id = String(member.id ?? "").trim();
   if (!isUuid(id)) return null;
@@ -241,6 +292,10 @@ function normalizeMemberInput(
     phone: formatKoreanPhoneNumber(normalizeText(member.phone, 30)),
     location: normalizeText(member.location, 120),
     notes: normalizeText(member.notes, 2000),
+    excludedEpisodeNumbers: normalizeExcludedEpisodeNumbers(
+      member.excludedEpisodeNumbers,
+      totalEpisodes
+    ),
     sortOrder: index + 1,
     createdAt: now,
     updatedAt: now
@@ -252,7 +307,8 @@ function staffMemberResponseRow(row: Record<string, unknown>) {
   return {
     ...row,
     role: decodedNotes.role,
-    notes: decodedNotes.notes
+    notes: decodedNotes.notes,
+    excludedEpisodeNumbers: decodedNotes.excludedEpisodeNumbers
   };
 }
 

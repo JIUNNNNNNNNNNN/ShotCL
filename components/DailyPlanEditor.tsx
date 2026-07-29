@@ -241,7 +241,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       initialDefaults.printMeta,
       projectStaffMembers,
       activeProjectBasicInfo?.actors ?? [],
-      projectStaffDepartments
+      projectStaffDepartments,
+      initialPlanDraft.episode || initialDefaults.printMeta.day
     );
     const initialLocations = buildInitialLocations(initialPlanDraft);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
@@ -401,18 +402,24 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         }
         : {})
     }));
-    setPrintMeta((current) => ({
-      ...current,
-      day: value,
-      ...(selectedMainStaff
-        ? {
-          mainStaff: selectedMainStaff,
-          directorContact: joinMainStaffContacts(directorStaff),
-          assistantDirectorContact: joinMainStaffContacts(assistantDirectorStaff),
-          producerContact: joinMainStaffContacts(producerStaff)
-        }
-        : {})
-    }));
+    setPrintMeta((current) => applyProjectStaffDefaults(
+      {
+        ...current,
+        day: value,
+        ...(selectedMainStaff
+          ? {
+            mainStaff: selectedMainStaff,
+            directorContact: joinMainStaffContacts(directorStaff),
+            assistantDirectorContact: joinMainStaffContacts(assistantDirectorStaff),
+            producerContact: joinMainStaffContacts(producerStaff)
+          }
+          : {})
+      },
+      projectStaffMembers,
+      activeProjectBasicInfo?.actors ?? [],
+      projectStaffDepartments,
+      value
+    ));
   }
 
   function updateStarring(index: number, patch: Partial<CallSheetPerson>) {

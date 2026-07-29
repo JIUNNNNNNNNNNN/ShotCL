@@ -26,6 +26,7 @@ export function ProjectAccessGate({
   const progressPath = `/projects/${projectId}`;
   const progressReadablePaths = new Set([
     progressPath,
+    `${progressPath}/staff-list`,
     `${progressPath}/scene-list`,
     `${progressPath}/scenario`,
     `${progressPath}/costumes`,

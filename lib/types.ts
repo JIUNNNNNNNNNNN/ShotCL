@@ -423,6 +423,8 @@ export type ProjectStaffMember = {
   phone: string;
   location: string;
   notes: string;
+  /** 비어 있으면 모든 회차 참여이며, 명시된 회차만 비참여입니다. */
+  excludedEpisodeNumbers: number[];
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

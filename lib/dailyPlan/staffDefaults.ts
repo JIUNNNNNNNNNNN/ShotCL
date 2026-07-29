@@ -11,6 +11,7 @@ import {
   normalizeStaffDepartment,
   sortStaffMembersForDisplay
 } from "@/lib/dailyPlan/staffList";
+import { isStaffParticipatingInEpisode } from "@/lib/staffParticipation";
 import type {
   ProjectActor,
   ProjectStaffDepartment,
@@ -42,10 +43,15 @@ export function applyProjectStaffDefaults(
   sourceMeta: DailyPlanPrintMeta,
   projectStaffMembers: ProjectStaffMember[],
   projectActors: ProjectActor[],
-  projectStaffDepartments: ProjectStaffDepartment[] = []
+  projectStaffDepartments: ProjectStaffDepartment[] = [],
+  episodeNumber?: string | number | null
 ): DailyPlanPrintMeta {
   const actorDefaults = buildActorDefaults(projectStaffMembers, projectActors);
-  const teamDefaults = buildTeamDefaults(projectStaffMembers, projectStaffDepartments);
+  const teamDefaults = buildTeamDefaults(
+    projectStaffMembers,
+    projectStaffDepartments,
+    episodeNumber
+  );
 
   return deriveDailyPlanHeadcount({
     ...sourceMeta,
@@ -106,8 +112,12 @@ function buildActorDefaults(
 
 function buildTeamDefaults(
   members: ProjectStaffMember[],
-  departments: ProjectStaffDepartment[]
+  departments: ProjectStaffDepartment[],
+  episodeNumber?: string | number | null
 ): TeamCallSheetRow[] {
+  const normalizedEpisodeNumber = Number(episodeNumber);
+  const shouldFilterByEpisode = Number.isInteger(normalizedEpisodeNumber)
+    && normalizedEpisodeNumber >= 1;
   const registeredKeys = new Set(
     departments.map((department) => normalizeKey(department.name)).filter(Boolean)
   );
@@ -115,7 +125,12 @@ function buildTeamDefaults(
   return groupStaffMembersForDisplay(members, departments)
     .filter((group) => !isActorDepartment(group.name))
     .flatMap((group) => {
-      const validMembers = group.members.filter((member) => !isStaffMemberEmpty(member));
+      const validMembers = group.members
+        .filter((member) => !isStaffMemberEmpty(member))
+        .filter((member) => (
+          !shouldFilterByEpisode
+          || isStaffParticipatingInEpisode(member, normalizedEpisodeNumber)
+        ));
       const departmentKey = normalizeKey(group.name) || "__unassigned__";
       if (validMembers.length === 0 && !registeredKeys.has(departmentKey)) return [];
       const departmentName = normalizeStaffDepartment(group.name) || "미분류";

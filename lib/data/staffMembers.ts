@@ -2,6 +2,10 @@ import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { normalizeStaffDepartment, sortStaffMembers } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
+import {
+  normalizeExcludedEpisodeNumbers,
+  normalizeStaffTotalEpisodes
+} from "@/lib/staffParticipation";
 import { decodeProjectStaffNotes } from "@/lib/staffRoleMetadata";
 import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
@@ -9,6 +13,7 @@ type StaffListPayload = {
   members?: Record<string, unknown>[];
   departments?: Record<string, unknown>[];
   warnings?: string[];
+  totalEpisodes?: unknown;
   error?: string;
 };
 
@@ -16,6 +21,7 @@ export type ProjectStaffListResult = {
   members: ProjectStaffMember[];
   departments: ProjectStaffDepartment[];
   warnings: string[];
+  totalEpisodes: number;
 };
 
 export function createBlankProjectStaffMember(
@@ -33,6 +39,7 @@ export function createBlankProjectStaffMember(
     phone: "",
     location: "",
     notes: "",
+    excludedEpisodeNumbers: [],
     sortOrder,
     createdAt: now,
     updatedAt: now
@@ -56,10 +63,14 @@ export function createBlankProjectStaffDepartment(
 }
 
 /** 프로젝트 전체에서 공유하는 스탭 풀을 불러옵니다. */
-export async function listProjectStaffMembers(projectId: string): Promise<ProjectStaffListResult> {
+export async function listProjectStaffMembers(
+  projectId: string,
+  options: { includeTotalEpisodes?: boolean } = {}
+): Promise<ProjectStaffListResult> {
+  const totalEpisodesQuery = options.includeTotalEpisodes ? "?includeTotalEpisodes=1" : "";
   try {
     const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/staff-list`,
+      `/api/projects/${encodeURIComponent(projectId)}/staff-list${totalEpisodesQuery}`,
       { cache: "no-store" }
     );
     const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
@@ -67,7 +78,8 @@ export async function listProjectStaffMembers(projectId: string): Promise<Projec
       return {
         members: sortStaffMembers(payload.members.map(staffMemberFromRow)),
         departments: sortDepartments((payload.departments ?? []).map(staffDepartmentFromRow)),
-        warnings: payload.warnings ?? []
+        warnings: payload.warnings ?? [],
+        totalEpisodes: normalizeStaffTotalEpisodes(payload.totalEpisodes)
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
@@ -84,9 +96,12 @@ export async function listProjectStaffMembers(projectId: string): Promise<Projec
 export async function saveProjectStaffMembers(
   projectId: string,
   members: ProjectStaffMember[],
-  departments: ProjectStaffDepartment[]
+  departments: ProjectStaffDepartment[],
+  totalEpisodes: number
 ): Promise<ProjectStaffListResult> {
-  const normalizedMembers = members.map((member, index) => normalizeMember(member, projectId, index));
+  const normalizedMembers = members.map((member, index) => (
+    normalizeMember(member, projectId, index, totalEpisodes)
+  ));
   const normalizedDepartments = normalizeDepartments(departments, projectId);
   try {
     const response = await fetch(
@@ -105,7 +120,8 @@ export async function saveProjectStaffMembers(
       return {
         members: sortStaffMembers(payload.members.map(staffMemberFromRow)),
         departments: sortDepartments((payload.departments ?? []).map(staffDepartmentFromRow)),
-        warnings: payload.warnings ?? []
+        warnings: payload.warnings ?? [],
+        totalEpisodes: normalizeStaffTotalEpisodes(payload.totalEpisodes)
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
@@ -120,18 +136,21 @@ export async function saveProjectStaffMembers(
 
 function listLocalStaffMembers(projectId: string): ProjectStaffListResult {
   const buckets = readLocalBuckets();
-  if (!buckets.projects.some((project) => project.id === projectId)) {
+  const project = buckets.projects.find((item) => item.id === projectId);
+  if (!project) {
     throw new Error("프로젝트를 찾을 수 없습니다.");
   }
+  const totalEpisodes = normalizeStaffTotalEpisodes(project.basicInfo?.totalEpisodes);
 
   return {
     members: sortStaffMembers(buckets.projectStaffMembers
       .filter((member) => member.projectId === projectId)
-      .map((member, index) => normalizeMember(member, projectId, index))),
+      .map((member, index) => normalizeMember(member, projectId, index, totalEpisodes))),
     departments: sortDepartments(
       buckets.projectStaffDepartments.filter((department) => department.projectId === projectId)
     ),
-    warnings: []
+    warnings: [],
+    totalEpisodes
   };
 }
 
@@ -163,14 +182,18 @@ function saveLocalStaffMembers(
   return {
     members: normalizedMembers,
     departments: normalizedDepartments,
-    warnings: []
+    warnings: [],
+    totalEpisodes: normalizeStaffTotalEpisodes(
+      buckets.projects.find((project) => project.id === projectId)?.basicInfo?.totalEpisodes
+    )
   };
 }
 
 function normalizeMember(
   member: ProjectStaffMember,
   projectId: string,
-  index: number
+  index: number,
+  totalEpisodes?: number
 ): ProjectStaffMember {
   return {
     ...member,
@@ -181,6 +204,10 @@ function normalizeMember(
     phone: formatKoreanPhoneNumber(member.phone),
     location: member.location.slice(0, 120),
     notes: member.notes.slice(0, 2000),
+    excludedEpisodeNumbers: normalizeExcludedEpisodeNumbers(
+      member.excludedEpisodeNumbers,
+      totalEpisodes
+    ),
     sortOrder: index + 1,
     updatedAt: new Date().toISOString()
   };
@@ -197,6 +224,9 @@ function staffMemberFromRow(row: Record<string, unknown>): ProjectStaffMember {
     phone: formatKoreanPhoneNumber(String(row.phone ?? "")),
     location: String(row.location ?? ""),
     notes: row.role === undefined ? decodedNotes.notes : String(row.notes ?? ""),
+    excludedEpisodeNumbers: normalizeExcludedEpisodeNumbers(
+      row.excludedEpisodeNumbers ?? decodedNotes.excludedEpisodeNumbers
+    ),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")

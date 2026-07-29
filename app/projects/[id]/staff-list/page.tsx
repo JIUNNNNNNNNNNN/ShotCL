@@ -28,6 +28,10 @@ import {
   getStaffDepartmentColor,
   moveProjectStaffMember,
 } from "@/lib/dailyPlan/staffList";
+import {
+  isStaffParticipatingInEpisode,
+  normalizeExcludedEpisodeNumbers
+} from "@/lib/staffParticipation";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -36,7 +40,7 @@ const inputClassName =
 const notesTextareaClassName =
   "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1 text-center text-xs font-bold leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
-  "md:grid-cols-[minmax(5.75rem,0.85fr)_minmax(4.75rem,0.6fr)_minmax(7.75rem,1fr)_minmax(8rem,1.15fr)_minmax(10rem,2fr)]";
+  "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -50,6 +54,7 @@ export default function StaffListPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [members, setMembers] = useState<ProjectStaffMember[]>([]);
   const [departments, setDepartments] = useState<ProjectStaffDepartment[]>([]);
+  const [totalEpisodes, setTotalEpisodes] = useState(0);
   const [isDepartmentsOpen, setIsDepartmentsOpen] = useState(false);
   const [newDepartmentName, setNewDepartmentName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -77,6 +82,7 @@ export default function StaffListPage() {
   } | null>(null);
   const suppressedNameClickRef = useRef<string | null>(null);
   const previousBodyUserSelectRef = useRef("");
+  const canEdit = role !== "progress";
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
     [departments, members]
@@ -93,15 +99,16 @@ export default function StaffListPage() {
   useUnsavedChangesGuard(isDirty);
 
   const load = useCallback(async () => {
-    if (!projectId || role === "progress") return;
+    if (!projectId) return;
     try {
       const [projectData, staffData] = await Promise.all([
         getProject(projectId),
-        listProjectStaffMembers(projectId)
+        listProjectStaffMembers(projectId, { includeTotalEpisodes: true })
       ]);
       setProject(projectData);
       setMembers(staffData.members);
       setDepartments(staffData.departments);
+      setTotalEpisodes(staffData.totalEpisodes);
       setIsDirty(false);
       setErrorMessage("");
     } catch (error) {
@@ -153,15 +160,21 @@ export default function StaffListPage() {
     sourceDepartments: ProjectStaffDepartment[],
     showMessage = false
   ) => {
-    if (!projectId || role === "progress") return;
+    if (!projectId || !canEdit) return;
     const version = editVersionRef.current;
     setIsSaving(true);
     setErrorMessage("");
     try {
-      const result = await saveProjectStaffMembers(projectId, sourceMembers, sourceDepartments);
+      const result = await saveProjectStaffMembers(
+        projectId,
+        sourceMembers,
+        sourceDepartments,
+        totalEpisodes
+      );
       if (editVersionRef.current === version) {
         setMembers(result.members);
         setDepartments(result.departments);
+        setTotalEpisodes(result.totalEpisodes);
         setIsDirty(false);
       }
       if (showMessage) setMessage("스탭 리스트를 저장했습니다.");
@@ -170,7 +183,7 @@ export default function StaffListPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [projectId, role]);
+  }, [canEdit, projectId, totalEpisodes]);
 
   const commitMembers = useCallback((updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) => {
     editVersionRef.current += 1;
@@ -411,14 +424,6 @@ export default function StaffListPage() {
     commitMembers((current) => current.filter((item) => item.id !== member.id));
   }, [commitMembers]);
 
-  if (role === "progress") {
-    return (
-      <div className="rounded-[2rem] border border-field-danger bg-white p-6 text-center">
-        <p className="font-black text-field-danger">Key staff 권한이 필요합니다.</p>
-      </div>
-    );
-  }
-
   if (isLoading) return <PixelDogLoader size="lg" />;
 
   if (!project) {
@@ -453,20 +458,26 @@ export default function StaffListPage() {
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
             </Link>
-            <button
-              type="button"
-              onClick={() => void save(members, departments, true)}
-              disabled={isSaving || !isDirty}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
-              저장
-            </button>
+            {canEdit ? (
+              <button
+                type="button"
+                onClick={() => void save(members, departments, true)}
+                disabled={isSaving || !isDirty}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
+                저장
+              </button>
+            ) : null}
           </div>
         </div>
         <p className="mt-2 text-[11px] font-bold text-field-muted" aria-live="polite">
-          프로젝트 전체에서 사용할 스탭을 직접 추가하고 수정한 뒤 저장 버튼을 눌러주세요.
-          {isSaving ? " 저장 중…" : isDirty ? " 저장되지 않은 변경사항이 있습니다." : " 저장됨"}
+          {canEdit
+            ? "프로젝트 전체에서 사용할 스탭을 직접 추가하고 수정한 뒤 저장 버튼을 눌러주세요."
+            : "프로젝트 스탭과 회차별 참여 상태를 읽기 전용으로 확인할 수 있습니다."}
+          {canEdit
+            ? isSaving ? " 저장 중…" : isDirty ? " 저장되지 않은 변경사항이 있습니다." : " 저장됨"
+            : ""}
         </p>
       </section>
 
@@ -478,20 +489,22 @@ export default function StaffListPage() {
       ) : null}
 
       <section className="mt-3 rounded-2xl border border-field-border bg-white px-2.5 py-2 shadow-sm">
-        <div className="grid h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsDepartmentsOpen((current) => !current)}
-            className="flex h-8 min-w-0 items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
-            aria-expanded={isDepartmentsOpen}
-            aria-controls="staff-departments-panel"
-          >
-            <span>부서 입력</span>
-            <ChevronDown
-              className={`h-4 w-4 shrink-0 transition-transform ${isDepartmentsOpen ? "rotate-180" : ""}`}
-              aria-hidden
-            />
-          </button>
+        <div className={`grid h-8 items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => setIsDepartmentsOpen((current) => !current)}
+              className="flex h-8 min-w-0 items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
+              aria-expanded={isDepartmentsOpen}
+              aria-controls="staff-departments-panel"
+            >
+              <span>부서 입력</span>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 transition-transform ${isDepartmentsOpen ? "rotate-180" : ""}`}
+                aria-hidden
+              />
+            </button>
+          ) : null}
           <div ref={notesSummaryRef} className="relative h-8 min-w-0">
             <button
               type="button"
@@ -538,7 +551,7 @@ export default function StaffListPage() {
             ) : null}
           </div>
         </div>
-        {isDepartmentsOpen ? (
+        {canEdit && isDepartmentsOpen ? (
           <div
             id="staff-departments-panel"
             className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-border px-1 pt-2"
@@ -627,7 +640,7 @@ export default function StaffListPage() {
                     >
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate">{group.name || "미분류"}</span>
-                        {group.name ? (
+                        {canEdit && group.name ? (
                           <button
                             type="button"
                             onClick={() => addMember(group.name)}
@@ -653,6 +666,8 @@ export default function StaffListPage() {
                         showBottomBorder={index < group.members.length - 1}
                         isDragging={draggedMemberId === member.id}
                         isDragTarget={dragTargetMemberId === member.id}
+                        canEdit={canEdit}
+                        totalEpisodes={totalEpisodes}
                         onChange={updateMember}
                         onDelete={deleteMember}
                         onRoleInputRef={registerMemberRoleInput}
@@ -693,6 +708,8 @@ const StaffMemberRow = memo(function StaffMemberRow({
   showBottomBorder,
   isDragging,
   isDragTarget,
+  canEdit,
+  totalEpisodes,
   onChange,
   onDelete,
   onRoleInputRef,
@@ -708,6 +725,8 @@ const StaffMemberRow = memo(function StaffMemberRow({
   showBottomBorder: boolean;
   isDragging: boolean;
   isDragTarget: boolean;
+  canEdit: boolean;
+  totalEpisodes: number;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
@@ -739,6 +758,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           className={inputClassName}
           value={member.role}
           onChange={(event) => onChange(member.id, { role: event.target.value })}
+          readOnly={!canEdit}
           placeholder="직책"
           aria-label={`${number}번 직책`}
           maxLength={100}
@@ -750,11 +770,12 @@ const StaffMemberRow = memo(function StaffMemberRow({
           className={`${inputClassName} ${isDragging ? "cursor-grabbing select-none" : ""}`}
           value={member.name}
           onChange={(event) => onChange(member.id, { name: event.target.value })}
-          onPointerDown={onNamePointerDown}
-          onPointerMove={onNamePointerMove}
-          onPointerUp={onNamePointerUp}
-          onPointerCancel={onNamePointerCancel}
-          onClick={onNameClick}
+          onPointerDown={canEdit ? onNamePointerDown : undefined}
+          onPointerMove={canEdit ? onNamePointerMove : undefined}
+          onPointerUp={canEdit ? onNamePointerUp : undefined}
+          onPointerCancel={canEdit ? onNamePointerCancel : undefined}
+          onClick={canEdit ? onNameClick : undefined}
+          readOnly={!canEdit}
           placeholder="이름"
           aria-label={`${number}번 이름`}
           title="길게 누른 뒤 움직여 순서 변경"
@@ -768,6 +789,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           inputMode="tel"
           value={member.phone}
           onChange={(event) => onChange(member.id, { phone: formatKoreanPhoneNumber(event.target.value) })}
+          readOnly={!canEdit}
           placeholder="010-0000-0000"
           aria-label={`${number}번 연락처`}
         />
@@ -778,11 +800,12 @@ const StaffMemberRow = memo(function StaffMemberRow({
           className={inputClassName}
           value={member.location}
           onChange={(event) => onChange(member.id, { location: event.target.value })}
+          readOnly={!canEdit}
           placeholder="서울특별시 강남구"
           aria-label={`${number}번 사는곳`}
         />
       </label>
-      <label className="col-span-4 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 특이사항</span>
         <textarea
           ref={notesInputRef}
@@ -793,24 +816,160 @@ const StaffMemberRow = memo(function StaffMemberRow({
             resizeNotesTextarea(event.currentTarget);
             onChange(member.id, { notes: event.target.value });
           }}
+          readOnly={!canEdit}
           rows={1}
         />
       </label>
-      <button
-        type="button"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete(member);
+      <EpisodeParticipationCells
+        member={member}
+        totalEpisodes={totalEpisodes}
+        canEdit={canEdit}
+        departmentColor={departmentColor}
+        onChange={(excludedEpisodeNumbers) => {
+          onChange(member.id, { excludedEpisodeNumbers });
         }}
-        className="absolute -right-0.5 -top-0.5 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
-        aria-label={`${member.name || `${number}번 스탭`} 삭제`}
-      >
-        <X className="h-2 w-2" strokeWidth={2.5} aria-hidden />
-      </button>
+      />
+      {canEdit ? (
+        <button
+          type="button"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete(member);
+          }}
+          className="absolute -right-0.5 -top-0.5 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
+          aria-label={`${member.name || `${number}번 스탭`} 삭제`}
+        >
+          <X className="h-2 w-2" strokeWidth={2.5} aria-hidden />
+        </button>
+      ) : null}
     </article>
   );
 });
+
+function EpisodeParticipationCells({
+  member,
+  totalEpisodes,
+  canEdit,
+  departmentColor,
+  onChange
+}: {
+  member: ProjectStaffMember;
+  totalEpisodes: number;
+  canEdit: boolean;
+  departmentColor: { background: string; border: string };
+  onChange: (excludedEpisodeNumbers: number[]) => void;
+}) {
+  const pointerGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const episodeNumbers = useMemo(
+    () => Array.from({ length: totalEpisodes }, (_, index) => index + 1),
+    [totalEpisodes]
+  );
+
+  function toggleEpisode(episodeNumber: number) {
+    if (!canEdit) return;
+    const excluded = normalizeExcludedEpisodeNumbers(
+      member.excludedEpisodeNumbers,
+      totalEpisodes
+    );
+    onChange(excluded.includes(episodeNumber)
+      ? excluded.filter((value) => value !== episodeNumber)
+      : [...excluded, episodeNumber].sort((left, right) => left - right));
+  }
+
+  return (
+    <div className="col-span-2 flex h-8 min-w-0 items-center gap-1 overflow-hidden md:col-auto">
+      <span className="w-7 shrink-0 text-[9px] font-black leading-none text-field-muted xl:w-auto">
+        <span className="xl:hidden">회차</span>
+        <span className="hidden xl:inline">참여 회차</span>
+      </span>
+      {episodeNumbers.length > 0 ? (
+        <div
+          className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-0.5 [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+          aria-label={`${member.name || "스탭"} 참여 회차`}
+          onDragStart={(event) => event.preventDefault()}
+        >
+          {episodeNumbers.map((episodeNumber) => {
+            const participating = isStaffParticipatingInEpisode(member, episodeNumber);
+            return (
+              <button
+                key={episodeNumber}
+                type="button"
+                aria-pressed={participating}
+                aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
+                disabled={!canEdit}
+                className={`h-7 w-7 shrink-0 select-none rounded-md border text-[10px] font-black leading-none transition-[background-color,border-color,color,opacity,transform] ${
+                  canEdit ? "cursor-pointer active:scale-95" : "cursor-default"
+                } ${
+                  participating
+                    ? "opacity-100"
+                    : "border-field-border bg-white/70 text-field-muted opacity-55"
+                }`}
+                style={participating ? {
+                  backgroundColor: departmentColor.border,
+                  borderColor: departmentColor.border,
+                  color: "#ffffff"
+                } : undefined}
+                onPointerDown={(event) => {
+                  if (!event.isPrimary) return;
+                  suppressClickRef.current = false;
+                  pointerGestureRef.current = {
+                    pointerId: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    moved: false
+                  };
+                }}
+                onPointerMove={(event) => {
+                  const gesture = pointerGestureRef.current;
+                  if (!gesture || gesture.pointerId !== event.pointerId) return;
+                  if (
+                    Math.hypot(
+                      event.clientX - gesture.startX,
+                      event.clientY - gesture.startY
+                    ) > 8
+                  ) {
+                    gesture.moved = true;
+                  }
+                }}
+                onPointerUp={(event) => {
+                  const gesture = pointerGestureRef.current;
+                  if (!gesture || gesture.pointerId !== event.pointerId) return;
+                  suppressClickRef.current = gesture.moved;
+                  pointerGestureRef.current = null;
+                }}
+                onPointerCancel={() => {
+                  suppressClickRef.current = true;
+                  pointerGestureRef.current = null;
+                }}
+                onClick={(event) => {
+                  if (suppressClickRef.current) {
+                    event.preventDefault();
+                    suppressClickRef.current = false;
+                    return;
+                  }
+                  toggleEpisode(episodeNumber);
+                }}
+              >
+                {episodeNumber}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <span className="grid h-7 min-w-0 flex-1 place-items-center rounded-md border border-field-border bg-white/70 text-[10px] font-black text-field-muted">
+          -
+        </span>
+      )}
+    </div>
+  );
+}
 
 function DepartmentChip({
   department,

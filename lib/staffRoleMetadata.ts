@@ -1,32 +1,43 @@
+import { normalizeExcludedEpisodeNumbers } from "@/lib/staffParticipation";
+
 const staffRoleMetadataStart = "[[TODAY_BOARD_STAFF_ROLE_V1]]";
 const staffRoleMetadataEnd = "[[/TODAY_BOARD_STAFF_ROLE_V1]]";
 
 export type ProjectStaffNotes = {
   role: string;
   notes: string;
+  excludedEpisodeNumbers: number[];
 };
 
 /**
  * 별도 DB 컬럼을 추가하지 않고도 직책과 기존 특이사항을 함께 보존합니다.
  * 메타데이터는 API 경계에서만 다루며 화면에는 노출하지 않습니다.
  */
-export function encodeProjectStaffNotes(role: unknown, notes: unknown) {
+export function encodeProjectStaffNotes(
+  role: unknown,
+  notes: unknown,
+  excludedEpisodeNumbers: unknown = []
+) {
   const normalizedRole = String(role ?? "").trim().slice(0, 100);
   const normalizedNotes = String(notes ?? "").slice(0, 2000);
-  if (!normalizedRole) return normalizedNotes;
+  const normalizedExcludedEpisodes = normalizeExcludedEpisodeNumbers(excludedEpisodeNumbers);
+  if (!normalizedRole && normalizedExcludedEpisodes.length === 0) return normalizedNotes;
 
-  return `${staffRoleMetadataStart}${JSON.stringify({ role: normalizedRole })}${staffRoleMetadataEnd}\n${normalizedNotes}`;
+  return `${staffRoleMetadataStart}${JSON.stringify({
+    role: normalizedRole,
+    excludedEpisodeNumbers: normalizedExcludedEpisodes
+  })}${staffRoleMetadataEnd}\n${normalizedNotes}`;
 }
 
 export function decodeProjectStaffNotes(value: unknown): ProjectStaffNotes {
   const rawValue = String(value ?? "");
   if (!rawValue.startsWith(staffRoleMetadataStart)) {
-    return { role: "", notes: rawValue };
+    return { role: "", notes: rawValue, excludedEpisodeNumbers: [] };
   }
 
   const metadataEndIndex = rawValue.indexOf(staffRoleMetadataEnd, staffRoleMetadataStart.length);
   if (metadataEndIndex < 0) {
-    return { role: "", notes: rawValue };
+    return { role: "", notes: rawValue, excludedEpisodeNumbers: [] };
   }
 
   const metadataText = rawValue.slice(staffRoleMetadataStart.length, metadataEndIndex);
@@ -34,12 +45,18 @@ export function decodeProjectStaffNotes(value: unknown): ProjectStaffNotes {
   const notes = rawValue.slice(notesStartIndex).replace(/^\r?\n/, "");
 
   try {
-    const metadata = JSON.parse(metadataText) as { role?: unknown };
+    const metadata = JSON.parse(metadataText) as {
+      role?: unknown;
+      excludedEpisodeNumbers?: unknown;
+    };
     return {
       role: String(metadata.role ?? "").trim().slice(0, 100),
-      notes
+      notes,
+      excludedEpisodeNumbers: normalizeExcludedEpisodeNumbers(
+        metadata.excludedEpisodeNumbers
+      )
     };
   } catch {
-    return { role: "", notes: rawValue };
+    return { role: "", notes: rawValue, excludedEpisodeNumbers: [] };
   }
 }

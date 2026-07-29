@@ -168,6 +168,7 @@ const PanelContent = memo(function PanelContent({
         {progressOnly ? (
           <nav className="grid gap-2" aria-label="진행도 페이지 이동">
             {pageType !== "progress" ? <SideActionLink href={createProgressPath(projectBasePath, currentPlanId)} icon={ListChecks}>진행도</SideActionLink> : null}
+            {pageType !== "staffList" ? <SideActionLink href={`${projectBasePath}/staff-list`} icon={Users}>스탭리스트</SideActionLink> : null}
             {pageType !== "sceneList" ? <SideActionLink href={`${projectBasePath}/scene-list`} icon={Table2}>씬리스트</SideActionLink> : null}
             <ReferencePageLinks pageType={pageType} projectBasePath={projectBasePath} />
           </nav>
