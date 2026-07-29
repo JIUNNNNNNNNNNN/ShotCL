@@ -10,15 +10,18 @@ type DailyPlanDesktopLandscapePreviewProps = {
   locations: DailyPlanLocation[];
   meta: DailyPlanPrintMeta;
   timetableRows: MobileDailyPlanTimetableRow[];
+  totalCutCount: number;
 };
 
+const timetableColumnSpans = [1, 1, 1, 3, 1, 1, 1, 3, 1, 2, 1] as const;
+const timetableColumnCount = timetableColumnSpans.reduce((total, span) => total + span, 0);
 const sectionTableClass = "daily-plan-section-table mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
 const halfTableClass = "daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center";
 const cellClass = "border border-black px-1.5 py-1 text-center align-middle";
 const headerCellClass = `${cellClass} bg-[#d9d9d9] font-black`;
 
 /** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
-export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows }: DailyPlanDesktopLandscapePreviewProps) {
+export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDesktopLandscapePreviewProps) {
   const printableLocations = locations.filter(isPrintableLocation);
   const starringRows = padRows(meta.starring, 9);
   const teamRows = padRows(meta.teams, 10);
@@ -112,7 +115,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
             <th className={headerCellClass}>SCENE</th>
             <th className={headerCellClass}>Total CUT</th>
             <th colSpan={3} className={headerCellClass}>Description</th>
-            <th className={headerCellClass}>Actor</th>
+            <th className={headerCellClass}>배역</th>
             <th colSpan={2} className={headerCellClass}>Shooting order</th>
             <th className={headerCellClass}>Notes</th>
           </tr>
@@ -147,6 +150,11 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               <td className={cellClass}>{row.notes}</td>
             </tr>
           ))}
+          <tr>
+            <td colSpan={timetableColumnCount} className={`${cellClass} py-1 text-center font-black`}>
+              총 컷수 {totalCutCount}컷
+            </td>
+          </tr>
         </tbody>
       </table>
 

@@ -33,14 +33,16 @@ type DailyPlanMobilePortraitPreviewProps = {
   locations: DailyPlanLocation[];
   meta: DailyPlanPrintMeta;
   timetableRows: MobileDailyPlanTimetableRow[];
+  totalCutCount: number;
 };
 
+const sheetColumnCount = 10;
 const cellClass = "border border-black px-0.5 py-1 align-middle break-words [overflow-wrap:anywhere]";
 const headerCellClass = "border border-black bg-[#d9d9d9] px-0.5 py-1 align-middle font-bold break-words [overflow-wrap:anywhere]";
 const yellowRowClass = "bg-[#fff2cc]";
 
 /** Google Sheet의 `세로` 시트와 같은 10열 구성으로 모바일 일촬표를 표시합니다. */
-export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows }: DailyPlanMobilePortraitPreviewProps) {
+export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanMobilePortraitPreviewProps) {
   const locationRows = padRows(locations.filter(isPrintableLocation), 4);
   const sheetTimetableRows = padRows(timetableRows, 7);
   const starringRows = padRows(meta.starring, 10);
@@ -178,7 +180,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
             <th className={headerCellClass}>SCENE</th>
             <th colSpan={3} className={headerCellClass}>Description</th>
             <th colSpan={2} className={headerCellClass}>Shooting order</th>
-            <th className={headerCellClass}>배우</th>
+            <th className={headerCellClass}>배역</th>
             <th colSpan={3} className={headerCellClass}>Notes</th>
           </tr>
         </thead>
@@ -186,7 +188,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
           {sheetTimetableRows.map((row, index) => row ? (
             row.type === "break" ? (
               <tr key={`portrait-detail-${index}`} className={`${yellowRowClass} h-[21px]`}>
-                <td colSpan={10} className={cellClass}>{formatBreakDescription(row)}</td>
+                <td colSpan={sheetColumnCount} className={cellClass}>{formatBreakDescription(row)}</td>
               </tr>
             ) : (
               <tr key={`portrait-detail-${index}`} className="h-[21px]">
@@ -204,6 +206,11 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               <td colSpan={3} className={cellClass} />
             </tr>
           ))}
+          <tr>
+            <td colSpan={sheetColumnCount} className={`${cellClass} py-1 text-center font-bold`}>
+              총 컷수 {totalCutCount}컷
+            </td>
+          </tr>
         </tbody>
       </table>
 
@@ -233,7 +240,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
 }
 
 function SheetColumns() {
-  return <colgroup>{Array.from({ length: 10 }, (_, index) => <col key={index} className="w-[10%]" />)}</colgroup>;
+  return <colgroup>{Array.from({ length: sheetColumnCount }, (_, index) => <col key={index} className="w-[10%]" />)}</colgroup>;
 }
 
 function StaffCells({ label, name, contact }: { label: string; name: string; contact: string }) {

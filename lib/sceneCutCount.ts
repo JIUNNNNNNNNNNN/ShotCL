@@ -39,6 +39,40 @@ export function normalizeSceneCutCount(raw: unknown): number | null {
   return result.error ? null : result.value;
 }
 
+/**
+ * 일촬표 씬 행의 최종 Cut 값입니다.
+ *
+ * 프로퍼티가 존재하는 0 override도 유효하므로 truthiness가 아니라 null 여부로
+ * 원본 씬리스트 값보다 먼저 판정합니다. 연결되지 않은 레거시 행은 fallback을
+ * 사용할 수 있습니다.
+ */
+export function resolveEffectiveSceneCutCount({
+  totalCutsOverride,
+  sceneListCut,
+  fallbackCut
+}: {
+  totalCutsOverride: unknown;
+  sceneListCut: unknown;
+  fallbackCut?: unknown;
+}) {
+  if (totalCutsOverride !== null && totalCutsOverride !== undefined) {
+    return normalizeSceneCutCount(totalCutsOverride);
+  }
+
+  return normalizeSceneCutCount(sceneListCut)
+    ?? normalizeSceneCutCount(fallbackCut);
+}
+
+/** 미리보기와 PDF가 공유하는 유효 씬 행 Cut 합계입니다. */
+export function sumSceneCutCounts(values: Iterable<unknown>) {
+  let total = 0;
+  for (const value of values) {
+    const normalized = normalizeSceneCutCount(value);
+    if (normalized !== null) total += normalized;
+  }
+  return total;
+}
+
 export type SceneCutCountMap = Record<string, number>;
 
 /**

@@ -95,6 +95,8 @@ export type DailyPlanTimetableSceneMeta = {
   sourceSnapshot: DailyPlanTimetableSceneSourceSnapshot | null;
   sceneContentOverride?: string;
   charactersOverride?: string;
+  /** 등장인물 selector에서 문자열 대신 사용하는 안정적인 CallSheetPerson id입니다. */
+  characterIdsOverride?: string[];
   totalCutsOverride?: number;
   rowSnapshot: DailyPlanTimetableSceneRowSnapshot;
 };
@@ -376,6 +378,16 @@ function normalizeDailyPlanTimetableScene(
     && typeof value.charactersOverride === "string"
   ) {
     normalized.charactersOverride = value.charactersOverride;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "characterIdsOverride")
+    && Array.isArray(value.characterIdsOverride)
+  ) {
+    normalized.characterIdsOverride = Array.from(new Set(
+      value.characterIdsOverride
+        .map((id) => normalizeMetaText(id))
+        .filter(Boolean)
+    )).slice(0, 200);
   }
   if (Object.prototype.hasOwnProperty.call(value, "totalCutsOverride")) {
     const totalCutsOverride = normalizeSceneCutCount(value.totalCutsOverride);

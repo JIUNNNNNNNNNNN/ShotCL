@@ -48,7 +48,9 @@ import {
 } from "@/lib/projectBasicInfo";
 import {
   MAX_SCENE_CUT_COUNT,
-  normalizeSceneCutCount
+  normalizeSceneCutCount,
+  resolveEffectiveSceneCutCount,
+  sumSceneCutCounts
 } from "@/lib/sceneCutCount";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
@@ -86,6 +88,7 @@ type SceneBlockInput = {
   sourceSnapshot: DailyPlanTimetableSceneSourceSnapshot | null;
   sceneContentOverride: string | null;
   charactersOverride: string | null;
+  characterIdsOverride: string[] | null;
   totalCutsOverride: number | null;
   sceneNumber: string;
   sceneTitle: string;
@@ -689,6 +692,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           sourceSnapshot: null,
           sceneContentOverride: null,
           charactersOverride: null,
+          characterIdsOverride: null,
           totalCutsOverride: null,
           sceneNumber: "",
           sceneTitle: "",
@@ -729,11 +733,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }));
   }
 
-  function updateSceneCharactersOverride(sceneIndex: number, value: string) {
+  function updateSceneCharactersOverride(sceneIndex: number, value: string, selectedIds: string[]) {
     const normalized = formatSceneCastValues(parseSceneCastValues(value));
     setScenes((current) => current.map((scene, index) => (
       index === sceneIndex
-        ? { ...scene, subject: normalized, charactersOverride: normalized }
+        ? {
+            ...scene,
+            subject: normalized,
+            charactersOverride: normalized,
+            characterIdsOverride: Array.from(new Set(selectedIds))
+          }
         : scene
     )));
   }
@@ -746,7 +755,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       return {
         ...scene,
         subject: normalizeSceneCharacters(source.characters),
-        charactersOverride: null
+        charactersOverride: null,
+        characterIdsOverride: null
       };
     }));
   }
@@ -1586,7 +1596,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           canReset={scene.charactersOverride !== null && Boolean(linkedSource)}
                           onReset={() => resetSceneCharactersOverride(sceneIndex)}
                         />
-                        <SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateSceneCharactersOverride(sceneIndex, value)} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장인물`} />
+                        <SceneCastSelector
+                          people={printMeta.starring}
+                          value={scene.subject}
+                          selectedIds={scene.characterIdsOverride}
+                          onChange={(value, selectedIds) => updateSceneCharactersOverride(sceneIndex, value, selectedIds)}
+                          ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장인물`}
+                        />
                       </td>
                       <td className={`${timetableTextCellClass} max-md:order-9 max-md:!col-span-7`}>
                         <TimetableLinkedFieldLabel
@@ -2922,29 +2938,35 @@ function TimetableLinkedFieldLabel({
 function SceneCastSelector({
   people,
   value,
+  selectedIds,
   onChange,
   ariaLabel
 }: {
   people: CallSheetPerson[];
   value: string;
-  onChange: (value: string) => void;
+  selectedIds: string[] | null;
+  onChange: (value: string, selectedIds: string[]) => void;
   ariaLabel: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [draftSelectedIds, setDraftSelectedIds] = useState<string[]>([]);
   const selectorRef = useRef<HTMLDivElement | null>(null);
-  const selectedValues = parseSceneCastValues(value);
+  const selectedValues = parseSceneCastValues(getValidSceneCastValue(value, people));
   const projectOptions = getCastOptions(people);
-  const optionValues = new Set(projectOptions.map((option) => option.value));
+  const optionValues = new Set(projectOptions.map((option) => option.role));
   const legacyOptions = selectedValues
     .filter((selected) => !optionValues.has(selected))
-    .map((selected, index) => ({ id: `legacy_cast_${index}`, value: selected, label: `${selected} (기존값)` }));
+    .map((selected, index) => ({ id: `legacy_cast_${index}`, role: selected, label: selected }));
   const options = [...projectOptions, ...legacyOptions];
+  const committedSelectedIds = resolveCastSelectionIds(options, selectedValues, selectedIds);
 
   useEffect(() => {
     if (!isOpen) return;
 
     function handlePointerDown(event: PointerEvent) {
-      if (!selectorRef.current?.contains(event.target as Node)) setIsOpen(false);
+      if (!selectorRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -2959,11 +2981,33 @@ function SceneCastSelector({
     };
   }, [isOpen]);
 
-  function toggleValue(nextValue: string, checked: boolean) {
-    const next = checked
-      ? [...selectedValues.filter((selected) => selected !== nextValue), nextValue]
-      : selectedValues.filter((selected) => selected !== nextValue);
-    onChange(formatSceneCastValues(next));
+  function openSelector() {
+    setDraftSelectedIds(committedSelectedIds);
+    setIsOpen(true);
+  }
+
+  function cancelSelection() {
+    setDraftSelectedIds(committedSelectedIds);
+    setIsOpen(false);
+  }
+
+  function toggleId(nextId: string) {
+    setDraftSelectedIds((current) => (
+      current.includes(nextId)
+        ? current.filter((id) => id !== nextId)
+        : [...current, nextId]
+    ));
+  }
+
+  function completeSelection() {
+    const optionsById = new Map(options.map((option) => [option.id, option]));
+    const committedIds = Array.from(new Set(
+      draftSelectedIds.filter((id) => optionsById.has(id))
+    ));
+    const selectedRoles = committedIds
+      .map((id) => optionsById.get(id)?.role ?? "")
+      .filter(Boolean);
+    onChange(formatSceneCastValues(selectedRoles), committedIds);
     setIsOpen(false);
   }
 
@@ -2972,29 +3016,66 @@ function SceneCastSelector({
       <button
         type="button"
         className="flex min-h-[38px] w-full items-center justify-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[12px] font-bold leading-[1.4] text-field-text"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => {
+          if (isOpen) cancelSelection();
+          else openSelector();
+        }}
         aria-expanded={isOpen}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-label={ariaLabel}
         title={ariaLabel}
       >
-        <span className="line-clamp-2">{selectedValues.join(", ") || "배우 선택"}</span>
+        <span className="line-clamp-2 break-words">{selectedValues.join(", ") || "배역 선택"}</span>
       </button>
       {isOpen ? (
         <>
-          <button type="button" tabIndex={-1} aria-label="배우 선택 닫기" className="fixed inset-0 z-20 cursor-default bg-transparent" onClick={() => setIsOpen(false)} />
-          <div role="listbox" aria-multiselectable="true" className="absolute left-0 z-30 mt-1 grid max-h-64 min-w-60 gap-1 overflow-y-auto rounded-md border border-field-border bg-white p-2 text-center shadow-lg max-lg:fixed max-lg:inset-x-6 max-lg:top-1/2 max-lg:mt-0 max-lg:-translate-y-1/2">
-            {options.length > 0 ? options.map((option) => (
-              <label key={option.id} className="flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-md px-2 py-1 hover:bg-field-soft">
-                <input
-                  type="checkbox"
-                  checked={selectedValues.includes(option.value)}
-                  onChange={(event) => toggleValue(option.value, event.target.checked)}
-                  className="h-4 w-4 accent-field-primary"
-                />
-                <span className="text-sm font-bold text-field-text">{option.label}</span>
-              </label>
-            )) : <p className="px-2 py-2 text-sm font-bold text-field-muted">배우 정보에서 배역 또는 이름을 먼저 입력해주세요.</p>}
+          <button type="button" tabIndex={-1} aria-label="배역 선택 취소" className="fixed inset-0 z-20 cursor-default bg-black/10" onClick={cancelSelection} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={ariaLabel}
+            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden rounded-md border border-field-border bg-white text-center shadow-lg max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)] max-lg:rounded-b-none max-lg:rounded-t-xl max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
+          >
+            <div className="flex items-center justify-between border-b border-field-border px-3 py-2">
+              <strong className="text-sm text-field-primary">등장인물 선택</strong>
+              <span className="text-xs font-bold text-field-muted">{draftSelectedIds.length}명 선택</span>
+            </div>
+            <div role="listbox" aria-multiselectable="true" className="grid min-h-0 flex-1 gap-1 overflow-y-auto p-2">
+              {options.length > 0 ? options.map((option) => {
+                const checked = draftSelectedIds.includes(option.id);
+                return (
+                  <label
+                    key={option.id}
+                    role="option"
+                    aria-selected={checked}
+                    className="flex min-h-11 cursor-pointer items-center justify-start gap-2 rounded-md px-3 py-1.5 text-left hover:bg-field-soft"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleId(option.id)}
+                      className="h-4 w-4 shrink-0 accent-field-primary"
+                    />
+                    <span className="break-words text-sm font-bold text-field-text">{option.label}</span>
+                  </label>
+                );
+              }) : <p className="px-2 py-3 text-sm font-bold text-field-muted">배역명이 입력된 배우가 없습니다.</p>}
+            </div>
+            <div className="flex items-center gap-2 border-t border-field-border p-2">
+              <button
+                type="button"
+                className="mr-auto min-h-9 rounded-full border border-field-border px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-field-primary"
+                onClick={() => setDraftSelectedIds([])}
+              >
+                전체 해제
+              </button>
+              <button type="button" className="min-h-9 rounded-full border border-field-border px-4 text-xs font-bold text-field-muted hover:border-field-primary" onClick={cancelSelection}>
+                취소
+              </button>
+              <button type="button" className="min-h-9 rounded-full bg-field-primary px-4 text-xs font-bold text-white hover:brightness-110" onClick={completeSelection}>
+                완료
+              </button>
+            </div>
           </div>
         </>
       ) : null}
@@ -3207,6 +3288,7 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data
         locations={data.locations}
         meta={data.meta}
         timetableRows={timetableRows}
+        totalCutCount={data.totalCutCount}
       />
     </section>
   );
@@ -3250,6 +3332,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
             locations={data.locations}
             meta={data.meta}
             timetableRows={timetableRows}
+            totalCutCount={data.totalCutCount}
           />
         </div>
       </div>
@@ -3289,6 +3372,9 @@ function PrintDailyPlanView({ data }: { data: DailyPlanPreviewData }) {
     </section>
   );
 }
+
+const printTimetableColumnSpans = [1, 1, 1, 2, 1, 1, 1, 3, 1, 2, 2] as const;
+const printTimetableColumnCount = printTimetableColumnSpans.reduce((total, span) => total + span, 0);
 
 function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
   const locations = data.locations.filter(isPrintableLocation);
@@ -3364,13 +3450,13 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
             <td className="border border-black">SCENE</td>
             <td className="border border-black">Total CUT</td>
             <td colSpan={3} className="border border-black">Description</td>
-            <td className="border border-black">Actor</td>
+            <td className="border border-black">배역</td>
             <td colSpan={2} className="border border-black">Shooting order</td>
             <td colSpan={2} className="border border-black">Notes</td>
           </tr>
           {timetableRows.map((row, index) =>
             row.type === "break" ? (
-              <tr key={`time-row-${index}`} className={`bg-[#fff2cc] ${index === timetableRows.length - 1 ? "pdf-section-end" : ""}`}>
+              <tr key={`time-row-${index}`} className="bg-[#fff2cc]">
                 <td className="border border-black">{row.start}</td>
                 <td className="border border-black">{row.end}</td>
                 <td className="border border-black">{row.runtime}</td>
@@ -3384,7 +3470,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 )}
               </tr>
             ) : (
-              <tr key={`time-row-${index}`} className={index === timetableRows.length - 1 ? "pdf-section-end" : undefined}>
+              <tr key={`time-row-${index}`}>
                 <td className="border border-black">{row.start}</td>
                 <td className="border border-black">{row.end}</td>
                 <td className="border border-black">{row.runtime}</td>
@@ -3399,6 +3485,14 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               </tr>
             )
           )}
+          <tr className="pdf-section-end">
+            <td
+              colSpan={printTimetableColumnCount}
+              className="border border-black py-1 text-center font-black"
+            >
+              총 컷수 {data.totalCutCount}컷
+            </td>
+          </tr>
           <tr><td colSpan={16} className="h-2 border-0 p-0" /></tr>
           <tr className="pdf-section-start">
             <td colSpan={8} className="border border-black font-black">Notice</td>
@@ -3551,19 +3645,17 @@ function normalizeDayNight(value: string) {
 }
 
 function getCastMemberValue(person: Pick<CallSheetPerson, "name" | "role">) {
-  const role = person.role.trim();
-  const name = person.name.trim();
-  if (role && name) return `${role} (${name})`;
-  return role || name;
+  return person.role.trim();
 }
 
 function getCastOptions(people: CallSheetPerson[]) {
-  const usedValues = new Set<string>();
+  const usedIds = new Set<string>();
   return people.flatMap((person) => {
-    const value = getCastMemberValue(person);
-    if (!value || usedValues.has(value)) return [];
-    usedValues.add(value);
-    return [{ id: person.id, value, label: value }];
+    const id = person.id.trim();
+    const role = getCastMemberValue(person);
+    if (!id || !role || usedIds.has(id)) return [];
+    usedIds.add(id);
+    return [{ id, role, label: role }];
   });
 }
 
@@ -3575,8 +3667,50 @@ function formatSceneCastValues(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).join(", ");
 }
 
-function getValidSceneCastValue(value: string, _people: CallSheetPerson[]) {
-  return formatSceneCastValues(parseSceneCastValues(value));
+function getValidSceneCastValue(value: string, people: CallSheetPerson[]) {
+  const normalizedRoles = parseSceneCastValues(value).flatMap((storedValue) => {
+    const exactRole = people.find((person) => person.role.trim() === storedValue)?.role.trim();
+    if (exactRole) return [exactRole];
+
+    const legacyRoleAndName = people.find((person) => {
+      const role = person.role.trim();
+      const name = person.name.trim();
+      return Boolean(role && name && `${role} (${name})` === storedValue);
+    })?.role.trim();
+    if (legacyRoleAndName) return [legacyRoleAndName];
+
+    const knownActorName = people.find((person) => {
+      const name = person.name.trim();
+      return Boolean(name && (storedValue === name || storedValue.includes(name)));
+    });
+    if (knownActorName) {
+      const role = knownActorName.role.trim();
+      return role ? [role] : [];
+    }
+
+    const withoutLegacyActorName = storedValue.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    return withoutLegacyActorName ? [withoutLegacyActorName] : [];
+  });
+  return formatSceneCastValues(normalizedRoles);
+}
+
+function resolveCastSelectionIds(
+  options: Array<{ id: string; role: string }>,
+  selectedRoles: string[],
+  selectedIds: string[] | null
+) {
+  const optionIds = new Set(options.map((option) => option.id));
+  if (selectedIds !== null) {
+    const storedIds = Array.from(new Set(selectedIds.filter((id) => optionIds.has(id))));
+    if (storedIds.length > 0 || selectedRoles.length === 0) return storedIds;
+  }
+
+  const unusedOptions = [...options];
+  return selectedRoles.flatMap((role) => {
+    const optionIndex = unusedOptions.findIndex((option) => option.role === role);
+    if (optionIndex < 0) return [];
+    return [unusedOptions.splice(optionIndex, 1)[0].id];
+  });
 }
 
 function replaceSceneCastValue(value: string, previousValue: string, nextValue: string) {
@@ -3914,6 +4048,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     sourceSnapshot,
     sceneContentOverride: null,
     charactersOverride: null,
+    characterIdsOverride: null,
     totalCutsOverride: null,
     sceneNumber: source.sceneNo,
     sceneTitle: "",
@@ -3968,6 +4103,7 @@ function serializeTimetableScenes(
       }
       if (scene.charactersOverride !== null) {
         metadata.charactersOverride = scene.charactersOverride;
+        metadata.characterIdsOverride = scene.characterIdsOverride ?? [];
       }
       if (scene.totalCutsOverride !== null) {
         metadata.totalCutsOverride = scene.totalCutsOverride;
@@ -4005,6 +4141,9 @@ function restoreTimetableScenes(
         : null,
       charactersOverride: Object.prototype.hasOwnProperty.call(entry, "charactersOverride")
         ? entry.charactersOverride ?? ""
+        : null,
+      characterIdsOverride: Object.prototype.hasOwnProperty.call(entry, "characterIdsOverride")
+        ? entry.characterIdsOverride ?? []
         : null,
       totalCutsOverride: Object.prototype.hasOwnProperty.call(entry, "totalCutsOverride")
         ? entry.totalCutsOverride ?? 0
@@ -4056,6 +4195,7 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
         sourceSnapshot: null,
         sceneContentOverride: null,
         charactersOverride: null,
+        characterIdsOverride: null,
         totalCutsOverride: null,
         sceneNumber: shot.sceneNumber || String(scenes.length + 1),
         sceneTitle: shot.sceneTitle ?? "",
@@ -4134,6 +4274,7 @@ function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlo
     sourceSnapshot: null,
     sceneContentOverride: null,
     charactersOverride: null,
+    characterIdsOverride: null,
     totalCutsOverride: null,
     sceneNumber: String(order),
     sceneTitle: "",
@@ -4612,14 +4753,16 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
       startTime: formatTimeDisplay(meal.startTime),
       endTime: formatTimeDisplay(meal.endTime)
     }));
-  let totalCutCount = 0;
-
   const previewScenes = scenes
     .map((scene, sceneIndex) => {
       const sceneNumber = scene.sceneNumber.trim() || String(sceneIndex + 1);
       const startTime = formatTimeDisplay(scene.startTime);
       const endTime = formatTimeDisplay(scene.endTime);
-      const normalizedTotalCuts = normalizeSceneCutCount(scene.cutCount);
+      const normalizedTotalCuts = resolveEffectiveSceneCutCount({
+        totalCutsOverride: scene.totalCutsOverride,
+        sceneListCut: scene.sourceSnapshot?.totalCuts,
+        fallbackCut: scene.cutCount
+      });
       const effectiveTotalCuts = normalizedTotalCuts ?? 0;
       const cuts = scene.cuts.slice(0, effectiveTotalCuts).map((cut, cutIndex) => {
         const cutNumber = cut.cutNumber.trim() || String(cutIndex + 1);
@@ -4631,8 +4774,6 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
           memo: cut.memo
         };
       });
-      totalCutCount += effectiveTotalCuts;
-
       return {
         id: scene.id,
         sceneNumber,
@@ -4657,6 +4798,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
       };
     })
     .filter((scene) => scene.sceneNumber || scene.locationName || scene.cuts.length > 0);
+  const totalCutCount = sumSceneCutCounts(previewScenes.map((scene) => scene.totalCuts));
 
   return {
     plan: {
