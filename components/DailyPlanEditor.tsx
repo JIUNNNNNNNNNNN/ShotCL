@@ -402,6 +402,22 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }));
   }
 
+  function updateTotalCrew(value: string) {
+    setPrintMeta((current) => {
+      const normalized = sanitizeNumericInput(value, 4);
+      const automaticMeta = deriveDailyPlanHeadcount({
+        ...current,
+        totalCrewOverride: null
+      });
+      return {
+        ...current,
+        autoTotalCrew: automaticMeta.autoTotalCrew,
+        totalCrewOverride: normalized === "" ? null : normalized,
+        totalCrew: normalized === "" ? automaticMeta.totalCrew : normalized
+      };
+    });
+  }
+
   function addLocation() {
     setLocations((current) => [...current, createBlankLocation()]);
   }
@@ -497,7 +513,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function addMealTime() {
-    setMealTimes((current) => [...current, createBlankOtherSchedule()]);
+    const nextEvent = createBlankOtherSchedule();
+    automaticStartRowIdsRef.current.add(`event:${nextEvent.id}`);
+    setMealTimes((current) => [...current, nextEvent]);
     setPrintMeta((current) => ({
       ...current,
       timetableRowOrder: current.timetableRowOrder.length > 0
@@ -1018,7 +1036,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   onChange={updateEpisode}
                 />
                 <MobileInfoField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
-                <MobileInfoReadOnly label="총 인원" value={`${effectivePrintMeta.totalCrew}명`} />
+                <MobileTotalCrewField
+                  value={effectivePrintMeta.totalCrew}
+                  overrideValue={effectivePrintMeta.totalCrewOverride}
+                  onChange={updateTotalCrew}
+                />
               </div>
               <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 overflow-hidden">
                 <MobileInfoField
@@ -1051,7 +1073,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   onChange={(value) => updatePlanField("shootingDate", value)}
                 />
                 <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
-                <CompactReadOnlyField label="총 인원" value={`${effectivePrintMeta.totalCrew}명`} />
+                <CompactTotalCrewField
+                  value={effectivePrintMeta.totalCrew}
+                  overrideValue={effectivePrintMeta.totalCrewOverride}
+                  onChange={updateTotalCrew}
+                />
               </div>
             </div>
             {showDailyPlanMainStaffInputs ? <div className="hidden items-stretch gap-3 md:grid lg:grid-cols-3">
@@ -1737,14 +1763,25 @@ function EpisodeField({
   );
 }
 
-function CompactReadOnlyField({ label, value }: { label: string; value: string }) {
+function CompactTotalCrewField({
+  value,
+  overrideValue,
+  onChange
+}: {
+  value: string;
+  overrideValue?: string | null;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-xs font-black text-field-primary">{label}</span>
-      <div className={`${compactInputClass} flex items-center justify-center bg-field-soft`} aria-label={`${label} ${value}`}>
-        {value}
-      </div>
-    </div>
+    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+      <span className="text-xs font-black text-field-primary">총 인원</span>
+      <TotalCrewInput
+        value={value}
+        overrideValue={overrideValue}
+        onChange={onChange}
+        className={compactInputClass}
+      />
+    </label>
   );
 }
 
@@ -1787,13 +1824,72 @@ function MobileInfoField({
   );
 }
 
-function MobileInfoReadOnly({ label, value }: { label: string; value: string }) {
+function MobileTotalCrewField({
+  value,
+  overrideValue,
+  onChange
+}: {
+  value: string;
+  overrideValue?: string | null;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
-      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
-      <div className={`${compactInputClass} flex h-auto min-h-[34px] items-center justify-center bg-white px-1 py-1.5 text-[11px] leading-[1.35]`} aria-label={`${label} ${value}`}>
-        {value}
-      </div>
+    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">총 인원</span>
+      <TotalCrewInput
+        value={value}
+        overrideValue={overrideValue}
+        onChange={onChange}
+        className={`${compactInputClass} h-auto min-h-[34px] max-w-full px-1 py-1.5 pr-4 text-[11px] leading-[1.35]`}
+      />
+    </label>
+  );
+}
+
+function TotalCrewInput({
+  value,
+  overrideValue,
+  onChange,
+  className
+}: {
+  value: string;
+  overrideValue?: string | null;
+  onChange: (value: string) => void;
+  className: string;
+}) {
+  const normalizedOverride = sanitizeNumericInput(String(overrideValue ?? ""), 4);
+  const [draft, setDraft] = useState(normalizedOverride || value);
+  const [isFocused, setIsFocused] = useState(false);
+  const isAutomatic = normalizedOverride === "";
+
+  useEffect(() => {
+    if (!isFocused) setDraft(normalizedOverride || value);
+  }, [isFocused, normalizedOverride, value]);
+
+  return (
+    <div className="relative min-w-0">
+      <input
+        type="text"
+        className={`${className} pr-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        value={isFocused ? draft : value}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={4}
+        aria-label={`총 인원 ${value}명`}
+        title={isAutomatic ? "부서와 배우 기준 자동 계산 · 값을 입력하면 이 일촬표의 수동 총인원으로 사용합니다." : "이 일촬표의 수동 총인원 · 값을 비우면 자동 계산으로 돌아갑니다."}
+        onFocus={(event) => {
+          setDraft(normalizedOverride || value);
+          setIsFocused(true);
+          event.currentTarget.select();
+        }}
+        onChange={(event) => {
+          const nextValue = sanitizeNumericInput(event.currentTarget.value, 4);
+          setDraft(nextValue);
+          onChange(nextValue);
+        }}
+        onBlur={() => setIsFocused(false)}
+      />
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-field-muted">명</span>
     </div>
   );
 }
@@ -3891,12 +3987,21 @@ function applyTimeFieldEdit<T extends { startTime: string; endTime: string; runt
 
 function parseRuntimeMinutes(value: string) {
   const normalized = String(value ?? "").toUpperCase().replace(/\s+/g, "");
-  const match = normalized.match(/^(?:(\d+)H)?(?:(\d+)M)?$/);
+  const numericMinutes = normalized.match(/^(\d+)(?:분)?$/);
+  if (numericMinutes) {
+    const minutes = Number(numericMinutes[1]);
+    return Number.isFinite(minutes) && minutes > 0 && minutes <= maxRuntimeMinutes
+      ? minutes
+      : null;
+  }
+
+  const match = normalized.match(/^(?:(\d+)(?:H|시간))?(?:(\d+)(?:M|분))?$/);
   if (!match || (!match[1] && !match[2])) return null;
   const hours = Number(match[1] || 0);
   const minutes = Number(match[2] || 0);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  return hours * 60 + minutes;
+  const totalMinutes = hours * 60 + minutes;
+  return totalMinutes > 0 && totalMinutes <= maxRuntimeMinutes ? totalMinutes : null;
 }
 
 function shiftTime(value: string, offsetMinutes: number) {

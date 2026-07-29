@@ -40,7 +40,12 @@ export type DailyPlanPrintMeta = {
   directorContact: string;
   assistantDirectorContact: string;
   producerContact: string;
+  /** 화면·미리보기·PDF에 사용하는 최종 총인원입니다. */
   totalCrew: string;
+  /** 부서별 유효 인원과 현재 일촬표 배우로 계산한 자동 총인원입니다. */
+  autoTotalCrew?: string;
+  /** null이면 자동값, "0"을 포함한 문자열 값이면 해당 일촬표의 수동 총인원입니다. */
+  totalCrewOverride?: string | null;
   weatherRegion: string;
   weatherProvince: string;
   weatherDistrict: string;
@@ -67,6 +72,8 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     assistantDirectorContact: "",
     producerContact: "",
     totalCrew: "",
+    autoTotalCrew: "",
+    totalCrewOverride: null,
     weatherRegion: "",
     weatherProvince: "",
     weatherDistrict: "",
@@ -113,11 +120,20 @@ export function decodeDailyPlanMemo(value: string): DailyPlanPrintMeta {
 
   try {
     const parsed = JSON.parse(jsonText) as Partial<DailyPlanPrintMeta>;
-    return normalizeDailyPlanPrintMeta({
+    const source = {
       ...fallback,
       ...parsed,
       memoText
-    });
+    };
+    // 과거 metadata에는 override 필드가 없으므로, fallback의 null이
+    // "명시적인 자동 모드"로 오인되지 않게 원래 필드 존재 여부를 보존합니다.
+    if (!Object.prototype.hasOwnProperty.call(parsed, "totalCrewOverride")) {
+      delete source.totalCrewOverride;
+    }
+    if (!Object.prototype.hasOwnProperty.call(parsed, "autoTotalCrew")) {
+      delete source.autoTotalCrew;
+    }
+    return normalizeDailyPlanPrintMeta(source);
   } catch {
     return { ...fallback, memoText: raw };
   }
@@ -130,12 +146,15 @@ export function encodeDailyPlanMemo(meta: DailyPlanPrintMeta) {
 
 export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlanPrintMeta {
   const weatherRegion = normalizeWeatherRegion(meta);
+  const totalCrew = normalizeTotalCrew(meta);
   return {
     day: meta.day ?? "",
     directorContact: formatKoreanPhoneNumber(meta.directorContact ?? ""),
     assistantDirectorContact: formatKoreanPhoneNumber(meta.assistantDirectorContact ?? ""),
     producerContact: formatKoreanPhoneNumber(meta.producerContact ?? ""),
-    totalCrew: meta.totalCrew ?? "",
+    totalCrew: totalCrew.effective,
+    autoTotalCrew: totalCrew.automatic,
+    totalCrewOverride: totalCrew.override,
     weatherRegion: weatherRegion.label,
     weatherProvince: weatherRegion.canonicalRegion,
     weatherDistrict: weatherRegion.district,
@@ -150,6 +169,29 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     mainStaff: normalizeMainStaff(meta.mainStaff),
     starring: normalizePeople(meta.starring),
     teams: normalizeTeams(meta.teams)
+  };
+}
+
+function normalizeTotalCrew(meta: DailyPlanPrintMeta) {
+  const legacyTotal = normalizeDailyPlanCount(meta.totalCrew);
+  const storedAutomatic = normalizeDailyPlanCount(meta.autoTotalCrew);
+  const hasExplicitOverride = Object.prototype.hasOwnProperty.call(meta, "totalCrewOverride");
+  const hasModernDepartmentCounts = Array.isArray(meta.teams) && meta.teams.some(
+    (row) => Object.prototype.hasOwnProperty.call(row, "totalOverride")
+  );
+  const override = hasExplicitOverride
+    ? normalizeDailyPlanCount(meta.totalCrewOverride)
+    : hasModernDepartmentCounts
+      ? null
+      : legacyTotal;
+  const automatic = storedAutomatic
+    ?? (hasModernDepartmentCounts || hasExplicitOverride ? legacyTotal : null)
+    ?? "";
+
+  return {
+    automatic,
+    override,
+    effective: override ?? automatic
   };
 }
 

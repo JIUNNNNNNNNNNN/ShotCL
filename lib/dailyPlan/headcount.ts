@@ -11,6 +11,12 @@ export type TeamHeadcount = {
   effectiveCount: number;
 };
 
+export type DailyPlanTotalHeadcount = {
+  calculatedCount: number;
+  overrideCount: number | null;
+  effectiveCount: number;
+};
+
 /**
  * 기존 total-only 데이터는 저장된 일촬표 수동값으로 취급합니다.
  * 신규 데이터는 totalOverride가 null이면 스탭리스트 자동값을 사용합니다.
@@ -70,6 +76,24 @@ export function getDailyPlanActorCount(rows: CallSheetPerson[]) {
   return count;
 }
 
+export function resolveDailyPlanTotalHeadcount(
+  meta: DailyPlanPrintMeta,
+  teams: TeamCallSheetRow[] = meta.teams
+): DailyPlanTotalHeadcount {
+  const calculatedCount = getDailyPlanStaffCount(teams) + getDailyPlanActorCount(meta.starring);
+  const hasExplicitOverride = Object.prototype.hasOwnProperty.call(meta, "totalCrewOverride");
+  const normalizedOverride = hasExplicitOverride
+    ? normalizeDailyPlanCount(meta.totalCrewOverride)
+    : normalizeDailyPlanCount(meta.totalCrew);
+  const overrideCount = normalizedOverride === null ? null : Number(normalizedOverride);
+
+  return {
+    calculatedCount,
+    overrideCount,
+    effectiveCount: overrideCount ?? calculatedCount
+  };
+}
+
 /**
  * 미리보기, PDF, 저장에 같은 값을 전달할 수 있도록 부서별 유효 인원과
  * 현재 일촬표 배우 인원을 한 번에 반영합니다.
@@ -84,12 +108,16 @@ export function deriveDailyPlanHeadcount(meta: DailyPlanPrintMeta): DailyPlanPri
       total: String(effectiveCount)
     };
   });
-  const totalCrew = getDailyPlanStaffCount(teams) + getDailyPlanActorCount(meta.starring);
+  const totalHeadcount = resolveDailyPlanTotalHeadcount(meta, teams);
 
   return {
     ...meta,
     teams,
-    totalCrew: String(totalCrew)
+    autoTotalCrew: String(totalHeadcount.calculatedCount),
+    totalCrewOverride: totalHeadcount.overrideCount === null
+      ? null
+      : String(totalHeadcount.overrideCount),
+    totalCrew: String(totalHeadcount.effectiveCount)
   };
 }
 
