@@ -284,7 +284,7 @@ export function ShotReorderList({
               }}
               aria-grabbed={isDragging}
               className={cn(
-                "relative select-none rounded-[1.5rem] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
+                "relative select-none rounded-[3px] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
                 !disabled && "cursor-grab",
                 isDragging && "z-50 cursor-grabbing opacity-95",
                 isDropTarget

@@ -1,12 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
+import { DailyProgressSummary } from "@/components/DailyProgressSummary";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import { ShotCard } from "@/components/ShotCard";
@@ -23,6 +24,7 @@ import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
+import { calculateDailyProgress, isProcessedCutStatus } from "@/lib/progress/dailyProgress";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
@@ -118,9 +120,11 @@ export default function ProjectDetailPage() {
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
   const isProgressView = searchParams.get("view") === "progress" || Boolean(dailyPlanId);
+  const progressEntryKey = `${projectId ?? "missing-project"}:${dailyPlanId || "episode-selection"}`;
   const [project, setProject] = useState<Project | null>(null);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
+  const [collapsedCutIds, setCollapsedCutIds] = useState<Set<string>>(() => new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
@@ -132,9 +136,22 @@ export default function ProjectDetailPage() {
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
   const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
+  const collapsedCutIdsRef = useRef(collapsedCutIds);
+  const initializedCollapseEntryRef = useRef("");
+  const activeProgressEntryKeyRef = useRef(progressEntryKey);
+  activeProgressEntryKeyRef.current = progressEntryKey;
+
+  const updateCollapsedCutIds = useCallback((update: (current: Set<string>) => Set<string>) => {
+    setCollapsedCutIds((current) => {
+      const next = update(current);
+      collapsedCutIdsRef.current = next;
+      return next;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
+    const requestedEntryKey = progressEntryKey;
 
     try {
       const [projectData, planData, selectedShots] = await Promise.all([
@@ -156,6 +173,7 @@ export default function ProjectDetailPage() {
             )
           : Promise.resolve([])
       ]);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setProject(projectData);
       if (!projectData) {
         setDailyPlans([]);
@@ -192,13 +210,31 @@ export default function ProjectDetailPage() {
       }
       setDailyPlans(planData);
       setShots(shotsWithDiagrams);
+      if (initializedCollapseEntryRef.current !== requestedEntryKey) {
+        const initiallyCollapsedIds = new Set(
+          shotsWithDiagrams
+            .filter((shot) => isProcessedCutStatus(shot.status))
+            .map((shot) => shot.id)
+        );
+        initializedCollapseEntryRef.current = requestedEntryKey;
+        collapsedCutIdsRef.current = initiallyCollapsedIds;
+        setCollapsedCutIds(initiallyCollapsedIds);
+      }
       setErrorMessage("");
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
     } finally {
-      setIsLoading(false);
+      if (activeProgressEntryKeyRef.current === requestedEntryKey) setIsLoading(false);
     }
-  }, [dailyPlanId, projectId]);
+  }, [dailyPlanId, progressEntryKey, projectId]);
+
+  useEffect(() => {
+    initializedCollapseEntryRef.current = "";
+    const emptySet = new Set<string>();
+    collapsedCutIdsRef.current = emptySet;
+    setCollapsedCutIds(emptySet);
+  }, [progressEntryKey]);
 
   useEffect(() => {
     refresh();
@@ -225,6 +261,7 @@ export default function ProjectDetailPage() {
 
   const nextOrderIndex = shots.length + 1;
   const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
+  const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
   const scheduleRowsByIndex = useMemo(
     () => selectedPlan ? placeScheduleRows(shots, selectedPlan.mealTimes, decodeDailyPlanMemo(selectedPlan.memo).timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
     [selectedPlan, shots]
@@ -235,21 +272,39 @@ export default function ProjectDetailPage() {
   }, []);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
+    const wasProcessed = isProcessedCutStatus(targetShot.status);
+    const willBeProcessed = isProcessedCutStatus(status);
+    const wasCollapsed = collapsedCutIdsRef.current.has(targetShot.id);
     setErrorMessage("");
+    if (wasProcessed && !willBeProcessed) {
+      updateCollapsedCutIds((current) => withCollapsedCut(current, targetShot.id, false));
+    }
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
 
     try {
       const savedShot = await updateShotStatus(targetShot, status);
+      const savedIsProcessed = isProcessedCutStatus(savedShot.status);
       setShots((current) => current.map((shot) => (
         shot.id === savedShot.id
           ? preserveShotMedia(savedShot, shot)
           : shot
       )));
+      if (!wasProcessed && savedIsProcessed) {
+        updateCollapsedCutIds((current) => withCollapsedCut(current, savedShot.id, true));
+      } else if (!savedIsProcessed) {
+        updateCollapsedCutIds((current) => withCollapsedCut(current, savedShot.id, false));
+      }
     } catch (error) {
       setShots((current) => current.map((shot) => (shot.id === targetShot.id ? targetShot : shot)));
+      updateCollapsedCutIds((current) => withCollapsedCut(current, targetShot.id, wasCollapsed));
       setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
     }
-  }, []);
+  }, [updateCollapsedCutIds]);
+
+  const handleToggleShotCollapsed = useCallback((shot: Shot) => {
+    if (!isProcessedCutStatus(shot.status)) return;
+    updateCollapsedCutIds((current) => withCollapsedCut(current, shot.id, !current.has(shot.id)));
+  }, [updateCollapsedCutIds]);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -372,9 +427,11 @@ export default function ProjectDetailPage() {
       onOpenMedia={handleOpenMedia}
       onImagePreview={handleImagePreview}
       onStatusChange={handleStatusChange}
+      collapsed={collapsedCutIds.has(shot.id)}
+      onToggleCollapsed={handleToggleShotCollapsed}
       progressOnly={progressOnly}
     />
-  ), [handleImagePreview, handleOpenMedia, handleStatusChange, progressOnly]);
+  ), [collapsedCutIds, handleImagePreview, handleOpenMedia, handleStatusChange, handleToggleShotCollapsed, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -487,6 +544,8 @@ export default function ProjectDetailPage() {
       <Link href={`/projects/${project.id}`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
         <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
       </Link>
+
+      <DailyProgressSummary progress={dailyProgress} />
 
       {errorMessage ? (
         <div className="mb-3 rounded-[1.25rem] border border-field-danger bg-white p-3 text-sm font-bold text-field-danger">
@@ -603,6 +662,14 @@ export default function ProjectDetailPage() {
       ) : null}
     </>
   );
+}
+
+function withCollapsedCut(current: Set<string>, shotId: string, shouldCollapse: boolean) {
+  if (current.has(shotId) === shouldCollapse) return current;
+  const next = new Set(current);
+  if (shouldCollapse) next.add(shotId);
+  else next.delete(shotId);
+  return next;
 }
 
 function preserveShotMedia(next: Shot, previous: Shot | undefined): Shot {

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Images, Map } from "lucide-react";
+import { ChevronDown, ChevronUp, Images, Map } from "lucide-react";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { type Shot, type ShotMediaType, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
@@ -13,6 +13,8 @@ type ShotCardProps = {
   onOpenMedia: (shot: Shot, type: ShotMediaType) => void;
   onImagePreview: (url: string, title: string) => void;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: (shot: Shot) => void;
   progressOnly?: boolean;
   isOverheadLoading?: boolean;
 };
@@ -24,14 +26,17 @@ export const ShotCard = memo(function ShotCard({
   onOpenMedia,
   onImagePreview,
   onStatusChange,
+  collapsed = false,
+  onToggleCollapsed,
   progressOnly = false,
   isOverheadLoading = false
 }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
+  const isProcessed = isOk || isOmit;
   const hasOverheadDiagram = hasShotOverheadContent(shot.overheadDiagram);
   const hasOverhead = Boolean(shot.overheadImageUrl || hasOverheadDiagram);
-  const statusLabel = isOk ? "OK" : isOmit ? "omit" : "대기";
+  const statusLabel = isOk ? "OK" : isOmit ? "OMIT" : "대기";
   const hasMedia = Boolean(shot.storyboardImageUrl || hasOverhead);
   const displayText = getShotDisplayText(shot);
 
@@ -54,6 +59,40 @@ export const ShotCard = memo(function ShotCard({
     if (shot.storyboardImageUrl) {
       onImagePreview(shot.storyboardImageUrl, shot.title);
     }
+  }
+
+  if (collapsed && isProcessed) {
+    return (
+      <article
+        className={cn(
+          "min-w-0 overflow-hidden rounded-[3px] border border-l-[3px] bg-white transition-[background-color,border-color]",
+          isOk ? "border-[#7f9e8e] border-l-field-primary" : "border-[#d7aaa4] border-l-field-danger"
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => onToggleCollapsed?.(shot)}
+          aria-expanded={false}
+          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d7b95f]"
+        >
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <strong className="truncate text-sm font-black text-field-primary">
+              S#{shot.sceneNumber || "-"} · CUT {shot.cutNumber || "-"}
+            </strong>
+            <span className={cn(
+              "text-[11px] font-black",
+              isOk ? "text-field-primary" : "text-field-danger"
+            )}>
+              {statusLabel}
+            </span>
+            {shot.orderIndex > 0 ? (
+              <span className="text-[10px] font-bold text-field-muted">순서 {shot.orderIndex}</span>
+            ) : null}
+          </span>
+          <ChevronDown className="h-5 w-5 shrink-0 text-field-muted" aria-hidden />
+        </button>
+      </article>
+    );
   }
 
   return (
@@ -131,6 +170,22 @@ export const ShotCard = memo(function ShotCard({
             <span className="font-display">{statusLabel}</span>
           </p>
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {isProcessed && onToggleCollapsed ? (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleCollapsed(shot);
+                }}
+                data-no-drag="true"
+                className="inline-flex min-h-7 min-w-7 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted transition-colors hover:border-field-secondary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                aria-label={`${statusLabel} 컷 접기`}
+                aria-expanded={true}
+                title="완료 컷 접기"
+              >
+                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={(event) => {
@@ -204,7 +259,7 @@ export const ShotCard = memo(function ShotCard({
               isOmit ? "border-field-danger bg-field-danger text-white" : "border-field-border bg-white text-field-danger"
             )}
           >
-            <span className="font-display">omit</span>
+            <span className="font-display">OMIT</span>
           </button>
         </div>
     </article>
