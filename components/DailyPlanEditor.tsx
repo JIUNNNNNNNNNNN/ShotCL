@@ -20,6 +20,7 @@ import {
   createBlankCallSheetPerson,
   decodeDailyPlanMemo,
   encodeDailyPlanMemo,
+  formatDailyPlanWeatherSummary,
   mergeDailyPlanTimetableRows,
   normalizeDailyPlanPrintMeta,
   type CallSheetPerson,
@@ -27,9 +28,17 @@ import {
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
+import {
+  deriveDailyPlanHeadcount,
+  resolveTeamHeadcount
+} from "@/lib/dailyPlan/headcount";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
-import { koreanWeatherProvinces, koreanWeatherRegions } from "@/lib/koreanWeatherRegions";
+import {
+  getKoreanWeatherRegionQuery,
+  koreanWeatherRegions,
+  resolveKoreanWeatherRegion
+} from "@/lib/koreanWeatherRegions";
 import { MAX_DAILY_PLAN_MAIN_STAFF } from "@/lib/projectBasicInfo";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
@@ -267,12 +276,24 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
   const printFrameRef = useRef<number | null>(null);
+  const automaticStartRowIdsRef = useRef<Set<string>>(new Set());
 
   const flattenedShots = useMemo(() => scenesToShotDrafts(scenes), [scenes]);
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
+  const timetableRows = useMemo(
+    () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
+    [mealTimes, printMeta.timetableRowOrder, scenes]
+  );
+  const effectivePrintMeta = useMemo(
+    () => deriveDailyPlanHeadcount({
+      ...printMeta,
+      timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
+    }),
+    [printMeta, timetableRows]
+  );
   const previewSource = useMemo(
-    () => ({ plan, locations, mealTimes, scenes, printMeta }),
-    [locations, mealTimes, plan, printMeta, scenes]
+    () => ({ plan, locations, mealTimes, scenes, printMeta: effectivePrintMeta }),
+    [effectivePrintMeta, locations, mealTimes, plan, scenes]
   );
   const deferredPreviewSource = useDeferredValue(previewSource);
   const currentEditorFingerprint = useMemo(
@@ -289,12 +310,29 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     );
     return buildDailyPlanPreviewData(printablePlan, deferredPreviewSource.scenes, deferredPreviewSource.printMeta);
   }, [deferredPreviewSource]);
-  const timetableRows = useMemo(
-    () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
-    [mealTimes, printMeta.timetableRowOrder, scenes]
-  );
+  useEffect(() => {
+    const updates = getAutomaticTimetableStartUpdates(timetableRows, automaticStartRowIdsRef.current);
+    if (updates.size === 0) return;
+
+    setScenes((current) => current.map((scene) => {
+      const startTime = updates.get(`scene:${scene.id}`);
+      return startTime === undefined || startTime === scene.startTime
+        ? scene
+        : startTime
+          ? applyTimeFieldEdit(scene, "startTime", startTime)
+          : { ...scene, startTime: "", endTime: "" };
+    }));
+    setMealTimes((current) => current.map((event) => {
+      const startTime = updates.get(`event:${event.id}`);
+      return startTime === undefined || startTime === event.startTime
+        ? event
+        : startTime
+          ? applyTimeFieldEdit(event, "startTime", startTime)
+          : { ...event, startTime: "", endTime: "" };
+    }));
+  }, [timetableRows]);
   const canPrint = previewData.scenes.length > 0 && previewData.totalCutCount > 0;
-  const weatherLookupSource = (printMeta.weatherRegion ?? "").trim();
+  const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
   const episodeOptions = activeProjectBasicInfo
     ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
     : [];
@@ -350,11 +388,36 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }));
   }
 
+  function updateTeamCount(index: number, value: string) {
+    setPrintMeta((current) => ({
+      ...current,
+      teams: current.teams.map((team, teamIndex) => {
+        if (teamIndex !== index) return team;
+        const normalized = sanitizeNumericInput(value, 4);
+        const autoTotal = String(resolveTeamHeadcount(team).autoCount);
+        return normalized
+          ? { ...team, total: normalized, autoTotal, totalOverride: normalized }
+          : { ...team, total: autoTotal, autoTotal, totalOverride: null };
+      })
+    }));
+  }
+
   function addLocation() {
     setLocations((current) => [...current, createBlankLocation()]);
   }
 
   function updateLocation(index: number, patch: Partial<DailyPlanLocation>) {
+    const addressRegion = resolveKoreanWeatherRegion(patch.roadAddress || patch.address);
+    if (addressRegion) {
+      setPrintMeta((current) => (current.weatherRegion.trim()
+        ? current
+        : {
+            ...current,
+            weatherRegion: addressRegion.label,
+            weatherProvince: addressRegion.canonicalRegion,
+            weatherDistrict: ""
+          }));
+    }
     setLocations((current) => {
       const next = current.map((location, locationIndex) => (locationIndex === index ? { ...location, ...patch } : location));
       const changed = next[index];
@@ -458,6 +521,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function updateMealTimeField(index: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
+    if (field === "startTime") {
+      setStartTimeSource(
+        automaticStartRowIdsRef.current,
+        mealTimes[index] ? `event:${mealTimes[index].id}` : "",
+        value
+      );
+    }
     setMealTimes((current) =>
       current.map((meal, mealIndex) => (mealIndex === index ? applyTimeFieldEdit(meal, field, value) : meal))
     );
@@ -554,6 +624,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function updateSceneTimeField(sceneIndex: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
+    if (field === "startTime") {
+      setStartTimeSource(
+        automaticStartRowIdsRef.current,
+        scenes[sceneIndex] ? `scene:${scenes[sceneIndex].id}` : "",
+        value
+      );
+    }
     setScenes((current) => current.map((scene, index) => (index === sceneIndex ? applyTimeFieldEdit(scene, field, value) : scene)));
   }
 
@@ -718,7 +795,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     try {
       const searchParams = new URLSearchParams({
         date: plan.shootingDate,
-        region: (printMeta.weatherRegion ?? "").trim()
+        region: weatherLookupSource
       });
       const response = await fetch(`/api/weather/open-meteo?${searchParams.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as OpenMeteoResponse;
@@ -771,7 +848,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setMessage("");
 
     try {
-      const planForSave = buildPlanForSave(plan, locations, mealTimes, printMeta);
+      const persistedTimetableRows = getPersistedEditorTimetableRows(timetableRows);
+      const printMetaForSave = deriveDailyPlanHeadcount({
+        ...printMeta,
+        timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
+      });
+      const planForSave = buildPlanForSave(
+        plan,
+        locations,
+        mealTimes,
+        printMetaForSave
+      );
+      const automaticRowPositions = captureAutomaticTimetableRowPositions(
+        persistedTimetableRows,
+        automaticStartRowIdsRef.current
+      );
       const saved = await saveDailyPlanWithShots({
         projectId: project.id,
         dailyPlanId,
@@ -789,6 +880,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const nextLocations = buildInitialLocations(savedDraft);
       const nextMeals = buildInitialMeals(savedDraft);
       const nextScenes = shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations);
+      automaticStartRowIdsRef.current = restoreAutomaticTimetableRowIds(
+        getPersistedEditorTimetableRows(
+          buildEditorTimetableRows(nextScenes, nextMeals, savedMeta.timetableRowOrder)
+        ),
+        automaticRowPositions
+      );
       setDailyPlanId(saved.plan.id);
       setPlan({ ...savedDraft, memo: savedMeta.memoText });
       setPrintMeta(savedMeta);
@@ -840,8 +937,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function getCurrentPreviewData() {
-    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, printMeta);
-    return buildDailyPlanPreviewData(currentPrintablePlan, scenes, printMeta);
+    const currentMeta = deriveDailyPlanHeadcount({
+      ...printMeta,
+      timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
+    });
+    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, currentMeta);
+    return buildDailyPlanPreviewData(currentPrintablePlan, scenes, currentMeta);
   }
 
   function handleOpenPrintPreview() {
@@ -917,7 +1018,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   onChange={updateEpisode}
                 />
                 <MobileInfoField label="작품명" value={plan.title} onChange={(value) => updatePlanField("title", value)} />
-                <MobileInfoField label="총 인원" value={printMeta.totalCrew} numeric onChange={(value) => updatePrintMetaField("totalCrew", value)} />
+                <MobileInfoReadOnly label="총 인원" value={`${effectivePrintMeta.totalCrew}명`} />
               </div>
               <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1.5 overflow-hidden">
                 <MobileInfoField
@@ -950,7 +1051,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   onChange={(value) => updatePlanField("shootingDate", value)}
                 />
                 <TimeWheelPicker label="현장 집합 시간" value={plan.callTime} onChange={(value) => updatePlanField("callTime", value)} compact inline />
-                <CompactNumericField label="총 인원" value={printMeta.totalCrew} onChange={(value) => updatePrintMetaField("totalCrew", value)} />
+                <CompactReadOnlyField label="총 인원" value={`${effectivePrintMeta.totalCrew}명`} />
               </div>
             </div>
             {showDailyPlanMainStaffInputs ? <div className="hidden items-stretch gap-3 md:grid lg:grid-cols-3">
@@ -993,10 +1094,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
               <WeatherRegionPicker
                 value={printMeta.weatherRegion ?? ""}
-                province={printMeta.weatherProvince ?? ""}
-                district={printMeta.weatherDistrict ?? ""}
-                onChange={({ value, province, district }) =>
-                  setPrintMeta((current) => ({ ...current, weatherRegion: value, weatherProvince: province, weatherDistrict: district }))
+                onChange={(region) =>
+                  setPrintMeta((current) => ({
+                    ...current,
+                    weatherRegion: region?.label ?? "",
+                    weatherProvince: region?.canonicalRegion ?? "",
+                    weatherDistrict: ""
+                  }))
                 }
               />
               <Button variant="secondary" onClick={handleLoadOpenMeteo} disabled={isWeatherLoading || !plan.shootingDate || !weatherLookupSource}>
@@ -1369,7 +1473,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 <p className="mt-1 text-center text-sm font-bold text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
               </div>
               <div className="mt-4 grid gap-2">
-                {printMeta.teams.length > 0 ? (
+                {effectivePrintMeta.teams.length > 0 ? (
                   <div className="hidden grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)] items-center gap-2 px-2 text-[11px] font-black text-field-primary md:grid">
                     <span>부서</span>
                     <span>인원</span>
@@ -1382,7 +1486,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     스탭리스트에 등록된 부서가 없습니다.
                   </p>
                 )}
-                {printMeta.teams.map((team, index) => (
+                {effectivePrintMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
                     className="grid grid-cols-2 items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)]"
@@ -1390,9 +1494,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <div className="flex min-h-[38px] items-center justify-center rounded-md bg-field-soft px-2 text-sm font-black text-field-primary">
                       {team.team || "미분류"}
                     </div>
-                    <div className="flex min-h-[38px] items-center justify-center rounded-md border border-field-border bg-white px-1 text-sm font-black text-field-text" aria-label={`${team.team || "미분류"} 인원 ${team.total || "0"}명`}>
-                      {team.total || "0"}명
-                    </div>
+                    <TeamCountInput
+                      value={team.total}
+                      isAutomatic={resolveTeamHeadcount(printMeta.teams[index] ?? team).overrideCount === null}
+                      ariaLabel={`${team.team || "미분류"} 인원`}
+                      onChange={(value) => updateTeamCount(index, value)}
+                    />
                     <div>
                       <span className={mobileTimetableLabelClass}>집합시간</span>
                       <TimeWheelPicker label={`${team.team || "미분류"} 집합시간`} value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
@@ -1630,21 +1737,14 @@ function EpisodeField({
   );
 }
 
-function CompactNumericField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function CompactReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
-    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
       <span className="text-xs font-black text-field-primary">{label}</span>
-      <DraftInput
-        className={compactInputClass}
-        value={sanitizeNumericInput(value, 4)}
-        onCommit={onChange}
-        sanitize={(nextValue) => sanitizeNumericInput(nextValue, 4)}
-        numericOnly
-        inputMode="numeric"
-        pattern="[0-9]*"
-        aria-label={label}
-      />
-    </label>
+      <div className={`${compactInputClass} flex items-center justify-center bg-field-soft`} aria-label={`${label} ${value}`}>
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -1684,6 +1784,59 @@ function MobileInfoField({
         title={value}
       />
     </label>
+  );
+}
+
+function MobileInfoReadOnly({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
+      <div className={`${compactInputClass} flex h-auto min-h-[34px] items-center justify-center bg-white px-1 py-1.5 text-[11px] leading-[1.35]`} aria-label={`${label} ${value}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function TeamCountInput({
+  value,
+  isAutomatic,
+  ariaLabel,
+  onChange
+}: {
+  value: string;
+  isAutomatic: boolean;
+  ariaLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) setDraft(value);
+  }, [isFocused, value]);
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        className={`${compactInputClass} pr-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        value={draft}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={4}
+        aria-label={ariaLabel}
+        title={isAutomatic ? "스탭리스트 자동 집계값 · 비우면 자동값 사용" : "이 일촬표의 수동 인원"}
+        onFocus={() => setIsFocused(true)}
+        onChange={(event) => {
+          const nextValue = sanitizeNumericInput(event.currentTarget.value, 4);
+          setDraft(nextValue);
+          onChange(nextValue);
+        }}
+        onBlur={() => setIsFocused(false)}
+      />
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-field-muted">명</span>
+    </div>
   );
 }
 
@@ -1815,103 +1968,31 @@ function EditableWeatherCard({
 
 function WeatherRegionPicker({
   value,
-  province,
-  district,
   onChange
 }: {
   value: string;
-  province: string;
-  district: string;
-  onChange: (next: { value: string; province: string; district: string }) => void;
+  onChange: (region: (typeof koreanWeatherRegions)[number] | null) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement | null>(null);
-  const districts = koreanWeatherRegions[province] ?? [];
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    function closeOnOutsideClick(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && !pickerRef.current?.contains(target)) {
-        const activeElement = document.activeElement;
-        if (activeElement instanceof HTMLElement && pickerRef.current?.contains(activeElement)) activeElement.blur();
-        setIsOpen(false);
-      }
-    }
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        const activeElement = document.activeElement;
-        if (activeElement instanceof HTMLElement && pickerRef.current?.contains(activeElement)) activeElement.blur();
-        setIsOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideClick);
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [isOpen]);
-
-  function selectProvince(nextProvince: string) {
-    const nextDistrict = koreanWeatherRegions[nextProvince]?.includes(district) ? district : "";
-    onChange({
-      province: nextProvince,
-      district: nextDistrict,
-      value: [nextProvince, nextDistrict].filter(Boolean).join(" ")
-    });
-  }
-
-  function selectDistrict(nextDistrict: string) {
-    onChange({
-      province,
-      district: nextDistrict,
-      value: [province, nextDistrict].filter(Boolean).join(" ")
-    });
-  }
+  const selected = resolveKoreanWeatherRegion(value);
 
   return (
-    <div ref={pickerRef} className="relative grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
+    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
       <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
-      <button
-        type="button"
-        className={`${compactInputClass} flex items-center justify-center`}
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
+      <select
+        className={compactInputClass}
+        value={selected?.label ?? ""}
+        onChange={(event) => {
+          const region = koreanWeatherRegions.find((item) => item.label === event.currentTarget.value) ?? null;
+          onChange(region);
+        }}
+        aria-label="날씨 기준 광역 지역"
       >
-        <span className={value ? "text-field-text" : "text-field-muted"}>{value || "\u00a0"}</span>
-      </button>
-      {isOpen ? (
-        <div className="absolute left-0 top-full z-50 mt-2 grid w-[min(24rem,calc(100vw-2rem))] gap-2 rounded-md border border-field-border bg-white p-3 shadow-xl sm:left-[7rem]">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[13px] font-black text-field-primary">도/광역시 · 시/군/구</span>
-            <button type="button" className="text-xs font-black text-field-muted" onClick={() => setIsOpen(false)}>닫기</button>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select className={compactInputClass} value={province} onChange={(event) => selectProvince(event.target.value)} aria-label="도 또는 광역시">
-              <option value="">도/광역시</option>
-              {koreanWeatherProvinces.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-            <select className={compactInputClass} value={district} onChange={(event) => selectDistrict(event.target.value)} disabled={!province} aria-label="시 군 구">
-              <option value="">시/군/구</option>
-              {districts.map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </div>
-          <label className="grid gap-1">
-            <span className="text-xs font-black text-field-muted">직접 입력</span>
-            <DraftInput
-              className={compactInputClass}
-              value={value}
-              onCommit={(nextValue) => onChange({ value: nextValue, province: "", district: "" })}
-              placeholder="예: 경기도 광주시"
-            />
-          </label>
-        </div>
-      ) : null}
-    </div>
+        <option value="">지역 선택</option>
+        {koreanWeatherRegions.map((region) => (
+          <option key={region.label} value={region.label}>{region.label}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -1965,11 +2046,16 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
   function applyDraft(nextDraft: string) {
     const sanitized = sanitizeNumericInput(nextDraft, 4);
     setDraftValue(sanitized);
+    if (!sanitized) {
+      if (value != null) onChange(null);
+      return;
+    }
     const nextValue = parseDurationMinutes(sanitized);
     if (nextValue != null && nextValue !== value) onChange(nextValue);
   }
 
   function finishEditing() {
+    if (!draftValue) return;
     const nextValue = parseDurationMinutes(draftValue);
     if (nextValue == null) setDraftValue(savedValue);
   }
@@ -2819,7 +2905,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
             <td className="border border-black">최고 기온</td>
             <td className="border border-black">{data.meta.maxTemperature || "-"}</td>
             <td className="border border-black">Weather</td>
-            <td colSpan={2} className="border border-black">{data.meta.weather || "-"}</td>
+            <td colSpan={2} className="border border-black">{formatDailyPlanWeatherSummary(data.meta) || "-"}</td>
           </tr>
           <tr>
             <td className="border border-black">최저 기온</td>
@@ -3271,24 +3357,16 @@ function planToDraft(plan: DailyPlan): DailyPlanDraft {
 }
 
 function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], mealTimes: DailyPlanMealTime[], meta: DailyPlanPrintMeta): DailyPlanDraft {
+  const derivedMeta = deriveDailyPlanHeadcount(meta);
   const nextLocations = locations
     .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
     .map(sanitizeManualLocation);
-  const nextMeals = mealTimes.filter((meal) => (
-    meal.startTime.trim()
-    || meal.endTime.trim()
-    || meal.runtimeMinutes
-    || meal.runtime?.trim()
-    || meal.locationId?.trim()
-    || meal.memo.trim()
-    || meal.progressMemo?.trim()
-    || meal.imageUrl
-  ));
+  const nextMeals = mealTimes.filter(isMeaningfulTimetableEvent);
 
   return {
     ...plan,
-    episode: meta.day.trim() || plan.episode,
-    memo: encodeDailyPlanMemo({ ...meta, memoText: meta.memoText ?? plan.memo }),
+    episode: derivedMeta.day.trim() || plan.episode,
+    memo: encodeDailyPlanMemo({ ...derivedMeta, memoText: derivedMeta.memoText ?? plan.memo }),
     shootingLocations: nextLocations,
     mealTimes: nextMeals,
     shootingLocation: nextLocations.map((location) => location.name.trim()).filter(Boolean).join(", "),
@@ -3512,6 +3590,123 @@ function buildEditorTimetableRows(
   return mergeDailyPlanTimetableRows(sceneRows, eventRows, order);
 }
 
+function getEditorTimetableRowKey(row: EditorTimetableRow) {
+  return `${row.type}:${row.item.id}`;
+}
+
+function setStartTimeSource(automaticRowIds: Set<string>, rowKey: string, value: string | number | null) {
+  if (!rowKey) return;
+  if (String(value ?? "").trim()) automaticRowIds.delete(rowKey);
+  else automaticRowIds.add(rowKey);
+}
+
+/**
+ * 화면에 보이는 TIME TABLE 순서를 따라 빈/자동 시작시간만 연결합니다.
+ * Set에 없는 기존 비어 있지 않은 값은 저장된 수동값으로 간주해 덮어쓰지 않습니다.
+ */
+function getAutomaticTimetableStartUpdates(
+  rows: EditorTimetableRow[],
+  automaticRowIds: Set<string>
+) {
+  const updates = new Map<string, string>();
+  let previousStartTime = "";
+  let previousRuntimeMinutes: number | null = null;
+
+  rows.forEach((row) => {
+    const rowKey = getEditorTimetableRowKey(row);
+    const currentStartTime = row.item.startTime.trim();
+    const isAutomatic = automaticRowIds.has(rowKey);
+    const canReceiveAutomaticTime = row.type === "scene" || isMeaningfulTimetableEvent(row.item);
+    let effectiveStartTime = currentStartTime;
+
+    if (isAutomatic || (!currentStartTime && canReceiveAutomaticTime)) {
+      const calculatedStartTime =
+        previousStartTime && previousRuntimeMinutes != null
+          ? shiftTime(previousStartTime, previousRuntimeMinutes)
+          : "";
+
+      if (calculatedStartTime) {
+        automaticRowIds.add(rowKey);
+        effectiveStartTime = calculatedStartTime;
+        if (calculatedStartTime !== currentStartTime) updates.set(rowKey, calculatedStartTime);
+      } else if (isAutomatic && currentStartTime) {
+        effectiveStartTime = "";
+        updates.set(rowKey, "");
+      }
+    }
+
+    previousStartTime = effectiveStartTime;
+    previousRuntimeMinutes = getRuntimeMinutes(
+      row.item.runtimeMinutes,
+      row.item.runtime,
+      effectiveStartTime,
+      row.item.endTime
+    );
+  });
+
+  return updates;
+}
+
+function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
+  return Boolean(
+    event.endTime.trim()
+    || event.runtimeMinutes != null
+    || event.runtime?.trim()
+    || event.locationId?.trim()
+    || event.memo.trim()
+    || event.progressMemo?.trim()
+    || event.imageUrl
+  );
+}
+
+function getPersistedEditorTimetableRows(rows: EditorTimetableRow[]) {
+  return rows.filter((row) => (
+    row.type === "event"
+      ? isMeaningfulTimetableEvent(row.item)
+      : isMeaningfulTimetableScene(row.item)
+        && row.item.sceneNumber.trim()
+        && parseCutCount(row.item.cutCount) > 0
+  ));
+}
+
+function getPersistedTimetableRowOrder(
+  rows: EditorTimetableRow[],
+  configuredOrder: DailyPlanPrintMeta["timetableRowOrder"]
+) {
+  if (configuredOrder.length === 0) return [];
+  return getPersistedEditorTimetableRows(rows).map((row) => row.type);
+}
+
+function captureAutomaticTimetableRowPositions(
+  rows: EditorTimetableRow[],
+  automaticRowIds: Set<string>
+) {
+  const positions = new Set<string>();
+  const typeIndexes: Record<EditorTimetableRow["type"], number> = { scene: 0, event: 0 };
+  rows.forEach((row) => {
+    const typeIndex = typeIndexes[row.type]++;
+    if (automaticRowIds.has(getEditorTimetableRowKey(row))) {
+      positions.add(`${row.type}:${typeIndex}`);
+    }
+  });
+  return positions;
+}
+
+function restoreAutomaticTimetableRowIds(
+  rows: EditorTimetableRow[],
+  positions: Set<string>
+) {
+  const automaticRowIds = new Set<string>();
+  const typeIndexes: Record<EditorTimetableRow["type"], number> = { scene: 0, event: 0 };
+  rows.forEach((row) => {
+    const typeIndex = typeIndexes[row.type]++;
+    if (positions.has(`${row.type}:${typeIndex}`)) {
+      automaticRowIds.add(getEditorTimetableRowKey(row));
+    }
+  });
+  return automaticRowIds;
+}
+
 function getNextCutNumber(currentValue: string | undefined, fallback: number) {
   const value = String(currentValue ?? "").trim();
   const numeric = Number(value);
@@ -3662,6 +3857,7 @@ function applyTimeFieldEdit<T extends { startTime: string; endTime: string; runt
   if (field === "runtimeMinutes") {
     next.runtimeMinutes = typeof value === "number" ? value : null;
     next.runtime = formatRuntimeMinutes(next.runtimeMinutes);
+    if (next.runtimeMinutes == null) next.endTime = "";
   } else {
     next[field] = String(value ?? "");
   }
@@ -3725,9 +3921,10 @@ function syncFirstCut(cuts: SceneCutInput[], patch: Partial<SceneCutInput>) {
 }
 
 function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput[], meta: DailyPlanPrintMeta): DailyPlanPreviewData {
+  const derivedMeta = deriveDailyPlanHeadcount(meta);
   const locations = (plan.shootingLocations ?? []).filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim());
   const mealTimes = (plan.mealTimes ?? [])
-    .filter((meal) => meal.startTime.trim() || meal.endTime.trim() || meal.runtimeMinutes || meal.runtime?.trim() || meal.memo.trim())
+    .filter(isMeaningfulTimetableEvent)
     .map((meal) => ({
       ...meal,
       startTime: formatTimeDisplay(meal.startTime),
@@ -3786,14 +3983,14 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
     scenes: previewScenes,
     totalCutCount,
     meta: {
-      ...meta,
-      directorContact: formatKoreanPhoneNumber(meta.directorContact),
-      assistantDirectorContact: formatKoreanPhoneNumber(meta.assistantDirectorContact),
-      producerContact: formatKoreanPhoneNumber(meta.producerContact),
-      sunrise: formatTimeDisplay(meta.sunrise),
-      sunset: formatTimeDisplay(meta.sunset),
-      starring: meta.starring.map((person) => ({ ...person, callTime: formatTimeDisplay(person.callTime) })),
-      teams: meta.teams.map((team) => ({ ...team, callTime: formatTimeDisplay(team.callTime) }))
+      ...derivedMeta,
+      directorContact: formatKoreanPhoneNumber(derivedMeta.directorContact),
+      assistantDirectorContact: formatKoreanPhoneNumber(derivedMeta.assistantDirectorContact),
+      producerContact: formatKoreanPhoneNumber(derivedMeta.producerContact),
+      sunrise: formatTimeDisplay(derivedMeta.sunrise),
+      sunset: formatTimeDisplay(derivedMeta.sunset),
+      starring: derivedMeta.starring.map((person) => ({ ...person, callTime: formatTimeDisplay(person.callTime) })),
+      teams: derivedMeta.teams.map((team) => ({ ...team, callTime: formatTimeDisplay(team.callTime) }))
     }
   };
 }

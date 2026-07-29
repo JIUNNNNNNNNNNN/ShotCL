@@ -1,33 +1,14 @@
 import { NextResponse } from "next/server";
 
+import {
+  getKoreanWeatherRegionQuery,
+  resolveKoreanWeatherRegion,
+  type KoreanWeatherRegion
+} from "@/lib/koreanWeatherRegions";
+
 const GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
 const DAILY_FIELDS = "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset";
-const REGION_ENGLISH_ALIASES: Record<string, string> = {
-  서울: "Seoul",
-  부산: "Busan",
-  대구: "Daegu",
-  인천: "Incheon",
-  광주: "Gwangju",
-  대전: "Daejeon",
-  울산: "Ulsan",
-  세종: "Sejong",
-  경기도: "Gyeonggi-do",
-  강원도: "Gangwon-do",
-  강원특별자치도: "Gangwon-do",
-  충청북도: "Chungcheongbuk-do",
-  충청남도: "Chungcheongnam-do",
-  전북특별자치도: "Jeollabuk-do",
-  전라북도: "Jeollabuk-do",
-  전라남도: "Jeollanam-do",
-  경상북도: "Gyeongsangbuk-do",
-  경상남도: "Gyeongsangnam-do",
-  제주특별자치도: "Jeju-do",
-  제주도: "Jeju-do",
-  성동구: "Seongdong-gu",
-  동대문구: "Dongdaemun-gu",
-  광주시: "Gwangju"
-};
 
 type GeocodingResult = {
   name?: string;
@@ -70,10 +51,23 @@ export async function GET(request: Request) {
   const requestedRegion = (searchParams.get("region") ?? "").trim();
   const address = (searchParams.get("address") ?? "").trim();
   const locationName = (searchParams.get("locationName") ?? "").trim();
-  const addressRegion = extractWeatherRegion(address);
-  const locationRegion = extractWeatherRegion(locationName);
-  const region = requestedRegion || addressRegion || locationRegion || locationName;
-  const regionFallbacks = Array.from(new Set([region, addressRegion, locationRegion, locationName].filter(Boolean)));
+  const resolvedRequestRegion = resolveRegionFromValue(requestedRegion);
+  const resolvedAddressRegion = resolveRegionFromValue(address);
+  const resolvedLocationRegion = resolveRegionFromValue(locationName);
+  const resolvedRegion = resolvedRequestRegion ?? resolvedAddressRegion ?? resolvedLocationRegion;
+  const region = resolvedRegion?.label || requestedRegion || address || locationName;
+  const regionFallbacks = Array.from(
+    new Set(
+      [
+        resolvedRegion?.weatherQuery,
+        resolvedRegion?.canonicalRegion,
+        resolvedRegion?.label,
+        requestedRegion,
+        address,
+        locationName
+      ].filter((value): value is string => Boolean(value))
+    )
+  );
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return weatherError("촬영일을 먼저 입력해주세요. 수동 입력은 계속 사용할 수 있습니다.", "INVALID_DATE", 400);
@@ -106,7 +100,7 @@ export async function GET(request: Request) {
     const weatherCode = forecast.daily?.weather_code?.[index];
     return NextResponse.json({
       provider: "open-meteo",
-      resolvedRegion: formatResolvedRegion(location, region),
+      resolvedRegion: getResolvedRegionLabel(location, resolvedRegion, region),
       latitude: location.latitude,
       longitude: location.longitude,
       weatherCode,
@@ -168,64 +162,67 @@ async function fetchJson<T>(url: URL): Promise<T> {
 
 function getRegionCandidates(region: string) {
   const normalized = region.replace(/\s+/g, " ").trim();
+  const resolvedRegion = resolveRegionFromValue(normalized);
   const tokens = normalized.split(" ").filter(Boolean);
-  const englishTokens = tokens.map((token) => REGION_ENGLISH_ALIASES[normalizeProvince(token) || token]).filter(Boolean);
-  const englishCombined = englishTokens.length > 1 ? `${englishTokens.at(-1)}, ${englishTokens[0]}` : englishTokens[0];
   return Array.from(
-    new Set([normalized, tokens.at(-1), tokens[0], englishCombined, ...englishTokens.slice().reverse()].filter((value): value is string => Boolean(value)))
+    new Set(
+      [
+        resolvedRegion?.weatherQuery,
+        resolvedRegion?.canonicalRegion,
+        resolvedRegion?.label,
+        getKoreanWeatherRegionQuery(normalized),
+        normalized,
+        tokens.at(-1),
+        tokens[0]
+      ].filter((value): value is string => Boolean(value))
+    )
   );
 }
 
 function chooseBestLocation(results: GeocodingResult[], region: string) {
   const available = results.filter((item) => item.latitude != null && item.longitude != null);
   if (available.length === 0) return null;
-  const tokens = region.split(/\s+/).map((token) => normalizeProvince(token) || token).filter((token) => token.length >= 2);
+  const targetRegion = resolveRegionFromValue(region);
+  const tokens = targetRegion
+    ? [targetRegion.label, targetRegion.canonicalRegion, targetRegion.weatherQuery]
+    : region.split(/\s+/).filter((token) => token.length >= 2);
 
   return available
     .map((item, index) => {
       const haystack = [item.name, item.admin1, item.admin2, item.admin3].filter(Boolean).join(" ");
-      const score = tokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0);
+      const itemRegion = resolveRegionFromValue(haystack);
+      const regionScore = targetRegion && itemRegion?.label === targetRegion.label ? 10 : 0;
+      const tokenScore = tokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0);
+      const score = regionScore + tokenScore;
       return { item, score, index };
     })
     .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.item ?? null;
 }
 
-function extractWeatherRegion(value: string) {
-  const tokens = value.replace(/[(),]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
-  if (tokens.length === 0) return "";
+function resolveRegionFromValue(value: string): KoreanWeatherRegion | null {
+  const normalized = value.replace(/[(),]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
 
-  let cursor = 1;
-  let province = normalizeProvince(tokens[0]);
-  if (["특별시", "광역시", "특별자치시", "특별자치도"].includes(tokens[1])) cursor = 2;
-  if (!province && tokens[1]) {
-    province = normalizeProvince(`${tokens[0]}${tokens[1]}`);
-    if (province) cursor = 2;
+  const directMatch = resolveKoreanWeatherRegion(normalized);
+  if (directMatch) return directMatch;
+
+  for (const token of normalized.split(" ")) {
+    const tokenMatch = resolveKoreanWeatherRegion(token);
+    if (tokenMatch) return tokenMatch;
   }
-
-  const district = tokens.slice(cursor).find((token) => /(?:시|군|구)$/.test(token));
-  return [province, district].filter(Boolean).join(" ") || tokens.slice(0, 2).join(" ");
+  return null;
 }
 
-function normalizeProvince(value: string) {
-  const aliases: Record<string, string> = {
-    서울: "서울",
-    서울시: "서울",
-    서울특별시: "서울",
-    부산광역시: "부산",
-    대구광역시: "대구",
-    인천광역시: "인천",
-    광주광역시: "광주",
-    대전광역시: "대전",
-    울산광역시: "울산",
-    세종특별자치시: "세종"
-  };
-  if (aliases[value]) return aliases[value];
-  return /(?:도|특별자치도)$/.test(value) ? value : "";
-}
-
-function formatResolvedRegion(location: GeocodingResult, fallback: string) {
-  const values = [location.admin1, location.admin2 || location.admin3 || location.name].filter(Boolean);
-  return Array.from(new Set(values)).join(" ") || fallback;
+function getResolvedRegionLabel(
+  location: GeocodingResult,
+  requestedRegion: KoreanWeatherRegion | null,
+  fallback: string
+) {
+  if (requestedRegion) return requestedRegion.label;
+  const locationRegion = resolveRegionFromValue(
+    [location.admin1, location.admin2, location.admin3, location.name].filter(Boolean).join(" ")
+  );
+  return locationRegion?.label ?? fallback;
 }
 
 function describeWeatherCode(code: number | undefined) {

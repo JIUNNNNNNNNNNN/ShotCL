@@ -1,8 +1,10 @@
 import {
+  normalizeDailyPlanCount,
   type CallSheetPerson,
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
+import { deriveDailyPlanHeadcount } from "@/lib/dailyPlan/headcount";
 import {
   groupStaffMembersForDisplay,
   isStaffMemberEmpty,
@@ -45,13 +47,13 @@ export function applyProjectStaffDefaults(
   const actorDefaults = buildActorDefaults(projectStaffMembers, projectActors);
   const teamDefaults = buildTeamDefaults(projectStaffMembers, projectStaffDepartments);
 
-  return {
+  return deriveDailyPlanHeadcount({
     ...sourceMeta,
     starring: hasMeaningfulPeople(sourceMeta.starring) || actorDefaults.length === 0
       ? sourceMeta.starring
       : actorDefaults,
     teams: mergeDailyPlanTeamRows(sourceMeta.teams, teamDefaults, projectStaffMembers)
-  };
+  });
 }
 
 function buildActorDefaults(
@@ -122,6 +124,8 @@ function buildTeamDefaults(
         team: departmentName,
         name: "",
         total: String(validMembers.length),
+        autoTotal: String(validMembers.length),
+        totalOverride: null,
         contact: "",
         callTime: "",
         callLocation: "",
@@ -140,8 +144,15 @@ function mergeDailyPlanTeamRows(
   const merged = defaults.map((row) => {
     const key = normalizeKey(row.team);
     const source = sourceGroups.get(key) ?? [];
+    const autoTotal = normalizeDailyPlanCount(row.autoTotal)
+      ?? normalizeDailyPlanCount(row.total)
+      ?? "0";
+    const totalOverride = firstTeamCountOverride(source);
     return {
       ...row,
+      total: totalOverride ?? autoTotal,
+      autoTotal,
+      totalOverride,
       callTime: firstValue(source, "callTime"),
       callLocation: firstDailyPlanLocation(source, members, key),
       notes: firstDailyPlanNotes(source, members, key)
@@ -152,11 +163,14 @@ function mergeDailyPlanTeamRows(
     if (defaultKeys.has(key) || isActorDepartment(rows[0]?.team)) return;
     const first = rows[0];
     if (!first || !isMeaningfulLegacyTeam(rows)) return;
+    const totalOverride = firstTeamCountOverride(rows);
     merged.push({
       id: makeDepartmentRowId(key),
       team: normalizeStaffDepartment(first.team) || "미분류",
       name: "",
-      total: "0",
+      total: totalOverride ?? "0",
+      autoTotal: "0",
+      totalOverride,
       contact: "",
       callTime: firstValue(rows, "callTime"),
       callLocation: firstDailyPlanLocation(rows, members, key),
@@ -165,6 +179,21 @@ function mergeDailyPlanTeamRows(
   });
 
   return merged;
+}
+
+function firstTeamCountOverride(rows: TeamCallSheetRow[]) {
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(row, "totalOverride")) {
+      const value = normalizeDailyPlanCount(row.totalOverride);
+      if (value !== null) return value;
+      continue;
+    }
+
+    const legacyValue = normalizeDailyPlanCount(row.total);
+    if (legacyValue !== null) return legacyValue;
+  }
+
+  return null;
 }
 
 function groupSourceTeamRows(rows: TeamCallSheetRow[]) {
@@ -221,9 +250,16 @@ function isMeaningfulLegacyTeam(rows: TeamCallSheetRow[]) {
     || row.notes.trim()
     || row.name.trim()
     || (row.contact ?? "").trim()
-    || row.total.trim()
+    || hasManualTeamCount(row)
     || !legacyDefaultTeamKeys.has(normalizeKey(row.team))
   ));
+}
+
+function hasManualTeamCount(row: TeamCallSheetRow) {
+  if (Object.prototype.hasOwnProperty.call(row, "totalOverride")) {
+    return normalizeDailyPlanCount(row.totalOverride) !== null;
+  }
+  return normalizeDailyPlanCount(row.total) !== null;
 }
 
 function makeDepartmentRowId(key: string) {

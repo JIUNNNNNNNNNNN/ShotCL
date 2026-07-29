@@ -1,5 +1,8 @@
 import type { MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
-import type { DailyPlanPrintMeta } from "@/lib/dailyPlan/printMeta";
+import {
+  formatDailyPlanWeatherSummary,
+  type DailyPlanPrintMeta
+} from "@/lib/dailyPlan/printMeta";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
 
 type DailyPlanDesktopLandscapePreviewProps = {
@@ -72,7 +75,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           <tbody>
             <tr><td className={`${cellClass} font-bold`}>Sunrise</td><td className={cellClass}>{meta.sunrise || "-"}</td></tr>
             <tr><td className={`${cellClass} font-bold`}>Sunset</td><td className={cellClass}>{meta.sunset || "-"}</td></tr>
-            <tr><td className={`${cellClass} font-bold`}>Weather</td><td className={cellClass}>{meta.weather || "-"}</td></tr>
+            <tr><td className={`${cellClass} font-bold`}>Weather</td><td className={cellClass}>{formatDailyPlanWeatherSummary(meta) || "-"}</td></tr>
             <tr><td className={`${cellClass} font-bold`}>강수 확률</td><td className={cellClass}>{meta.rainProbability || "-"}</td></tr>
             <tr><td className={`${cellClass} font-bold`}>최저 기온</td><td className={cellClass}>{meta.minTemperature || "-"}</td></tr>
             <tr><td className={`${cellClass} font-bold`}>최고 기온</td><td className={cellClass}>{meta.maxTemperature || "-"}</td></tr>

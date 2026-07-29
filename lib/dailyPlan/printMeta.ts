@@ -1,4 +1,5 @@
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
+import { resolveKoreanWeatherRegion } from "@/lib/koreanWeatherRegions";
 
 export type DailyPlanTimetableRowType = "scene" | "event";
 
@@ -17,6 +18,10 @@ export type TeamCallSheetRow = {
   team: string;
   name: string;
   total: string;
+  /** 현재 스탭리스트에서 집계한 자동 인원입니다. */
+  autoTotal?: string;
+  /** null이면 자동값을 사용하고, "0"을 포함한 문자열 값이면 일촬표 수동값입니다. */
+  totalOverride?: string | null;
   contact?: string;
   callTime: string;
   callLocation: string;
@@ -124,15 +129,16 @@ export function encodeDailyPlanMemo(meta: DailyPlanPrintMeta) {
 }
 
 export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlanPrintMeta {
+  const weatherRegion = normalizeWeatherRegion(meta);
   return {
     day: meta.day ?? "",
     directorContact: formatKoreanPhoneNumber(meta.directorContact ?? ""),
     assistantDirectorContact: formatKoreanPhoneNumber(meta.assistantDirectorContact ?? ""),
     producerContact: formatKoreanPhoneNumber(meta.producerContact ?? ""),
     totalCrew: meta.totalCrew ?? "",
-    weatherRegion: meta.weatherRegion ?? "",
-    weatherProvince: meta.weatherProvince ?? "",
-    weatherDistrict: meta.weatherDistrict ?? "",
+    weatherRegion: weatherRegion.label,
+    weatherProvince: weatherRegion.canonicalRegion,
+    weatherDistrict: weatherRegion.district,
     sunrise: meta.sunrise ?? "",
     sunset: meta.sunset ?? "",
     weather: meta.weather ?? "",
@@ -195,18 +201,100 @@ function normalizePeople(rows: CallSheetPerson[] | undefined) {
 }
 
 function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {
-  const next = (Array.isArray(rows) ? rows : []).map((row) => ({
-    id: row.id || createMetaId("team"),
-    team: row.team ?? "",
-    name: row.name ?? "",
-    total: row.total ?? "",
-    contact: formatKoreanPhoneNumber(row.contact ?? ""),
-    callTime: row.callTime ?? "",
-    callLocation: row.callLocation ?? "",
-    notes: row.notes ?? ""
-  }));
+  const next = (Array.isArray(rows) ? rows : []).map((row) => {
+    const hasExplicitOverride = Object.prototype.hasOwnProperty.call(row, "totalOverride");
+    const legacyTotal = normalizeDailyPlanCount(row.total);
+    const totalOverride = hasExplicitOverride
+      ? normalizeDailyPlanCount(row.totalOverride)
+      : legacyTotal;
+    const autoTotal = normalizeDailyPlanCount(row.autoTotal)
+      ?? (hasExplicitOverride && totalOverride === null ? legacyTotal : null)
+      ?? "";
+    const total = totalOverride ?? autoTotal;
+
+    return {
+      id: row.id || createMetaId("team"),
+      team: row.team ?? "",
+      name: row.name ?? "",
+      total,
+      autoTotal,
+      totalOverride,
+      contact: formatKoreanPhoneNumber(row.contact ?? ""),
+      callTime: row.callTime ?? "",
+      callLocation: row.callLocation ?? "",
+      notes: row.notes ?? ""
+    };
+  });
 
   return next;
+}
+
+/** 0을 포함한 0 이상의 정수만 인원 값으로 정규화합니다. */
+export function normalizeDailyPlanCount(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  if (!/^\d+$/.test(normalized)) return null;
+  const count = Number(normalized);
+  if (!Number.isSafeInteger(count) || count < 0) return null;
+  return String(count);
+}
+
+export function formatDailyPlanWeatherSummary(meta: Pick<DailyPlanPrintMeta, "weatherRegion" | "weather">) {
+  const region = resolveKoreanWeatherRegion(meta.weatherRegion)?.label
+    ?? String(meta.weatherRegion ?? "").trim();
+  const weather = String(meta.weather ?? "").trim();
+  if (!region) return weather;
+  if (!weather || weather === region) return region;
+
+  const weatherRegion = resolveKoreanWeatherRegion(weather);
+  if (weatherRegion?.label === region) {
+    const prefix = [
+      weatherRegion.canonicalRegion,
+      weatherRegion.weatherQuery,
+      ...weatherRegion.aliases,
+      weatherRegion.label
+    ]
+      .sort((left, right) => right.length - left.length)
+      .find((candidate) => weather.toLocaleLowerCase("ko-KR").startsWith(
+        candidate.toLocaleLowerCase("ko-KR")
+      ));
+    const detail = prefix
+      ? weather.slice(prefix.length).replace(/^[\s·,:/-]+/, "").trim()
+      : "";
+    return [region, detail].filter(Boolean).join(" · ");
+  }
+  return `${region} · ${weather}`;
+}
+
+function normalizeWeatherRegion(meta: DailyPlanPrintMeta) {
+  const sourceLabel = String(meta.weatherRegion ?? "").trim();
+  const sourceProvince = String(meta.weatherProvince ?? "").trim();
+  const sourceDistrict = String(meta.weatherDistrict ?? "").trim();
+  const isLegacyProvinceDistrictSelection = Boolean(
+    sourceProvince
+    && (
+      !sourceLabel
+      || sourceLabel === sourceDistrict
+      || sourceLabel === [sourceProvince, sourceDistrict].filter(Boolean).join(" ")
+    )
+  );
+  const resolved = resolveKoreanWeatherRegion(sourceLabel)
+    ?? (isLegacyProvinceDistrictSelection
+      ? resolveKoreanWeatherRegion([sourceProvince, sourceDistrict].filter(Boolean).join(" "))
+      : null);
+
+  if (!resolved) {
+    return {
+      label: sourceLabel,
+      canonicalRegion: sourceProvince,
+      district: sourceDistrict
+    };
+  }
+
+  return {
+    label: resolved.label,
+    canonicalRegion: resolved.canonicalRegion,
+    district: ""
+  };
 }
 
 function createMetaId(prefix: string) {

@@ -1,4 +1,7 @@
-import type { DailyPlanPrintMeta } from "@/lib/dailyPlan/printMeta";
+import {
+  formatDailyPlanWeatherSummary,
+  type DailyPlanPrintMeta
+} from "@/lib/dailyPlan/printMeta";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
 
 export type MobileDailyPlanTimetableRow =
@@ -95,7 +98,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
             <td colSpan={2} className={cellClass}>Sunrise</td>
             <td colSpan={2} className={cellClass}>{meta.sunrise || ""}</td>
             <td colSpan={2} className={cellClass}>Weather</td>
-            <td colSpan={2} className={cellClass}>{meta.weather || ""}</td>
+            <td colSpan={2} className={cellClass}>{formatDailyPlanWeatherSummary(meta)}</td>
             <td className={cellClass}>최고 기온</td>
             <td className={cellClass}>{formatTemperature(meta.maxTemperature)}</td>
           </tr>
