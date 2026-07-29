@@ -2103,15 +2103,17 @@ function ShootingOrderField({
     setIsOpen(false);
   }
 
-  function appendRemainingCuts() {
-    if (isInputDisabled || savedValidation.error) return;
-    const usedNumbers = new Set(savedNumbers);
+  function appendRemainingCutsToDraft() {
+    const validation = getShootingOrderValidation(draftValueRef.current, totalCut);
+    setDraftNumbers(validation.numbers);
+    if (isInputDisabled || validation.error) return;
+    const usedNumbers = new Set(validation.numbers);
     const remainingNumbers = Array.from(
       { length: totalCutCount },
       (_, index) => index + 1
     ).filter((cutNumber) => !usedNumbers.has(cutNumber));
     if (remainingNumbers.length > 0) {
-      onChange([...savedNumbers, ...remainingNumbers].join("-"));
+      updateDraft([...validation.numbers, ...remainingNumbers].join(" "));
     }
   }
 
@@ -2163,7 +2165,7 @@ function ShootingOrderField({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex min-h-10 w-full min-w-0 items-center rounded-md border bg-white px-2.5 py-2 text-left text-sm font-bold leading-[1.35] transition-colors ${
+        className={`flex min-h-[38px] w-full min-w-0 items-center rounded-md border bg-white px-2.5 py-1.5 text-left text-sm font-bold leading-[1.35] transition-colors ${
           savedValidation.error
             ? "border-field-danger text-field-danger ring-1 ring-field-danger/20"
             : displayValue
@@ -2183,35 +2185,12 @@ function ShootingOrderField({
         aria-label={ariaLabel}
         aria-invalid={Boolean(savedValidation.error)}
         aria-expanded={isOpen}
-        title={displayValue || "촬영 순서를 입력하세요"}
+        title={isInputDisabled ? "총 컷수를 먼저 입력해주세요." : displayValue || "촬영 순서 입력"}
       >
         <span className="block min-w-0 max-w-full overflow-x-auto whitespace-nowrap">
-          {displayValue || "촬영 순서를 입력하세요"}
+          {displayValue || "촬영 순서 입력"}
         </span>
       </button>
-      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-        <button
-          type="button"
-          className="min-h-9 rounded-md border border-field-border bg-field-soft px-2 py-1.5 text-[11px] font-bold leading-[1.35] text-field-primary transition-colors hover:border-field-primary disabled:cursor-not-allowed disabled:opacity-45"
-          onClick={appendRemainingCuts}
-          disabled={isInputDisabled || Boolean(savedValidation.error)}
-        >
-          이후 순서대로
-        </button>
-        <button
-          type="button"
-          className="min-h-9 rounded-md border border-field-border bg-white px-2 py-1.5 text-[11px] font-bold leading-[1.35] text-field-danger transition-colors hover:border-field-danger disabled:cursor-not-allowed disabled:opacity-45"
-          onClick={() => onChange("")}
-          disabled={!value}
-        >
-          전체삭제
-        </button>
-      </div>
-      {savedValidation.error ? (
-        <p className="mt-1 text-[10px] font-bold leading-[1.35] text-field-danger">{savedValidation.error}</p>
-      ) : isInputDisabled ? (
-        <p className="mt-1 text-[10px] font-bold leading-[1.35] text-field-muted">총 컷수를 먼저 입력해주세요.</p>
-      ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
           className="fixed inset-0 z-[80] flex items-end justify-center bg-black/20 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4"
@@ -2223,7 +2202,7 @@ function ShootingOrderField({
             role="dialog"
             aria-modal="true"
             aria-label={`${ariaLabel} 입력`}
-            className="w-full max-w-sm rounded-t-xl border border-field-border bg-white p-3 shadow-xl sm:rounded-xl"
+            className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-xl border border-field-border bg-white p-3 shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl"
             data-shooting-order-popover
             onPointerDown={(event) => event.stopPropagation()}
           >
@@ -2302,6 +2281,26 @@ function ShootingOrderField({
                 onClick={() => insertAtCursor(" ")}
               >
                 스페이스
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                className="min-h-10 rounded-md border border-field-border bg-field-soft px-2 py-2 text-xs font-bold leading-[1.35] text-field-primary transition-colors hover:border-field-primary disabled:cursor-not-allowed disabled:opacity-45"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={appendRemainingCutsToDraft}
+                disabled={Boolean(draftValidation.error)}
+              >
+                이후 순서대로
+              </button>
+              <button
+                type="button"
+                className="min-h-10 rounded-md border border-field-border bg-white px-2 py-2 text-xs font-bold leading-[1.35] text-field-danger transition-colors hover:border-field-danger disabled:cursor-not-allowed disabled:opacity-45"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => updateDraft("")}
+                disabled={!draftValue}
+              >
+                전체삭제
               </button>
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5">
