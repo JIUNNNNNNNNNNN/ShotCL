@@ -939,17 +939,20 @@ export default function ProjectSceneListPage() {
   }, [canEdit]);
 
   const startHeaderHelpLongPress = useCallback<HeaderLongPressHandler>((event, description) => {
-    if (isMobileSceneListInteraction(event)) return;
     headerLongPressCleanupRef.current?.();
     setHeaderHelpPopover(null);
-    headerLongPressCleanupRef.current = beginLongPress(event, ({ x, y }) => {
-      const width = 150;
-      setHeaderHelpPopover({
-        description,
-        left: clampPopoverLeft(x, width),
-        top: getPopoverTop(y, 44)
-      });
-    });
+    headerLongPressCleanupRef.current = beginHeaderHelpLongPress(
+      event,
+      ({ x, y }) => {
+        const width = 150;
+        setHeaderHelpPopover({
+          description,
+          left: clampPopoverLeft(x, width),
+          top: getPopoverTop(y, 44)
+        });
+      },
+      () => setHeaderHelpPopover(null)
+    );
   }, []);
 
   const startActorCellTextLongPress = useCallback((
@@ -1088,6 +1091,7 @@ export default function ProjectSceneListPage() {
           actorRoles={actorRoles}
           locationStyles={locationStyles}
           canEdit={canEdit}
+          onHeaderLongPress={startHeaderHelpLongPress}
           onUpdate={updateItem}
           onCutValidationChange={updateCutInputError}
         />
@@ -1106,7 +1110,7 @@ export default function ProjectSceneListPage() {
         >
           <div
             role="row"
-            className="sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] z-50 grid border-b border-[#aeb6ae] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary print:static"
+            className="sticky top-0 z-[60] grid border-b border-[#aeb6ae] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary shadow-[0_1px_0_rgba(15,61,46,0.08)] print:static print:shadow-none"
             style={{ gridTemplateColumns }}
           >
             <SceneHeaderCell
@@ -1166,7 +1170,7 @@ export default function ProjectSceneListPage() {
             <SceneHeaderCell
               label="Cut"
               description="총 컷수"
-              showDescription
+              helpId="scene-list-cut-help-landscape"
               className="border-r border-[#bfc5bf]"
               onLongPress={startHeaderHelpLongPress}
             />
@@ -1248,7 +1252,7 @@ export default function ProjectSceneListPage() {
         <div
           ref={headerHelpPopoverRef}
           role="tooltip"
-          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center rounded-xl border border-field-border bg-white px-3 py-2 text-center text-xs font-bold text-field-primary shadow-[0_8px_22px_rgba(15,61,46,0.14)]"
+          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center rounded-xl border border-field-border bg-white px-3 py-2 text-center text-xs font-bold text-field-primary shadow-[0_8px_22px_rgba(15,61,46,0.14)] print:hidden"
           style={{ left: headerHelpPopover.left, top: headerHelpPopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -1337,6 +1341,7 @@ function MobileSceneList({
   actorRoles,
   locationStyles,
   canEdit,
+  onHeaderLongPress,
   onUpdate,
   onCutValidationChange
 }: {
@@ -1344,6 +1349,7 @@ function MobileSceneList({
   actorRoles: string[];
   locationStyles: Map<string, PaletteStyle>;
   canEdit: boolean;
+  onHeaderLongPress: HeaderLongPressHandler;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
   onCutValidationChange: (id: string, message: string) => void;
 }) {
@@ -1358,7 +1364,7 @@ function MobileSceneList({
         WebkitTouchCallout: "none"
       }}
     >
-      <div className="sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] z-50 grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary print:static"
+      <div className="sticky top-0 z-[60] grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary shadow-[0_1px_0_rgba(15,61,46,0.08)] print:static print:shadow-none"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
@@ -1377,7 +1383,11 @@ function MobileSceneList({
         />
         <MobileSceneHeader entries={[["Content", "씬 내용"]]} />
         <MobileSceneHeader entries={[["Characters", "등장인물"]]} />
-        <MobileSceneHeader entries={[["Cut", "총 컷수"]]} />
+        <MobileSceneHeader
+          entries={[["Cut", "총 컷수"]]}
+          helpId="scene-list-cut-help-mobile"
+          onLongPress={onHeaderLongPress}
+        />
         <MobileSceneHeader entries={[["Memo", "소품&특이사항"]]} />
       </div>
 
@@ -1516,33 +1526,62 @@ function MobileSceneRow({
 }
 
 function MobileSceneHeader({
-  entries
+  entries,
+  helpId,
+  onLongPress
 }: {
   entries: ReadonlyArray<readonly [label: string, description?: string]>;
+  helpId?: string;
+  onLongPress?: HeaderLongPressHandler;
 }) {
   return (
     <div
       role="columnheader"
       className="flex min-w-0 flex-col items-stretch justify-center border-b border-r border-[#bfc5bf] text-center [overflow-wrap:anywhere]"
     >
-      {entries.map(([label, description]) => (
-        <span
-          key={label}
-          className={`flex min-h-5 flex-1 touch-pan-y select-none flex-col items-center justify-center py-0.5 text-center ${
-            label === "Int/Ext" || label === "#S"
-              ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
+      {entries.map(([label, description]) => {
+        const isSubLocation = label === "Sub-Location";
+        const isHelpTrigger = label === "Cut" && Boolean(description && helpId && onLongPress);
+        const labelContent = isSubLocation ? (
+          <span
+            aria-hidden
+            className="flex flex-col items-center justify-center text-[8px] leading-[0.85]"
+          >
+            <span>Sub-</span>
+            <span>Location</span>
+          </span>
+        ) : label;
+        const entryClassName = `flex min-h-5 flex-1 touch-pan-y select-none flex-col items-center justify-center py-0.5 text-center ${
+          label === "Int/Ext" || label === "#S"
+            ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
+            : isSubLocation
+              ? "overflow-hidden px-0"
               : "px-0.5"
-          }`}
-          draggable={false}
-        >
-          {label}
-          {label === "Cut" && description ? (
-            <small className="block text-[7px] font-bold leading-none text-field-muted">
-              {description}
-            </small>
-          ) : null}
-        </span>
-      ))}
+        }`;
+
+        return isHelpTrigger ? (
+          <button
+            key={label}
+            type="button"
+            className={`${entryClassName} w-full cursor-default bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d7b95f]`}
+            aria-label={label}
+            aria-describedby={helpId}
+            onPointerDown={(event) => onLongPress?.(event, description ?? "")}
+          >
+            {labelContent}
+            <span id={helpId} className="sr-only">{description}</span>
+          </button>
+        ) : (
+          <span
+            key={label}
+            aria-label={isSubLocation ? label : undefined}
+            className={entryClassName}
+            draggable={false}
+          >
+            {labelContent}
+          </span>
+        );
+      })}
     </div>
   );
 }
@@ -1587,7 +1626,7 @@ function SceneHeaderCell({
   title,
   ariaLabel,
   onLongPress,
-  showDescription = false
+  helpId
 }: {
   label: string;
   description?: string;
@@ -1596,25 +1635,46 @@ function SceneHeaderCell({
   title?: string;
   ariaLabel?: string;
   onLongPress: HeaderLongPressHandler;
-  showDescription?: boolean;
+  helpId?: string;
 }) {
+  const isSubLocation = label === "Sub-Location";
+  const labelContent = isSubLocation ? (
+    <span
+      aria-hidden
+      className="flex flex-col items-center justify-center text-[10px] leading-[0.9]"
+    >
+      <span>Sub-</span>
+      <span>Location</span>
+    </span>
+  ) : (
+    <span className="block leading-4">{label}</span>
+  );
+
   return (
     <div
       role="columnheader"
       title={title}
-      aria-label={ariaLabel}
-      className={`flex min-w-0 touch-none select-none flex-col items-center justify-center truncate px-1 py-1 text-center ${className}`}
+      aria-label={ariaLabel ?? label}
+      className={`flex min-w-0 touch-pan-y select-none flex-col items-center justify-center overflow-hidden py-1 text-center ${
+        isSubLocation ? "px-0.5" : "px-1"
+      } ${className}`}
       style={style}
-      onPointerDown={description
+      onPointerDown={!helpId && description
         ? (event) => onLongPress(event, description)
         : undefined}
     >
-      <span className="block leading-4">{label}</span>
-      {showDescription && description ? (
-        <small className="block text-[8px] font-bold leading-3 text-field-muted">
-          {description}
-        </small>
-      ) : null}
+      {helpId && description ? (
+        <button
+          type="button"
+          className="flex h-full min-h-6 w-full cursor-default touch-pan-y items-center justify-center bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d7b95f]"
+          aria-label={label}
+          aria-describedby={helpId}
+          onPointerDown={(event) => onLongPress(event, description)}
+        >
+          {labelContent}
+          <span id={helpId} className="sr-only">{description}</span>
+        </button>
+      ) : labelContent}
     </div>
   );
 }
@@ -3012,6 +3072,73 @@ function beginLongPress(
   window.addEventListener("pointerup", handleEnd);
   window.addEventListener("pointercancel", handleEnd);
   return cleanup;
+}
+
+function beginHeaderHelpLongPress(
+  event: ReactPointerEvent<HTMLElement>,
+  onTrigger: (point: { x: number; y: number }) => void,
+  onFinish: () => void
+) {
+  if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) {
+    return () => undefined;
+  }
+  const pressedElement = event.currentTarget;
+  const pointerId = event.pointerId;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let timer: number | null = null;
+  let isActive = true;
+
+  const cleanup = () => {
+    if (timer !== null) window.clearTimeout(timer);
+    timer = null;
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleEnd);
+    window.removeEventListener("pointercancel", handleEnd);
+    window.removeEventListener("scroll", handleScroll, true);
+    window.removeEventListener("resize", finish);
+    if (pressedElement.hasPointerCapture(pointerId)) {
+      try {
+        pressedElement.releasePointerCapture(pointerId);
+      } catch {
+        // 브라우저가 먼저 capture를 해제한 경우에도 나머지 정리는 계속합니다.
+      }
+    }
+  };
+  const finish = () => {
+    if (!isActive) return;
+    isActive = false;
+    cleanup();
+    onFinish();
+  };
+  const handleMove = (moveEvent: PointerEvent) => {
+    if (moveEvent.pointerId !== pointerId) return;
+    if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 9) {
+      finish();
+    }
+  };
+  const handleEnd = (endEvent: PointerEvent) => {
+    if (endEvent.pointerId === pointerId) finish();
+  };
+  const handleScroll = () => finish();
+
+  try {
+    pressedElement.setPointerCapture(pointerId);
+  } catch {
+    // capture 미지원 환경에서도 window 이벤트로 long press를 추적합니다.
+  }
+  timer = window.setTimeout(() => {
+    if (!isActive) return;
+    timer = null;
+    window.getSelection()?.removeAllRanges();
+    onTrigger({ x: startX, y: startY });
+  }, 600);
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleEnd);
+  window.addEventListener("pointercancel", handleEnd);
+  window.addEventListener("scroll", handleScroll, true);
+  window.addEventListener("resize", finish);
+  return finish;
 }
 
 function clampPopoverLeft(pointerX: number, width: number) {
