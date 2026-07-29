@@ -91,6 +91,7 @@ export async function uploadProjectReferenceAsset(
   assetType: ProjectReferenceAssetType,
   file: File,
   metadata: {
+    assetId?: string;
     dailyPlanId?: string;
     sceneNo?: string;
     cutNo?: string;
@@ -104,6 +105,13 @@ export async function uploadProjectReferenceAsset(
     sourceType?: ProjectReferenceCrop["sourceType"];
     sourceAssetId?: string;
     pageIndex?: number;
+    sourceFilename?: string;
+    sourceKind?: ProjectReferenceCrop["sourceKind"];
+    sourcePageNumber?: number;
+    importBatchId?: string;
+    templateId?: string;
+    manuallyPositioned?: boolean;
+    customSize?: boolean;
     title?: string;
     memo?: string;
     sortOrder?: number;

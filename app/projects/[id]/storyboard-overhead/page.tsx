@@ -33,7 +33,12 @@ import {
   X
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { ArchiveImportDialog, type ArchiveImportCommit } from "@/components/ArchiveImportDialog";
+import {
+  ArchiveImportDialog,
+  type ArchiveImportCommit,
+  type ArchiveImportSaveFailure,
+  type ArchiveImportSaveReport
+} from "@/components/ArchiveImportDialog";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -45,6 +50,7 @@ import {
   createArchiveThumbnail,
   detectArchiveCropSourceKind,
   loadArchiveImagePages,
+  mapSettledWithConcurrency,
   mapWithConcurrency,
   optimizeArchiveImage,
   releaseArchivePages,
@@ -100,11 +106,13 @@ const ShotOverheadEditor = dynamic(
 type ArchiveType = Extract<ProjectReferenceAssetType, "overhead" | "storyboard">;
 type PendingImport = {
   assetType: ArchiveType;
-  sourceKind: "pdf" | "images";
+  sourceKind: "pdf" | "images" | "mixed";
   sourceFiles: File[];
   sourceLabel: string;
   pages: ArchiveImportPage[];
   folderId: string | null;
+  importBatchId: string;
+  baseSortOrder: number;
   fileMetadata: Array<{ originalFolderName: string; relativePath: string }>;
   existingSourceAssetIds?: string[];
   inheritedAssets?: Array<ProjectReferenceAsset | null>;
@@ -216,6 +224,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [moveFolderId, setMoveFolderId] = useState("");
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>({
@@ -254,6 +263,9 @@ export default function ProjectStoryboardOverheadPage() {
   const dragPreviewRef = useRef<HTMLDivElement | null>(null);
   const dragPositionFrameRef = useRef<number | null>(null);
   const bodyUserSelectRef = useRef("");
+  const pendingImportRef = useRef<PendingImport | null>(null);
+  const savedImportResultIdsRef = useRef(new Set<string>());
+  const importResultAssetIdsRef = useRef(new Map<string, string>());
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
@@ -334,7 +346,12 @@ export default function ProjectStoryboardOverheadPage() {
     const longPress = longPressRef.current;
     if (longPress) window.clearTimeout(longPress.timeoutId);
     document.body.style.userSelect = bodyUserSelectRef.current;
+    if (pendingImportRef.current) releaseArchivePages(pendingImportRef.current.pages);
   }, []);
+
+  useEffect(() => {
+    pendingImportRef.current = pendingImport;
+  }, [pendingImport]);
 
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
   const folderPathById = useMemo(
@@ -523,7 +540,7 @@ export default function ProjectStoryboardOverheadPage() {
   async function prepareImages(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    await prepareFiles(assetType, files, "images", true);
+    await prepareFiles(assetType, files, "images", assetType === "overhead");
   }
 
   async function prepareFiles(
@@ -539,25 +556,45 @@ export default function ProjectStoryboardOverheadPage() {
     }
   ) {
     if (!projectId || rawFiles.length === 0 || preparingRef.current || isSaving) return;
-    const candidates = uniqueFiles(rawFiles);
-    const files = candidates.filter((file) => {
+    const seenSources = new Set<string>();
+    const candidates = rawFiles.flatMap((file, index) => {
+      const metadata = context?.fileMetadata?.[index] ?? {
+        originalFolderName: "",
+        relativePath: file.name
+      };
+      const key = `${metadata.relativePath}:${file.name}:${file.size}:${file.lastModified}`;
+      if (seenSources.has(key)) return [];
+      seenSources.add(key);
+      return [{
+        file,
+        metadata,
+        sourceAssetId: context?.existingSourceAssetIds?.[index] ?? "",
+        inheritedAsset: context?.inheritedAssets?.[index] ?? null
+      }];
+    });
+    const acceptedSources = candidates.filter(({ file }) => {
       if (!isAcceptedArchiveFile(file) || file.size <= 0) return false;
       if (expectedKind === "pdf") return isPdfFile(file);
       if (expectedKind === "images") return isImageFile(file);
       return true;
     });
-    let excludedCount = candidates.length - files.length;
+    const files = acceptedSources.map(({ file }) => file);
+    let excludedCount = candidates.length - acceptedSources.length;
     if (files.length === 0) {
       setErrorMessage("PDF, JPG, JPEG, PNG, WebP 중 읽을 수 있는 파일을 선택해주세요.");
       return;
     }
     const pdfFiles = files.filter(isPdfFile);
     const imageFiles = files.filter(isImageFile);
-    if (pdfFiles.length > 0 && imageFiles.length > 0) {
+    if (pdfFiles.length > 0 && imageFiles.length > 0 && assetType !== "storyboard") {
       setErrorMessage("PDF와 이미지는 각각의 가져오기 흐름으로 나누어 놓아주세요.");
       return;
     }
-    const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 ? "pdf" : "images";
+    const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 && imageFiles.length > 0
+      ? "mixed"
+      : pdfFiles.length > 0
+        ? "pdf"
+        : "images";
     const destinationFolderId = context?.folderId !== undefined
       ? context.folderId
       : currentFolderPath
@@ -583,7 +620,7 @@ export default function ProjectStoryboardOverheadPage() {
             setProgressMessage(`이미지 최적화 중 · ${file.name}`);
             const optimized = await optimizeArchiveImage(file);
             setProgressMessage(`썸네일 생성 완료 · 업로드 중 ${completed + 1}/${files.length}`);
-            const metadata = context?.fileMetadata?.[index];
+            const metadata = acceptedSources[index]?.metadata;
             const uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
               thumbnailFile: optimized.thumbnailFile,
               sourceType: "upload_image",
@@ -616,42 +653,45 @@ export default function ProjectStoryboardOverheadPage() {
       const readableFiles: File[] = [];
       const readableMetadata: Array<{ originalFolderName: string; relativePath: string }> = [];
       const readableSourceIds: string[] = [];
-      if (sourceKind === "pdf") {
-        for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
-          const file = files[fileIndex];
-          try {
+      const readableInheritedAssets: Array<ProjectReferenceAsset | null> = [];
+      for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+        const file = files[fileIndex];
+        try {
+          const sourceFileIndex = readableFiles.length;
+          let rendered: ArchiveImportPage[];
+          if (isPdfFile(file)) {
             if (!await hasPdfSignature(file)) throw new Error("Invalid PDF");
-            const sourceFileIndex = readableFiles.length;
-            const rendered = await renderArchivePdfPages(file, (current, total) => {
+            rendered = await renderArchivePdfPages(file, (current, total) => {
               setProgressMessage(`PDF ${fileIndex + 1}/${files.length} · 페이지 ${current}/${total}`);
             }, sourceFileIndex);
-            if (rendered.length === 0) throw new Error("Empty PDF");
-            readableFiles.push(file);
-            readableMetadata.push(context?.fileMetadata?.[fileIndex] ?? {
-              originalFolderName: "",
-              relativePath: file.name
-            });
-            readableSourceIds.push(context?.existingSourceAssetIds?.[fileIndex] ?? "");
-            pages.push(...rendered);
-          } catch {
-            excludedCount += 1;
+          } else {
+            setProgressMessage(`이미지 ${fileIndex + 1}/${files.length} 준비 중`);
+            rendered = (await loadArchiveImagePages([file])).map((page) => ({
+              ...page,
+              id: `image-${sourceFileIndex}-${file.lastModified}`,
+              index: 0,
+              sourceFileIndex
+            }));
           }
+          if (rendered.length === 0) throw new Error("Empty source");
+          readableFiles.push(file);
+          readableMetadata.push(acceptedSources[fileIndex]?.metadata ?? {
+            originalFolderName: "",
+            relativePath: file.name
+          });
+          readableSourceIds.push(acceptedSources[fileIndex]?.sourceAssetId ?? "");
+          readableInheritedAssets.push(acceptedSources[fileIndex]?.inheritedAsset ?? null);
+          pages.push(...rendered);
+        } catch {
+          excludedCount += 1;
         }
-      } else {
-        setProgressMessage("이미지 묶음을 준비하는 중입니다.");
-        pages.push(...await loadArchiveImagePages(files));
-        readableFiles.push(...files);
-        readableMetadata.push(...files.map((file, index) => context?.fileMetadata?.[index] ?? {
-          originalFolderName: "",
-          relativePath: file.name
-        }));
       }
       if (pages.length === 0 || readableFiles.length === 0) {
         setErrorMessage("읽을 수 있는 자료가 없습니다.");
         setProgressMessage("");
         return;
       }
-      setPendingImport({
+      beginImport({
         assetType,
         sourceKind,
         sourceFiles: readableFiles,
@@ -660,10 +700,11 @@ export default function ProjectStoryboardOverheadPage() {
           : `${readableFiles[0].name} 외 ${readableFiles.length - 1}개`,
         pages,
         folderId: destinationFolderId,
+        importBatchId: createArchiveSessionId(),
+        baseSortOrder: imageAssets.length,
         fileMetadata: readableMetadata,
-        existingSourceAssetIds: context?.existingSourceAssetIds
-          ?? (readableSourceIds.length > 0 ? readableSourceIds : undefined),
-        inheritedAssets: context?.inheritedAssets
+        existingSourceAssetIds: readableSourceIds.some(Boolean) ? readableSourceIds : undefined,
+        inheritedAssets: readableInheritedAssets.some(Boolean) ? readableInheritedAssets : undefined
       });
       setProgressMessage("");
       if (excludedCount > 0) setStatusMessage(`${readableFiles.length}개 준비됨 · ${excludedCount}개 제외`);
@@ -697,18 +738,195 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
+  function beginImport(nextImport: PendingImport) {
+    if (pendingImport) releaseArchivePages(pendingImport.pages);
+    savedImportResultIdsRef.current = new Set();
+    importResultAssetIdsRef.current = new Map();
+    setImportSaveReport(null);
+    setPendingImport(nextImport);
+  }
+
   function closeImport() {
     if (pendingImport) releaseArchivePages(pendingImport.pages);
+    pendingImportRef.current = null;
+    savedImportResultIdsRef.current = new Set();
+    importResultAssetIdsRef.current = new Map();
+    setImportSaveReport(null);
     setPendingImport(null);
   }
 
-  async function saveImport(value: ArchiveImportCommit) {
-    if (!projectId || !pendingImport || isSaving) return;
+  function stableImportAssetId(resultId: string) {
+    const existing = importResultAssetIdsRef.current.get(resultId);
+    if (existing) return existing;
+    const assetId = createArchiveUuid();
+    importResultAssetIdsRef.current.set(resultId, assetId);
+    return assetId;
+  }
+
+  async function saveStoryboardImport(
+    value: ArchiveImportCommit,
+    currentImport: PendingImport
+  ): Promise<ArchiveImportSaveReport> {
+    if (!projectId) {
+      return {
+        total: value.results.length,
+        succeededResultIds: [],
+        failures: value.results.map((result) => ({
+          resultId: result.id,
+          cropIndex: result.orderIndex + 1,
+          label: result.page.name,
+          message: "프로젝트를 찾을 수 없습니다."
+        }))
+      };
+    }
+
+    const pendingResults = value.results.filter(
+      (result) => !savedImportResultIdsRef.current.has(result.id)
+    );
+    const preparation = await mapSettledWithConcurrency(
+      pendingResults,
+      3,
+      async (result) => {
+        if (!result.crop) throw new Error("crop 범위가 없습니다.");
+        const inherited = inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex);
+        const baseTitle = value.title || inherited.displayName || "콘티";
+        const displayName = pageTitle(baseTitle, result.orderIndex, value.results.length)
+          || `콘티_${String(result.orderIndex + 1).padStart(2, "0")}`;
+        setProgressMessage(`crop 이미지 생성 중 ${result.orderIndex + 1}/${value.results.length}`);
+        const resultFile = await createCroppedArchiveFile(
+          result.page,
+          result.crop,
+          `${displayName}.jpg`
+        );
+        const thumbnailFile = await createArchiveThumbnail(resultFile);
+        return {
+          result,
+          inherited,
+          displayName,
+          resultFile,
+          thumbnailFile
+        };
+      }
+    );
+
+    const failures: ArchiveImportSaveFailure[] = preparation.flatMap((item) => {
+      if (item.status === "fulfilled") return [];
+      const result = pendingResults[item.index];
+      return [{
+        resultId: result.id,
+        cropIndex: result.orderIndex + 1,
+        label: pageTitle(
+          value.title || inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex).displayName,
+          result.orderIndex,
+          value.results.length
+        ) || result.page.name,
+        message: errorMessageOf(item.reason, "crop 이미지를 만들지 못했습니다.")
+      }];
+    });
+    const preparedItems = preparation.flatMap((item) => (
+      item.status === "fulfilled" ? [item.value] : []
+    ));
+
+    if (preparedItems.length > 0) {
+      setProgressMessage(`crop Blob ${preparedItems.length}개 준비 완료 · 업로드 시작`);
+    }
+    const uploads = await mapSettledWithConcurrency(
+      preparedItems,
+      3,
+      async ({ result, inherited, displayName, resultFile, thumbnailFile }, uploadIndex) => {
+        const sourceFile = currentImport.sourceFiles[result.page.sourceFileIndex];
+        const sourceIsPdf = sourceFile ? isPdfFile(sourceFile) : currentImport.sourceKind === "pdf";
+        setProgressMessage(`crop 결과 업로드 중 ${uploadIndex + 1}/${preparedItems.length}`);
+        const saved = await uploadProjectReferenceAsset(
+          projectId,
+          "storyboard",
+          resultFile,
+          {
+            assetId: stableImportAssetId(result.id),
+            thumbnailFile,
+            sourceType: sourceIsPdf ? "pdf_crop" : "image_crop",
+            sourceAssetId: currentImport.existingSourceAssetIds?.[result.page.sourceFileIndex] || undefined,
+            pageIndex: result.page.index,
+            groupId: currentImport.importBatchId,
+            folderId: currentImport.folderId,
+            originalFolderName: currentImport.fileMetadata[result.page.sourceFileIndex]?.originalFolderName,
+            relativePath: currentImport.fileMetadata[result.page.sourceFileIndex]?.relativePath,
+            ...cropMetadata(result.crop, result.page, value.cropTemplate),
+            cropOrderIndex: result.orderIndex,
+            cropIndex: result.orderIndex + 1,
+            displayName,
+            originalFilename: resultFile.name,
+            sourceFilename: sourceFile?.name || inherited.originalFilename || result.page.name,
+            sourceKind: sourceIsPdf ? "pdf" : "image",
+            sourcePageNumber: result.page.index + 1,
+            importBatchId: currentImport.importBatchId,
+            templateId: result.templateId || value.cropTemplate?.templateId,
+            manuallyPositioned: result.manuallyPositioned,
+            customSize: result.customSize,
+            title: displayName,
+            memo: value.memo,
+            episodeNumber: inherited.episodeNumber ?? undefined,
+            sceneId: value.sceneId || inherited.sceneId || undefined,
+            sceneNumber: value.sceneNo || inherited.sceneNumber,
+            sceneNo: value.sceneNo || inherited.sceneNumber,
+            cutNo: value.cutNo,
+            sortOrder: currentImport.baseSortOrder + result.orderIndex
+          }
+        );
+        return { result, saved };
+      }
+    );
+
+    const uploadedAssets: ProjectReferenceAsset[] = [];
+    for (const item of uploads) {
+      if (item.status === "fulfilled") {
+        savedImportResultIdsRef.current.add(item.value.result.id);
+        uploadedAssets.push(item.value.saved);
+        continue;
+      }
+      const prepared = preparedItems[item.index];
+      failures.push({
+        resultId: prepared.result.id,
+        cropIndex: prepared.result.orderIndex + 1,
+        label: prepared.displayName,
+        message: errorMessageOf(item.reason, "crop 결과를 업로드하지 못했습니다.")
+      });
+    }
+    mergeUploadedAssets("storyboard", uploadedAssets);
+
+    const report: ArchiveImportSaveReport = {
+      total: value.results.length,
+      succeededResultIds: [...savedImportResultIdsRef.current],
+      failures
+    };
+    setImportSaveReport(report);
+    setProgressMessage("");
+
+    if (report.succeededResultIds.length === report.total && failures.length === 0) {
+      setStatusMessage(`${report.total}개 콘티를 추출했습니다.`);
+      closeImport();
+    } else {
+      setErrorMessage(
+        `콘티 ${report.succeededResultIds.length}/${report.total}개 저장 · ${failures.length}개 실패`
+      );
+    }
+    return report;
+  }
+
+  async function saveImport(value: ArchiveImportCommit): Promise<ArchiveImportSaveReport> {
+    if (!projectId || !pendingImport || isSaving) {
+      return { total: value.results.length, succeededResultIds: [], failures: [] };
+    }
     setIsSaving(true);
     setErrorMessage("");
-    const batchId = typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}`;
+    if (pendingImport.assetType === "storyboard") {
+      try {
+        return await saveStoryboardImport(value, pendingImport);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+    const batchId = pendingImport.importBatchId;
     const savedAssets: ProjectReferenceAsset[] = [];
     try {
       if (pendingImport.sourceKind === "pdf") {
@@ -875,6 +1093,11 @@ export default function ProjectStoryboardOverheadPage() {
       closeImport();
       setProgressMessage("");
       mergeUploadedAssets(pendingImport.assetType, savedAssets);
+      return {
+        total: value.results.length,
+        succeededResultIds: value.results.map((result) => result.id),
+        failures: []
+      };
     } catch (error) {
       if (savedAssets.length > 0) {
         mergeUploadedAssets(pendingImport.assetType, savedAssets);
@@ -887,6 +1110,16 @@ export default function ProjectStoryboardOverheadPage() {
           : detail
       );
       setProgressMessage("");
+      return {
+        total: value.results.length,
+        succeededResultIds: [],
+        failures: value.results.map((result) => ({
+          resultId: result.id,
+          cropIndex: result.orderIndex + 1,
+          label: result.page.name,
+          message: errorMessageOf(error, "아카이브 자료를 저장하지 못했습니다.")
+        }))
+      };
     } finally {
       setIsSaving(false);
     }
@@ -1069,6 +1302,27 @@ export default function ProjectStoryboardOverheadPage() {
         verified: false
       });
       setErrorMessage("선택한 폴더에 읽을 수 있는 PDF 또는 이미지가 없습니다.");
+      return;
+    }
+    if (assetType === "storyboard") {
+      // 콘티 폴더 선택도 원본 저장 작업이 아니라 현재 폴더에서 시작하는
+      // 하나의 로컬 crop session으로 취급합니다. 원래 상대 경로는 metadata로만 보존합니다.
+      await prepareFiles(
+        assetType,
+        entries.map((entry) => entry.file),
+        undefined,
+        false,
+        {
+          folderId: currentFolderPath ? currentFolderId ?? undefined : null,
+          fileMetadata: entries.map((entry) => ({
+            originalFolderName: entry.originalFolderName,
+            relativePath: entry.relativePath
+          }))
+        }
+      );
+      if (scan.skipped.length > 0) {
+        setStatusMessage(`${entries.length}개 준비됨 · ${scan.skipped.length}개 제외`);
+      }
       return;
     }
     setIsPreparing(true);
@@ -1641,13 +1895,15 @@ export default function ProjectStoryboardOverheadPage() {
           setProgressMessage(`${sourceKind === "pdf" ? "PDF" : "이미지"} ${current}/${total}`);
         }
       });
-      setPendingImport({
+      beginImport({
         assetType: "storyboard",
         sourceKind: source.kind === "pdf" ? "pdf" : "images",
         sourceFiles: [file],
         sourceLabel: archiveDisplayName(asset),
         pages: source.pages,
         folderId: asset.crop.folderId ?? null,
+        importBatchId: createArchiveSessionId(),
+        baseSortOrder: imageAssets.length,
         fileMetadata: [{
           originalFolderName: asset.crop.originalFolderName ?? "",
           relativePath: asset.crop.relativePath ?? asset.filename
@@ -2337,6 +2593,7 @@ export default function ProjectStoryboardOverheadPage() {
           scenes={sceneItems}
           initialMetadata={archiveImportInitialMetadata(pendingImport)}
           isSaving={isSaving}
+          saveReport={importSaveReport}
           onClose={closeImport}
           onSave={saveImport}
         />
@@ -2924,16 +3181,6 @@ function isValidArchiveDropTarget(
   });
 }
 
-function uniqueFiles(files: File[]) {
-  const seen = new Set<string>();
-  return files.filter((file) => {
-    const key = `${file.name}:${file.size}:${file.lastModified}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
 function isPdfFile(file: File) {
   return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
 }
@@ -2951,4 +3198,36 @@ async function hasPdfSignature(file: File) {
   if (file.size < 5) return false;
   const bytes = new Uint8Array(await file.slice(0, Math.min(1_024, file.size)).arrayBuffer());
   return String.fromCharCode(...bytes).includes("%PDF-");
+}
+
+function createArchiveUuid() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const value = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [
+    value.slice(0, 8),
+    value.slice(8, 12),
+    value.slice(12, 16),
+    value.slice(16, 20),
+    value.slice(20)
+  ].join("-");
+}
+
+function createArchiveSessionId() {
+  return createArchiveUuid();
+}
+
+function errorMessageOf(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
 }

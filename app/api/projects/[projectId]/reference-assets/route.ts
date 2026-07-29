@@ -28,6 +28,7 @@ type ReferenceMediaLinkTypeUpdate = {
 
 const STORAGE_BUCKET = "storyboards";
 const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,scenario_scenes,scenario_parse_error,sort_order,created_at,updated_at";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -60,6 +61,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   const uploadedPaths: string[] = [];
+  let cleanupClient: ReturnType<typeof requireProjectAccessDb> | null = null;
+  let rowPersisted = false;
   try {
     const projectId = await getProjectId(context);
     if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
@@ -97,6 +100,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     const validationError = validateFile(assetType, file);
     if (validationError) return NextResponse.json({ error: validationError }, { status: 415 });
+    const requestedAssetId = cleanText(formData.get("assetId"), 100).toLowerCase();
+    if (requestedAssetId && !UUID_PATTERN.test(requestedAssetId)) {
+      return NextResponse.json({ error: "자료 ID가 올바른 UUID 형식이 아닙니다." }, { status: 400 });
+    }
 
     const dailyPlanId = cleanText(formData.get("dailyPlanId"), 500);
     const sceneNo = cleanText(formData.get("sceneNo"), 100);
@@ -104,6 +111,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const shotRef = cleanText(formData.get("shotRef"), 500);
 
     const supabase = requireProjectAccessDb();
+    cleanupClient = supabase;
+    if (requestedAssetId) {
+      const { data: existingById, error: existingByIdError } = await supabase
+        .from("project_reference_assets")
+        .select(SELECT_COLUMNS)
+        .eq("id", requestedAssetId)
+        .eq("project_id", projectId)
+        .maybeSingle();
+      if (existingByIdError) throw existingByIdError;
+      if (existingById) {
+        if (String(existingById.asset_type ?? "") !== assetType) {
+          return NextResponse.json(
+            { error: "같은 자료 ID가 다른 프로젝트 또는 자료 종류에서 사용 중입니다." },
+            { status: 409 }
+          );
+        }
+        return NextResponse.json({
+          ok: true,
+          asset: mapAssetRow(existingById),
+          idempotent: true
+        });
+      }
+    }
     const rawCropData = parseCropFormData(formData, normalizeSourceType(formData.get("sourceType"), file));
     const rawMetadataError = validateRawArchiveMetadata(rawCropData);
     if (rawMetadataError) {
@@ -231,6 +261,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
           .single();
         if (error) throw error;
         savedRow = data;
+        rowPersisted = true;
         const previousPaths = [
           String(existing.storage_path ?? ""),
           cleanText(normalizeCrop(existing.crop_data).thumbnailPath, 1_000)
@@ -242,22 +273,48 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     if (!savedRow) {
+      // 이 프로젝트의 Supabase client는 Database generic이 없어 payload에서 Insert shape를 추론합니다.
+      // 실제 테이블의 UUID PK를 포함하되 기존 payload shape로 좁혀 나머지 필드 검사는 유지합니다.
+      const insertPayload = requestedAssetId
+        ? { id: requestedAssetId, ...payload } as typeof payload
+        : payload;
       const { data, error } = await supabase
         .from("project_reference_assets")
-        .insert(payload)
+        .insert(insertPayload)
         .select(SELECT_COLUMNS)
         .single();
-      if (error) throw error;
+      if (error) {
+        if (requestedAssetId && safeError(error).code === "23505") {
+          const { data: existingById, error: existingByIdError } = await supabase
+            .from("project_reference_assets")
+            .select(SELECT_COLUMNS)
+            .eq("id", requestedAssetId)
+            .eq("project_id", projectId)
+            .maybeSingle();
+          if (existingByIdError) throw existingByIdError;
+          if (existingById && isMatchingStableAsset(existingById, projectId, assetType)) {
+            const storageCleanupWarning = await cleanupUploadedPaths(
+              supabase,
+              uploadedPaths,
+              "idempotent-race"
+            );
+            return NextResponse.json({
+              ok: true,
+              asset: mapAssetRow(existingById),
+              idempotent: true,
+              ...(storageCleanupWarning ? { storageCleanupWarning } : {})
+            });
+          }
+        }
+        throw error;
+      }
       savedRow = data;
+      rowPersisted = true;
     }
     return NextResponse.json({ ok: true, asset: mapAssetRow(savedRow) }, { status: 201 });
   } catch (error) {
-    if (uploadedPaths.length > 0) {
-      try {
-        await requireProjectAccessDb().storage.from(STORAGE_BUCKET).remove(uploadedPaths);
-      } catch {
-        // 메타데이터 저장 실패 응답을 우선합니다.
-      }
+    if (!rowPersisted && cleanupClient && uploadedPaths.length > 0) {
+      await cleanupUploadedPaths(cleanupClient, uploadedPaths, "upload-failure");
     }
     return materialError(error, "자료를 업로드하지 못했습니다.");
   }
@@ -734,9 +791,11 @@ function normalizeCrop(value: unknown) {
   };
   const ratio = number("ratio", 0);
   const sourceType = normalizeStoredSourceType(source.sourceType);
+  const sourceKind = normalizeSourceKind(source.sourceKind);
   const assetType = normalizeArchiveMediaType(source.assetType);
   const hasPageIndex = source.pageIndex !== null && source.pageIndex !== undefined && source.pageIndex !== "";
   const pageIndexValue = Number(source.pageIndex);
+  const sourcePageNumber = nullablePositiveInteger(source.sourcePageNumber);
   const episodeNumber = nullablePositiveInteger(source.episodeNumber);
   const sceneId = cleanText(source.sceneId, 100) || null;
   const rawSceneNumber = cleanText(source.sceneNumber ?? source.sceneNo, 100);
@@ -744,6 +803,8 @@ function normalizeCrop(value: unknown) {
   const cutNumber = nullablePositiveInteger(source.cutNumber ?? source.cutNo);
   const cropIndex = nullableNonNegativeInteger(source.cropIndex);
   const normalizedLinkKey = cleanText(source.normalizedLinkKey, 1_000);
+  const manuallyPositioned = nullableBoolean(source.manuallyPositioned);
+  const customSize = nullableBoolean(source.customSize);
   return {
     x: Math.min(1, Math.max(0, number("x", 0))),
     y: Math.min(1, Math.max(0, number("y", 0))),
@@ -755,6 +816,17 @@ function normalizeCrop(value: unknown) {
       ? { sourceAssetId: cleanText(source.sourceAssetId, 100) || null }
       : {}),
     ...(hasPageIndex && Number.isInteger(pageIndexValue) && pageIndexValue >= 0 ? { pageIndex: pageIndexValue } : {}),
+    ...(cleanText(source.sourceFilename, 500)
+      ? { sourceFilename: cleanText(source.sourceFilename, 500) }
+      : {}),
+    ...(sourceKind ? { sourceKind } : {}),
+    ...(sourcePageNumber !== null ? { sourcePageNumber } : {}),
+    ...(cleanText(source.importBatchId, 200)
+      ? { importBatchId: cleanText(source.importBatchId, 200) }
+      : {}),
+    ...(cleanText(source.templateId, 200) ? { templateId: cleanText(source.templateId, 200) } : {}),
+    ...(manuallyPositioned !== null ? { manuallyPositioned } : {}),
+    ...(customSize !== null ? { customSize } : {}),
     ...(cleanText(source.title, 240) ? { title: cleanText(source.title, 240) } : {}),
     ...(cleanText(source.displayName, 240) ? { displayName: cleanText(source.displayName, 240) } : {}),
     ...(cleanText(source.originalFilename, 500)
@@ -803,6 +875,13 @@ function parseCropFormData(formData: FormData, sourceType: ReturnType<typeof nor
     sourceType,
     sourceAssetId: formData.get("sourceAssetId"),
     pageIndex: formData.get("pageIndex"),
+    sourceFilename: formData.get("sourceFilename"),
+    sourceKind: formData.get("sourceKind"),
+    sourcePageNumber: formData.get("sourcePageNumber"),
+    importBatchId: formData.get("importBatchId"),
+    templateId: formData.get("templateId"),
+    manuallyPositioned: formData.get("manuallyPositioned"),
+    customSize: formData.get("customSize"),
     title: formData.get("title"),
     memo: formData.get("memo"),
     basePageWidth: formData.get("basePageWidth"),
@@ -859,6 +938,12 @@ function nullableNonNegativeInteger(value: unknown) {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function nullableBoolean(value: unknown) {
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return null;
+}
+
 function normalizeSourceType(value: FormDataEntryValue | null, file: File) {
   const normalized = normalizeStoredSourceType(value);
   if (normalized) return normalized;
@@ -872,7 +957,11 @@ function normalizeStoredSourceType(value: unknown) {
     || value === "image_crop"
     || value === "pdf_crop"
     ? value
-    : null;
+      : null;
+}
+
+function normalizeSourceKind(value: unknown) {
+  return value === "pdf" || value === "image" ? value : null;
 }
 
 function mapAssetRow(row: Record<string, unknown>) {
@@ -953,6 +1042,7 @@ function validateRawArchiveMetadata(value: unknown) {
   const episodeValue = source.episodeNumber;
   const cutValue = source.cutNumber ?? source.cutNo;
   const cropIndexValue = source.cropIndex;
+  const sourcePageNumberValue = source.sourcePageNumber;
   if (hasValue(episodeValue) && nullablePositiveInteger(episodeValue) === null) {
     return "회차는 1 이상의 정수로 입력해주세요.";
   }
@@ -961,6 +1051,18 @@ function validateRawArchiveMetadata(value: unknown) {
   }
   if (hasValue(cropIndexValue) && nullableNonNegativeInteger(cropIndexValue) === null) {
     return "crop 순서는 0 이상의 정수로 입력해주세요.";
+  }
+  if (hasValue(sourcePageNumberValue) && nullablePositiveInteger(sourcePageNumberValue) === null) {
+    return "원본 페이지 번호는 1 이상의 정수로 입력해주세요.";
+  }
+  if (hasValue(source.sourceKind) && !normalizeSourceKind(source.sourceKind)) {
+    return "crop 원본 종류가 올바르지 않습니다.";
+  }
+  if (hasValue(source.manuallyPositioned) && nullableBoolean(source.manuallyPositioned) === null) {
+    return "crop 수동 이동 여부가 올바르지 않습니다.";
+  }
+  if (hasValue(source.customSize) && nullableBoolean(source.customSize) === null) {
+    return "crop 사용자 크기 여부가 올바르지 않습니다.";
   }
   return "";
 }
@@ -1172,6 +1274,33 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function isMatchingStableAsset(
+  row: Record<string, unknown>,
+  projectId: string,
+  assetType: AssetType
+) {
+  return String(row.project_id ?? "") === projectId
+    && String(row.asset_type ?? "") === assetType;
+}
+
+async function cleanupUploadedPaths(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  uploadedPaths: string[],
+  reason: string
+) {
+  const paths = [...new Set(uploadedPaths.filter(Boolean))];
+  if (paths.length === 0) return "";
+  try {
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+    if (error) throw error;
+    uploadedPaths.splice(0, uploadedPaths.length);
+    return "";
+  } catch (error) {
+    console.error(`[reference-assets:${reason}:storage-cleanup]`, safeError(error));
+    return "일부 Storage 파일을 정리하지 못했습니다.";
+  }
 }
 
 function materialError(error: unknown, message: string) {

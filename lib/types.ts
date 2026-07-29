@@ -179,6 +179,13 @@ export type ProjectReferenceCrop = {
   sourceType?: "upload_image" | "upload_pdf" | "pdf_page" | "image_crop" | "pdf_crop";
   sourceAssetId?: string | null;
   pageIndex?: number | null;
+  sourceFilename?: string;
+  sourceKind?: "pdf" | "image";
+  sourcePageNumber?: number | null;
+  importBatchId?: string;
+  templateId?: string;
+  manuallyPositioned?: boolean;
+  customSize?: boolean;
   title?: string;
   memo?: string;
   basePageWidth?: number;

@@ -45,9 +45,12 @@ export type StoryboardCropCandidate = {
   id: string;
   page: ArchiveImportPage;
   crop: RelativeCrop;
+  templateId: string;
   rowIndex: number;
   columnIndex: number;
   cellKey: string;
+  manuallyPositioned: boolean;
+  customSize: boolean;
 };
 
 export type StoryboardGridOrigin = {
@@ -57,12 +60,14 @@ export type StoryboardGridOrigin = {
 
 export type StoryboardGridCell = {
   key: string;
+  templateId: string;
   rowIndex: number;
   columnIndex: number;
   crop: RelativeCrop;
 };
 
 export type StoryboardCropTemplate = {
+  templateId: string;
   basePageWidth: number;
   basePageHeight: number;
   pageNativeWidth: number;
@@ -144,7 +149,14 @@ export async function renderArchivePdfPages(
   sourceFileIndex = 0
 ): Promise<ArchiveImportPage[]> {
   const pdfjs = await loadPdfJs();
-  const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  let sourceData: ArrayBuffer | null = await file.arrayBuffer();
+  const loadingTask = pdfjs.getDocument({ data: sourceData });
+  const document = await loadingTask.promise.catch(async (error) => {
+    sourceData = null;
+    await loadingTask.destroy();
+    throw error;
+  });
+  sourceData = null;
   const pages: ArchiveImportPage[] = [];
   try {
     for (let pageIndex = 0; pageIndex < document.numPages; pageIndex += 1) {
@@ -171,13 +183,17 @@ export async function renderArchivePdfPages(
       onProgress?.(pageIndex + 1, document.numPages);
     }
     return pages;
+  } catch (error) {
+    releaseArchivePages(pages);
+    throw error;
   } finally {
     await document.cleanup();
+    await loadingTask.destroy();
   }
 }
 
 export async function loadArchiveImagePages(files: File[]): Promise<ArchiveImportPage[]> {
-  return mapWithConcurrency(files, 3, async (file, index) => {
+  const results = await mapSettledWithConcurrency(files, 3, async (file, index) => {
     const optimized = await optimizeArchiveImage(file);
     const url = URL.createObjectURL(optimized.displayFile);
     try {
@@ -198,16 +214,29 @@ export async function loadArchiveImagePages(files: File[]): Promise<ArchiveImpor
       throw error;
     }
   });
+  const pages = results.flatMap((result) => (
+    result.status === "fulfilled" ? [result.value] : []
+  ));
+  const failure = results.find(
+    (result): result is SettledMapRejected => result.status === "rejected"
+  );
+  if (failure) {
+    releaseArchivePages(pages);
+    throw failure.reason;
+  }
+  return pages;
 }
 
 export function createStoryboardCropTemplate(
   page: ArchiveImportPage,
-  crop: RelativeCrop
+  crop: RelativeCrop,
+  templateId = createStoryboardTemplateId()
 ): StoryboardCropTemplate {
   const safeCrop = normalizeRelativeCrop(crop);
   const templateWidth = safeCrop.width * page.width;
   const templateHeight = safeCrop.height * page.height;
   return {
+    templateId,
     basePageWidth: page.width,
     basePageHeight: page.height,
     pageNativeWidth: page.width,
@@ -237,10 +266,12 @@ export function createCenteredStoryboardCrop(
   template: StoryboardCropTemplate,
   centerX: number,
   centerY: number,
-  _page?: Pick<ArchiveImportPage, "width" | "height">
+  page: Pick<ArchiveImportPage, "width" | "height"> = {
+    width: template.pageNativeWidth,
+    height: template.pageNativeHeight
+  }
 ): RelativeCrop {
-  const width = Math.min(1, Math.max(0.01, template.cropWidth));
-  const height = Math.min(1, Math.max(0.01, template.cropHeight));
+  const { width, height } = getStoryboardPageGeometry(template, page);
   return {
     x: Math.min(1 - width, Math.max(0, centerX - width / 2)),
     y: Math.min(1 - height, Math.max(0, centerY - height / 2)),
@@ -259,11 +290,45 @@ export function createStoryboardCellKey(
 
 export function getStoryboardPageOrigin(
   template: StoryboardCropTemplate,
-  _page?: Pick<ArchiveImportPage, "width" | "height">
+  page: Pick<ArchiveImportPage, "width" | "height"> = {
+    width: template.pageNativeWidth,
+    height: template.pageNativeHeight
+  }
 ): StoryboardGridOrigin {
+  const geometry = getStoryboardPageGeometry(template, page);
   return {
-    x: template.columnOriginX / template.pageNativeWidth,
-    y: template.rowOriginY / template.pageNativeHeight
+    x: template.columnOriginX * geometry.nativeScale / geometry.pageWidth,
+    y: template.rowOriginY * geometry.nativeScale / geometry.pageHeight
+  };
+}
+
+export function getStoryboardPageGeometry(
+  template: StoryboardCropTemplate,
+  page: Pick<ArchiveImportPage, "width" | "height">
+) {
+  const pageWidth = Math.max(1, page.width);
+  const pageHeight = Math.max(1, page.height);
+  const templateWidth = Math.max(Number.EPSILON, template.templateWidth);
+  const templateHeight = Math.max(Number.EPSILON, template.templateHeight);
+  const nativeScale = Math.min(
+    1,
+    pageWidth / templateWidth,
+    pageHeight / templateHeight
+  );
+  const width = templateWidth * nativeScale / pageWidth;
+  const height = templateHeight * nativeScale / pageHeight;
+  const horizontalGap = Math.max(0, template.horizontalGap) * nativeScale / pageWidth;
+  const verticalGap = Math.max(0, template.verticalGap) * nativeScale / pageHeight;
+  return {
+    pageWidth,
+    pageHeight,
+    nativeScale,
+    width,
+    height,
+    horizontalGap,
+    verticalGap,
+    columnStep: width + horizontalGap,
+    rowStep: height + verticalGap
   };
 }
 
@@ -272,12 +337,12 @@ export function createStoryboardGridCells(
   page: Pick<ArchiveImportPage, "sourceFileIndex" | "index" | "width" | "height">,
   origin = getStoryboardPageOrigin(template, page)
 ): StoryboardGridCell[] {
-  const width = template.cropWidth;
-  const height = template.cropHeight;
-  const horizontalGap = template.horizontalGap / template.pageNativeWidth;
-  const verticalGap = template.verticalGap / template.pageNativeHeight;
-  const columnStep = width + horizontalGap;
-  const rowStep = height + verticalGap;
+  const {
+    width,
+    height,
+    columnStep,
+    rowStep
+  } = getStoryboardPageGeometry(template, page);
   if (columnStep <= 0 || rowStep <= 0) return [];
 
   const firstColumn = Math.ceil((-origin.x - 0.000001) / columnStep);
@@ -290,6 +355,7 @@ export function createStoryboardGridCells(
     for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex += 1) {
       cells.push({
         key: createStoryboardCellKey(page, rowIndex, columnIndex),
+        templateId: template.templateId,
         rowIndex,
         columnIndex,
         crop: {
@@ -336,8 +402,9 @@ export function selectStoryboardGridCells(
   origin = getStoryboardPageOrigin(template, page)
 ) {
   const safeSelection = normalizeRelativeCrop(selection);
-  const toleranceX = Math.min(template.cropWidth * 0.12, 8 / Math.max(1, page.width));
-  const toleranceY = Math.min(template.cropHeight * 0.12, 8 / Math.max(1, page.height));
+  const geometry = getStoryboardPageGeometry(template, page);
+  const toleranceX = Math.min(geometry.width * 0.12, 8 / geometry.pageWidth);
+  const toleranceY = Math.min(geometry.height * 0.12, 8 / geometry.pageHeight);
   const selectionLeft = safeSelection.x - toleranceX;
   const selectionTop = safeSelection.y - toleranceY;
   const selectionRight = safeSelection.x + safeSelection.width + toleranceX;
@@ -536,6 +603,13 @@ function ensureJpegName(value: string) {
   return `${stripExtension(value)}.jpg`;
 }
 
+function createStoryboardTemplateId() {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `storyboard-template-${globalThis.crypto.randomUUID()}`;
+  }
+  return `storyboard-template-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 function clamp(value: number, min = 0) {
   return Math.min(1, Math.max(min, Number.isFinite(value) ? value : min));
 }
@@ -573,6 +647,40 @@ export async function mapWithConcurrency<T, R>(
   );
   if (failure) throw failure.reason;
   return results;
+}
+
+export type SettledMapFulfilled<R> = {
+  status: "fulfilled";
+  index: number;
+  value: R;
+};
+
+export type SettledMapRejected = {
+  status: "rejected";
+  index: number;
+  reason: unknown;
+};
+
+export async function mapSettledWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>
+): Promise<Array<SettledMapFulfilled<R> | SettledMapRejected>> {
+  return mapWithConcurrency(values, concurrency, async (value, index) => {
+    try {
+      return {
+        status: "fulfilled",
+        index,
+        value: await worker(value, index)
+      } as const;
+    } catch (reason) {
+      return {
+        status: "rejected",
+        index,
+        reason
+      } as const;
+    }
+  });
 }
 
 async function loadPdfJs() {
