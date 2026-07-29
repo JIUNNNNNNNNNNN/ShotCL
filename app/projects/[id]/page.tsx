@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import { ShotCard } from "@/components/ShotCard";
@@ -116,6 +117,7 @@ export default function ProjectDetailPage() {
   const projectId = useProjectId();
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
+  const isProgressView = searchParams.get("view") === "progress" || Boolean(dailyPlanId);
   const [project, setProject] = useState<Project | null>(null);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
@@ -427,6 +429,16 @@ export default function ProjectDetailPage() {
           프로젝트 선택으로
         </ButtonLink>
       </Card>
+    );
+  }
+
+  if (!isProgressView) {
+    return (
+      <ProjectGuideMenu
+        projectId={project.id}
+        role={role}
+        queryString={searchParams.toString()}
+      />
     );
   }
 
