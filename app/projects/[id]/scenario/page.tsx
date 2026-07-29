@@ -290,7 +290,7 @@ export default function ProjectScenarioPage() {
                 setStatusMessage("");
               }}
               aria-label="시나리오 PDF 선택"
-              className="min-h-9 w-full min-w-0 truncate rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light"
+              className="min-h-9 w-full min-w-0 truncate rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light"
             >
               {assets.map((asset) => (
                 <option key={asset.id} value={asset.id}>{asset.filename}</option>
@@ -312,7 +312,7 @@ export default function ProjectScenarioPage() {
                 rel="noreferrer"
                 aria-label={`${selectedAsset.filename} 새 창에서 열기`}
                 title="원본 PDF 새 창"
-                className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95"
+                className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95"
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden />
               </a>
@@ -323,7 +323,7 @@ export default function ProjectScenarioPage() {
                 rel="noreferrer"
                 aria-label={`${selectedAsset.filename} 다운로드`}
                 title="다운로드"
-                className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95"
+                className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden />
               </a>
@@ -338,7 +338,7 @@ export default function ProjectScenarioPage() {
                 disabled={isUploading}
                 aria-label={isUploading ? "PDF 업로드 중" : "PDF 업로드"}
                 title="PDF 업로드"
-                className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-2.5 text-[11px] font-black text-white transition hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-2.5 text-[11px] font-black text-white transition hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60"
               >
                 {isUploading ? <PixelDogLoader size="xs" compact /> : <Upload className="h-3.5 w-3.5" aria-hidden />}
                 <span className="hidden sm:inline">{isUploading ? "분석 중" : "+ PDF"}</span>
@@ -357,7 +357,7 @@ export default function ProjectScenarioPage() {
                   onClick={() => void handleDelete(selectedAsset)}
                   aria-label={`${selectedAsset.filename} 삭제`}
                   title="선택한 PDF 삭제"
-                  className="grid h-9 w-9 place-items-center rounded-full border border-red-200 bg-white text-field-danger transition hover:bg-red-50 active:scale-95"
+                  className="grid h-9 w-9 place-items-center rounded-[3px] border border-red-200 bg-white text-field-danger transition hover:bg-red-50 active:scale-95"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </button>
@@ -369,7 +369,7 @@ export default function ProjectScenarioPage() {
 
       {selectedAsset ? (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <div className="inline-flex rounded-full border border-field-border bg-white p-0.5">
+          <div className="inline-flex rounded-[3px] border border-field-border bg-white p-0.5">
             <ModeButton active={viewMode === "scenes"} onClick={() => setViewMode("scenes")} icon={List}>
               씬별 보기
             </ModeButton>
@@ -386,7 +386,7 @@ export default function ProjectScenarioPage() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="씬 번호·제목 검색"
-                className="min-h-9 w-full rounded-full border border-field-border bg-white py-1.5 pl-8 pr-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                className="min-h-9 w-full rounded-[3px] border border-field-border bg-white py-1.5 pl-8 pr-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light"
               />
             </label>
           ) : null}
@@ -399,7 +399,7 @@ export default function ProjectScenarioPage() {
                     type="button"
                     onClick={cancelEditing}
                     disabled={isSaving}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-2.5 text-[11px] font-black text-field-muted transition active:scale-95"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-2.5 text-[11px] font-black text-field-muted transition active:scale-95"
                   >
                     <X className="h-3.5 w-3.5" aria-hidden />
                     취소
@@ -408,7 +408,7 @@ export default function ProjectScenarioPage() {
                     type="button"
                     onClick={() => void handleSaveScenes()}
                     disabled={isSaving || !hasChanges}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-[11px] font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-[11px] font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     <Save className="h-3.5 w-3.5" aria-hidden />
                     {isSaving ? "저장 중" : "저장"}
@@ -418,7 +418,7 @@ export default function ProjectScenarioPage() {
                 <button
                   type="button"
                   onClick={() => setIsEditing(true)}
-                  className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-2.5 text-[11px] font-black text-field-primary transition hover:border-field-primary active:scale-95"
+                  className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-2.5 text-[11px] font-black text-field-primary transition hover:border-field-primary active:scale-95"
                 >
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
                   편집
@@ -429,7 +429,7 @@ export default function ProjectScenarioPage() {
                 onClick={() => void handleReanalyze()}
                 disabled={isAnalyzing}
                 title="원본 PDF에서 자동 분할 다시 실행"
-                className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95 disabled:cursor-wait disabled:opacity-50"
+                className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white text-field-primary transition hover:border-field-primary active:scale-95 disabled:cursor-wait disabled:opacity-50"
               >
                 {isAnalyzing ? <PixelDogLoader size="xs" compact /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                 <span className="sr-only">자동 분할 다시 실행</span>
@@ -488,7 +488,7 @@ export default function ProjectScenarioPage() {
                   <button
                     type="button"
                     onClick={() => setViewMode("pdf")}
-                    className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
+                    className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary"
                   >
                     원본 PDF 보기
                   </button>
@@ -496,7 +496,7 @@ export default function ProjectScenarioPage() {
                     <button
                       type="button"
                       onClick={addScene}
-                      className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white"
+                      className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white"
                     >
                       <Plus className="h-3.5 w-3.5" aria-hidden />
                       수동 씬 추가
@@ -523,7 +523,7 @@ export default function ProjectScenarioPage() {
                           className={`h-4 w-4 shrink-0 text-field-primary transition-transform ${expanded ? "rotate-180" : ""}`}
                           aria-hidden
                         />
-                        <span className="shrink-0 rounded-full bg-field-light px-2 py-0.5 text-xs font-black text-field-primary">
+                        <span className="shrink-0 rounded-[3px] bg-field-light px-2 py-0.5 text-xs font-black text-field-primary">
                           S#{scene.sceneNo || index + 1}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-sm font-black leading-normal text-field-text">
@@ -635,7 +635,7 @@ function ModeButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-[11px] font-black transition ${
+      className={`inline-flex min-h-8 items-center gap-1 rounded-[3px] px-2.5 text-[11px] font-black transition ${
         active ? "bg-field-primary text-white" : "text-field-muted hover:text-field-primary"
       }`}
     >
@@ -665,7 +665,7 @@ function SmallIconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`grid h-8 w-8 place-items-center rounded-full transition active:scale-95 disabled:opacity-25 ${
+      className={`grid h-8 w-8 place-items-center rounded-[3px] transition active:scale-95 disabled:opacity-25 ${
         danger ? "text-field-danger hover:bg-red-50" : "text-field-muted hover:bg-field-light hover:text-field-primary"
       }`}
     >
@@ -708,7 +708,7 @@ function EmptyState({
       <div>
         <p>{hasAsset ? "저장된 씬이 없습니다." : canEdit ? "PDF를 업로드해 씬별로 읽을 수 있습니다." : "등록된 시나리오 PDF가 없습니다."}</p>
         {canEdit && onAdd ? (
-          <button type="button" onClick={onAdd} className="mt-3 rounded-full bg-field-primary px-3 py-2 text-xs font-black text-white">
+          <button type="button" onClick={onAdd} className="mt-3 rounded-[3px] bg-field-primary px-3 py-2 text-xs font-black text-white">
             수동 씬 추가
           </button>
         ) : null}

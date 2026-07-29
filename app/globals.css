@@ -215,13 +215,18 @@ div {
 
 button {
   -webkit-tap-highlight-color: transparent;
-  border-radius: 9999px !important;
+  border-radius: 3px !important;
 }
 
 summary,
 label:has(input[type="file"]),
 a[class*="inline-flex"],
 a[class*="min-h-"][class*="items-center"] {
+  border-radius: 3px !important;
+}
+
+/* New / Join / Go와 프로젝트 궤도처럼 동작 자체가 원형인 컨트롤만 예외입니다. */
+.functional-circle {
   border-radius: 9999px !important;
 }
 

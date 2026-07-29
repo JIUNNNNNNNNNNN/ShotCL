@@ -113,7 +113,7 @@ export function ShotArchivePicker({
             <h2 className="font-display truncate text-lg font-black text-field-primary">아카이브에서 선택</h2>
             <p className="truncate text-xs font-bold text-field-muted">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
           </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-full border border-field-border text-field-muted" aria-label="자료 선택 닫기">
+          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-border text-field-muted" aria-label="자료 선택 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
@@ -125,7 +125,7 @@ export function ShotArchivePicker({
                 key={type}
                 type="button"
                 onClick={() => setMediaType(type)}
-                className={`min-h-10 rounded-full border text-sm font-black ${mediaType === type ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"}`}
+                className={`min-h-10 rounded-[3px] border text-sm font-black ${mediaType === type ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"}`}
               >
                 {type === "overhead" ? "부감도" : "콘티"}
               </button>
@@ -133,13 +133,13 @@ export function ShotArchivePicker({
           </div>
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full rounded-full border border-field-border bg-white pl-9 pr-3 text-sm" placeholder="제목, 메모, 씬, 컷 검색" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full rounded-[3px] border border-field-border bg-white pl-9 pr-3 text-sm" placeholder="제목, 메모, 씬, 컷 검색" />
           </label>
           {selected ? (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-field-primary bg-field-soft px-3 py-2">
               <p className="min-w-0 truncate text-xs font-black text-field-primary">현재 연결: {selected.filename}</p>
               {!readOnly ? (
-                <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-field-border bg-white px-2 text-[11px] font-black text-field-danger">
+                <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-[3px] border border-field-border bg-white px-2 text-[11px] font-black text-field-danger">
                   <Unlink className="h-3.5 w-3.5" aria-hidden />
                   선택 해제
                 </button>
@@ -177,7 +177,7 @@ export function ShotArchivePicker({
                     <p className="truncate px-1 text-[10px] font-bold text-field-muted">
                       {[asset.sceneNo && `S#${asset.sceneNo}`, asset.cutNo && `C#${asset.cutNo}`, asset.memo].filter(Boolean).join(" · ") || "태그 없음"}
                     </p>
-                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-field-primary text-white"><Check className="h-4 w-4" aria-hidden /></span> : null}
+                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[3px] bg-field-primary text-white"><Check className="h-4 w-4" aria-hidden /></span> : null}
                   </button>
                 );
               })}

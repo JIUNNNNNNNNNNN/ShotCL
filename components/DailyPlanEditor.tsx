@@ -1182,11 +1182,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black">
-              <span className="max-w-[55vw] truncate rounded-full border border-field-border bg-white px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
+              <span className="max-w-[55vw] truncate rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
-              className="inline-flex min-h-10 items-center justify-center rounded-full border border-field-border bg-white px-4 text-sm font-black text-field-text"
+              className="inline-flex min-h-10 items-center justify-center rounded-[3px] border border-field-border bg-white px-4 text-sm font-black text-field-text"
             >
               목록으로 돌아가기
             </Link>
@@ -2930,7 +2930,7 @@ function TimetableLinkedFieldLabel({
       {canReset ? (
         <button
           type="button"
-          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
           onClick={onReset}
           aria-label={`${label} 씬리스트 원본값 사용`}
           title="씬리스트 원본값 사용"
@@ -3071,15 +3071,15 @@ function SceneCastSelector({
             <div className="flex items-center gap-2 border-t border-field-border p-2">
               <button
                 type="button"
-                className="mr-auto min-h-9 rounded-full border border-field-border px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-field-primary"
+                className="mr-auto min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-field-primary"
                 onClick={() => setDraftSelectedIds([])}
               >
                 전체 해제
               </button>
-              <button type="button" className="min-h-9 rounded-full border border-field-border px-4 text-xs font-bold text-field-muted hover:border-field-primary" onClick={cancelSelection}>
+              <button type="button" className="min-h-9 rounded-[3px] border border-field-border px-4 text-xs font-bold text-field-muted hover:border-field-primary" onClick={cancelSelection}>
                 취소
               </button>
-              <button type="button" className="min-h-9 rounded-full bg-field-primary px-4 text-xs font-bold text-white hover:brightness-110" onClick={completeSelection}>
+              <button type="button" className="min-h-9 rounded-[3px] bg-field-primary px-4 text-xs font-bold text-white hover:brightness-110" onClick={completeSelection}>
                 완료
               </button>
             </div>
@@ -3095,7 +3095,7 @@ function CircularDeleteButton({ label, onClick, tabIndex }: { label: string; onC
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-field-danger bg-white text-field-danger hover:bg-field-danger hover:text-white"
+      className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-danger bg-white text-field-danger hover:bg-field-danger hover:text-white"
       aria-label={label}
       title={label}
       tabIndex={tabIndex}

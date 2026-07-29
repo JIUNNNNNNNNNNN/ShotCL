@@ -690,7 +690,7 @@ export default function ProjectCostumesPage() {
               </Button>
             </>
           ) : (
-            <span className="rounded-full border border-field-border bg-white px-2.5 py-1.5 text-[11px] font-black text-field-muted">읽기 전용</span>
+            <span className="rounded-[3px] border border-field-border bg-white px-2.5 py-1.5 text-[11px] font-black text-field-muted">읽기 전용</span>
           )}
         </div>
 
@@ -1071,7 +1071,7 @@ function EditableMediaField({
               <button
                 type="button"
                 onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-[3px] bg-white/95 text-field-danger"
                 aria-label={`저장 시 ${label} 이미지 삭제`}
               >
                 <X className="h-4 w-4" aria-hidden />
@@ -1137,7 +1137,7 @@ function PendingImagePreview({
       <button
         type="button"
         onClick={onRemove}
-        className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-white/95 text-field-danger"
+        className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-[3px] bg-white/95 text-field-danger"
         aria-label="선택한 이미지 제외"
       >
         <X className="h-4 w-4" aria-hidden />
@@ -1310,7 +1310,7 @@ function IconButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`grid shrink-0 place-items-center rounded-full border border-field-border bg-white ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
+      className={`grid shrink-0 place-items-center rounded-[3px] border border-field-border bg-white ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
     >
       {children}
     </button>

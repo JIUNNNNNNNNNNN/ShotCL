@@ -701,7 +701,7 @@ export function ShotOverheadEditor({
             <p className="text-[11px] font-bold text-field-muted">S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}</p>
             <h2 className="truncate text-base font-black text-field-primary">{readOnly ? "부감도 보기" : "부감도 편집"} · {shot.description || shot.title}</h2>
           </div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-field-border text-field-muted hover:bg-field-soft" aria-label="부감도 닫기">
+          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[3px] border border-field-border text-field-muted hover:bg-field-soft" aria-label="부감도 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
@@ -951,10 +951,10 @@ export function ShotOverheadEditor({
 
               {selectedCamera ? (
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => rotateSelectedCamera(-15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedCamera(-15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
                     <RotateCcw className="h-4 w-4" aria-hidden /> -15°
                   </button>
-                  <button type="button" onClick={() => rotateSelectedCamera(15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedCamera(15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
                     <RotateCw className="h-4 w-4" aria-hidden /> +15°
                   </button>
                 </div>
@@ -962,10 +962,10 @@ export function ShotOverheadEditor({
 
               {selectedPerson ? (
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => rotateSelectedPerson(-15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedPerson(-15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
                     <RotateCcw className="h-4 w-4" aria-hidden /> 방향 -15°
                   </button>
-                  <button type="button" onClick={() => rotateSelectedPerson(15)} className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedPerson(15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
                     <RotateCw className="h-4 w-4" aria-hidden /> 방향 +15°
                   </button>
                   <span className="px-1 text-xs font-bold text-field-muted">크기 {Math.round(selectedPerson.scale * 100)}%</span>
@@ -986,9 +986,9 @@ export function ShotOverheadEditor({
               ) : null}
 
               {selectedLine ? (
-                <div className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-2">
-                  <button type="button" onClick={() => updateSelectedLineColor("black")} aria-pressed={selectedLine.color === "black"} className={cn("h-7 rounded-full px-3 text-xs font-black", selectedLine.color === "black" ? "bg-[#242424] text-white" : "text-field-muted")}>검정</button>
-                  <button type="button" onClick={() => updateSelectedLineColor("red")} aria-pressed={selectedLine.color === "red"} className={cn("h-7 rounded-full px-3 text-xs font-black", selectedLine.color === "red" ? "bg-field-danger text-white" : "text-field-danger")}>빨강</button>
+                <div className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-2">
+                  <button type="button" onClick={() => updateSelectedLineColor("black")} aria-pressed={selectedLine.color === "black"} className={cn("h-7 rounded-[3px] px-3 text-xs font-black", selectedLine.color === "black" ? "bg-[#242424] text-white" : "text-field-muted")}>검정</button>
+                  <button type="button" onClick={() => updateSelectedLineColor("red")} aria-pressed={selectedLine.color === "red"} className={cn("h-7 rounded-[3px] px-3 text-xs font-black", selectedLine.color === "red" ? "bg-field-danger text-white" : "text-field-danger")}>빨강</button>
                 </div>
               ) : null}
 
@@ -1002,7 +1002,7 @@ export function ShotOverheadEditor({
                   setLineStart(null);
                   setTool("select");
                 }}
-                className="flex min-h-10 items-center gap-1 rounded-full border border-field-border px-3 text-xs font-black text-field-muted"
+                className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-muted"
               >
                 <Eraser className="h-4 w-4" aria-hidden /> 초기화
               </button>
@@ -1010,7 +1010,7 @@ export function ShotOverheadEditor({
                 type="button"
                 onClick={() => onSave(diagram)}
                 disabled={isSaving}
-                className="flex min-h-10 items-center gap-1.5 rounded-full border border-field-primary bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50"
+                className="flex min-h-10 items-center gap-1.5 rounded-[3px] border border-field-primary bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden /> {isSaving ? "저장 중" : "저장"}
               </button>
@@ -1047,7 +1047,7 @@ function ToolButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-black transition-colors disabled:opacity-40",
+        "flex min-h-9 shrink-0 items-center gap-1.5 rounded-[3px] border px-3 text-xs font-black transition-colors disabled:opacity-40",
         active ? "border-field-primary bg-field-primary text-white" : danger ? "border-field-danger/50 bg-white text-field-danger" : "border-field-border bg-white text-field-primary"
       )}
     >

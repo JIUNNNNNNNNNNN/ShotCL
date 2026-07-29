@@ -1041,7 +1041,7 @@ export default function ProjectSceneListPage() {
         <p className="font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <Link
           href="/"
-          className="mt-4 inline-flex min-h-10 items-center rounded-full border border-field-border px-4 text-sm font-bold text-field-primary"
+          className="mt-4 inline-flex min-h-10 items-center rounded-[3px] border border-field-border px-4 text-sm font-bold text-field-primary"
         >
           홈으로
         </Link>
@@ -1059,7 +1059,7 @@ export default function ProjectSceneListPage() {
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
+              className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -1069,7 +1069,7 @@ export default function ProjectSceneListPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={isSaving || !isDirty}
-                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving
                   ? <PixelDogLoader size="xs" compact />
@@ -1215,7 +1215,7 @@ export default function ProjectSceneListPage() {
               <button
                 type="button"
                 onClick={addItem}
-                className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
+                className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
                 씬 추가

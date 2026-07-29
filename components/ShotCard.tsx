@@ -127,7 +127,7 @@ export const ShotCard = memo(function ShotCard({
 
         <div className="min-w-0 px-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
-          <p className={cn("rounded-full px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
+          <p className={cn("rounded-[3px] px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -138,7 +138,7 @@ export const ShotCard = memo(function ShotCard({
                 onOpenMedia(shot, "storyboard");
               }}
               className={cn(
-                "inline-flex min-h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+                "inline-flex min-h-7 items-center gap-1 rounded-[3px] border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
                 shot.storyboardImageUrl ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
               )}
               title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
@@ -154,7 +154,7 @@ export const ShotCard = memo(function ShotCard({
               }}
               disabled={isOverheadLoading}
               className={cn(
-                "inline-flex min-h-7 items-center gap-1 rounded-full border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
+                "inline-flex min-h-7 items-center gap-1 rounded-[3px] border px-2 text-[10px] font-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] disabled:cursor-wait disabled:opacity-55",
                 hasOverhead ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
               )}
               title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
@@ -188,7 +188,7 @@ export const ShotCard = memo(function ShotCard({
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
             className={cn(
-              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-[3px] border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOk ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"
             )}
           >
@@ -200,7 +200,7 @@ export const ShotCard = memo(function ShotCard({
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "min-h-[38px] rounded-full border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
+              "min-h-[38px] rounded-[3px] border text-xs font-black leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]",
               isOmit ? "border-field-danger bg-field-danger text-white" : "border-field-border bg-white text-field-danger"
             )}
           >

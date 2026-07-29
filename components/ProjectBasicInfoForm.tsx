@@ -185,7 +185,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           <p className="font-display text-xl font-black text-field-primary md:text-2xl">프로젝트 기본정보</p>
           <p className="mt-1 truncate text-sm font-bold text-field-muted">{projectName}</p>
         </div>
-        <span className="rounded-full border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-muted">
+        <span className="rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-muted">
           프로젝트 공통 정보
         </span>
       </div>
@@ -229,7 +229,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           <Button
             type="button"
             variant="secondary"
-            className="h-9 min-h-9 w-9 shrink-0 rounded-full p-0"
+            className="h-9 min-h-9 w-9 shrink-0 rounded-[3px] p-0"
             aria-label="메인 스태프 추가"
             onClick={() => setValue((current) => ({
               ...current,
@@ -364,7 +364,7 @@ const StaffFields = memo(function StaffFields({
         </label>
         <button
           type="button"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-field-danger transition active:scale-95"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-[3px] text-field-danger transition active:scale-95"
           aria-label={`메인 스태프 ${index + 1} 삭제`}
           onClick={() => onDelete(index)}
         >
@@ -490,7 +490,7 @@ function EpisodeSelectionField({
                 </div>
                 <button
                   type="button"
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-field-border text-field-muted transition hover:bg-field-soft active:scale-95"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-[3px] border border-field-border text-field-muted transition hover:bg-field-soft active:scale-95"
                   aria-label="참여 회차 선택 닫기"
                   onClick={onClose}
                 >
@@ -591,7 +591,7 @@ const ActorFields = memo(function ActorFields({
       />
       <button
         type="button"
-        className="grid h-10 w-10 place-items-center rounded-full border border-field-danger bg-white text-field-danger transition active:scale-95"
+        className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-danger bg-white text-field-danger transition active:scale-95"
         aria-label={`배우 ${index + 1} 삭제`}
         onClick={() => onDelete(index)}
       >

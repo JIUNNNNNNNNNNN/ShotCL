@@ -144,7 +144,7 @@ function SceneImageFallback({ pdfUrl, filename }: { pdfUrl: string; filename: st
         href={pdfUrl}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-field-border px-3 text-xs font-black text-field-primary"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary"
       >
         <ExternalLink className="h-3.5 w-3.5" aria-hidden />
         {filename} 원본 PDF 열기

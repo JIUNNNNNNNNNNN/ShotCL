@@ -58,8 +58,6 @@ import {
   type ArchiveImportPage,
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
-import { parseArchiveFilenameSuggestion } from "@/lib/archiveAssetMetadata";
-import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import {
   scanArchiveDrop,
   scanArchiveFileList,
@@ -151,14 +149,14 @@ type DiagramDraft = {
 };
 
 type MetadataDraft = {
-  displayName: string;
-  memo: string;
-  episodeNumber: string;
   sceneId: string;
   sceneNo: string;
   cutNo: string;
-  assetType: ArchiveType;
-  folderId: string;
+};
+
+type MetadataAnchor = {
+  left: number;
+  top: number;
 };
 
 type FolderUploadReport = {
@@ -227,17 +225,16 @@ export default function ProjectStoryboardOverheadPage() {
   const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
+  const [metadataAnchor, setMetadataAnchor] = useState<MetadataAnchor | null>(null);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>({
-    displayName: "",
-    memo: "",
-    episodeNumber: "",
     sceneId: "",
     sceneNo: "",
-    cutNo: "",
-    assetType: "overhead",
-    folderId: ""
+    cutNo: ""
   });
   const [metadataError, setMetadataError] = useState("");
+  const [renamingAsset, setRenamingAsset] = useState<ProjectReferenceAsset | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
@@ -352,6 +349,16 @@ export default function ProjectStoryboardOverheadPage() {
   useEffect(() => {
     pendingImportRef.current = pendingImport;
   }, [pendingImport]);
+
+  useEffect(() => {
+    if (!editingAsset) return;
+    const stillExists = [...overheads, ...storyboards].some((asset) => asset.id === editingAsset.id);
+    if (!stillExists || !canEdit) {
+      setEditingAsset(null);
+      setMetadataAnchor(null);
+      setMetadataError("");
+    }
+  }, [canEdit, editingAsset, overheads, storyboards]);
 
   const activeAssets = activeType === "overhead" ? overheads : storyboards;
   const folderPathById = useMemo(
@@ -1601,12 +1608,20 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
+  function renameSingleSelectedAsset() {
+    if (!singleSelectedReferenceAsset) return;
+    setRenamingAsset(singleSelectedReferenceAsset);
+    setRenameDraft(archiveDisplayName(singleSelectedReferenceAsset));
+    setRenameError("");
+  }
+
   function beginArchiveSelectionPress(
     kind: ArchiveSelectionKind,
     id: string,
     event: ReactPointerEvent<HTMLButtonElement>
   ) {
     if (!canEdit || event.button !== 0) return;
+    if (editingAsset) closeMetadata();
     cancelArchivePointerSession();
     selectionPointerCleanupRef.current?.();
 
@@ -1920,38 +1935,35 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  function openMetadata(asset: ProjectReferenceAsset) {
+  function closeMetadata() {
+    setEditingAsset(null);
+    setMetadataAnchor(null);
+    setMetadataError("");
+  }
+
+  function openMetadata(asset: ProjectReferenceAsset, anchor?: { clientX: number; clientY: number }) {
+    if (!canEdit) return;
+    const currentSceneId = asset.crop.sceneId || "";
     setEditingAsset(asset);
+    setMetadataAnchor(anchor
+      ? {
+          left: Math.max(8, Math.min(anchor.clientX + 8, window.innerWidth - 312)),
+          top: Math.max(8, Math.min(anchor.clientY + 8, window.innerHeight - 284))
+        }
+      : null);
     setMetadataError("");
     setMetadataDraft({
-      displayName: archiveDisplayName(asset),
-      memo: asset.crop.memo || "",
-      episodeNumber: asset.crop.episodeNumber ? String(asset.crop.episodeNumber) : "",
-      sceneId: asset.crop.sceneId || "",
+      sceneId: currentSceneId,
       sceneNo: asset.crop.sceneNumber || asset.sceneNo || "",
-      cutNo: asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || "",
-      assetType: asset.assetType === "storyboard" ? "storyboard" : "overhead",
-      folderId: asset.crop.folderId || ""
+      cutNo: asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || ""
     });
   }
 
   async function saveMetadata() {
     if (!projectId || !editingAsset || !canEdit) return;
-    const displayName = metadataDraft.displayName.trim();
-    if (!displayName) {
-      setMetadataError("이름을 입력해주세요.");
-      return;
-    }
     const cutNumber = metadataDraft.cutNo.trim() ? Number(metadataDraft.cutNo) : null;
     if (cutNumber !== null && (!Number.isInteger(cutNumber) || cutNumber < 1)) {
       setMetadataError("컷은 1 이상의 정수로 입력해주세요.");
-      return;
-    }
-    const episodeNumber = metadataDraft.episodeNumber.trim()
-      ? Number(metadataDraft.episodeNumber)
-      : null;
-    if (episodeNumber !== null && (!Number.isInteger(episodeNumber) || episodeNumber < 1)) {
-      setMetadataError("회차는 1 이상의 정수로 입력해주세요.");
       return;
     }
     if (cutNumber !== null && !metadataDraft.sceneId) {
@@ -1959,7 +1971,15 @@ export default function ProjectStoryboardOverheadPage() {
       return;
     }
     const selectedScene = sceneItems.find((scene) => scene.id === metadataDraft.sceneId);
-    if (selectedScene?.cutCount && cutNumber && cutNumber > selectedScene.cutCount) {
+    if (metadataDraft.sceneId && !selectedScene) {
+      setMetadataError("연결된 씬이 삭제되었습니다. 다른 씬을 선택하거나 연결을 해제해주세요.");
+      return;
+    }
+    if (cutNumber !== null && selectedScene && (!selectedScene.cutCount || cutNumber > selectedScene.cutCount)) {
+      if (!selectedScene.cutCount) {
+        setMetadataError("씬리스트에 총 컷수를 먼저 입력해주세요.");
+        return;
+      }
       setMetadataError(`선택한 씬의 총 컷수 ${selectedScene.cutCount}를 초과했습니다.`);
       return;
     }
@@ -1967,24 +1987,14 @@ export default function ProjectStoryboardOverheadPage() {
     setIsSaving(true);
     try {
       const updated = await updateProjectReferenceAsset(projectId, editingAsset.id, {
-        title: displayName,
-        displayName,
-        memo: metadataDraft.memo,
-        episodeNumber,
         sceneId: metadataDraft.sceneId || null,
-        sceneNumber: selectedScene?.sceneNo || metadataDraft.sceneNo,
+        sceneNumber: selectedScene?.sceneNo || "",
         cutNumber,
-        sceneNo: selectedScene?.sceneNo || metadataDraft.sceneNo,
-        cutNo: cutNumber ? String(cutNumber) : "",
-        assetType: metadataDraft.assetType,
-        crop: { folderId: metadataDraft.folderId || null }
+        sceneNo: selectedScene?.sceneNo || "",
+        cutNo: cutNumber ? String(cutNumber) : ""
       });
       replaceAssetInLocalState(updated);
-      if (updated.assetType !== editingAsset.assetType) {
-        clearSelection();
-        setActiveType(updated.assetType === "storyboard" ? "storyboard" : "overhead");
-      }
-      setEditingAsset(null);
+      closeMetadata();
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다.");
     } finally {
@@ -1992,17 +2002,57 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
+  async function saveAssetName() {
+    if (!projectId || !renamingAsset || !canEdit) return;
+    const displayName = renameDraft.trim();
+    if (!displayName) {
+      setRenameError("이름을 입력해주세요.");
+      return;
+    }
+    setRenameError("");
+    setIsSaving(true);
+    try {
+      const updated = await updateProjectReferenceAsset(projectId, renamingAsset.id, {
+        title: displayName,
+        displayName
+      });
+      replaceAssetInLocalState(updated);
+      setRenamingAsset(null);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : "이름을 변경하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function openAssetContextMenu(
+    asset: ProjectReferenceAsset,
+    event: { preventDefault: () => void; stopPropagation: () => void; clientX: number; clientY: number }
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (
+      !canEdit
+      || longPressRef.current?.dragging
+      || !window.matchMedia("(hover: hover) and (pointer: fine)").matches
+    ) {
+      return;
+    }
+    cancelArchivePointerSession();
+    openMetadata(asset, event);
+  }
+
   if (isLoading) return <PixelDogLoader size="lg" />;
 
   return (
     <>
-      <div className="mx-auto grid w-full max-w-6xl select-none gap-4 [&_input]:select-text [&_textarea]:select-text" onContextMenu={(event) => event.preventDefault()}>
+      <div className="mx-auto grid w-full max-w-6xl select-none gap-4 [&_input]:select-text [&_textarea]:select-text">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="font-display truncate text-xl font-black text-field-primary">부감도&콘티 아카이브</h1>
             <p className="truncate text-xs font-bold text-field-muted">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
-          {!canEdit ? <span className="rounded-full border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">읽기 전용</span> : null}
+          {!canEdit ? <span className="rounded-[3px] border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">읽기 전용</span> : null}
         </div>
 
         {errorMessage ? <p role="alert" className="rounded-xl border border-field-danger bg-red-50 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}
@@ -2061,29 +2111,29 @@ export default function ProjectStoryboardOverheadPage() {
           <div className="grid gap-2 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center">
             <div className="grid grid-cols-2 gap-2">
               {(["overhead", "storyboard"] as const).map((type) => (
-                <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 rounded-full border px-4 text-sm font-black ${activeType === type ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"}`}>
+                <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 rounded-[3px] border px-4 text-sm font-black ${activeType === type ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"}`}>
                   {type === "overhead" ? "부감도" : "콘티"}
                 </button>
               ))}
             </div>
             <label className="relative block min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full rounded-full border border-field-border bg-white pl-9 pr-3 text-sm" placeholder="제목, 메모, 씬, 컷 검색" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full rounded-[3px] border border-field-border bg-white pl-9 pr-3 text-sm" placeholder="제목, 메모, 씬, 컷 검색" />
             </label>
             {canEdit ? (
               <div className="flex flex-wrap justify-end gap-2">
                 {activeType === "overhead" ? (
-                  <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                     <MapIcon className="h-4 w-4" aria-hidden />
                     직접 만들기
                   </button>
                 ) : null}
-                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <ImagePlus className="h-4 w-4" aria-hidden />
                   이미지
                   <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(activeType, event)} />
                 </label>
-                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white">
+                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white">
                   <Upload className="h-4 w-4" aria-hidden />
                   PDF
                   <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(activeType, event)} />
@@ -2096,7 +2146,7 @@ export default function ProjectStoryboardOverheadPage() {
               <button
                 type="button"
                 onClick={() => setCurrentFolderPath("")}
-                className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
+                className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary"
                 aria-label="아카이브 홈으로 이동"
               >
                 <Home className="h-3.5 w-3.5" aria-hidden />
@@ -2108,7 +2158,7 @@ export default function ProjectStoryboardOverheadPage() {
                   <button
                     type="button"
                     onClick={() => setCurrentFolderPath(crumb.path)}
-                    className={`min-h-9 rounded-full px-2.5 text-xs font-black ${
+                    className={`min-h-9 rounded-[3px] px-2.5 text-xs font-black ${
                       crumb.path === currentFolderPath
                         ? "bg-field-primary text-white"
                         : "text-field-primary hover:bg-field-soft"
@@ -2124,7 +2174,7 @@ export default function ProjectStoryboardOverheadPage() {
                 type="button"
                 disabled={!currentFolderPath}
                 onClick={() => setCurrentFolderPath(archiveParentPath(currentFolderPath))}
-                className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white text-field-primary disabled:opacity-35"
+                className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white text-field-primary disabled:opacity-35"
                 aria-label="상위 폴더로 이동"
               >
                 <ArrowUp className="h-4 w-4" aria-hidden />
@@ -2141,7 +2191,7 @@ export default function ProjectStoryboardOverheadPage() {
             <select
               value={sortMode}
               onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
-              className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-bold text-field-text"
+              className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-text"
               aria-label="아카이브 정렬"
             >
               <option value="newest">최신순</option>
@@ -2150,7 +2200,7 @@ export default function ProjectStoryboardOverheadPage() {
             </select>
             {canEdit ? (
               <>
-                <button type="button" onClick={() => setFolderEditor({ mode: "create", folderPath: currentFolderPath, value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                <button type="button" onClick={() => setFolderEditor({ mode: "create", folderPath: currentFolderPath, value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden />
                   새 폴더
                 </button>
@@ -2165,7 +2215,7 @@ export default function ProjectStoryboardOverheadPage() {
                           value: archiveBaseName(currentFolderPath)
                         });
                       }}
-                      className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary"
+                      className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary"
                     >
                       이름 변경
                     </button>
@@ -2199,7 +2249,7 @@ export default function ProjectStoryboardOverheadPage() {
                             );
                           });
                       }}
-                      className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-danger"
+                      className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-danger"
                     >
                       폴더 삭제
                     </button>
@@ -2207,7 +2257,7 @@ export default function ProjectStoryboardOverheadPage() {
                 ) : null}
                 {supportsDesktopDrop ? (
                   <>
-                    <button type="button" onClick={() => folderUploadRef.current?.click()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                    <button type="button" onClick={() => folderUploadRef.current?.click()} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                       <FolderInput className="h-3.5 w-3.5" aria-hidden />
                       폴더 업로드
                     </button>
@@ -2242,22 +2292,22 @@ export default function ProjectStoryboardOverheadPage() {
                   placeholder={folderEditor.mode === "create" ? "새 폴더 이름" : "폴더 이름"}
                   maxLength={80}
                 />
-                <button type="submit" className="min-h-9 rounded-full bg-field-primary px-3 text-xs font-black text-white">확인</button>
-                <button type="button" onClick={() => setFolderEditor(null)} className="grid h-9 w-9 place-items-center rounded-full border border-field-border bg-white" aria-label="폴더 편집 취소">
+                <button type="submit" className="min-h-9 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white">확인</button>
+                <button type="button" onClick={() => setFolderEditor(null)} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white" aria-label="폴더 편집 취소">
                   <X className="h-4 w-4" aria-hidden />
                 </button>
               </form>
             ) : null}
           </div>
           {canEdit && selectedCount > 0 ? (
-            <div className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-2xl border border-field-border bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
+            <div className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 rounded-[3px] border border-field-border bg-white/95 px-3 py-2 shadow-lg backdrop-blur">
               <span className="text-xs font-black text-field-primary">
                 {selectedCount}개 선택
               </span>
               <select
                 value={moveFolderId}
                 onChange={(event) => setMoveFolderId(event.target.value)}
-                className="min-h-9 rounded-full border border-field-border bg-white px-3 text-xs font-bold"
+                className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold"
                 aria-label="선택 자료 이동 폴더"
               >
                 <option value="">홈으로 이동</option>
@@ -2271,7 +2321,7 @@ export default function ProjectStoryboardOverheadPage() {
                   </option>
                 ))}
               </select>
-              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length + selectedFolderIds.length === 0 || selectedDiagramItems.length > 0 || !isValidArchiveDropTarget(moveFolderId || null, selectedFolderIds, folders)} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
+              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length + selectedFolderIds.length === 0 || selectedDiagramItems.length > 0 || !isValidArchiveDropTarget(moveFolderId || null, selectedFolderIds, folders)} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
                 <Move className="h-3.5 w-3.5" aria-hidden />
                 이동
               </button>
@@ -2284,27 +2334,32 @@ export default function ProjectStoryboardOverheadPage() {
                     clearSelection();
                     void cropStoredAsset(asset);
                   }}
-                  className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-50"
+                  className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-50"
                 >
                   <Crop className="h-3.5 w-3.5" aria-hidden />
                   크롭
                 </button>
               ) : null}
               {selectedCount === 1 ? (
-                <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <Info className="h-3.5 w-3.5" aria-hidden />
                   {selectedFolderIds.length === 1
                     ? "이름 변경"
                     : singleSelectedReferenceAsset
-                      ? "이름/정보 수정"
+                      ? "정보 수정"
                       : "정보"}
                 </button>
               ) : null}
-              <button type="button" disabled={isSaving || selectedCount === 0} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
+              {singleSelectedReferenceAsset ? (
+                <button type="button" onClick={renameSingleSelectedAsset} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                  이름 변경
+                </button>
+              ) : null}
+              <button type="button" disabled={isSaving || selectedCount === 0} onClick={() => void deleteSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-danger bg-white px-3 text-xs font-black text-field-danger disabled:opacity-50">
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 삭제
               </button>
-              <button type="button" onClick={clearSelection} className="min-h-9 rounded-full px-3 text-xs font-black text-field-muted">
+              <button type="button" onClick={clearSelection} className="min-h-9 rounded-[3px] px-3 text-xs font-black text-field-muted">
                 선택 해제
               </button>
             </div>
@@ -2321,8 +2376,7 @@ export default function ProjectStoryboardOverheadPage() {
             <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
             <div
-              className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4"
-              onContextMenu={(event) => event.preventDefault()}
+              className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
             >
               {childFolders.map((folder) => {
                 const key = folder.id ? archiveSelectionKey("folder", folder.id) : null;
@@ -2416,7 +2470,7 @@ export default function ProjectStoryboardOverheadPage() {
                       ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
                       : "border-field-border"
                   } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
-                  onContextMenu={(event) => event.preventDefault()}
+                  onContextMenu={(event) => openAssetContextMenu(asset, event)}
                 >
                   <button
                     type="button"
@@ -2434,7 +2488,7 @@ export default function ProjectStoryboardOverheadPage() {
                       }
                       setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
                     }}
-                    className="grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center bg-field-soft p-1"
+                    className="grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1"
                     aria-pressed={selectionMode ? selected : undefined}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2445,7 +2499,7 @@ export default function ProjectStoryboardOverheadPage() {
                       decoding="async"
                       draggable={false}
                       onDragStart={(event) => event.preventDefault()}
-                      className="block h-auto max-h-full w-auto max-w-full rounded-none object-contain"
+                      className="block h-full w-full rounded-none object-contain"
                     />
                   </button>
                   <ArchiveText title={archiveDisplayName(asset)} sceneNo={asset.crop.sceneNumber || asset.sceneNo || ""} cutNo={asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || ""} />
@@ -2454,7 +2508,7 @@ export default function ProjectStoryboardOverheadPage() {
             </div>
           )}
           {visibleAssets.length < filteredAssets.length ? (
-            <button type="button" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)} className="mx-auto min-h-9 rounded-full border border-field-border bg-white px-4 text-xs font-black text-field-primary">
+            <button type="button" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)} className="mx-auto min-h-9 rounded-[3px] border border-field-border bg-white px-4 text-xs font-black text-field-primary">
               더 보기 · {visibleAssets.length}/{filteredAssets.length}
             </button>
           ) : null}
@@ -2478,7 +2532,7 @@ export default function ProjectStoryboardOverheadPage() {
                         ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
                         : "border-field-border"
                     } ${pressedSelectionKey === key ? "scale-[0.92]" : ""}`}
-                    onContextMenu={(event) => event.preventDefault()}
+                    onContextMenu={(event) => openAssetContextMenu(asset, event)}
                   >
                     <button
                       type="button"
@@ -2527,7 +2581,7 @@ export default function ProjectStoryboardOverheadPage() {
                           event.stopPropagation();
                           void cropStoredAsset(asset);
                         }}
-                        className="min-h-9 shrink-0 rounded-full border border-field-border px-3 text-[11px] font-black text-field-primary"
+                        className="min-h-9 shrink-0 rounded-[3px] border border-field-border px-3 text-[11px] font-black text-field-primary"
                       >
                         crop
                       </button>
@@ -2579,7 +2633,7 @@ export default function ProjectStoryboardOverheadPage() {
               )}
             </div>
           ))}
-          <span className="absolute right-0 top-0 z-10 grid min-h-6 min-w-6 place-items-center rounded-full bg-[#ef8f39] px-1 text-[10px] font-black text-white shadow">
+          <span className="absolute right-0 top-0 z-10 grid min-h-6 min-w-6 place-items-center rounded-[3px] bg-[#ef8f39] px-1 text-[10px] font-black text-white shadow">
             {dragPreviewItems.length}
           </span>
         </div>
@@ -2607,23 +2661,34 @@ export default function ProjectStoryboardOverheadPage() {
         </>
       ) : null}
       {editingAsset ? (
-        <MetadataDialog
+        <MetadataPopover
           value={metadataDraft}
-          folders={folders}
           scenes={sceneItems}
-          originalFilename={editingAsset.crop.originalFilename || editingAsset.filename}
+          anchor={metadataAnchor}
           errorMessage={metadataError}
-          readOnly={!canEdit}
           isSaving={isSaving}
           onChange={(value) => {
             setMetadataDraft(value);
             setMetadataError("");
           }}
-          onClose={() => {
-            setEditingAsset(null);
-            setMetadataError("");
-          }}
+          onClose={closeMetadata}
           onSave={saveMetadata}
+        />
+      ) : null}
+      {renamingAsset ? (
+        <AssetRenameEditor
+          value={renameDraft}
+          errorMessage={renameError}
+          isSaving={isSaving}
+          onChange={(value) => {
+            setRenameDraft(value);
+            setRenameError("");
+          }}
+          onClose={() => {
+            setRenamingAsset(null);
+            setRenameError("");
+          }}
+          onSave={saveAssetName}
         />
       ) : null}
       {pendingConfirm ? (
@@ -2714,177 +2779,183 @@ function CompactConfirm({
   onCancel: () => void;
 }) {
   return (
-    <section className="flex flex-wrap items-center gap-2 rounded-2xl border border-field-border bg-white p-3 shadow-lg" role="alertdialog" aria-label="삭제 확인">
+    <section className="flex flex-wrap items-center gap-2 rounded-[3px] border border-field-border bg-white p-3 shadow-lg" role="alertdialog" aria-label="삭제 확인">
       <p className="min-w-0 flex-1 text-xs font-bold leading-5 text-field-text">{message}</p>
-      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 rounded-full border border-field-border px-3 text-xs font-black text-field-muted disabled:opacity-50">
+      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-muted disabled:opacity-50">
         취소
       </button>
-      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 rounded-full bg-field-danger px-3 text-xs font-black text-white disabled:opacity-50">
+      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 rounded-[3px] bg-field-danger px-3 text-xs font-black text-white disabled:opacity-50">
         {isSaving ? "처리 중" : "삭제"}
       </button>
     </section>
   );
 }
 
-function MetadataDialog({
+function MetadataPopover({
   value,
-  folders,
   scenes,
-  originalFilename,
+  anchor,
   errorMessage,
-  readOnly,
   isSaving,
   onChange,
   onClose,
   onSave
 }: {
   value: MetadataDraft;
-  folders: ProjectArchiveFolder[];
   scenes: ProjectSceneItem[];
-  originalFilename: string;
+  anchor: MetadataAnchor | null;
   errorMessage: string;
-  readOnly: boolean;
   isSaving: boolean;
   onChange: (value: MetadataDraft) => void;
   onClose: () => void;
   onSave: () => void;
 }) {
-  const suggestion = parseArchiveFilenameSuggestion(value.displayName || originalFilename);
-  const suggestedScene = suggestion
-    ? scenes.find((scene) => normalizeComparableScene(scene.sceneNo) === normalizeComparableScene(suggestion.sceneNumber))
-    : null;
+  const popoverRef = useRef<HTMLElement | null>(null);
+  const selectedScene = scenes.find((scene) => scene.id === value.sceneId);
+  const selectedCut = value.cutNo ? Number(value.cutNo) : null;
+  const maxCut = selectedScene?.cutCount ?? 0;
+  const missingScene = Boolean(value.sceneId && !selectedScene);
+  const invalidCut = Boolean(
+    selectedCut !== null
+    && (!Number.isInteger(selectedCut) || selectedCut < 1 || !maxCut || selectedCut > maxCut)
+  );
+
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!popoverRef.current?.contains(event.target as Node)) onClose();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
   return (
-    <div
-      className="fixed inset-0 z-[85] grid select-text items-end bg-black/25 px-0 pt-4 sm:place-items-center sm:p-4"
+    <section
+      ref={popoverRef}
+      className={`fixed z-[85] grid max-h-[min(70dvh,22rem)] w-auto gap-3 overflow-y-auto border border-field-border bg-white p-3 shadow-lg ${
+        anchor
+          ? "max-w-[19rem]"
+          : "inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] mx-auto max-w-sm sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
+      }`}
+      style={anchor ? { left: anchor.left, top: anchor.top, width: 304 } : undefined}
       role="dialog"
-      aria-modal="true"
-      aria-label={readOnly ? "자료 정보 보기" : "자료 정보 수정"}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+      aria-label="자료 정보 수정"
     >
-      <section className="grid max-h-[min(92dvh,46rem)] w-full max-w-md gap-3 overflow-y-auto rounded-t-2xl border border-field-border bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl sm:pb-4">
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-black text-field-primary">자료 정보</h2>
-          <button type="button" onClick={onClose} className="grid h-9 w-9 place-items-center rounded-full border border-field-border" aria-label="자료 정보 닫기"><X className="h-4 w-4" aria-hidden /></button>
-        </div>
-        {readOnly ? <p className="text-xs font-bold text-field-muted">읽기 전용 정보입니다.</p> : null}
-        <label className="grid gap-1 text-xs font-black text-field-muted">
-          이름
-          <input
-            readOnly={readOnly}
-            value={value.displayName}
-            maxLength={240}
-            onChange={(event) => onChange({ ...value, displayName: event.target.value })}
-            className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft"
-          />
-        </label>
-        <p className="truncate text-[11px] font-bold text-field-muted" title={originalFilename}>
-          원본 파일명 · {originalFilename}
-        </p>
-        {suggestion && !readOnly ? (
-          <button
-            type="button"
-            disabled={!suggestedScene}
-            onClick={() => {
-              if (!suggestedScene) return;
-              onChange({
-                ...value,
-                sceneId: suggestedScene.id,
-                sceneNo: suggestedScene.sceneNo,
-                cutNo: String(suggestion.cutNumber)
-              });
-            }}
-            className="min-h-9 rounded-lg border border-field-border bg-field-soft px-3 text-left text-xs font-black text-field-primary disabled:opacity-50"
-          >
-            {suggestedScene
-              ? `씬 ${suggestedScene.sceneNo} / 컷 ${suggestion.cutNumber}로 설정`
-              : `파일명 제안: 씬 ${suggestion.sceneNumber} / 컷 ${suggestion.cutNumber} · 일치하는 씬 없음`}
-          </button>
-        ) : null}
-        <div className="grid grid-cols-2 gap-2">
-          <label className="grid gap-1 text-xs font-black text-field-muted">
-            유형
-            <select
-              disabled={readOnly}
-              value={value.assetType}
-              onChange={(event) => onChange({ ...value, assetType: event.target.value as ArchiveType })}
-              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft"
-            >
-              <option value="overhead">부감도</option>
-              <option value="storyboard">콘티</option>
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs font-black text-field-muted">
-            회차
-            <input
-              readOnly={readOnly}
-              type="number"
-              min={1}
-              inputMode="numeric"
-              value={value.episodeNumber}
-              onChange={(event) => onChange({ ...value, episodeNumber: event.target.value })}
-              className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft"
-              placeholder="선택"
-            />
-          </label>
-        </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
-          <label className="grid gap-1 text-xs font-black text-field-muted">
-            씬
-            <select
-              disabled={readOnly}
-              value={value.sceneId}
-              onChange={(event) => {
-                const scene = scenes.find((entry) => entry.id === event.target.value);
-                onChange({
-                  ...value,
-                  sceneId: scene?.id || "",
-                  sceneNo: scene?.sceneNo || "",
-                  cutNo: scene ? value.cutNo : ""
-                });
-              }}
-              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft"
-            >
-              <option value="">연결 안 함</option>
-              {scenes.map((scene) => (
-                <option key={scene.id} value={scene.id}>
-                  S#{scene.sceneNo}{scene.sceneContent ? ` · ${scene.sceneContent.slice(0, 32)}` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1 text-xs font-black text-field-muted">
-            컷
-            <input
-              readOnly={readOnly}
-              type="number"
-              min={1}
-              inputMode="numeric"
-              value={value.cutNo}
-              onChange={(event) => onChange({ ...value, cutNo: event.target.value })}
-              className="min-h-10 rounded-lg border border-field-border px-3 text-sm text-field-text read-only:bg-field-soft"
-              placeholder="선택"
-            />
-          </label>
-        </div>
-        <label className="grid gap-1 text-xs font-black text-field-muted">
-          폴더
-          <select disabled={readOnly} value={value.folderId} onChange={(event) => onChange({ ...value, folderId: event.target.value })} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft">
-            <option value="">홈</option>
-            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-          </select>
-        </label>
-        <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea readOnly={readOnly} value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} rows={4} className="rounded-lg border border-field-border px-3 py-2 text-sm leading-5 text-field-text read-only:bg-field-soft" /></label>
-        {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
-        {!readOnly ? (
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" disabled={isSaving} onClick={onClose} className="min-h-11 rounded-full border border-field-border px-4 text-sm font-black text-field-muted disabled:opacity-50">취소</button>
-            <button type="button" disabled={isSaving} onClick={onSave} className="min-h-11 rounded-full bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
-          </div>
-        ) : null}
-      </section>
-    </div>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-display text-base font-black text-field-primary">정보 수정</h2>
+        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-border" aria-label="정보 수정 닫기">
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+      <label className="grid gap-1 text-xs font-black text-field-muted">
+        씬
+        <select
+          value={value.sceneId}
+          onChange={(event) => {
+            const scene = scenes.find((entry) => entry.id === event.target.value);
+            onChange({
+              sceneId: scene?.id || "",
+              sceneNo: scene?.sceneNo || "",
+              cutNo: ""
+            });
+          }}
+          className="min-h-10 border border-field-border bg-white px-3 text-sm text-field-text"
+        >
+          <option value="">미지정</option>
+          {missingScene ? (
+            <option value={value.sceneId}>삭제된 씬 · S#{value.sceneNo || "알 수 없음"}</option>
+          ) : null}
+          {scenes.map((scene) => (
+            <option key={scene.id} value={scene.id}>
+              S#{scene.sceneNo}{scene.sceneContent ? ` · ${scene.sceneContent.slice(0, 28)}` : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="grid gap-1 text-xs font-black text-field-muted">
+        컷
+        <select
+          disabled={!selectedScene || maxCut < 1}
+          value={value.cutNo}
+          onChange={(event) => onChange({ ...value, cutNo: event.target.value })}
+          className="min-h-10 border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft disabled:text-field-muted"
+        >
+          <option value="">미지정</option>
+          {invalidCut && value.cutNo ? (
+            <option value={value.cutNo}>C#{value.cutNo} · 범위 초과</option>
+          ) : null}
+          {Array.from({ length: maxCut }, (_, index) => index + 1).map((cutNumber) => (
+            <option key={cutNumber} value={String(cutNumber)}>C#{cutNumber}</option>
+          ))}
+        </select>
+      </label>
+      {selectedScene && maxCut < 1 ? (
+        <p className="text-[11px] font-bold text-field-muted">씬리스트에 총 컷수를 먼저 입력해주세요.</p>
+      ) : null}
+      {missingScene ? (
+        <p className="text-[11px] font-bold text-field-danger">연결된 씬이 삭제되었습니다. 다른 씬을 선택하거나 미지정으로 바꿔주세요.</p>
+      ) : null}
+      {invalidCut && selectedScene && maxCut > 0 ? (
+        <p className="text-[11px] font-bold text-field-danger">컷은 1부터 {maxCut}까지만 선택할 수 있습니다.</p>
+      ) : null}
+      {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-border px-3 text-sm font-black text-field-muted disabled:opacity-50">취소</button>
+        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 bg-field-primary px-3 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+      </div>
+    </section>
+  );
+}
+
+function AssetRenameEditor({
+  value,
+  errorMessage,
+  isSaving,
+  onChange,
+  onClose,
+  onSave
+}: {
+  value: string;
+  errorMessage: string;
+  isSaving: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <section
+      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[86] mx-auto grid max-w-sm gap-3 border border-field-border bg-white p-3 shadow-lg sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
+      role="dialog"
+      aria-label="자료 이름 변경"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-display text-base font-black text-field-primary">이름 변경</h2>
+        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-border" aria-label="이름 변경 닫기">
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      </div>
+      <label className="grid gap-1 text-xs font-black text-field-muted">
+        이름
+        <input
+          autoFocus
+          value={value}
+          maxLength={240}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-h-10 border border-field-border bg-white px-3 text-sm text-field-text"
+        />
+      </label>
+      {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-border px-3 text-sm font-black text-field-muted disabled:opacity-50">취소</button>
+        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 bg-field-primary px-3 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+      </div>
+    </section>
   );
 }
 
@@ -2995,10 +3066,6 @@ function archiveImportInitialMetadata(pending: PendingImport) {
     // cropIndex는 컷 제안 토대일 뿐이며 컷 번호를 자동 확정하지 않습니다.
     cutNo: ""
   };
-}
-
-function normalizeComparableScene(value: string) {
-  return normalizeSceneNumber(value) || value.trim().replace(/^S\s*#?\s*/i, "").toLocaleLowerCase("ko-KR");
 }
 
 function archiveDragPreviewPosition(clientX: number, clientY: number) {

@@ -475,7 +475,7 @@ export default function HomePage() {
         role="group"
         tabIndex={0}
         aria-label="프로젝트 원형 메뉴. 좌우 방향키 또는 드래그로 회전"
-        className="absolute inset-0 z-10 touch-none select-none rounded-full outline-none cursor-grab active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
+        className="functional-circle absolute inset-0 z-10 touch-none select-none outline-none cursor-grab active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4"
         {...projectSpinner.pointerHandlers}
         onClick={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -485,17 +485,17 @@ export default function HomePage() {
         onKeyDown={handleProjectSpinnerKeyDown}
       >
         <div
-          className="pointer-events-none absolute inset-[10%] rounded-full border border-field-border/75 bg-white/15 shadow-[0_14px_34px_rgba(15,61,46,0.06)]"
+          className="functional-circle pointer-events-none absolute inset-[10%] border border-field-border/75 bg-white/15 shadow-[0_14px_34px_rgba(15,61,46,0.06)]"
           aria-hidden
         />
-        <div className="pointer-events-none absolute inset-[14%] rounded-full border border-dashed border-field-secondary/45" aria-hidden />
+        <div className="functional-circle pointer-events-none absolute inset-[14%] border border-dashed border-field-secondary/45" aria-hidden />
         <div
           ref={projectTargetRef}
           className="pointer-events-none absolute left-[89.5%] top-1/2 h-[4.25rem] w-[4.25rem] -translate-x-1/2 -translate-y-1/2 md:h-[5.5rem] md:w-[5.5rem]"
           aria-hidden
         >
           <div
-            className={`absolute inset-0 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 transition-[transform,box-shadow,background-color] duration-[260ms] ease-out ${
+            className={`functional-circle absolute inset-0 border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 transition-[transform,box-shadow,background-color] duration-[260ms] ease-out ${
               selectedProjectId
                 ? "scale-[1.18] bg-[#fff2b7]/55 shadow-[0_0_28px_rgba(215,185,95,0.62)] motion-safe:animate-[project-target-confirm_420ms_ease-out]"
                 : isProjectTargetEngaged
@@ -551,7 +551,7 @@ export default function HomePage() {
                     if (projectSpinner.consumeSuppressedClick()) return;
                     projectSpinner.activateIndex(index);
                   }}
-                  className={`flex h-full w-full flex-col items-center justify-center rounded-full border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] duration-[240ms] ease-out ${
+                  className={`functional-circle flex h-full w-full flex-col items-center justify-center border bg-white px-2 text-center outline-none transition-[background-color,border-color,box-shadow,filter] duration-[240ms] ease-out ${
                     isSelectedProject
                       ? "border-[#d7b95f] bg-[#fff9df] shadow-[inset_0_5px_10px_rgba(15,61,46,0.12),0_8px_22px_rgba(215,185,95,0.32)] brightness-90 motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
                       : isActive
@@ -575,10 +575,10 @@ export default function HomePage() {
                     event.stopPropagation();
                     hideProjectFromCurrentList(project);
                   }}
-                  className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label={`${project.name} 목록에서 숨기기`}
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[3px] border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
@@ -618,7 +618,7 @@ export default function HomePage() {
               role="group"
               tabIndex={0}
               aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
-              className={`relative z-20 aspect-square shrink-0 touch-none select-none rounded-full outline-none cursor-grab active:cursor-grabbing transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
+              className={`functional-circle relative z-20 aspect-square shrink-0 touch-none select-none outline-none cursor-grab active:cursor-grabbing transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
                 isProjectRingOpen
                   ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
                   : "w-[min(90vw,21rem)] md:w-[min(82vw,22rem)]"
@@ -631,12 +631,12 @@ export default function HomePage() {
               }}
               onKeyDown={handleWheelKeyDown}
             >
-              <div className="pointer-events-none absolute inset-[15%] rounded-full border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
-              <div className="pointer-events-none absolute inset-[23%] rounded-full border border-dashed border-field-secondary/40" aria-hidden />
-              <div className="pointer-events-none absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)] md:h-8 md:w-8" aria-hidden />
+              <div className="functional-circle pointer-events-none absolute inset-[15%] border border-field-border bg-white/45 shadow-[inset_0_0_0_10px_rgba(255,255,255,0.34),0_14px_30px_rgba(15,61,46,0.08)]" aria-hidden />
+              <div className="functional-circle pointer-events-none absolute inset-[23%] border border-dashed border-field-secondary/40" aria-hidden />
+              <div className="functional-circle pointer-events-none absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 border border-field-border bg-field-bg shadow-[0_3px_9px_rgba(15,61,46,0.10)] md:h-8 md:w-8" aria-hidden />
               <div
                 ref={mainTargetRef}
-                className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)] ${
+                className={`functional-circle pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 border-2 border-[#d7b95f]/70 bg-[#fff7d8]/35 shadow-[0_0_18px_rgba(215,185,95,0.34)] ${
                   isProjectRingOpen
                     ? "left-[79%] h-16 w-16 md:h-[6.25rem] md:w-[6.25rem]"
                     : "left-[83%] h-[4.75rem] w-[4.75rem] md:h-[6.25rem] md:w-[6.25rem]"
@@ -691,7 +691,7 @@ export default function HomePage() {
                           if (mainSpinner.consumeSuppressedClick()) return;
                           mainSpinner.activateIndex(index);
                         }}
-                        className={`flex items-center justify-center rounded-full border px-2 text-center text-white outline-none transition-[transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out ${item.colorClass} ${
+                        className={`functional-circle flex items-center justify-center border px-2 text-center text-white outline-none transition-[transform,opacity,box-shadow,border-color,filter] duration-[260ms] ease-out ${item.colorClass} ${
                           isProjectRingOpen
                             ? "h-14 w-14 md:h-20 md:w-20"
                             : "h-[4.25rem] w-[4.25rem] sm:h-24 sm:w-24"
@@ -726,12 +726,12 @@ export default function HomePage() {
             </div>
           </div>
           {isProgressMode && isLoading ? (
-            <div className="pointer-events-none rounded-full border border-field-border bg-white/95 px-4 py-2 shadow-sm">
+            <div className="pointer-events-none rounded-[3px] border border-field-border bg-white/95 px-4 py-2 shadow-sm">
               <PixelDogLoader size="xs" compact />
             </div>
           ) : null}
           {isProgressMode && hasLoadedProjects && !isLoading && projects.length === 0 ? (
-            <p className="pointer-events-none whitespace-nowrap rounded-full border border-field-border bg-white/95 px-4 py-2 text-center text-[11px] font-black text-field-muted shadow-sm">
+            <p className="pointer-events-none whitespace-nowrap rounded-[3px] border border-field-border bg-white/95 px-4 py-2 text-center text-[11px] font-black text-field-muted shadow-sm">
               진행 볼 프로젝트가 없습니다
             </p>
           ) : null}
@@ -746,7 +746,7 @@ export default function HomePage() {
             className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_220ms_ease-out] md:w-[14rem]"
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
-              <h1 className="rounded-full border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
+              <h1 className="rounded-[3px] border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
                 <span className="font-display">{pickerTitle}</span>
               </h1>
             </div>
@@ -761,10 +761,10 @@ export default function HomePage() {
                     event.stopPropagation();
                     closeInputSubmenu("new");
                   }}
-                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label="새 프로젝트 입력 닫기"
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[3px] border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
@@ -776,7 +776,7 @@ export default function HomePage() {
                   }}
                   placeholder="프로젝트 이름"
                   aria-label="새 프로젝트 이름"
-                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -786,7 +786,7 @@ export default function HomePage() {
                   onChange={(event) => setAdminPassword(sanitizePasscode(event.target.value))}
                   placeholder="Key staff 비밀번호 4자리"
                   aria-label="Key staff 비밀번호"
-                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -796,13 +796,13 @@ export default function HomePage() {
                   onChange={(event) => setProgressPassword(sanitizePasscode(event.target.value))}
                   placeholder="Staff 비밀번호 4자리"
                   aria-label="Staff 비밀번호"
-                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
                   disabled={isCreatingProject}
-                  className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                  className="h-10 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
                   <span className="font-display">{isCreatingProject ? "만드는 중" : "만들기"}</span>
                 </button>
@@ -818,10 +818,10 @@ export default function HomePage() {
                     event.stopPropagation();
                     closeInputSubmenu("join");
                   }}
-                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-full text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label="프로젝트 참여 입력 닫기"
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[3px] border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
@@ -833,7 +833,7 @@ export default function HomePage() {
                   }}
                   placeholder="프로젝트 이름"
                   aria-label="참여할 프로젝트 이름"
-                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 <input
                   type="password"
@@ -843,13 +843,13 @@ export default function HomePage() {
                   onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
                   placeholder="비밀번호 4자리"
                   aria-label="프로젝트 참여 비밀번호"
-                  className="h-10 min-w-0 rounded-full border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
                   disabled={isCreatingProject}
-                  className="h-10 rounded-full bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                  className="h-10 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
                 >
                   <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
                 </button>
@@ -861,7 +861,7 @@ export default function HomePage() {
         {feedback ? (
           <p
             role="status"
-            className={`absolute z-30 whitespace-nowrap rounded-full border border-field-border bg-white px-3 py-1.5 text-[11px] font-black text-field-primary shadow-[0_5px_14px_rgba(15,61,46,0.12)] ${
+            className={`absolute z-30 whitespace-nowrap rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-[11px] font-black text-field-primary shadow-[0_5px_14px_rgba(15,61,46,0.12)] ${
               feedback.target === "progress"
                 ? "left-1/2 top-[calc(100%+0.5rem)] -translate-x-1/2"
                 : "right-[calc(100%+0.5rem)] top-1/3"

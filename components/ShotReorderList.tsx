@@ -289,8 +289,8 @@ export function ShotReorderList({
                 isDragging && "z-50 cursor-grabbing opacity-95",
                 isDropTarget
                   && (dragState?.insertAfter
-                    ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:rounded-full after:bg-[#d77b32]"
-                    : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:rounded-full before:bg-[#d77b32]")
+                    ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:rounded-[3px] after:bg-[#d77b32]"
+                    : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:rounded-[3px] before:bg-[#d77b32]")
               )}
               style={isDragging ? {
                 transform: `translate3d(0, ${dragState.currentY - dragState.startY}px, 0) scale(1.015)`,

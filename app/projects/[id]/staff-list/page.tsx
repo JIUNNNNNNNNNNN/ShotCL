@@ -432,7 +432,7 @@ export default function StaffListPage() {
     return (
       <div className="rounded-[2rem] border border-field-danger bg-white p-6 text-center">
         <p className="font-black text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
-        <Link href="/" className="mt-4 inline-flex rounded-full border border-field-border px-4 py-2 text-sm font-black text-field-primary">
+        <Link href="/" className="mt-4 inline-flex rounded-[3px] border border-field-border px-4 py-2 text-sm font-black text-field-primary">
           홈으로
         </Link>
       </div>
@@ -444,7 +444,7 @@ export default function StaffListPage() {
       <section className="rounded-[1.5rem] border border-field-border bg-white px-4 py-3 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-field-primary text-white">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[3px] bg-field-primary text-white">
               <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
@@ -455,7 +455,7 @@ export default function StaffListPage() {
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-field-border bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-soft"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-soft"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -465,7 +465,7 @@ export default function StaffListPage() {
                 type="button"
                 onClick={() => void save(members, departments, true)}
                 disabled={isSaving || !isDirty}
-                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
@@ -567,7 +567,7 @@ export default function StaffListPage() {
                 onDelete={() => deleteDepartment(department.id)}
               />
             ))}
-            <div className="flex h-8 items-center rounded-full border border-dashed border-field-border bg-field-soft/50 pl-2">
+            <div className="flex h-8 items-center rounded-[3px] border border-dashed border-field-border bg-field-soft/50 pl-2">
               <input
                 type="text"
                 value={newDepartmentName}
@@ -607,7 +607,7 @@ export default function StaffListPage() {
               <button
                 type="button"
                 onClick={() => addDepartment()}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-field-primary transition hover:bg-field-light active:scale-90"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] text-field-primary transition hover:bg-field-light active:scale-90"
                 aria-label="부서 추가"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -646,7 +646,7 @@ export default function StaffListPage() {
                           <button
                             type="button"
                             onClick={() => addMember(group.name)}
-                            className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
+                            className="grid h-5 w-5 shrink-0 place-items-center rounded-[3px] border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
                             aria-label={`${group.name} 부서에 인원 추가`}
                           >
                             <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
@@ -844,7 +844,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] border border-field-danger/25 bg-white text-field-danger/60 transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -1027,7 +1027,7 @@ function DepartmentChip({
 
   return (
     <div
-      className="flex h-8 items-center rounded-full border pl-2 shadow-sm"
+      className="flex h-8 items-center rounded-[3px] border pl-2 shadow-sm"
       style={{
         backgroundColor: departmentColor.background,
         borderColor: departmentColor.border
@@ -1064,7 +1064,7 @@ function DepartmentChip({
           event.stopPropagation();
           onDelete();
         }}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-field-muted transition hover:bg-field-danger hover:text-white active:scale-90"
+        className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] text-field-muted transition hover:bg-field-danger hover:text-white active:scale-90"
         aria-label={`${department.name} 부서 삭제`}
       >
         <X className="h-3 w-3" aria-hidden />

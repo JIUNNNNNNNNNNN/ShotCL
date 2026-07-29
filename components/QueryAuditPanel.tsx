@@ -34,7 +34,7 @@ export function QueryAuditPanel() {
       <details className="rounded-xl border border-amber-500 bg-[#fffdf4]/95 shadow-sm backdrop-blur">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-black text-amber-950 marker:content-none">
           Query audit
-          <span className="ml-auto rounded-full bg-amber-100 px-2 py-0.5">
+          <span className="ml-auto rounded-[3px] bg-amber-100 px-2 py-0.5">
             {totalCalls} calls · {duplicateCalls} duplicates
           </span>
         </summary>
@@ -43,7 +43,7 @@ export function QueryAuditPanel() {
             <button
               type="button"
               onClick={clearQueryAudit}
-              className="min-h-7 rounded-full border border-amber-300 bg-white px-2 font-bold text-amber-900"
+              className="min-h-7 rounded-[3px] border border-amber-300 bg-white px-2 font-bold text-amber-900"
             >
               로그 초기화
             </button>

@@ -158,6 +158,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (archiveMetadataError) {
       return NextResponse.json({ error: archiveMetadataError }, { status: 400 });
     }
+    if (resolvedScene && archiveMetadata.cutNumber && !resolvedScene.cutCount) {
+      return NextResponse.json(
+        { error: "선택한 씬의 총 컷수를 먼저 입력해주세요." },
+        { status: 400 }
+      );
+    }
     if (
       resolvedScene?.cutCount
       && archiveMetadata.cutNumber
@@ -554,6 +560,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       const archiveMetadataError = validateSceneCutMetadata(archiveMetadata);
       if (archiveMetadataError) {
         return NextResponse.json({ error: archiveMetadataError }, { status: 400 });
+      }
+      if (resolvedScene && archiveMetadata.cutNumber && !resolvedScene.cutCount) {
+        return NextResponse.json(
+          { error: "선택한 씬의 총 컷수를 먼저 입력해주세요." },
+          { status: 400 }
+        );
       }
       if (
         resolvedScene?.cutCount

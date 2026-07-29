@@ -298,7 +298,7 @@ export function ArchiveImportDialog({
             <h2 className="font-display truncate text-lg font-black text-field-primary">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
             <p className="truncate text-xs font-bold text-field-muted">{sourceLabel} · {pages.length}페이지/이미지</p>
           </div>
-          <button type="button" onClick={onClose} disabled={isSaving} className="grid h-10 w-10 place-items-center rounded-full border border-field-border text-field-muted" aria-label="가져오기 닫기">
+          <button type="button" onClick={onClose} disabled={isSaving} className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-border text-field-muted" aria-label="가져오기 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
@@ -423,7 +423,7 @@ export function ArchiveImportDialog({
                   sceneNo,
                   cutNo
                 })}
-                className="inline-flex min-h-11 items-center gap-2 rounded-full bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
+                className="inline-flex min-h-11 items-center gap-2 rounded-[3px] bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden />
                 {isSaving ? "저장 중" : "추출 확정"}
@@ -665,7 +665,7 @@ function StoryboardCropWorkflow({
             type="button"
             onClick={() => activePage && onAddAutomaticCandidates(activePage)}
             disabled={!cropTemplate || !activePage || isEditorLocked}
-            className="inline-flex min-h-9 items-center gap-1 rounded-full border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+            className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
           >
             <Grid2X2 className="h-3.5 w-3.5" aria-hidden />
             자동 후보
@@ -675,7 +675,7 @@ function StoryboardCropWorkflow({
               type="button"
               onClick={() => onResetPageGrid(activePage, editingCandidate)}
               disabled={isEditorLocked}
-              className="min-h-9 rounded-full border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+              className="min-h-9 rounded-[3px] border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
             >
               격자 재설정
             </button>
@@ -684,7 +684,7 @@ function StoryboardCropWorkflow({
             type="button"
             onClick={onUndo}
             disabled={candidates.length === 0 || isEditorLocked}
-            className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-40"
+            className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-40"
             aria-label="마지막 후보 취소"
           >
             <Undo2 className="h-4 w-4" aria-hidden />
@@ -694,7 +694,7 @@ function StoryboardCropWorkflow({
               type="button"
               onClick={() => editingCandidate && onDeleteCandidate(editingCandidate.id)}
               disabled={isEditorLocked}
-              className="grid h-9 w-9 place-items-center rounded-full border border-field-danger/35 text-field-danger disabled:opacity-40"
+              className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-danger/35 text-field-danger disabled:opacity-40"
               aria-label="선택한 crop 후보 삭제"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
@@ -703,20 +703,20 @@ function StoryboardCropWorkflow({
         </div>
 
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => movePage(-1)} disabled={activePageIndex <= 0 || isSaving} className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-35" aria-label="이전 페이지">
+          <button type="button" onClick={() => movePage(-1)} disabled={activePageIndex <= 0 || isSaving} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-35" aria-label="이전 페이지">
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>
-          <button type="button" onClick={() => movePage(1)} disabled={activePageIndex >= pages.length - 1 || isSaving} className="grid h-9 w-9 place-items-center rounded-full border border-field-border text-field-primary disabled:opacity-35" aria-label="다음 페이지">
+          <button type="button" onClick={() => movePage(1)} disabled={activePageIndex >= pages.length - 1 || isSaving} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-35" aria-label="다음 페이지">
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
-          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-9 rounded-full border border-field-border px-3 text-[11px] font-black text-field-muted disabled:opacity-40">
+          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-9 rounded-[3px] border border-field-border px-3 text-[11px] font-black text-field-muted disabled:opacity-40">
             취소
           </button>
           <button
             type="button"
             onClick={onConfirmExtraction}
             disabled={!cropTemplate || candidates.length === 0 || isSaving}
-            className="inline-flex min-h-9 items-center gap-1 rounded-full bg-field-primary px-3 text-[11px] font-black text-white disabled:opacity-40"
+            className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-[11px] font-black text-white disabled:opacity-40"
           >
             <Save className="h-3.5 w-3.5" aria-hidden />
             {isSaving
@@ -1103,7 +1103,7 @@ function StoryboardCropCanvas({
             event.stopPropagation();
             onConfirmTemplate();
           }}
-          className="absolute z-20 inline-flex min-h-9 -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-full bg-field-primary px-3 text-[11px] font-black text-white shadow-[0_4px_16px_rgba(20,66,52,0.24)]"
+          className="absolute z-20 inline-flex min-h-9 -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-[3px] bg-field-primary px-3 text-[11px] font-black text-white shadow-[0_4px_16px_rgba(20,66,52,0.24)]"
           style={{
             left: `clamp(4.75rem, ${(referenceCrop.x + referenceCrop.width / 2) * 100}%, calc(100% - 4.75rem))`,
             top: `clamp(0.5rem, ${(referenceCrop.y + referenceCrop.height + 0.015) * 100}%, calc(100% - 2.75rem))`
@@ -1326,7 +1326,7 @@ function OverheadCropWorkflow({
     <div className="grid content-start gap-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-black text-field-primary">저장할 페이지 선택</p>
-        <button type="button" onClick={() => onSelectedIdsChange(selectedCount === pages.length ? new Set() : new Set(pages.map((page) => page.id)))} className="min-h-9 rounded-full border border-field-border px-3 text-xs font-black text-field-primary">
+        <button type="button" onClick={() => onSelectedIdsChange(selectedCount === pages.length ? new Set() : new Set(pages.map((page) => page.id)))} className="min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
           {selectedCount === pages.length ? "전체 해제" : "전체 선택"}
         </button>
       </div>
@@ -1349,7 +1349,7 @@ function OverheadCropWorkflow({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={page.previewUrl} alt={`${page.index + 1}페이지 미리보기`} draggable={false} className="block aspect-[4/3] h-auto w-full select-none rounded-none object-contain" />
               <span className="truncate px-1 text-[11px] font-bold text-field-muted">{page.index + 1}. {page.name}</span>
-              {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-field-primary text-white"><Check className="h-4 w-4" aria-hidden /></span> : null}
+              {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[3px] bg-field-primary text-white"><Check className="h-4 w-4" aria-hidden /></span> : null}
             </button>
           );
         })}
