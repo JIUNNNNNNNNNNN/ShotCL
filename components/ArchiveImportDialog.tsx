@@ -17,7 +17,7 @@ import {
   type StoryboardGridCell,
   type StoryboardGridOrigin
 } from "@/lib/client/archiveMedia";
-import type { ProjectReferenceAssetType } from "@/lib/types";
+import type { ProjectReferenceAssetType, ProjectSceneItem } from "@/lib/types";
 
 export type ArchiveImportResult = {
   page: ArchiveImportPage;
@@ -29,8 +29,17 @@ export type ArchiveImportCommit = {
   cropTemplate: StoryboardCropTemplate | null;
   title: string;
   memo: string;
+  sceneId: string;
   sceneNo: string;
   cutNo: string;
+};
+
+export type ArchiveImportInitialMetadata = {
+  title?: string;
+  memo?: string;
+  sceneId?: string;
+  sceneNo?: string;
+  cutNo?: string;
 };
 
 const DEFAULT_CROP: RelativeCrop = { x: 0.06, y: 0.08, width: 0.46, height: 0.16 };
@@ -39,6 +48,8 @@ export function ArchiveImportDialog({
   assetType,
   sourceLabel,
   pages,
+  scenes = [],
+  initialMetadata,
   isSaving,
   onClose,
   onSave
@@ -46,6 +57,8 @@ export function ArchiveImportDialog({
   assetType: Extract<ProjectReferenceAssetType, "overhead" | "storyboard">;
   sourceLabel: string;
   pages: ArchiveImportPage[];
+  scenes?: ProjectSceneItem[];
+  initialMetadata?: ArchiveImportInitialMetadata;
   isSaving: boolean;
   onClose: () => void;
   onSave: (value: ArchiveImportCommit) => Promise<void> | void;
@@ -63,10 +76,11 @@ export function ArchiveImportDialog({
   const [pageOrigins, setPageOrigins] = useState<Record<string, StoryboardGridOrigin>>({});
   const [activePageId, setActivePageId] = useState(pages[0]?.id ?? "");
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [memo, setMemo] = useState("");
-  const [sceneNo, setSceneNo] = useState("");
-  const [cutNo, setCutNo] = useState("");
+  const [title, setTitle] = useState(() => initialMetadata?.title ?? "");
+  const [memo, setMemo] = useState(() => initialMetadata?.memo ?? "");
+  const [sceneId, setSceneId] = useState(() => initialMetadata?.sceneId ?? "");
+  const [sceneNo, setSceneNo] = useState(() => initialMetadata?.sceneNo ?? "");
+  const [cutNo, setCutNo] = useState(() => initialMetadata?.cutNo ?? "");
   const selectedPages = useMemo(
     () => pages.filter((page) => selectedIds.has(page.id)),
     [pages, selectedIds]
@@ -274,6 +288,7 @@ export function ArchiveImportDialog({
                 cropTemplate,
                 title,
                 memo,
+                sceneId,
                 sceneNo,
                 cutNo
               })}
@@ -286,10 +301,17 @@ export function ArchiveImportDialog({
                 <ArchiveMetadataFields
                   title={title}
                   memo={memo}
+                  scenes={scenes}
+                  sceneId={sceneId}
                   sceneNo={sceneNo}
                   cutNo={cutNo}
                   onTitleChange={setTitle}
                   onMemoChange={setMemo}
+                  onSceneChange={(nextSceneId, nextSceneNo) => {
+                    setSceneId(nextSceneId);
+                    setSceneNo(nextSceneNo);
+                    if (!nextSceneId) setCutNo("");
+                  }}
                   onSceneNoChange={setSceneNo}
                   onCutNoChange={setCutNo}
                 />
@@ -314,10 +336,17 @@ export function ArchiveImportDialog({
               <ArchiveMetadataFields
                 title={title}
                 memo={memo}
+                scenes={scenes}
+                sceneId={sceneId}
                 sceneNo={sceneNo}
                 cutNo={cutNo}
                 onTitleChange={setTitle}
                 onMemoChange={setMemo}
+                onSceneChange={(nextSceneId, nextSceneNo) => {
+                  setSceneId(nextSceneId);
+                  setSceneNo(nextSceneNo);
+                  if (!nextSceneId) setCutNo("");
+                }}
                 onSceneNoChange={setSceneNo}
                 onCutNoChange={setCutNo}
               />
@@ -330,7 +359,15 @@ export function ArchiveImportDialog({
               <button
                 type="button"
                 disabled={isSaving || results.length === 0}
-                onClick={() => onSave({ results, cropTemplate: null, title, memo, sceneNo, cutNo })}
+                onClick={() => onSave({
+                  results,
+                  cropTemplate: null,
+                  title,
+                  memo,
+                  sceneId,
+                  sceneNo,
+                  cutNo
+                })}
                 className="inline-flex min-h-11 items-center gap-2 rounded-full bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden />
@@ -347,22 +384,29 @@ export function ArchiveImportDialog({
 function ArchiveMetadataFields({
   title,
   memo,
+  scenes,
+  sceneId,
   sceneNo,
   cutNo,
   onTitleChange,
   onMemoChange,
+  onSceneChange,
   onSceneNoChange,
   onCutNoChange
 }: {
   title: string;
   memo: string;
+  scenes: ProjectSceneItem[];
+  sceneId: string;
   sceneNo: string;
   cutNo: string;
   onTitleChange: (value: string) => void;
   onMemoChange: (value: string) => void;
+  onSceneChange: (sceneId: string, sceneNo: string) => void;
   onSceneNoChange: (value: string) => void;
   onCutNoChange: (value: string) => void;
 }) {
+  const selectedSceneExists = scenes.some((scene) => scene.id === sceneId);
   return (
     <div className="grid content-start gap-2">
       <label className="grid gap-1 text-xs font-black text-field-muted">
@@ -370,7 +414,35 @@ function ArchiveMetadataFields({
         <input value={title} onChange={(event) => onTitleChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" placeholder="선택 사항" />
       </label>
       <div className="grid grid-cols-2 gap-2">
-        <label className="grid gap-1 text-xs font-black text-field-muted">씬<input value={sceneNo} onChange={(event) => onSceneNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
+        <label className="grid gap-1 text-xs font-black text-field-muted">
+          씬
+          {scenes.length > 0 || sceneId ? (
+            <select
+              value={sceneId}
+              onChange={(event) => {
+                const scene = scenes.find((entry) => entry.id === event.target.value);
+                onSceneChange(scene?.id || "", scene?.sceneNo || "");
+              }}
+              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text"
+            >
+              <option value="">연결 안 함</option>
+              {sceneId && !selectedSceneExists ? (
+                <option value={sceneId}>{sceneNo || "삭제된 씬"} · 현재 연결 유지</option>
+              ) : null}
+              {scenes.map((scene) => (
+                <option key={scene.id} value={scene.id}>
+                  S#{scene.sceneNo}{scene.sceneContent ? ` · ${scene.sceneContent.slice(0, 24)}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={sceneNo}
+              onChange={(event) => onSceneNoChange(event.target.value)}
+              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text"
+            />
+          )}
+        </label>
         <label className="grid gap-1 text-xs font-black text-field-muted">컷<input value={cutNo} onChange={(event) => onCutNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text" /></label>
       </div>
       <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea value={memo} onChange={(event) => onMemoChange(event.target.value)} rows={3} className="rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-5 text-field-text" /></label>

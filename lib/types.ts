@@ -168,6 +168,7 @@ export type Shot = {
 };
 
 export type ProjectReferenceAssetType = "scenario" | "storyboard" | "overhead";
+export type ArchiveMediaAssetType = Extract<ProjectReferenceAssetType, "storyboard" | "overhead">;
 
 export type ProjectReferenceCrop = {
   x: number;
@@ -198,6 +199,37 @@ export type ProjectReferenceCrop = {
   folderId?: string | null;
   originalFolderName?: string;
   relativePath?: string;
+  /** 사용자가 편집하는 표시 이름입니다. 원본 파일명 및 Storage key와 독립적입니다. */
+  displayName?: string;
+  /** 최초 업로드 파일명입니다. 표시 이름을 바꿔도 유지합니다. */
+  originalFilename?: string;
+  episodeNumber?: number | null;
+  /** project_scene_items.id를 가리키는 안정적인 씬 식별값입니다. */
+  sceneId?: string | null;
+  sceneNumber?: string;
+  cutNumber?: number | null;
+  assetType?: ArchiveMediaAssetType;
+  cropIndex?: number | null;
+  normalizedLinkKey?: string;
+};
+
+export type ArchiveSceneCutMetadata = {
+  episodeNumber: number | null;
+  sceneId: string | null;
+  sceneNumber: string;
+  cutNumber: number | null;
+  assetType: ArchiveMediaAssetType | null;
+  normalizedLinkKey: string;
+};
+
+export type ArchiveFilenameSuggestion = {
+  sceneNumber: string;
+  cutNumber: number;
+};
+
+export type ArchiveAssetLinkCandidate = ArchiveSceneCutMetadata & {
+  assetId: string;
+  source: "explicit_scene_id" | "explicit_scene_number" | "filename_suggestion";
 };
 
 export type ProjectArchiveFolder = {
@@ -207,6 +239,16 @@ export type ProjectArchiveFolder = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProjectArchiveFolderInspection = {
+  selectedRootIds: string[];
+  folderIds: string[];
+  assetIds: string[];
+  selectedFolderCount: number;
+  descendantFolderCount: number;
+  assetCount: number;
+  linkedAssetCount: number;
 };
 
 export type ProjectScenarioImageSegment = {

@@ -157,13 +157,56 @@ export async function listAccessGrants(request: NextRequest) {
   return data ?? [];
 }
 
-/** 레거시 프로젝트는 기존 Auth/RLS 흐름을 유지하고, 공유 프로젝트만 passcode admin 세션을 강제합니다. */
+/**
+ * 공유 프로젝트는 passcode 세션을, 레거시 프로젝트는 Supabase Auth 소유권/멤버십을 확인합니다.
+ * service-role 클라이언트를 쓰는 API가 `share_enabled=false`만으로 권한을 우회하지 않도록
+ * 레거시 요청에도 실제 사용자 JWT를 요구합니다.
+ */
 export async function canAdministerProject(request: NextRequest, projectId: string) {
+  return (await getProjectRequestRole(request, projectId)) === "admin";
+}
+
+/** passcode 공유 세션과 레거시 Supabase Auth를 하나의 서버 권한 판정으로 합칩니다. */
+export async function getProjectRequestRole(
+  request: NextRequest,
+  projectId: string
+): Promise<SharedProjectRole | null> {
   const supabase = requireProjectAccessDb();
   const databaseProjectId = normalizeProjectId(projectId);
-  const { data, error } = await supabase.from("projects").select("share_enabled").eq("id", databaseProjectId).maybeSingle();
+  const grant = await getAccessGrant(request, databaseProjectId);
+  if (grant) return grant.role;
+
+  const { data, error } = await supabase
+    .from("projects")
+    .select("share_enabled,created_by")
+    .eq("id", databaseProjectId)
+    .maybeSingle();
   if (error) throw error;
-  if (!data) return false;
-  if (!data.share_enabled) return true;
-  return (await getAccessGrant(request, databaseProjectId))?.role === "admin";
+  if (!data || data.share_enabled) return null;
+
+  const bearerToken = getBearerToken(request);
+  if (!bearerToken) return null;
+  const { data: authData, error: authError } = await supabase.auth.getUser(bearerToken);
+  if (authError || !authData.user) return null;
+  if (String(data.created_by ?? "") === authData.user.id) return "admin";
+
+  const { data: membership, error: membershipError } = await supabase
+    .from("project_members")
+    .select("role")
+    .eq("project_id", databaseProjectId)
+    .eq("user_id", authData.user.id)
+    .maybeSingle();
+  if (membershipError) {
+    // 초기 MVP DB에는 project_members가 없을 수 있습니다. 소유자 검증은 위에서 완료했습니다.
+    if (membershipError.code === "42P01" || membershipError.code === "PGRST205") return null;
+    throw membershipError;
+  }
+  if (membership?.role === "admin") return "admin";
+  return membership ? "progress" : null;
+}
+
+function getBearerToken(request: NextRequest) {
+  const authorization = request.headers.get("authorization")?.trim() ?? "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
 }

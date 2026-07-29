@@ -12,6 +12,28 @@ export type ArchiveImportPage = {
   originalFile?: File;
 };
 
+export type ArchiveCropSourceKind = "pdf" | "image";
+
+export type ArchiveCropSource = {
+  kind: ArchiveCropSourceKind;
+  sourceAssetId: string | null;
+  file: File;
+  pageCount: number;
+  pages: ArchiveImportPage[];
+};
+
+export type CreateArchiveCropSourceOptions = {
+  sourceAssetId?: string | null;
+  onProgress?: (current: number, total: number) => void;
+};
+
+export type ArchiveCropSourceDescriptor = {
+  type?: string | null;
+  name?: string | null;
+  mimeType?: string | null;
+  filename?: string | null;
+};
+
 export type RelativeCrop = {
   x: number;
   y: number;
@@ -78,6 +100,43 @@ const ARCHIVE_THUMBNAIL_QUALITY = 0.72;
 let configuredPdfJs:
   | Promise<typeof import("pdfjs-dist/legacy/build/pdf.mjs")>
   | null = null;
+
+export function detectArchiveCropSourceKind(
+  source: ArchiveCropSourceDescriptor
+): ArchiveCropSourceKind | null {
+  const mimeType = String(source.type ?? source.mimeType ?? "").trim().toLowerCase();
+  const filename = String(source.name ?? source.filename ?? "").trim();
+  if (mimeType === "application/pdf" || /\.pdf$/i.test(filename)) return "pdf";
+  if (
+    /^(?:image\/jpeg|image\/png|image\/webp)$/i.test(mimeType)
+    || /\.(?:jpe?g|png|webp)$/i.test(filename)
+  ) {
+    return "image";
+  }
+  return null;
+}
+
+export async function createArchiveCropSource(
+  file: File,
+  options: CreateArchiveCropSourceOptions = {}
+): Promise<ArchiveCropSource> {
+  const kind = detectArchiveCropSourceKind(file);
+  if (!kind) {
+    throw new Error("PDF, JPG, JPEG, PNG 또는 WebP 파일만 crop할 수 있습니다.");
+  }
+  const pages = kind === "pdf"
+    ? await renderArchivePdfPages(file, options.onProgress, 0)
+    : await loadArchiveImagePages([file]);
+  if (kind === "image") options.onProgress?.(pages.length, pages.length);
+  if (pages.length === 0) throw new Error("crop할 페이지나 이미지를 읽지 못했습니다.");
+  return {
+    kind,
+    sourceAssetId: options.sourceAssetId?.trim() || null,
+    file,
+    pageCount: pages.length,
+    pages
+  };
+}
 
 export async function renderArchivePdfPages(
   file: File,
@@ -351,16 +410,19 @@ export async function createCroppedArchiveFile(
 }
 
 export async function optimizeArchiveImage(file: File): Promise<OptimizedArchiveImage> {
-  const sourceUrl = URL.createObjectURL(file);
+  const decoded = await decodeArchiveImage(file);
   try {
-    const image = await loadImage(sourceUrl);
     const displayBlob = await resizeImage(
-      image,
+      decoded.source,
+      decoded.width,
+      decoded.height,
       ARCHIVE_DISPLAY_MAX_SIDE,
       ARCHIVE_DISPLAY_QUALITY
     );
     const thumbnailBlob = await resizeImage(
-      image,
+      decoded.source,
+      decoded.width,
+      decoded.height,
       ARCHIVE_THUMBNAIL_MAX_SIDE,
       ARCHIVE_THUMBNAIL_QUALITY
     );
@@ -369,18 +431,23 @@ export async function optimizeArchiveImage(file: File): Promise<OptimizedArchive
       thumbnailFile: new File([thumbnailBlob], `${stripExtension(file.name)}-thumb.jpg`, { type: "image/jpeg" })
     };
   } finally {
-    URL.revokeObjectURL(sourceUrl);
+    decoded.close();
   }
 }
 
 export async function createArchiveThumbnail(file: File) {
-  const sourceUrl = URL.createObjectURL(file);
+  const decoded = await decodeArchiveImage(file);
   try {
-    const image = await loadImage(sourceUrl);
-    const blob = await resizeImage(image, ARCHIVE_THUMBNAIL_MAX_SIDE, ARCHIVE_THUMBNAIL_QUALITY);
+    const blob = await resizeImage(
+      decoded.source,
+      decoded.width,
+      decoded.height,
+      ARCHIVE_THUMBNAIL_MAX_SIDE,
+      ARCHIVE_THUMBNAIL_QUALITY
+    );
     return new File([blob], `${stripExtension(file.name)}-thumb.jpg`, { type: "image/jpeg" });
   } finally {
-    URL.revokeObjectURL(sourceUrl);
+    decoded.close();
   }
 }
 
@@ -404,15 +471,52 @@ function canvasBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
   });
 }
 
-async function resizeImage(image: HTMLImageElement, maxSide: number, quality: number) {
-  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
-  const canvas = documentCanvas(image.naturalWidth * scale, image.naturalHeight * scale);
+async function resizeImage(
+  image: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  maxSide: number,
+  quality: number
+) {
+  const scale = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+  const canvas = documentCanvas(sourceWidth * scale, sourceHeight * scale);
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("이미지 최적화 캔버스를 준비하지 못했습니다.");
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   return canvasBlob(canvas, "image/jpeg", quality);
+}
+
+async function decodeArchiveImage(file: File) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      return {
+        source: bitmap as CanvasImageSource,
+        width: bitmap.width,
+        height: bitmap.height,
+        close: () => bitmap.close()
+      };
+    } catch {
+      // Some older Safari versions do not support imageOrientation. Fall through
+      // to the HTMLImageElement decoder, which applies EXIF orientation in modern browsers.
+    }
+  }
+
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(sourceUrl);
+    return {
+      source: image as CanvasImageSource,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+      close: () => URL.revokeObjectURL(sourceUrl)
+    };
+  } catch (error) {
+    URL.revokeObjectURL(sourceUrl);
+    throw error;
+  }
 }
 
 function loadImage(url: string) {
@@ -461,7 +565,13 @@ export async function mapWithConcurrency<T, R>(
       results[index] = await worker(values[index], index);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, run));
+  const workers = await Promise.allSettled(
+    Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, run)
+  );
+  const failure = workers.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (failure) throw failure.reason;
   return results;
 }
 

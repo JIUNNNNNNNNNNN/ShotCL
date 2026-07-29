@@ -2,13 +2,26 @@ import type {
   ProjectCostume,
   ProjectCostumeScene,
   ProjectArchiveFolder,
+  ProjectArchiveFolderInspection,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
   ProjectScenarioScene,
 } from "@/lib/types";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ApiError = { error?: string; detail?: string };
+
+async function fetchArchiveApi(input: RequestInfo | URL, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  const supabase = getSupabaseBrowserClient();
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  }
+  return fetch(input, { ...init, headers });
+}
 
 export type ProjectCostumeBulkSaveInput = {
   scenes: Array<{
@@ -65,7 +78,7 @@ export async function listProjectReferenceAssets(
 ): Promise<ProjectReferenceAsset[]> {
   const query = new URLSearchParams({ type: assetType });
   if (dailyPlanId) query.set("dailyPlanId", dailyPlanId);
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets?${query}`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets?${query}`, {
     cache: "no-store"
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & { assets?: ProjectReferenceAsset[] };
@@ -110,6 +123,13 @@ export async function uploadProjectReferenceAsset(
     folderId?: string | null;
     originalFolderName?: string;
     relativePath?: string;
+    displayName?: string;
+    originalFilename?: string;
+    episodeNumber?: number;
+    sceneId?: string;
+    sceneNumber?: string;
+    cutNumber?: number;
+    cropIndex?: number;
     thumbnailFile?: File;
   } = {}
 ): Promise<ProjectReferenceAsset> {
@@ -125,7 +145,7 @@ export async function uploadProjectReferenceAsset(
     }
     if (value !== undefined && value !== null && value !== "") formData.set(key, String(value));
   });
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
     method: "POST",
     body: formData
   });
@@ -146,29 +166,48 @@ export async function updateProjectReferenceAsset(
     memo?: string;
     sceneNo?: string;
     cutNo?: string;
+    displayName?: string;
+    episodeNumber?: number | null;
+    sceneId?: string | null;
+    sceneNumber?: string;
+    cutNumber?: number | null;
+    cropIndex?: number | null;
+    assetType?: ProjectReferenceCrop["assetType"];
+    folderId?: string | null;
     sortOrder?: number;
     scenarioScenes?: ProjectScenarioScene[];
     scenarioParseError?: string | null;
     reanalyzeScenario?: boolean;
   }
 ): Promise<ProjectReferenceAsset> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, ...patch })
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & { asset?: ProjectReferenceAsset };
-  if (!response.ok || !payload.asset) throw new Error(payload.error || "자료 설정을 저장하지 못했습니다.");
+  if (!response.ok || !payload.asset) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 설정을 저장하지 못했습니다.");
+  }
   return payload.asset;
 }
 
 export async function deleteProjectReferenceAsset(projectId: string, id: string) {
-  const response = await fetch(
+  const response = await fetchArchiveApi(
     `/api/projects/${encodeURIComponent(projectId)}/reference-assets?id=${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
-  const payload = (await response.json().catch(() => ({}))) as ApiError;
-  if (!response.ok) throw new Error(payload.error || "자료를 삭제하지 못했습니다.");
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    deleted?: number;
+    storageCleanupWarning?: string;
+  };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료를 삭제하지 못했습니다.");
+  }
+  return {
+    deleted: payload.deleted ?? 0,
+    storageCleanupWarning: payload.storageCleanupWarning ?? ""
+  };
 }
 
 export async function moveProjectReferenceAssets(
@@ -176,7 +215,7 @@ export async function moveProjectReferenceAssets(
   ids: string[],
   folderId: string | null
 ) {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operation: "move_many", ids, folderId })
@@ -187,18 +226,54 @@ export async function moveProjectReferenceAssets(
 }
 
 export async function deleteProjectReferenceAssets(projectId: string, ids: string[]) {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids })
   });
-  const payload = (await response.json().catch(() => ({}))) as ApiError & { deleted?: number };
-  if (!response.ok) throw new Error(payload.error || "선택한 자료를 삭제하지 못했습니다.");
-  return payload.deleted ?? 0;
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    deleted?: number;
+    storageCleanupWarning?: string;
+  };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "선택한 자료를 삭제하지 못했습니다.");
+  }
+  return {
+    deleted: payload.deleted ?? 0,
+    storageCleanupWarning: payload.storageCleanupWarning ?? ""
+  };
+}
+
+export async function inspectProjectReferenceAssets(
+  projectId: string,
+  ids: string[]
+): Promise<{ assetIds: string[]; assetCount: number; linkedAssetCount: number }> {
+  const response = await fetchArchiveApi(
+    `/api/projects/${encodeURIComponent(projectId)}/reference-assets`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "inspect_many", ids: [...new Set(ids)] })
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    inspection?: { assetIds?: string[]; assetCount?: number; linkedAssetCount?: number };
+  };
+  if (!response.ok || !payload.inspection) {
+    throw new Error(
+      [payload.error, payload.detail].filter(Boolean).join(" · ")
+      || "선택한 자료의 연결 상태를 확인하지 못했습니다."
+    );
+  }
+  return {
+    assetIds: payload.inspection.assetIds ?? [],
+    assetCount: payload.inspection.assetCount ?? 0,
+    linkedAssetCount: payload.inspection.linkedAssetCount ?? 0
+  };
 }
 
 export async function listProjectArchiveFolders(projectId: string): Promise<ProjectArchiveFolder[]> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
     cache: "no-store"
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & { folders?: ProjectArchiveFolder[] };
@@ -211,7 +286,7 @@ export async function createProjectArchiveFolder(
   name: string,
   sortOrder = 0
 ): Promise<ProjectArchiveFolder> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, sortOrder })
@@ -226,7 +301,7 @@ export async function renameProjectArchiveFolder(
   id: string,
   name: string
 ): Promise<ProjectArchiveFolder> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id, name })
@@ -236,13 +311,166 @@ export async function renameProjectArchiveFolder(
   return payload.folder;
 }
 
+export async function renameProjectArchiveFolderTree(
+  projectId: string,
+  id: string | null,
+  rootPath: string,
+  name: string
+): Promise<ProjectArchiveFolder[]> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "rename_tree", id, rootPath, name })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    folders?: ProjectArchiveFolder[];
+  };
+  if (!response.ok || !payload.folders) {
+    throw new Error(
+      [payload.error, payload.detail].filter(Boolean).join(" · ")
+      || "폴더 이름을 바꾸지 못했습니다."
+    );
+  }
+  return payload.folders;
+}
+
 export async function deleteProjectArchiveFolder(projectId: string, id: string) {
-  const response = await fetch(
+  const response = await fetchArchiveApi(
     `/api/projects/${encodeURIComponent(projectId)}/archive-folders?id=${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError;
   if (!response.ok) throw new Error(payload.error || "폴더를 삭제하지 못했습니다.");
+}
+
+/**
+ * 선택된 폴더와 모든 하위 폴더의 full path를 변경합니다.
+ * 부모와 자식이 함께 전달돼도 서버가 최상위 선택 폴더만 이동 대상으로 정리합니다.
+ */
+export async function moveProjectArchiveFolders(
+  projectId: string,
+  ids: string[],
+  destinationFolderId: string | null
+): Promise<{ movedRootIds: string[]; folders: ProjectArchiveFolder[] }> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "move_many",
+      ids,
+      destinationFolderId
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    movedRootIds?: string[];
+    folders?: ProjectArchiveFolder[];
+  };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "폴더를 이동하지 못했습니다.");
+  }
+  return {
+    movedRootIds: payload.movedRootIds ?? [],
+    folders: payload.folders ?? []
+  };
+}
+
+/**
+ * asset·folder 혼합 선택을 하나의 서버 작업으로 이동합니다.
+ * 서버는 폴더 이동 뒤 asset 이동이 실패하면 두 상태를 이전 값으로 되돌립니다.
+ */
+export async function moveProjectArchiveSelection(
+  projectId: string,
+  assetIds: string[],
+  folderIds: string[],
+  destinationFolderId: string | null
+): Promise<{
+  movedAssetIds: string[];
+  movedRootIds: string[];
+  folders: ProjectArchiveFolder[];
+}> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "move_selection",
+      assetIds,
+      ids: folderIds,
+      destinationFolderId
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    movedAssetIds?: string[];
+    movedRootIds?: string[];
+    folders?: ProjectArchiveFolder[];
+  };
+  if (!response.ok) {
+    throw new Error(
+      [payload.error, payload.detail].filter(Boolean).join(" · ")
+      || "자료와 폴더를 이동하지 못했습니다."
+    );
+  }
+  return {
+    movedAssetIds: payload.movedAssetIds ?? [],
+    movedRootIds: payload.movedRootIds ?? [],
+    folders: payload.folders ?? []
+  };
+}
+
+/** 삭제 확인 화면에 필요한 하위 폴더·파일·진행도 연결 개수를 서버 기준으로 조회합니다. */
+export async function inspectProjectArchiveFolders(
+  projectId: string,
+  ids: string[],
+  assetIds: string[] = []
+): Promise<ProjectArchiveFolderInspection> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "inspect_delete", ids, assetIds })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    inspection?: ProjectArchiveFolderInspection;
+  };
+  if (!response.ok || !payload.inspection) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "폴더 내용을 확인하지 못했습니다.");
+  }
+  return payload.inspection;
+}
+
+/**
+ * inspect 결과를 사용자에게 보여준 뒤에만 호출해야 합니다.
+ * 연결된 진행도 media_link도 명시적으로 정리하며 Storage 정리 경고를 함께 반환합니다.
+ */
+export async function deleteProjectArchiveFolders(
+  projectId: string,
+  ids: string[],
+  confirmed: boolean,
+  assetIds: string[] = []
+): Promise<{
+  inspection: ProjectArchiveFolderInspection;
+  deletedFolderCount: number;
+  deletedAssetCount: number;
+  storageCleanupWarning: string;
+}> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, confirmed, assetIds })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    inspection?: ProjectArchiveFolderInspection;
+    deletedFolderCount?: number;
+    deletedAssetCount?: number;
+    storageCleanupWarning?: string;
+  };
+  if (!response.ok || !payload.inspection) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "폴더를 삭제하지 못했습니다.");
+  }
+  return {
+    inspection: payload.inspection,
+    deletedFolderCount: payload.deletedFolderCount ?? 0,
+    deletedAssetCount: payload.deletedAssetCount ?? 0,
+    storageCleanupWarning: payload.storageCleanupWarning ?? ""
+  };
 }
 
 export async function listProjectCostumes(projectId: string): Promise<ProjectCostume[]> {
