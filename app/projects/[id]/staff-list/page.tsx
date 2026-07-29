@@ -41,6 +41,8 @@ const notesTextareaClassName =
   "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1 text-center text-xs font-bold leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
+const desktopEditableGridClassName =
+  "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)_2.5rem]";
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -745,7 +747,11 @@ const StaffMemberRow = memo(function StaffMemberRow({
 
   return (
     <article
-      className={`relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70 shadow-sm" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""} ${desktopGridClassName}`}
+      className={`relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition ${
+        canEdit
+          ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
+          : `grid-cols-6 ${desktopGridClassName}`
+      } ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70 shadow-sm" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
       style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
@@ -830,18 +836,20 @@ const StaffMemberRow = memo(function StaffMemberRow({
         }}
       />
       {canEdit ? (
-        <button
-          type="button"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete(member);
-          }}
-          className="absolute -right-0.5 -top-0.5 z-10 grid h-6 w-6 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 shadow-sm transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-1"
-          aria-label={`${member.name || `${number}번 스탭`} 삭제`}
-        >
-          <X className="h-2 w-2" strokeWidth={2.5} aria-hidden />
-        </button>
+        <div className="col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l border-field-border/80 p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(member);
+            }}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-field-danger/25 bg-white text-field-danger/60 transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            aria-label={`${member.name || `${number}번 스탭`} 삭제`}
+          >
+            <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
+          </button>
+        </div>
       ) : null}
     </article>
   );
@@ -864,8 +872,10 @@ function EpisodeParticipationCells({
     pointerId: number;
     startX: number;
     startY: number;
+    startScrollLeft: number;
     moved: boolean;
   } | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const suppressClickRef = useRef(false);
   const episodeNumbers = useMemo(
     () => Array.from({ length: totalEpisodes }, (_, index) => index + 1),
@@ -885,82 +895,99 @@ function EpisodeParticipationCells({
 
   return (
     <div className="col-span-2 flex h-8 min-w-0 items-center gap-1 overflow-hidden md:col-auto">
-      <span className="w-7 shrink-0 text-[9px] font-black leading-none text-field-muted xl:w-auto">
+      <span className="w-7 shrink-0 whitespace-nowrap text-center text-[9px] font-black leading-normal text-field-muted xl:w-auto">
         <span className="xl:hidden">회차</span>
         <span className="hidden xl:inline">참여 회차</span>
       </span>
       {episodeNumbers.length > 0 ? (
         <div
-          className="flex h-8 min-w-0 flex-1 flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden overscroll-x-contain px-0.5 [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+          ref={scrollContainerRef}
+          className="h-7 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-md [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
           aria-label={`${member.name || "스탭"} 참여 회차`}
           onDragStart={(event) => event.preventDefault()}
+          onScroll={() => {
+            if (!pointerGestureRef.current) return;
+            pointerGestureRef.current.moved = true;
+            suppressClickRef.current = true;
+          }}
         >
-          {episodeNumbers.map((episodeNumber) => {
-            const participating = isStaffParticipatingInEpisode(member, episodeNumber);
-            return (
-              <button
-                key={episodeNumber}
-                type="button"
-                aria-pressed={participating}
-                aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
-                disabled={!canEdit}
-                className={`h-7 w-7 shrink-0 select-none rounded-md border text-[10px] font-black leading-none transition-[background-color,border-color,color,opacity,transform] ${
-                  canEdit ? "cursor-pointer active:scale-95" : "cursor-default"
-                } ${
-                  participating
-                    ? "opacity-100"
-                    : "border-field-border bg-white/70 text-field-muted opacity-55"
-                }`}
-                style={participating ? {
-                  backgroundColor: departmentColor.border,
-                  borderColor: departmentColor.border,
-                  color: "#ffffff"
-                } : undefined}
-                onPointerDown={(event) => {
-                  if (!event.isPrimary) return;
-                  suppressClickRef.current = false;
-                  pointerGestureRef.current = {
-                    pointerId: event.pointerId,
-                    startX: event.clientX,
-                    startY: event.clientY,
-                    moved: false
-                  };
-                }}
-                onPointerMove={(event) => {
-                  const gesture = pointerGestureRef.current;
-                  if (!gesture || gesture.pointerId !== event.pointerId) return;
-                  if (
-                    Math.hypot(
-                      event.clientX - gesture.startX,
-                      event.clientY - gesture.startY
-                    ) > 8
-                  ) {
-                    gesture.moved = true;
-                  }
-                }}
-                onPointerUp={(event) => {
-                  const gesture = pointerGestureRef.current;
-                  if (!gesture || gesture.pointerId !== event.pointerId) return;
-                  suppressClickRef.current = gesture.moved;
-                  pointerGestureRef.current = null;
-                }}
-                onPointerCancel={() => {
-                  suppressClickRef.current = true;
-                  pointerGestureRef.current = null;
-                }}
-                onClick={(event) => {
-                  if (suppressClickRef.current) {
-                    event.preventDefault();
+          <div
+            className="grid h-7 w-full min-w-full"
+            style={{
+              gridTemplateColumns: `repeat(${episodeNumbers.length}, minmax(24px, 1fr))`,
+              minWidth: `${episodeNumbers.length * 24}px`
+            }}
+          >
+            {episodeNumbers.map((episodeNumber) => {
+              const participating = isStaffParticipatingInEpisode(member, episodeNumber);
+              return (
+                <button
+                  key={episodeNumber}
+                  type="button"
+                  aria-pressed={participating}
+                  aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
+                  disabled={!canEdit}
+                  className={`h-7 min-w-0 select-none whitespace-nowrap border-y border-r border-field-border p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:rounded-l-md first:border-l last:rounded-r-md focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
+                    canEdit ? "cursor-pointer active:brightness-95" : "cursor-default"
+                  } ${
+                    participating
+                      ? "opacity-100"
+                      : "bg-white/80 text-field-muted"
+                  }`}
+                  style={participating ? {
+                    backgroundColor: departmentColor.border,
+                    color: "#ffffff"
+                  } : undefined}
+                  onPointerDown={(event) => {
+                    if (!event.isPrimary) return;
                     suppressClickRef.current = false;
-                    return;
-                  }
-                  toggleEpisode(episodeNumber);
-                }}
-              >
-                {episodeNumber}
-              </button>
-            );
-          })}
+                    pointerGestureRef.current = {
+                      pointerId: event.pointerId,
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      startScrollLeft: scrollContainerRef.current?.scrollLeft ?? 0,
+                      moved: false
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const gesture = pointerGestureRef.current;
+                    if (!gesture || gesture.pointerId !== event.pointerId) return;
+                    if (
+                      Math.hypot(
+                        event.clientX - gesture.startX,
+                        event.clientY - gesture.startY
+                      ) > 8
+                    ) {
+                      gesture.moved = true;
+                    }
+                  }}
+                  onPointerUp={(event) => {
+                    const gesture = pointerGestureRef.current;
+                    if (!gesture || gesture.pointerId !== event.pointerId) return;
+                    const scrolled = Math.abs(
+                      (scrollContainerRef.current?.scrollLeft ?? 0) - gesture.startScrollLeft
+                    ) > 4;
+                    suppressClickRef.current = gesture.moved || scrolled;
+                    pointerGestureRef.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    suppressClickRef.current = true;
+                    pointerGestureRef.current = null;
+                  }}
+                  onClick={(event) => {
+                    if (suppressClickRef.current) {
+                      event.preventDefault();
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    toggleEpisode(episodeNumber);
+                  }}
+                >
+                  {episodeNumber}
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <span className="grid h-7 min-w-0 flex-1 place-items-center rounded-md border border-field-border bg-white/70 text-[10px] font-black text-field-muted">
