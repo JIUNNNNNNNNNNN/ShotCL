@@ -4,7 +4,7 @@ import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -23,9 +23,12 @@ import {
   formatDailyPlanWeatherSummary,
   mergeDailyPlanTimetableRows,
   normalizeDailyPlanPrintMeta,
+  resolveDailyPlanTimetableSceneValues,
   type CallSheetPerson,
   type DailyPlanMainStaffRow,
   type DailyPlanPrintMeta,
+  type DailyPlanTimetableSceneMeta,
+  type DailyPlanTimetableSceneSourceSnapshot,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
 import {
@@ -39,14 +42,15 @@ import {
   koreanWeatherRegions,
   resolveKoreanWeatherRegion
 } from "@/lib/koreanWeatherRegions";
-import { MAX_DAILY_PLAN_MAIN_STAFF } from "@/lib/projectBasicInfo";
+import {
+  getProjectMainStaffForEpisode,
+  MAX_DAILY_PLAN_MAIN_STAFF
+} from "@/lib/projectBasicInfo";
 import {
   MAX_SCENE_CUT_COUNT,
-  normalizeSceneCutCount,
-  type SceneCutCountMap
+  normalizeSceneCutCount
 } from "@/lib/sceneCutCount";
-import { normalizeSceneNumber } from "@/lib/sceneNumber";
-import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
+import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
@@ -65,7 +69,7 @@ type DailyPlanEditorProps = {
   initialShots?: DailyPlanShot[];
   initialDraft?: DailyPlanDraft;
   initialShotDrafts?: DailyPlanShotDraft[];
-  sceneCutCounts?: SceneCutCountMap;
+  sceneListItems?: ProjectSceneItem[];
   notice?: string;
 };
 
@@ -78,6 +82,11 @@ type SceneCutInput = {
 
 type SceneBlockInput = {
   id: string;
+  sourceSceneId: string | null;
+  sourceSnapshot: DailyPlanTimetableSceneSourceSnapshot | null;
+  sceneContentOverride: string | null;
+  charactersOverride: string | null;
+  totalCutsOverride: number | null;
   sceneNumber: string;
   sceneTitle: string;
   description: string;
@@ -100,6 +109,12 @@ type SceneBlockInput = {
 };
 
 type PlanTextField = Exclude<keyof DailyPlanDraft, "shootingLocations" | "mealTimes">;
+
+type DailyPlanPrintMetaTextField = {
+  [Key in keyof DailyPlanPrintMeta]-?: NonNullable<DailyPlanPrintMeta[Key]> extends string
+    ? Key
+    : never;
+}[keyof DailyPlanPrintMeta];
 
 type EditableWeatherField = "weather" | "sunrise" | "sunset" | "minTemperature" | "maxTemperature" | "rainProbability";
 
@@ -130,6 +145,7 @@ type DailyPlanPreviewScene = {
   props: string;
   costumeMakeup: string;
   sceneMemo: string;
+  totalCuts: number | null;
   cuts: DailyPlanPreviewCut[];
 };
 
@@ -202,11 +218,11 @@ const maxRuntimeMinutes = 1440;
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
 const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
-const emptySceneCutCounts: SceneCutCountMap = {};
+const emptySceneListItems: ProjectSceneItem[] = [];
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneCutCounts = emptySceneCutCounts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneListItems = emptySceneListItems, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const initialEditorState = useMemo(() => {
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
@@ -215,8 +231,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const initialDefaults = applyProjectBasicInfoDefaults(
       sourcePlanDraft,
       sourcePrintMeta,
-      activeProjectBasicInfo,
-      !initialPlan && !initialDraft
+      activeProjectBasicInfo
     );
     const initialPlanDraft = initialDefaults.plan;
     const initialPrintMeta = applyProjectStaffDefaults(
@@ -227,13 +242,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     );
     const initialLocations = buildInitialLocations(initialPlanDraft);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
-    const initialScenes = applySceneCutCounts(
-      shotsToScenes(initialSourceShots, initialLocations),
-      sceneCutCounts
+    const initialScenes = restoreTimetableScenes(
+      initialPrintMeta.timetableScenes,
+      initialSourceShots,
+      initialLocations,
+      sceneListItems
     );
     const managedShotKeys = new Set(
       initialSourceShots.length > 0
-        ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(initialScenes)).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
+        ? dailyPlanShotsToShotDrafts(initialPlanDraft, initialSourceShots).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
         : []
     );
     return {
@@ -245,7 +262,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       initialScenes,
       managedShotKeys
     };
-  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffDepartments, projectStaffMembers, sceneCutCounts]);
+  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffDepartments, projectStaffMembers, sceneListItems]);
   const {
     activeProjectBasicInfo,
     initialPrintMeta,
@@ -317,10 +334,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       deferredPreviewSource.plan,
       deferredPreviewSource.locations,
       deferredPreviewSource.mealTimes,
-      deferredPreviewSource.printMeta
+      deferredPreviewSource.printMeta,
+      deferredPreviewSource.scenes,
+      sceneListItems
     );
     return buildDailyPlanPreviewData(printablePlan, deferredPreviewSource.scenes, deferredPreviewSource.printMeta);
-  }, [deferredPreviewSource]);
+  }, [deferredPreviewSource, sceneListItems]);
   useEffect(() => {
     const updates = getAutomaticTimetableStartUpdates(timetableRows, automaticStartRowIdsRef.current);
     if (updates.size === 0) return;
@@ -342,7 +361,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           : { ...event, startTime: "", endTime: "" };
     }));
   }, [timetableRows]);
-  const canPrint = previewData.scenes.length > 0 && previewData.totalCutCount > 0;
+  const canPrint = previewData.scenes.length > 0;
   const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
   const episodeOptions = activeProjectBasicInfo
     ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
@@ -356,13 +375,41 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setPlan((current) => ({ ...current, [field]: value }));
   }
 
-  function updatePrintMetaField(field: keyof Omit<DailyPlanPrintMeta, "mainStaff" | "starring" | "teams">, value: string) {
+  function updatePrintMetaField(field: DailyPlanPrintMetaTextField, value: string) {
     setPrintMeta((current) => ({ ...current, [field]: value }));
   }
 
   function updateEpisode(value: string) {
-    setPlan((current) => ({ ...current, episode: value }));
-    setPrintMeta((current) => ({ ...current, day: value }));
+    const selectedMainStaff = activeProjectBasicInfo
+      ? getDailyPlanProjectMainStaffRows(activeProjectBasicInfo, value)
+      : null;
+    const directorStaff = selectedMainStaff?.filter((member) => isDirectorRole(member.role)) ?? [];
+    const assistantDirectorStaff = selectedMainStaff?.filter((member) => isAssistantDirectorRole(member.role)) ?? [];
+    const producerStaff = selectedMainStaff?.filter((member) => isProducerRole(member.role)) ?? [];
+
+    setPlan((current) => ({
+      ...current,
+      episode: value,
+      ...(selectedMainStaff
+        ? {
+          director: joinMainStaffNames(directorStaff),
+          assistantDirector: joinMainStaffNames(assistantDirectorStaff),
+          production: joinMainStaffNames(producerStaff)
+        }
+        : {})
+    }));
+    setPrintMeta((current) => ({
+      ...current,
+      day: value,
+      ...(selectedMainStaff
+        ? {
+          mainStaff: selectedMainStaff,
+          directorContact: joinMainStaffContacts(directorStaff),
+          assistantDirectorContact: joinMainStaffContacts(assistantDirectorStaff),
+          producerContact: joinMainStaffContacts(producerStaff)
+        }
+        : {})
+    }));
   }
 
   function updateStarring(index: number, patch: Partial<CallSheetPerson>) {
@@ -376,7 +423,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }));
 
     if (previousValue && previousValue !== nextValue) {
-      setScenes((current) => current.map((scene) => ({ ...scene, subject: replaceSceneCastValue(scene.subject, previousValue, nextValue) })));
+      setScenes((current) => current.map((scene) => {
+        const nextSubject = replaceSceneCastValue(scene.subject, previousValue, nextValue);
+        if (nextSubject === scene.subject) return scene;
+        return {
+          ...scene,
+          subject: nextSubject,
+          charactersOverride: scene.sourceSceneId ? nextSubject : scene.charactersOverride
+        };
+      }));
     }
   }
 
@@ -388,7 +443,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const removedValue = printMeta.starring[index] ? getCastMemberValue(printMeta.starring[index]) : "";
     setPrintMeta((current) => ({ ...current, starring: current.starring.filter((_, personIndex) => personIndex !== index) }));
     if (removedValue) {
-      setScenes((current) => current.map((scene) => ({ ...scene, subject: replaceSceneCastValue(scene.subject, removedValue, "") })));
+      setScenes((current) => current.map((scene) => {
+        const nextSubject = replaceSceneCastValue(scene.subject, removedValue, "");
+        if (nextSubject === scene.subject) return scene;
+        return {
+          ...scene,
+          subject: nextSubject,
+          charactersOverride: scene.sourceSceneId ? nextSubject : scene.charactersOverride
+        };
+      }));
     }
   }
 
@@ -610,31 +673,97 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function updateScene(sceneIndex: number, patch: Partial<SceneBlockInput>) {
+    setScenes((current) => current.map((scene, index) => (
+      index === sceneIndex ? { ...scene, ...patch } : scene
+    )));
+  }
+
+  function selectSceneSource(sceneIndex: number, sourceSceneId: string) {
+    const source = sceneListItems.find((item) => item.id === sourceSceneId) ?? null;
     setScenes((current) => current.map((scene, index) => {
       if (index !== sceneIndex) return scene;
-      const nextScene = { ...scene, ...patch };
-      return patch.sceneNumber === undefined
-        ? nextScene
-        : applySceneCutCount(nextScene, sceneCutCounts);
+      if (!source) {
+        return {
+          ...scene,
+          sourceSceneId: null,
+          sourceSnapshot: null,
+          sceneContentOverride: null,
+          charactersOverride: null,
+          totalCutsOverride: null,
+          sceneNumber: "",
+          sceneTitle: "",
+          description: "",
+          subject: "",
+          cutCount: "",
+          cuts: []
+        };
+      }
+      return applySelectedSceneSource(scene, source);
     }));
   }
 
-  function updateSceneCutCount(sceneIndex: number, value: string) {
-    const targetScene = scenes[sceneIndex];
-    if (targetScene && getLinkedSceneCutCount(targetScene.sceneNumber, sceneCutCounts) != null) return;
-    const sanitized = value
-      .replace(/\D/g, "")
-      .slice(0, String(MAX_SCENE_CUT_COUNT).length);
-    const count = parseCutCount(sanitized);
+  function updateSceneContentOverride(sceneIndex: number, value: string) {
+    setScenes((current) => current.map((scene, index) => (
+      index === sceneIndex
+        ? {
+            ...scene,
+            description: value,
+            sceneContentOverride: value,
+            cuts: syncFirstCut(scene.cuts, { description: value })
+          }
+        : scene
+    )));
+  }
+
+  function resetSceneContentOverride(sceneIndex: number) {
     setScenes((current) => current.map((scene, index) => {
       if (index !== sceneIndex) return scene;
-      const cuts = Array.from({ length: count }, (_, cutIndex) => scene.cuts[cutIndex] ?? {
-        id: makeLocalId("cut"),
-        cutNumber: String(cutIndex + 1),
-        description: "",
-        memo: ""
-      }).map((cut, cutIndex) => ({ ...cut, cutNumber: String(cutIndex + 1) }));
-      return { ...scene, cutCount: sanitized, cuts };
+      const source = sceneListItems.find((item) => item.id === scene.sourceSceneId);
+      if (!source) return scene;
+      return {
+        ...scene,
+        description: source.sceneContent,
+        sceneContentOverride: null,
+        cuts: syncFirstCut(scene.cuts, { description: source.sceneContent })
+      };
+    }));
+  }
+
+  function updateSceneCharactersOverride(sceneIndex: number, value: string) {
+    const normalized = formatSceneCastValues(parseSceneCastValues(value));
+    setScenes((current) => current.map((scene, index) => (
+      index === sceneIndex
+        ? { ...scene, subject: normalized, charactersOverride: normalized }
+        : scene
+    )));
+  }
+
+  function resetSceneCharactersOverride(sceneIndex: number) {
+    setScenes((current) => current.map((scene, index) => {
+      if (index !== sceneIndex) return scene;
+      const source = sceneListItems.find((item) => item.id === scene.sourceSceneId);
+      if (!source) return scene;
+      return {
+        ...scene,
+        subject: normalizeSceneCharacters(source.characters),
+        charactersOverride: null
+      };
+    }));
+  }
+
+  function updateSceneCutCountOverride(sceneIndex: number, value: string) {
+    setScenes((current) => current.map((scene, index) => {
+      if (index !== sceneIndex) return scene;
+      const source = sceneListItems.find((item) => item.id === scene.sourceSceneId);
+      if (!value.trim()) {
+        const sourceCount = source
+          ? source.cutCount
+          : scene.sourceSnapshot?.totalCuts ?? normalizeSceneCutCount(scene.cutCount);
+        return applyEffectiveCutCount(scene, sourceCount, null);
+      }
+      const count = normalizeSceneCutCount(value);
+      if (count == null) return { ...scene, cutCount: value };
+      return applyEffectiveCutCount(scene, count, count);
     }));
   }
 
@@ -715,20 +844,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       locationId,
       locationName: location?.name ?? ""
     });
-  }
-
-  function updateTimetableDescription(sceneIndex: number, value: string) {
-    setScenes((current) =>
-      current.map((scene, index) =>
-        index === sceneIndex
-          ? {
-              ...scene,
-              description: value,
-              cuts: syncFirstCut(scene.cuts, { description: value })
-            }
-          : scene
-      )
-    );
   }
 
   function updateTimetableNotes(sceneIndex: number, value: string) {
@@ -869,15 +984,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       setErrorMessage(constraintMessage);
       return null;
     }
-    const invalidShootingOrder = scenes
-      .map((scene, index) => ({
-        label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${index + 1}`,
-        validation: getShootingOrderValidation(scene.shootingOrder, scene.cutCount)
-      }))
-      .find((item) => item.validation.error);
-    if (invalidShootingOrder) {
+    const timetableValidationMessage = getTimetableValidationMessage(scenes);
+    if (timetableValidationMessage) {
       setMessage("");
-      setErrorMessage(`${invalidShootingOrder.label} 촬영 순서: ${invalidShootingOrder.validation.error}`);
+      setErrorMessage(timetableValidationMessage);
       return null;
     }
 
@@ -890,13 +1000,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const persistedTimetableRows = getPersistedEditorTimetableRows(timetableRows);
       const printMetaForSave = deriveDailyPlanHeadcount({
         ...printMeta,
-        timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
+        timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder),
+        timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
       });
       const planForSave = buildPlanForSave(
         plan,
         locations,
         mealTimes,
-        printMetaForSave
+        printMetaForSave,
+        scenes,
+        sceneListItems
       );
       const automaticRowPositions = captureAutomaticTimetableRowPositions(
         persistedTimetableRows,
@@ -918,9 +1031,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
       const nextMeals = buildInitialMeals(savedDraft);
-      const nextScenes = applySceneCutCounts(
-        shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations),
-        sceneCutCounts
+      const nextScenes = restoreTimetableScenes(
+        savedMeta.timetableScenes,
+        saved.shots.map(dailyPlanShotToDraft),
+        nextLocations,
+        sceneListItems
       );
       automaticStartRowIdsRef.current = restoreAutomaticTimetableRowIds(
         getPersistedEditorTimetableRows(
@@ -981,16 +1096,22 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   function getCurrentPreviewData() {
     const currentMeta = deriveDailyPlanHeadcount({
       ...printMeta,
-      timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
+      timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder),
+      timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
     });
-    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, currentMeta);
+    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, currentMeta, scenes, sceneListItems);
     return buildDailyPlanPreviewData(currentPrintablePlan, scenes, currentMeta);
   }
 
   function handleOpenPrintPreview() {
+    const timetableValidationMessage = getTimetableValidationMessage(scenes);
+    if (timetableValidationMessage) {
+      setErrorMessage(timetableValidationMessage);
+      return;
+    }
     const currentPreviewData = getCurrentPreviewData();
-    if (currentPreviewData.scenes.length === 0 || currentPreviewData.totalCutCount === 0) {
-      setErrorMessage("출력할 씬 또는 컷이 없습니다.");
+    if (currentPreviewData.scenes.length === 0) {
+      setErrorMessage("출력할 씬이 없습니다.");
       return;
     }
     setErrorMessage("");
@@ -998,9 +1119,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function handlePrint() {
+    const timetableValidationMessage = getTimetableValidationMessage(scenes);
+    if (timetableValidationMessage) {
+      setErrorMessage(timetableValidationMessage);
+      return;
+    }
     const currentPreviewData = getCurrentPreviewData();
-    if (currentPreviewData.scenes.length === 0 || currentPreviewData.totalCutCount === 0) {
-      setErrorMessage("출력할 씬 또는 컷이 없습니다.");
+    if (currentPreviewData.scenes.length === 0) {
+      setErrorMessage("출력할 씬이 없습니다.");
       return;
     }
     setErrorMessage("");
@@ -1386,7 +1512,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </colgroup>
               <thead className="max-lg:hidden">
                 <tr className="bg-field-soft text-field-primary">
-                  {["순서 / 삭제", "시작시간", "소요시간", "장소", "D/N", "SCENE", "컷 수", "등장 배우", "내용", "촬영 순서", "비고"].map((header) => (
+                  {["순서 / 삭제", "시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
                       {header}
                     </th>
@@ -1425,10 +1551,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   const scene = row.item;
                   const sceneIndex = row.sourceIndex;
-                  const linkedSceneCutCount = getLinkedSceneCutCount(
-                    scene.sceneNumber,
-                    sceneCutCounts
-                  );
+                  const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
                   return (
                     <tr key={scene.id} className={`align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
@@ -1436,33 +1559,49 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
-                      <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-3`}><span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
-                      <td className={`${timetableCellClass} max-md:hidden`}>
-                        <span className={mobileTimetableLabelClass}>컷 수</span>
-                        <input
-                          aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`}
-                          className={`${compactInputClass} read-only:bg-field-soft read-only:text-field-muted`}
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          maxLength={String(MAX_SCENE_CUT_COUNT).length}
-                          value={scene.cutCount}
-                          readOnly={linkedSceneCutCount != null}
-                          title={linkedSceneCutCount != null ? "씬리스트 Cut 값과 연동됩니다." : undefined}
-                          onChange={(event) => updateSceneCutCount(sceneIndex, event.currentTarget.value)}
+                      <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
+                        <span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
+                        <SceneSourceSelector
+                          ariaLabel={`촬영 행 ${sceneIndex + 1} SCENE`}
+                          value={scene.sourceSceneId}
+                          legacySceneNumber={scene.sceneNumber}
+                          items={sceneListItems}
+                          onChange={(value) => selectSceneSource(sceneIndex, value)}
+                          onLegacySceneNumberChange={(value) => updateScene(sceneIndex, { sceneNumber: value })}
                         />
                       </td>
-                      <td className={`${timetableWideCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
-                      <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
-                        <span className={mobileTimetableLabelClass}>내용</span>
+                      <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-2`}>
+                        <span className={mobileTimetableLabelClass}>Cut</span>
+                        <SceneCutCountField
+                          value={scene.cutCount}
+                          sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
+                          isOverride={scene.totalCutsOverride !== null}
+                          ariaLabel={`촬영 행 ${sceneIndex + 1} 총 컷수`}
+                          onCommit={(value) => updateSceneCutCountOverride(sceneIndex, value)}
+                        />
+                      </td>
+                      <td className={`${timetableWideCellClass} max-md:order-8 max-md:!col-span-5`}>
+                        <TimetableLinkedFieldLabel
+                          label="등장인물"
+                          canReset={scene.charactersOverride !== null && Boolean(linkedSource)}
+                          onReset={() => resetSceneCharactersOverride(sceneIndex)}
+                        />
+                        <SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateSceneCharactersOverride(sceneIndex, value)} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장인물`} />
+                      </td>
+                      <td className={`${timetableTextCellClass} max-md:order-9 max-md:!col-span-7`}>
+                        <TimetableLinkedFieldLabel
+                          label="씬별 내용"
+                          canReset={scene.sceneContentOverride !== null && Boolean(linkedSource)}
+                          onReset={() => resetSceneContentOverride(sceneIndex)}
+                        />
                         <MemoPopoverField
                           value={scene.description}
-                          placeholder="촬영 내용"
-                          ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 내용 수정`}
-                          onChange={(value) => updateTimetableDescription(sceneIndex, value)}
+                          placeholder="씬별 내용"
+                          ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 씬별 내용 수정`}
+                          onChange={(value) => updateSceneContentOverride(sceneIndex, value)}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-md:order-6 max-md:!col-span-3`}>
+                      <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
                         <span className={mobileTimetableLabelClass}><span className="md:hidden">순서</span><span className="hidden md:inline">촬영 순서</span></span>
                         <ShootingOrderField
                           value={scene.shootingOrder}
@@ -2415,6 +2554,11 @@ function ShootingOrderField({
           {displayValue || "촬영 순서 입력"}
         </span>
       </button>
+      {savedValidation.error ? (
+        <span className="mt-0.5 block text-[9px] font-bold leading-[1.3] text-field-danger" aria-live="polite">
+          {savedValidation.error}
+        </span>
+      ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
           className="fixed inset-0 z-[80] flex items-end justify-center bg-black/20 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4"
@@ -2626,6 +2770,152 @@ function TimetableOrderControls({
       </button>
       <CircularDeleteButton label={`${ariaLabel} 삭제`} onClick={onDelete} tabIndex={-1} />
     </div>
+  );
+}
+
+function SceneSourceSelector({
+  value,
+  legacySceneNumber,
+  items,
+  onChange,
+  onLegacySceneNumberChange,
+  ariaLabel
+}: {
+  value: string | null;
+  legacySceneNumber: string;
+  items: ProjectSceneItem[];
+  onChange: (value: string) => void;
+  onLegacySceneNumberChange: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const selectedSourceExists = Boolean(value && items.some((item) => item.id === value));
+  const hasLegacyValue = !value && Boolean(legacySceneNumber.trim());
+  const selectedValue = value ?? (hasLegacyValue ? "__legacy_scene__" : "");
+
+  if (items.length === 0 && !value) {
+    return (
+      <DraftInput
+        className={`${compactInputClass} !text-left`}
+        value={legacySceneNumber}
+        onCommit={onLegacySceneNumberChange}
+        placeholder="SCENE"
+        aria-label={ariaLabel}
+      />
+    );
+  }
+
+  return (
+    <select
+      className={`${compactInputClass} !text-left`}
+      value={selectedValue}
+      onChange={(event) => {
+        if (event.currentTarget.value === "__legacy_scene__") return;
+        onChange(event.currentTarget.value);
+      }}
+      aria-label={ariaLabel}
+    >
+      <option value="">씬 선택</option>
+      {hasLegacyValue ? (
+        <option value="__legacy_scene__">{formatSceneNumber(legacySceneNumber)} · 기존값 (미연결)</option>
+      ) : null}
+      {value && !selectedSourceExists ? (
+        <option value={value}>{formatSceneNumber(legacySceneNumber) || "씬"} · 연결된 씬 없음</option>
+      ) : null}
+      {items.map((item, index) => (
+        <option key={item.id} value={item.id}>
+          {formatSceneSourceOption(item, index)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function SceneCutCountField({
+  value,
+  sourceValue,
+  isOverride,
+  onCommit,
+  ariaLabel
+}: {
+  value: string;
+  sourceValue: number | null;
+  isOverride: boolean;
+  onCommit: (value: string) => void;
+  ariaLabel: string;
+}) {
+  const [draftValue, setDraftValue] = useState(value);
+  const invalid = draftValue !== "" && normalizeSceneCutCount(draftValue) == null;
+
+  useEffect(() => setDraftValue(value), [value]);
+
+  function updateDraft(nextValue: string) {
+    if (!/^\d*$/.test(nextValue)) return;
+    const sanitized = nextValue.slice(0, String(MAX_SCENE_CUT_COUNT).length + 1);
+    setDraftValue(sanitized);
+    if (sanitized) onCommit(sanitized);
+  }
+
+  function finishDraft() {
+    if (!draftValue) {
+      onCommit("");
+      return;
+    }
+    if (normalizeSceneCutCount(draftValue) == null) return;
+    onCommit(draftValue);
+  }
+
+  return (
+    <div className="grid min-w-0 gap-0.5">
+      <input
+        aria-label={ariaLabel}
+        className={`${compactInputClass} ${invalid ? "!border-field-danger" : ""}`}
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        value={draftValue}
+        title={isOverride ? "이 일촬표의 수동 Cut 값입니다. 비우면 씬리스트 값으로 돌아갑니다." : sourceValue == null ? undefined : `씬리스트 Cut ${sourceValue}`}
+        onChange={(event) => updateDraft(event.currentTarget.value)}
+        onBlur={finishDraft}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            finishDraft();
+            event.currentTarget.blur();
+          }
+        }}
+        aria-invalid={invalid}
+      />
+      {invalid ? (
+        <span className="text-[9px] font-bold leading-tight text-field-danger">0~{MAX_SCENE_CUT_COUNT}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function TimetableLinkedFieldLabel({
+  label,
+  canReset,
+  onReset
+}: {
+  label: string;
+  canReset: boolean;
+  onReset: () => void;
+}) {
+  return (
+    <span className="mb-1 flex min-h-6 items-center justify-center text-[11px] font-black text-field-primary max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25] lg:mb-0 lg:min-h-0 lg:justify-end">
+      <span className="lg:hidden">{label}</span>
+      {canReset ? (
+        <button
+          type="button"
+          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-full border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+          onClick={onReset}
+          aria-label={`${label} 씬리스트 원본값 사용`}
+          title="씬리스트 원본값 사용"
+        >
+          <RotateCcw className="h-3 w-3" aria-hidden />
+        </button>
+      ) : null}
+    </span>
   );
 }
 
@@ -3073,7 +3363,8 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
             <td className="border border-black">D/N/S</td>
             <td className="border border-black">SCENE</td>
             <td className="border border-black">Total CUT</td>
-            <td colSpan={4} className="border border-black">Description</td>
+            <td colSpan={3} className="border border-black">Description</td>
+            <td className="border border-black">Actor</td>
             <td colSpan={2} className="border border-black">Shooting order</td>
             <td colSpan={2} className="border border-black">Notes</td>
           </tr>
@@ -3101,7 +3392,8 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
                 <td className="border border-black">{row.dayNight}</td>
                 <td className="border border-black">{row.sceneNumber}</td>
                 <td className="border border-black">{row.totalCut}</td>
-                <td colSpan={4} className="border border-black">{row.description}</td>
+                <td colSpan={3} className="border border-black">{row.description}</td>
+                <td className="border border-black">{row.cast}</td>
                 <td colSpan={2} className="border border-black">{row.shootingOrder}</td>
                 <td colSpan={2} className="border border-black">{row.notes}</td>
               </tr>
@@ -3173,7 +3465,7 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     sceneNumber: formatSceneNumber(scene.sceneNumber),
     totalCut: getSceneTotalCutForPreview(scene),
     cast: getValidSceneCastValue(scene.subject, data.meta.starring),
-    description: scene.description || scene.sceneTitle || "",
+    description: scene.description,
     shootingOrder: scene.shootingOrder || "",
     notes: scene.notes || ""
   }));
@@ -3293,8 +3585,7 @@ function replaceSceneCastValue(value: string, previousValue: string, nextValue: 
 }
 
 function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
-  if (scene.cuts.length > 0) return String(scene.cuts.length);
-  return "";
+  return scene.totalCuts == null ? "" : String(scene.totalCuts);
 }
 
 function PreviewList({ title, children }: { title: string; children: React.ReactNode }) {
@@ -3347,8 +3638,7 @@ function isConfiguredProjectBasicInfo(value: ProjectBasicInfo | null | undefined
 function applyProjectBasicInfoDefaults(
   sourcePlan: DailyPlanDraft,
   sourcePrintMeta: DailyPlanPrintMeta,
-  projectBasicInfo: ProjectBasicInfo | null,
-  allowMainStaffDefaults: boolean
+  projectBasicInfo: ProjectBasicInfo | null
 ) {
   if (!projectBasicInfo) {
     const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim();
@@ -3359,17 +3649,7 @@ function applyProjectBasicInfoDefaults(
   }
 
   const episode = sourcePlan.episode.trim() || sourcePrintMeta.day.trim() || "1";
-  const selectedMainStaff = allowMainStaffDefaults
-    ? projectBasicInfo.mainStaff
-      .filter((member) => member.includeInDailyPlan && (member.role.trim() || member.name.trim()))
-      .slice(0, MAX_DAILY_PLAN_MAIN_STAFF)
-      .map((member) => ({
-        id: member.id,
-        role: member.role.trim(),
-        name: member.name.trim(),
-        contact: formatKoreanPhoneNumber(member.phone)
-      }))
-    : sourcePrintMeta.mainStaff;
+  const selectedMainStaff = getDailyPlanProjectMainStaffRows(projectBasicInfo, episode);
   const directorStaff = selectedMainStaff.filter((member) => isDirectorRole(member.role));
   const assistantDirectorStaff = selectedMainStaff.filter((member) => isAssistantDirectorRole(member.role));
   const producerStaff = selectedMainStaff.filter((member) => isProducerRole(member.role));
@@ -3379,19 +3659,47 @@ function applyProjectBasicInfoDefaults(
       ...sourcePlan,
       episode,
       shootingDate: sourcePlan.shootingDate || projectBasicInfo.shootingStartDate,
-      director: sourcePlan.director || joinMainStaffNames(directorStaff),
-      assistantDirector: sourcePlan.assistantDirector || joinMainStaffNames(assistantDirectorStaff),
-      production: sourcePlan.production || joinMainStaffNames(producerStaff)
+      director: joinMainStaffNames(directorStaff),
+      assistantDirector: joinMainStaffNames(assistantDirectorStaff),
+      production: joinMainStaffNames(producerStaff)
     },
     printMeta: {
       ...sourcePrintMeta,
       day: episode,
       mainStaff: selectedMainStaff,
-      directorContact: sourcePrintMeta.directorContact || joinMainStaffContacts(directorStaff),
-      assistantDirectorContact: sourcePrintMeta.assistantDirectorContact || joinMainStaffContacts(assistantDirectorStaff),
-      producerContact: sourcePrintMeta.producerContact || joinMainStaffContacts(producerStaff)
+      directorContact: joinMainStaffContacts(directorStaff),
+      assistantDirectorContact: joinMainStaffContacts(assistantDirectorStaff),
+      producerContact: joinMainStaffContacts(producerStaff)
     }
   };
+}
+
+function getDailyPlanProjectMainStaffRows(
+  projectBasicInfo: ProjectBasicInfo,
+  episode: string
+): DailyPlanMainStaffRow[] {
+  const episodeNumber = Number(episode.trim());
+  if (
+    !Number.isInteger(episodeNumber)
+    || episodeNumber < 1
+    || episodeNumber > projectBasicInfo.totalEpisodes
+  ) {
+    return [];
+  }
+
+  return getProjectMainStaffForEpisode(
+    projectBasicInfo.mainStaff,
+    episodeNumber,
+    true
+  )
+    .filter((member) => member.role.trim() || member.name.trim())
+    .slice(0, MAX_DAILY_PLAN_MAIN_STAFF)
+    .map((member) => ({
+      id: member.id,
+      role: member.role.trim(),
+      name: member.name.trim(),
+      contact: formatKoreanPhoneNumber(member.phone)
+    }));
 }
 
 function getDailyPlanMainStaffRows(
@@ -3494,8 +3802,18 @@ function planToDraft(plan: DailyPlan): DailyPlanDraft {
   };
 }
 
-function buildPlanForSave(plan: DailyPlanDraft, locations: DailyPlanLocation[], mealTimes: DailyPlanMealTime[], meta: DailyPlanPrintMeta): DailyPlanDraft {
-  const derivedMeta = deriveDailyPlanHeadcount(meta);
+function buildPlanForSave(
+  plan: DailyPlanDraft,
+  locations: DailyPlanLocation[],
+  mealTimes: DailyPlanMealTime[],
+  meta: DailyPlanPrintMeta,
+  scenes: SceneBlockInput[],
+  sceneListItems: ProjectSceneItem[]
+): DailyPlanDraft {
+  const derivedMeta = deriveDailyPlanHeadcount({
+    ...meta,
+    timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
+  });
   const nextLocations = locations
     .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
     .map(sanitizeManualLocation);
@@ -3543,43 +3861,175 @@ function buildInitialMeals(plan: DailyPlanDraft): DailyPlanMealTime[] {
   return [createBlankOtherSchedule()];
 }
 
-function getLinkedSceneCutCount(
-  sceneNumber: string,
-  sceneCutCounts: SceneCutCountMap
-) {
-  const sceneKey = normalizeSceneNumber(sceneNumber);
-  if (!sceneKey || !(sceneKey in sceneCutCounts)) return null;
-  return normalizeSceneCutCount(sceneCutCounts[sceneKey]);
+function formatSceneSourceOption(item: ProjectSceneItem, index: number) {
+  const sceneNumber = formatSceneNumber(item.sceneNo) || `씬 ${index + 1}`;
+  const location = [item.mainLocation, item.subLocation].map((value) => value.trim()).filter(Boolean).join(" / ");
+  const content = item.sceneContent.trim().replace(/\s+/g, " ").slice(0, 28);
+  return [sceneNumber, location, content].filter(Boolean).join(" · ");
 }
 
-function applySceneCutCounts(
-  scenes: SceneBlockInput[],
-  sceneCutCounts: SceneCutCountMap
-) {
-  return scenes.map((scene) => applySceneCutCount(scene, sceneCutCounts));
+function normalizeSceneCharacters(value: string) {
+  return formatSceneCastValues(parseSceneCastValues(value));
 }
 
-function applySceneCutCount(
+function createSceneSourceSnapshot(item: ProjectSceneItem): DailyPlanTimetableSceneSourceSnapshot {
+  return {
+    sceneNumber: item.sceneNo,
+    sceneContent: item.sceneContent,
+    characters: normalizeSceneCharacters(item.characters),
+    totalCuts: item.cutCount
+  };
+}
+
+function ensureSceneCutCapacity(cuts: SceneCutInput[], count: number) {
+  if (count <= cuts.length) return cuts;
+  return Array.from({ length: count }, (_, cutIndex) => (
+    cuts[cutIndex] ?? {
+      id: makeLocalId("cut"),
+      cutNumber: String(cutIndex + 1),
+      description: "",
+      memo: ""
+    }
+  )).map((cut, cutIndex) => ({ ...cut, cutNumber: String(cutIndex + 1) }));
+}
+
+function applyEffectiveCutCount(
   scene: SceneBlockInput,
-  sceneCutCounts: SceneCutCountMap
-) {
-  const count = getLinkedSceneCutCount(scene.sceneNumber, sceneCutCounts);
-  if (count == null) return scene;
-  const cuts = count > scene.cuts.length
-    ? Array.from({ length: count }, (_, cutIndex) => (
-        scene.cuts[cutIndex] ?? {
-          id: makeLocalId("cut"),
-          cutNumber: String(cutIndex + 1),
-          description: "",
-          memo: ""
-        }
-      )).map((cut, cutIndex) => ({ ...cut, cutNumber: String(cutIndex + 1) }))
-    : scene.cuts;
+  count: number | null,
+  override: number | null
+): SceneBlockInput {
   return {
     ...scene,
-    cutCount: String(count),
-    cuts
+    cutCount: count == null ? "" : String(count),
+    totalCutsOverride: override,
+    cuts: ensureSceneCutCapacity(scene.cuts, count ?? 0)
   };
+}
+
+function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneItem): SceneBlockInput {
+  const sourceSnapshot = createSceneSourceSnapshot(source);
+  const nextScene = {
+    ...scene,
+    sourceSceneId: source.id,
+    sourceSnapshot,
+    sceneContentOverride: null,
+    charactersOverride: null,
+    totalCutsOverride: null,
+    sceneNumber: source.sceneNo,
+    sceneTitle: "",
+    description: sourceSnapshot.sceneContent,
+    subject: sourceSnapshot.characters,
+    cuts: []
+  };
+  return applyEffectiveCutCount(nextScene, sourceSnapshot.totalCuts, null);
+}
+
+function serializeTimetableScenes(
+  scenes: SceneBlockInput[],
+  sceneListItems: ProjectSceneItem[]
+): DailyPlanTimetableSceneMeta[] {
+  const sourcesById = new Map(sceneListItems.map((item) => [item.id, item]));
+
+  return scenes
+    .filter(isMeaningfulTimetableScene)
+    .map((scene) => {
+      const currentSource = scene.sourceSceneId ? sourcesById.get(scene.sourceSceneId) : undefined;
+      const metadata: DailyPlanTimetableSceneMeta = {
+        version: 1,
+        rowId: scene.id,
+        sourceSceneId: scene.sourceSceneId,
+        sourceSnapshot: currentSource ? createSceneSourceSnapshot(currentSource) : scene.sourceSnapshot,
+        rowSnapshot: {
+          sceneNumber: scene.sceneNumber,
+          sceneTitle: scene.sceneTitle,
+          description: scene.description,
+          startTime: scene.startTime,
+          endTime: scene.endTime,
+          runtimeMinutes: scene.runtimeMinutes,
+          runtime: scene.runtime,
+          locationId: scene.locationId,
+          locationName: scene.locationName,
+          dayNight: scene.dayNight,
+          storyDay: scene.storyDay,
+          shootingOrder: scene.shootingOrder,
+          notes: scene.notes,
+          subject: scene.subject,
+          props: scene.props,
+          costumeMakeup: scene.costumeMakeup,
+          sceneMemo: scene.sceneMemo,
+          totalCuts: normalizeSceneCutCount(scene.cutCount),
+          cuts: scene.cuts
+            .slice(0, MAX_SCENE_CUT_COUNT)
+            .map((cut) => ({ ...cut }))
+        }
+      };
+      if (scene.sceneContentOverride !== null) {
+        metadata.sceneContentOverride = scene.sceneContentOverride;
+      }
+      if (scene.charactersOverride !== null) {
+        metadata.charactersOverride = scene.charactersOverride;
+      }
+      if (scene.totalCutsOverride !== null) {
+        metadata.totalCutsOverride = scene.totalCutsOverride;
+      }
+      return metadata;
+    });
+}
+
+function restoreTimetableScenes(
+  metadata: DailyPlanTimetableSceneMeta[],
+  shots: DailyPlanShotDraft[],
+  locations: DailyPlanLocation[],
+  sceneListItems: ProjectSceneItem[]
+): SceneBlockInput[] {
+  if (metadata.length === 0) return shotsToScenes(shots, locations);
+  const sourcesById = new Map(sceneListItems.map((item) => [item.id, item]));
+
+  return metadata.map((entry) => {
+    const source = entry.sourceSceneId ? sourcesById.get(entry.sourceSceneId) : undefined;
+    const currentSource = source ? createSceneSourceSnapshot(source) : undefined;
+    const effective = resolveDailyPlanTimetableSceneValues(entry, currentSource);
+    const snapshot = entry.rowSnapshot;
+    const totalCuts = effective.totalCuts;
+    const cuts = ensureSceneCutCapacity(
+      snapshot.cuts.map((cut) => ({ ...cut })),
+      totalCuts ?? 0
+    );
+
+    return {
+      id: entry.rowId || makeLocalId("scene"),
+      sourceSceneId: entry.sourceSceneId,
+      sourceSnapshot: currentSource ?? entry.sourceSnapshot,
+      sceneContentOverride: Object.prototype.hasOwnProperty.call(entry, "sceneContentOverride")
+        ? entry.sceneContentOverride ?? ""
+        : null,
+      charactersOverride: Object.prototype.hasOwnProperty.call(entry, "charactersOverride")
+        ? entry.charactersOverride ?? ""
+        : null,
+      totalCutsOverride: Object.prototype.hasOwnProperty.call(entry, "totalCutsOverride")
+        ? entry.totalCutsOverride ?? 0
+        : null,
+      sceneNumber: source?.sceneNo ?? snapshot.sceneNumber,
+      sceneTitle: snapshot.sceneTitle,
+      description: effective.sceneContent,
+      startTime: snapshot.startTime,
+      endTime: snapshot.endTime,
+      runtimeMinutes: snapshot.runtimeMinutes,
+      runtime: snapshot.runtime,
+      locationId: snapshot.locationId,
+      locationName: snapshot.locationName,
+      dayNight: snapshot.dayNight,
+      storyDay: snapshot.storyDay,
+      shootingOrder: snapshot.shootingOrder,
+      notes: snapshot.notes,
+      subject: normalizeSceneCharacters(effective.characters),
+      props: snapshot.props,
+      costumeMakeup: snapshot.costumeMakeup,
+      sceneMemo: snapshot.sceneMemo,
+      cutCount: totalCuts == null ? "" : String(totalCuts),
+      cuts
+    };
+  });
 }
 
 function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation[]): SceneBlockInput[] {
@@ -3602,6 +4052,11 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
       const sceneMetadata = decodeSceneMemoMetadata(shot.sceneMemo ?? "");
       scene = {
         id: makeLocalId("scene"),
+        sourceSceneId: null,
+        sourceSnapshot: null,
+        sceneContentOverride: null,
+        charactersOverride: null,
+        totalCutsOverride: null,
         sceneNumber: shot.sceneNumber || String(scenes.length + 1),
         sceneTitle: shot.sceneTitle ?? "",
         description: shot.description ?? "",
@@ -3662,7 +4117,7 @@ function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
         subLocation: "",
         dayNight: scene.dayNight,
         storyDay: scene.storyDay,
-        description: scene.description || cut?.description || "",
+        description: scene.description,
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
         sceneMemo: encodeSceneMemoMetadata(scene.sceneMemo, normalizeShootingOrder(scene.shootingOrder, scene.cutCount)),
@@ -3675,6 +4130,11 @@ function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
 function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlockInput {
   return {
     id: makeLocalId("scene"),
+    sourceSceneId: null,
+    sourceSnapshot: null,
+    sceneContentOverride: null,
+    charactersOverride: null,
+    totalCutsOverride: null,
     sceneNumber: String(order),
     sceneTitle: "",
     description: "",
@@ -3735,7 +4195,9 @@ function cloneScene(scene: SceneBlockInput, fallbackSceneNumber: number): SceneB
   return {
     ...scene,
     id: makeLocalId("scene"),
-    sceneNumber: getNextCutNumber(scene.sceneNumber, fallbackSceneNumber),
+    sceneNumber: scene.sourceSceneId
+      ? scene.sceneNumber
+      : getNextCutNumber(scene.sceneNumber, fallbackSceneNumber),
     cuts: scene.cuts.map((cut) => ({ ...cut, id: makeLocalId("cut") }))
   };
 }
@@ -3841,8 +4303,7 @@ function getPersistedEditorTimetableRows(rows: EditorTimetableRow[]) {
     row.type === "event"
       ? isMeaningfulTimetableEvent(row.item)
       : isMeaningfulTimetableScene(row.item)
-        && row.item.sceneNumber.trim()
-        && parseCutCount(row.item.cutCount) > 0
+        && (row.item.sourceSceneId !== null || row.item.sceneNumber.trim())
   ));
 }
 
@@ -3906,13 +4367,35 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
     scene.locationName,
     scene.dayNight,
     scene.sceneNumber,
+    scene.sourceSceneId,
     scene.cutCount,
     scene.description,
+    scene.subject,
     scene.shootingOrder,
     scene.notes,
     scene.sceneTitle,
     scene.sceneMemo
   ].some((value) => String(value ?? "").trim());
+}
+
+function getTimetableValidationMessage(scenes: SceneBlockInput[]) {
+  const invalidTotalCuts = scenes.findIndex((scene) => (
+    scene.cutCount.trim() !== "" && normalizeSceneCutCount(scene.cutCount) == null
+  ));
+  if (invalidTotalCuts >= 0) {
+    return `촬영 행 ${invalidTotalCuts + 1} Cut은 0부터 ${MAX_SCENE_CUT_COUNT}까지의 정수로 입력해주세요.`;
+  }
+
+  const invalidShootingOrder = scenes
+    .map((scene, index) => ({
+      label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${index + 1}`,
+      validation: getShootingOrderValidation(scene.shootingOrder, scene.cutCount)
+    }))
+    .find((item) => item.validation.error);
+
+  return invalidShootingOrder
+    ? `${invalidShootingOrder.label} 촬영 순서: ${invalidShootingOrder.validation.error}`
+    : "";
 }
 
 type ShootingOrderValue = string | number[] | null | undefined;
@@ -4136,7 +4619,9 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
       const sceneNumber = scene.sceneNumber.trim() || String(sceneIndex + 1);
       const startTime = formatTimeDisplay(scene.startTime);
       const endTime = formatTimeDisplay(scene.endTime);
-      const cuts = scene.cuts.map((cut, cutIndex) => {
+      const normalizedTotalCuts = normalizeSceneCutCount(scene.cutCount);
+      const effectiveTotalCuts = normalizedTotalCuts ?? 0;
+      const cuts = scene.cuts.slice(0, effectiveTotalCuts).map((cut, cutIndex) => {
         const cutNumber = cut.cutNumber.trim() || String(cutIndex + 1);
         return {
           id: cut.id,
@@ -4146,13 +4631,13 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
           memo: cut.memo
         };
       });
-      totalCutCount += parseCutCount(scene.cutCount);
+      totalCutCount += effectiveTotalCuts;
 
       return {
         id: scene.id,
         sceneNumber,
         sceneTitle: scene.sceneTitle,
-        description: scene.description || cuts[0]?.description || "",
+        description: scene.description,
         startTime,
         endTime,
         runtimeMinutes: getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime),
@@ -4167,6 +4652,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
         sceneMemo: scene.sceneMemo,
+        totalCuts: normalizedTotalCuts,
         cuts
       };
     })

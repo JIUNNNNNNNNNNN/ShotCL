@@ -56,6 +56,11 @@ export type ProjectMainStaffMember = {
   name: string;
   phone: string;
   includeInDailyPlan: boolean;
+  /**
+   * null은 프로젝트의 전체 회차, 빈 배열은 참여 회차 없음,
+   * 숫자 배열은 명시적으로 선택한 회차를 뜻합니다.
+   */
+  episodeNumbers: number[] | null;
   sortOrder: number;
 };
 

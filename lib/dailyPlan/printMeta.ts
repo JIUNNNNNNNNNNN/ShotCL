@@ -1,5 +1,6 @@
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { resolveKoreanWeatherRegion } from "@/lib/koreanWeatherRegions";
+import { MAX_SCENE_CUT_COUNT, normalizeSceneCutCount } from "@/lib/sceneCutCount";
 
 export type DailyPlanTimetableRowType = "scene" | "event";
 
@@ -35,6 +36,69 @@ export type DailyPlanMainStaffRow = {
   contact: string;
 };
 
+/**
+ * 씬리스트에서 가져온 값의 저장 시점 스냅샷입니다.
+ *
+ * 연결된 씬이 나중에 삭제되거나 조회되지 않아도 일촬표 행 자체는 이 값과
+ * rowSnapshot으로 복원할 수 있습니다. current source가 존재할 때는 이
+ * 스냅샷보다 최신 씬리스트 값을 우선합니다.
+ */
+export type DailyPlanTimetableSceneSourceSnapshot = {
+  sceneNumber: string;
+  sceneContent: string;
+  characters: string;
+  totalCuts: number | null;
+};
+
+export type DailyPlanTimetableSceneCutSnapshot = {
+  id: string;
+  cutNumber: string;
+  description: string;
+  memo: string;
+};
+
+/**
+ * daily_plan_shots가 한 건도 생기지 않는 0컷 행까지 다시 만들기 위한
+ * 일촬표 로컬 행의 최종(effective) 스냅샷입니다.
+ */
+export type DailyPlanTimetableSceneRowSnapshot = {
+  sceneNumber: string;
+  sceneTitle: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  runtimeMinutes: number | null;
+  runtime: string;
+  locationId: string;
+  locationName: string;
+  dayNight: string;
+  storyDay: string;
+  shootingOrder: string;
+  notes: string;
+  subject: string;
+  props: string;
+  costumeMakeup: string;
+  sceneMemo: string;
+  totalCuts: number | null;
+  cuts: DailyPlanTimetableSceneCutSnapshot[];
+};
+
+/**
+ * 씬별 내용/등장인물/총 컷수 override는 프로퍼티 존재 여부로 판정합니다.
+ * 프로퍼티가 없으면 씬리스트 값을 사용하고, 빈 문자열과 숫자 0은 명시적인
+ * 일촬표 override로 보존합니다.
+ */
+export type DailyPlanTimetableSceneMeta = {
+  version: 1;
+  rowId: string;
+  sourceSceneId: string | null;
+  sourceSnapshot: DailyPlanTimetableSceneSourceSnapshot | null;
+  sceneContentOverride?: string;
+  charactersOverride?: string;
+  totalCutsOverride?: number;
+  rowSnapshot: DailyPlanTimetableSceneRowSnapshot;
+};
+
 export type DailyPlanPrintMeta = {
   day: string;
   directorContact: string;
@@ -56,6 +120,8 @@ export type DailyPlanPrintMeta = {
   maxTemperature: string;
   rainProbability: string;
   timetableRowOrder: DailyPlanTimetableRowType[];
+  /** 순서를 유지하며 0컷 씬 행까지 저장하는 버전형 TIME TABLE 메타데이터입니다. */
+  timetableScenes: DailyPlanTimetableSceneMeta[];
   memoText: string;
   mainStaff: DailyPlanMainStaffRow[];
   starring: CallSheetPerson[];
@@ -84,6 +150,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     maxTemperature: "",
     rainProbability: "",
     timetableRowOrder: [],
+    timetableScenes: [],
     memoText: "",
     mainStaff: [],
     starring: [createBlankCallSheetPerson()],
@@ -165,6 +232,7 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     maxTemperature: meta.maxTemperature ?? "",
     rainProbability: meta.rainProbability ?? "",
     timetableRowOrder: normalizeTimetableRowOrder(meta.timetableRowOrder),
+    timetableScenes: normalizeDailyPlanTimetableScenes(meta.timetableScenes),
     memoText: meta.memoText ?? "",
     mainStaff: normalizeMainStaff(meta.mainStaff),
     starring: normalizePeople(meta.starring),
@@ -216,6 +284,204 @@ export function mergeDailyPlanTimetableRows<TScene, TEvent>(
 function normalizeTimetableRowOrder(value: DailyPlanTimetableRowType[] | undefined) {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is DailyPlanTimetableRowType => item === "scene" || item === "event");
+}
+
+/**
+ * 저장 데이터가 훼손되어도 편집 화면 전체가 실패하지 않도록 각 행을
+ * 독립적으로 정규화합니다. 배열 순서는 일촬표 행 순서이므로 변경하지 않습니다.
+ */
+export function normalizeDailyPlanTimetableScenes(
+  value: unknown
+): DailyPlanTimetableSceneMeta[] {
+  if (!Array.isArray(value)) return [];
+
+  const usedRowIds = new Set<string>();
+  return value
+    .map((candidate, index) => normalizeDailyPlanTimetableScene(candidate, index))
+    .filter((candidate): candidate is DailyPlanTimetableSceneMeta => candidate !== null)
+    .map((candidate, index) => ({
+      ...candidate,
+      rowId: createUniqueSnapshotId(
+        candidate.rowId || `daily_scene_${index}`,
+        usedRowIds
+      )
+    }));
+}
+
+/**
+ * 최신 씬리스트 데이터와 저장된 일촬표 override를 합쳐 화면/미리보기/PDF에
+ * 사용할 세 필드의 유효값을 계산합니다.
+ *
+ * currentSource가 null이면 연결된 원본이 삭제된 상태이므로 저장된 최종
+ * rowSnapshot을 fallback으로 사용합니다. undefined도 아직 원본을 조회하지
+ * 않은 상태로 보고 같은 fallback을 사용합니다.
+ */
+export function resolveDailyPlanTimetableSceneValues(
+  meta: DailyPlanTimetableSceneMeta,
+  currentSource?: DailyPlanTimetableSceneSourceSnapshot | null
+) {
+  const hasCurrentSource = currentSource !== undefined && currentSource !== null;
+  const hasContentOverride = Object.prototype.hasOwnProperty.call(meta, "sceneContentOverride");
+  const hasCharactersOverride = Object.prototype.hasOwnProperty.call(meta, "charactersOverride");
+  const hasTotalCutsOverride = Object.prototype.hasOwnProperty.call(meta, "totalCutsOverride");
+
+  return {
+    sceneContent: hasContentOverride
+      ? meta.sceneContentOverride ?? ""
+      : hasCurrentSource
+        ? currentSource.sceneContent
+        : meta.rowSnapshot.description,
+    characters: hasCharactersOverride
+      ? meta.charactersOverride ?? ""
+      : hasCurrentSource
+        ? currentSource.characters
+        : meta.rowSnapshot.subject,
+    totalCuts: hasTotalCutsOverride
+      ? meta.totalCutsOverride ?? null
+      : hasCurrentSource
+        ? currentSource.totalCuts
+        : meta.rowSnapshot.totalCuts
+  };
+}
+
+function normalizeDailyPlanTimetableScene(
+  value: unknown,
+  index: number
+): DailyPlanTimetableSceneMeta | null {
+  if (!isUnknownRecord(value) || value.version !== 1 || !isUnknownRecord(value.rowSnapshot)) {
+    return null;
+  }
+
+  const rowSnapshot = normalizeDailyPlanTimetableSceneRowSnapshot(value.rowSnapshot, index);
+  if (!rowSnapshot) return null;
+
+  const normalized: DailyPlanTimetableSceneMeta = {
+    version: 1,
+    rowId: normalizeMetaText(value.rowId) || `daily_scene_${index}`,
+    sourceSceneId: normalizeNullableMetaText(value.sourceSceneId),
+    sourceSnapshot: normalizeDailyPlanTimetableSceneSourceSnapshot(value.sourceSnapshot),
+    rowSnapshot
+  };
+
+  // 값의 truthiness가 아니라 프로퍼티 존재 여부를 보존해야 ""와 0이
+  // 명시적인 override로 유지됩니다.
+  if (
+    Object.prototype.hasOwnProperty.call(value, "sceneContentOverride")
+    && typeof value.sceneContentOverride === "string"
+  ) {
+    normalized.sceneContentOverride = value.sceneContentOverride;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "charactersOverride")
+    && typeof value.charactersOverride === "string"
+  ) {
+    normalized.charactersOverride = value.charactersOverride;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "totalCutsOverride")) {
+    const totalCutsOverride = normalizeSceneCutCount(value.totalCutsOverride);
+    if (totalCutsOverride !== null) normalized.totalCutsOverride = totalCutsOverride;
+  }
+
+  return normalized;
+}
+
+function normalizeDailyPlanTimetableSceneSourceSnapshot(
+  value: unknown
+): DailyPlanTimetableSceneSourceSnapshot | null {
+  if (!isUnknownRecord(value)) return null;
+  return {
+    sceneNumber: normalizeMetaText(value.sceneNumber),
+    sceneContent: normalizeMetaText(value.sceneContent),
+    characters: normalizeMetaText(value.characters),
+    totalCuts: normalizeSceneCutCount(value.totalCuts)
+  };
+}
+
+function normalizeDailyPlanTimetableSceneRowSnapshot(
+  value: Record<string, unknown>,
+  index: number
+): DailyPlanTimetableSceneRowSnapshot | null {
+  const usedCutIds = new Set<string>();
+  const cuts = Array.isArray(value.cuts)
+    ? value.cuts
+      .slice(0, MAX_SCENE_CUT_COUNT)
+      .map((cut, cutIndex) => normalizeDailyPlanTimetableSceneCutSnapshot(cut, index, cutIndex))
+      .filter((cut): cut is DailyPlanTimetableSceneCutSnapshot => cut !== null)
+      .map((cut, cutIndex) => ({
+        ...cut,
+        id: createUniqueSnapshotId(
+          cut.id || `daily_scene_${index}_cut_${cutIndex}`,
+          usedCutIds
+        )
+      }))
+    : [];
+
+  return {
+    sceneNumber: normalizeMetaText(value.sceneNumber),
+    sceneTitle: normalizeMetaText(value.sceneTitle),
+    description: normalizeMetaText(value.description),
+    startTime: normalizeMetaText(value.startTime),
+    endTime: normalizeMetaText(value.endTime),
+    runtimeMinutes: normalizeNonNegativeInteger(value.runtimeMinutes),
+    runtime: normalizeMetaText(value.runtime),
+    locationId: normalizeMetaText(value.locationId),
+    locationName: normalizeMetaText(value.locationName),
+    dayNight: normalizeMetaText(value.dayNight),
+    storyDay: normalizeMetaText(value.storyDay),
+    shootingOrder: normalizeMetaText(value.shootingOrder),
+    notes: normalizeMetaText(value.notes),
+    subject: normalizeMetaText(value.subject),
+    props: normalizeMetaText(value.props),
+    costumeMakeup: normalizeMetaText(value.costumeMakeup),
+    sceneMemo: normalizeMetaText(value.sceneMemo),
+    totalCuts: normalizeSceneCutCount(value.totalCuts),
+    cuts
+  };
+}
+
+function normalizeDailyPlanTimetableSceneCutSnapshot(
+  value: unknown,
+  sceneIndex: number,
+  cutIndex: number
+): DailyPlanTimetableSceneCutSnapshot | null {
+  if (!isUnknownRecord(value)) return null;
+  return {
+    id: normalizeMetaText(value.id) || `daily_scene_${sceneIndex}_cut_${cutIndex}`,
+    cutNumber: normalizeMetaText(value.cutNumber),
+    description: normalizeMetaText(value.description),
+    memo: normalizeMetaText(value.memo)
+  };
+}
+
+function normalizeNonNegativeInteger(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const normalized = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isSafeInteger(normalized) || normalized < 0) return null;
+  return normalized;
+}
+
+function createUniqueSnapshotId(value: string, usedIds: Set<string>) {
+  let candidate = value;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${value}_${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function normalizeNullableMetaText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  return normalizeMetaText(value) || null;
+}
+
+function normalizeMetaText(value: unknown) {
+  return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeMainStaff(rows: DailyPlanMainStaffRow[] | undefined) {

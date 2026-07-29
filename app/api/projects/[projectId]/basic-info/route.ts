@@ -212,7 +212,15 @@ function logBasicInfoSavePayload(payload: {
   total_episodes: number;
   shooting_start_date: string | null;
   shooting_end_date: string | null;
-  main_staff: Array<{ id: string; role: string; name: string; phone: string; includeInDailyPlan: boolean; sortOrder: number }>;
+  main_staff: Array<{
+    id: string;
+    role: string;
+    name: string;
+    phone: string;
+    includeInDailyPlan: boolean;
+    episodeNumbers: number[] | null;
+    sortOrder: number;
+  }>;
   actors: Array<{ role: string; name: string }>;
 }) {
   if (process.env.NODE_ENV === "production") return;

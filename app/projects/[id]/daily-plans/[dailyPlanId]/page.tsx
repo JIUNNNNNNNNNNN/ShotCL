@@ -10,11 +10,14 @@ import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
-import {
-  buildSceneCutCountMap,
-  type SceneCutCountMap
-} from "@/lib/sceneCutCount";
-import type { DailyPlanWithShots, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
+import type {
+  DailyPlanWithShots,
+  Project,
+  ProjectBasicInfo,
+  ProjectSceneItem,
+  ProjectStaffDepartment,
+  ProjectStaffMember
+} from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -35,7 +38,7 @@ export default function DailyPlanDetailPage() {
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
-  const [sceneCutCounts, setSceneCutCounts] = useState<SceneCutCountMap>({});
+  const [sceneListItems, setSceneListItems] = useState<ProjectSceneItem[]>([]);
   const [dailyPlan, setDailyPlan] = useState<DailyPlanWithShots | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -50,7 +53,7 @@ export default function DailyPlanDetailPage() {
           getDailyPlanWithShots(projectId, dailyPlanId),
           getProjectBasicInfo(projectId).catch(() => null),
           listProjectStaffMembers(projectId).catch(() => null),
-          getProjectSceneList(projectId)
+          getProjectSceneList(projectId).catch(() => null)
         ]);
         setProject(projectData);
         if (!projectData) {
@@ -58,7 +61,7 @@ export default function DailyPlanDetailPage() {
           setProjectBasicInfo(null);
           setProjectStaffMembers([]);
           setProjectStaffDepartments([]);
-          setSceneCutCounts({});
+          setSceneListItems([]);
           setErrorMessage("");
           return;
         }
@@ -66,7 +69,7 @@ export default function DailyPlanDetailPage() {
         setProjectBasicInfo(basicInfo);
         setProjectStaffMembers(staffList?.members ?? []);
         setProjectStaffDepartments(staffList?.departments ?? []);
-        setSceneCutCounts(sceneList ? buildSceneCutCountMap(sceneList.items) : {});
+        setSceneListItems(sceneList?.items ?? []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "일촬표를 불러오지 못했습니다.");
@@ -99,7 +102,7 @@ export default function DailyPlanDetailPage() {
       projectBasicInfo={projectBasicInfo}
       projectStaffMembers={projectStaffMembers}
       projectStaffDepartments={projectStaffDepartments}
-      sceneCutCounts={sceneCutCounts}
+      sceneListItems={sceneListItems}
       initialPlan={dailyPlan.plan}
       initialShots={dailyPlan.shots}
     />

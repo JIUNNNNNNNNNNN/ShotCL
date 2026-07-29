@@ -8,11 +8,13 @@ import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
-import {
-  buildSceneCutCountMap,
-  type SceneCutCountMap
-} from "@/lib/sceneCutCount";
-import type { Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
+import type {
+  Project,
+  ProjectBasicInfo,
+  ProjectSceneItem,
+  ProjectStaffDepartment,
+  ProjectStaffMember
+} from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
@@ -32,7 +34,7 @@ export default function NewDailyPlanPage() {
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
-  const [sceneCutCounts, setSceneCutCounts] = useState<SceneCutCountMap>({});
+  const [sceneListItems, setSceneListItems] = useState<ProjectSceneItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -45,13 +47,13 @@ export default function NewDailyPlanPage() {
           getProject(projectId),
           getProjectBasicInfo(projectId).catch(() => null),
           listProjectStaffMembers(projectId).catch(() => null),
-          getProjectSceneList(projectId)
+          getProjectSceneList(projectId).catch(() => null)
         ]);
         setProject(data);
         setProjectBasicInfo(data ? basicInfo : null);
         setProjectStaffMembers(data ? staffList?.members ?? [] : []);
         setProjectStaffDepartments(data ? staffList?.departments ?? [] : []);
-        setSceneCutCounts(data && sceneList ? buildSceneCutCountMap(sceneList.items) : {});
+        setSceneListItems(data ? sceneList?.items ?? [] : []);
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -77,7 +79,7 @@ export default function NewDailyPlanPage() {
       projectBasicInfo={projectBasicInfo}
       projectStaffMembers={projectStaffMembers}
       projectStaffDepartments={projectStaffDepartments}
-      sceneCutCounts={sceneCutCounts}
+      sceneListItems={sceneListItems}
     />
   );
 }

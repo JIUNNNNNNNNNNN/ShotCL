@@ -1,12 +1,15 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useRef, useState } from "react";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, Plus, Save, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
   createBlankProjectMainStaffMember,
-  MAX_DAILY_PLAN_MAIN_STAFF,
+  formatMainStaffEpisodeSummary,
+  getDailyPlanMainStaffEpisodeViolations,
+  normalizeMainStaffEpisodeNumbers,
   validateProjectBasicInfo
 } from "@/lib/projectBasicInfo";
 import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/lib/types";
@@ -33,22 +36,20 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   const [totalEpisodesDraft, setTotalEpisodesDraft] = useState(String(initialValue.totalEpisodes));
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [openEpisodeStaffId, setOpenEpisodeStaffId] = useState<string | null>(null);
   const savedFingerprintRef = useRef(JSON.stringify({ value, totalEpisodesDraft }));
+  const selectableTotalEpisodes = parseSelectableTotalEpisodes(totalEpisodesDraft);
+  const episodeLimitViolations = useMemo(
+    () => selectableTotalEpisodes
+      ? getDailyPlanMainStaffEpisodeViolations(value.mainStaff, selectableTotalEpisodes)
+      : [],
+    [selectableTotalEpisodes, value.mainStaff]
+  );
   useUnsavedChangesGuard(
     JSON.stringify({ value, totalEpisodesDraft }) !== savedFingerprintRef.current
   );
 
   const updateStaff = useCallback((index: number, field: keyof Pick<ProjectMainStaffMember, "role" | "name" | "phone" | "includeInDailyPlan">, nextValue: string | boolean) => {
-    if (
-      field === "includeInDailyPlan"
-      && nextValue === true
-      && !value.mainStaff[index]?.includeInDailyPlan
-      && value.mainStaff.filter((member) => member.includeInDailyPlan).length >= MAX_DAILY_PLAN_MAIN_STAFF
-    ) {
-      setErrorMessage("일촬표 반영은 최대 3명까지만 가능합니다.");
-      return;
-    }
-
     setErrorMessage("");
     setValue((current) => ({
       ...current,
@@ -61,9 +62,20 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           : member
       ))
     }));
-  }, [value.mainStaff]);
+  }, []);
+
+  const updateStaffEpisodes = useCallback((staffId: string, episodeNumbers: number[] | null) => {
+    setErrorMessage("");
+    setValue((current) => ({
+      ...current,
+      mainStaff: current.mainStaff.map((member) => (
+        member.id === staffId ? { ...member, episodeNumbers } : member
+      ))
+    }));
+  }, []);
 
   const deleteStaff = useCallback((index: number) => {
+    setOpenEpisodeStaffId(null);
     setValue((current) => ({
       ...current,
       mainStaff: current.mainStaff.length === 1
@@ -72,6 +84,59 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           .map((member, sortOrder) => ({ ...member, sortOrder }))
     }));
   }, []);
+
+  const updateTotalEpisodes = useCallback((nextDraft: string) => {
+    const digits = nextDraft.replace(/\D/g, "").slice(0, 3);
+    const nextTotalEpisodes = parseSelectableTotalEpisodes(digits);
+    if (nextTotalEpisodes === null) {
+      setTotalEpisodesDraft(digits);
+      setOpenEpisodeStaffId(null);
+      return;
+    }
+
+    const previousTotalEpisodes = value.totalEpisodes;
+    if (nextTotalEpisodes < previousTotalEpisodes) {
+      const affected = value.mainStaff
+        .map((member) => ({
+          member,
+          removedEpisodes: member.episodeNumbers?.filter((episode) => episode > nextTotalEpisodes) ?? []
+        }))
+        .filter(({ removedEpisodes }) => removedEpisodes.length > 0);
+
+      if (affected.length > 0) {
+        const affectedEpisodes = [...new Set(
+          affected.flatMap(({ removedEpisodes }) => removedEpisodes)
+        )].sort((left, right) => left - right);
+        const affectedStaff = affected
+          .map(({ member }) => member.name.trim() || member.role.trim() || "이름 미입력 스태프")
+          .join(", ");
+        const confirmed = window.confirm(
+          `총회차를 ${nextTotalEpisodes}회차로 줄이면 ${affectedStaff}의 ${affectedEpisodes.join(", ")}회차 선택이 제거됩니다. 계속할까요?`
+        );
+        if (!confirmed) {
+          setTotalEpisodesDraft(String(previousTotalEpisodes));
+          return;
+        }
+      }
+    }
+
+    setErrorMessage("");
+    setTotalEpisodesDraft(digits);
+    setOpenEpisodeStaffId(null);
+    setValue((current) => ({
+      ...current,
+      totalEpisodes: nextTotalEpisodes,
+      mainStaff: current.mainStaff.map((member) => ({
+        ...member,
+        episodeNumbers: member.episodeNumbers === null
+          ? null
+          : normalizeMainStaffEpisodeNumbers(
+            member.episodeNumbers.filter((episode) => episode <= nextTotalEpisodes),
+            nextTotalEpisodes
+          )
+      }))
+    }));
+  }, [value.mainStaff, value.totalEpisodes]);
 
   const updateActor = useCallback((index: number, field: keyof ProjectActor, nextValue: string) => {
     setValue((current) => ({
@@ -135,10 +200,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
               inputMode="numeric"
               pattern="[0-9]*"
               value={totalEpisodesDraft}
-              onChange={(event) => {
-                const digits = event.currentTarget.value.replace(/\D/g, "").slice(0, 3);
-                setTotalEpisodesDraft(digits);
-              }}
+              onChange={(event) => updateTotalEpisodes(event.currentTarget.value)}
               aria-label="총회차"
               required
             />
@@ -161,7 +223,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           <div className="min-w-0">
             <h2 className="text-sm font-black text-field-primary">메인 스태프</h2>
             <p className="text-[11px] font-bold text-field-muted">
-              인원·직책 중복 제한 없음 · 일촬표 반영 {value.mainStaff.filter((member) => member.includeInDailyPlan).length}/3
+              인원·직책 중복 제한 없음 · 일촬표 표시는 회차별 최대 3명
             </p>
           </div>
           <Button
@@ -173,10 +235,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
               ...current,
               mainStaff: [
                 ...current.mainStaff,
-                createFormMainStaffMember(
-                  current.mainStaff.length,
-                  current.mainStaff.filter((member) => member.includeInDailyPlan).length < MAX_DAILY_PLAN_MAIN_STAFF
-                )
+                createFormMainStaffMember(current.mainStaff.length)
               ]
             }))}
           >
@@ -189,11 +248,31 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
               key={member.id}
               member={member}
               index={index}
+              totalEpisodes={selectableTotalEpisodes}
+              isEpisodeSelectorOpen={openEpisodeStaffId === member.id}
               onChange={updateStaff}
+              onEpisodeChange={updateStaffEpisodes}
+              onEpisodeSelectorOpen={() => setOpenEpisodeStaffId(member.id)}
+              onEpisodeSelectorClose={() => setOpenEpisodeStaffId(null)}
               onDelete={deleteStaff}
             />
           ))}
         </div>
+        {episodeLimitViolations.length > 0 ? (
+          <div className="mt-2 grid gap-1" role="alert">
+            {episodeLimitViolations.map(({ episodeNumber, members }) => (
+              <p
+                key={episodeNumber}
+                className="rounded-lg border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger"
+              >
+                {episodeNumber}회차 일촬표 표시 인원이 {members.length}명입니다. 최대 3명까지 선택할 수 있습니다.
+                <span className="mt-0.5 block text-[11px]">
+                  {members.map((member) => member.name || member.role || "이름 미입력").join(", ")}
+                </span>
+              </p>
+            ))}
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-field-border bg-white p-3 md:p-5">
@@ -254,12 +333,22 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
 const StaffFields = memo(function StaffFields({
   member,
   index,
+  totalEpisodes,
+  isEpisodeSelectorOpen,
   onChange,
+  onEpisodeChange,
+  onEpisodeSelectorOpen,
+  onEpisodeSelectorClose,
   onDelete
 }: {
   member: ProjectMainStaffMember;
   index: number;
+  totalEpisodes: number | null;
+  isEpisodeSelectorOpen: boolean;
   onChange: (index: number, field: keyof Pick<ProjectMainStaffMember, "role" | "name" | "phone" | "includeInDailyPlan">, value: string | boolean) => void;
+  onEpisodeChange: (staffId: string, episodeNumbers: number[] | null) => void;
+  onEpisodeSelectorOpen: () => void;
+  onEpisodeSelectorClose: () => void;
   onDelete: (index: number) => void;
 }) {
   return (
@@ -306,9 +395,172 @@ const StaffFields = memo(function StaffFields({
         aria-label={`메인 스태프 ${index + 1} 연락처`}
         onChange={(event) => onChange(index, "phone", event.currentTarget.value)}
       />
+      <EpisodeSelectionField
+        member={member}
+        totalEpisodes={totalEpisodes}
+        open={isEpisodeSelectorOpen}
+        onOpen={onEpisodeSelectorOpen}
+        onClose={onEpisodeSelectorClose}
+        onChange={(episodeNumbers) => onEpisodeChange(member.id, episodeNumbers)}
+      />
     </div>
   );
 });
+
+function EpisodeSelectionField({
+  member,
+  totalEpisodes,
+  open,
+  onOpen,
+  onClose,
+  onChange
+}: {
+  member: ProjectMainStaffMember;
+  totalEpisodes: number | null;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onChange: (episodeNumbers: number[] | null) => void;
+}) {
+  const episodeOptions = useMemo(
+    () => totalEpisodes
+      ? Array.from({ length: totalEpisodes }, (_, index) => index + 1)
+      : [],
+    [totalEpisodes]
+  );
+  const selectedEpisodes = member.episodeNumbers;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, open]);
+
+  function toggleEpisode(episodeNumber: number) {
+    if (!totalEpisodes) return;
+    const current = selectedEpisodes === null ? episodeOptions : selectedEpisodes;
+    const next = current.includes(episodeNumber)
+      ? current.filter((episode) => episode !== episodeNumber)
+      : [...current, episodeNumber];
+    onChange(normalizeMainStaffEpisodeNumbers(next, totalEpisodes));
+  }
+
+  return (
+    <div className="grid min-w-0 gap-1">
+      <span className="text-center text-[10px] font-black text-field-primary">참여 회차</span>
+      <button
+        type="button"
+        className={`${fieldClass} flex min-h-9 items-center justify-between gap-2 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-field-soft disabled:text-field-muted`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={!totalEpisodes}
+        onClick={onOpen}
+      >
+        <span className="min-w-0 flex-1 truncate">
+          {totalEpisodes
+            ? formatMainStaffEpisodeSummary(selectedEpisodes)
+            : "총회차를 먼저 입력하세요"}
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      </button>
+
+      {open && totalEpisodes && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            className="fixed inset-0 z-[90] flex items-end justify-center bg-black/25 p-0 sm:items-center sm:p-4"
+            onPointerDown={(event) => {
+              if (event.currentTarget === event.target) onClose();
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${member.name || member.role || "메인 스태프"} 참여 회차 선택`}
+              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-field-border bg-white shadow-xl sm:rounded-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-field-primary">참여 회차</p>
+                  <p className="truncate text-xs font-bold text-field-muted">
+                    {member.role || "직책 미입력"} · {member.name || "이름 미입력"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-field-border text-field-muted transition hover:bg-field-soft active:scale-95"
+                  aria-label="참여 회차 선택 닫기"
+                  onClick={onClose}
+                >
+                  <X className="h-4 w-4" aria-hidden />
+                </button>
+              </div>
+
+              <div className="min-h-0 overflow-y-auto p-3 overscroll-contain">
+                <button
+                  type="button"
+                  className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-field-border px-3 py-2 text-left text-sm font-bold text-field-text transition hover:bg-field-soft active:scale-[0.99]"
+                  role="checkbox"
+                  aria-checked={selectedEpisodes === null}
+                  onClick={() => onChange(null)}
+                >
+                  <SelectionMark checked={selectedEpisodes === null} />
+                  전체 회차
+                </button>
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {episodeOptions.map((episodeNumber) => {
+                    const checked = selectedEpisodes === null || selectedEpisodes.includes(episodeNumber);
+                    return (
+                      <button
+                        key={episodeNumber}
+                        type="button"
+                        className="flex min-h-11 items-center gap-2 rounded-xl border border-field-border px-3 py-2 text-left text-sm font-bold text-field-text transition hover:bg-field-soft active:scale-[0.99]"
+                        role="checkbox"
+                        aria-checked={checked}
+                        onClick={() => toggleEpisode(episodeNumber)}
+                      >
+                        <SelectionMark checked={checked} />
+                        {episodeNumber}회차
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 border-t border-field-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+                <Button type="button" variant="secondary" onClick={() => onChange([])}>
+                  전체 해제
+                </Button>
+                <Button type="button" onClick={onClose}>
+                  완료
+                </Button>
+              </div>
+            </section>
+          </div>,
+          document.body
+        )
+        : null}
+    </div>
+  );
+}
+
+function SelectionMark({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${
+        checked
+          ? "border-field-primary bg-field-primary text-white"
+          : "border-field-border bg-white text-transparent"
+      }`}
+      aria-hidden
+    >
+      <Check className="h-3.5 w-3.5" />
+    </span>
+  );
+}
 
 const ActorFields = memo(function ActorFields({
   actor,
@@ -356,4 +608,10 @@ function createFormMainStaffMember(sortOrder = 0, includeInDailyPlan = true) {
     includeInDailyPlan,
     id: `${member.id}_${Date.now()}_${Math.random().toString(16).slice(2)}`
   };
+}
+
+function parseSelectableTotalEpisodes(value: string) {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
 }
