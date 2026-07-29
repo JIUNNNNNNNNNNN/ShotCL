@@ -2062,227 +2062,265 @@ function ShootingOrderField({
   ariaLabel: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const initialDisplayValue = formatShootingOrderForDisplay(value, totalCut);
-  const [draftValue, setDraftValue] = useState(initialDisplayValue);
-  const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
+  const initialDraftValue = formatShootingOrderForDraft(value, totalCut);
+  const [draftValue, setDraftValue] = useState(initialDraftValue);
+  const [draftNumbers, setDraftNumbers] = useState<number[]>(
+    getShootingOrderValidation(value, totalCut).numbers
+  );
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const draftValueRef = useRef(initialDisplayValue);
+  const draftValueRef = useRef(initialDraftValue);
   const totalCutCount = parseCutCount(totalCut);
   const savedValidation = getShootingOrderValidation(value, totalCut);
   const savedNumbers = savedValidation.numbers;
   const draftValidation = getShootingOrderValidation(draftValue, totalCut);
   const displayValue = savedNumbers.join("-");
+  const isInputDisabled = totalCutCount === 0;
 
   function updateDraft(nextValue: string) {
     const sanitized = sanitizeShootingOrderInput(nextValue);
     draftValueRef.current = sanitized;
     setDraftValue(sanitized);
     const validation = getShootingOrderValidation(sanitized, totalCut);
-    if (!validation.error) {
-      const normalized = validation.numbers.join("-");
-      if (normalized !== value) onChange(normalized);
-    }
+    setDraftNumbers(validation.numbers);
   }
 
   function commitAndClose() {
     const validation = getShootingOrderValidation(draftValueRef.current, totalCut);
-    if (!validation.error) {
-      const normalized = validation.numbers.join("-");
-      if (normalized !== value) onChange(normalized);
-    }
+    setDraftNumbers(validation.numbers);
+    if (validation.error) return;
+    const normalized = validation.numbers.join("-");
+    if (normalized !== value) onChange(normalized);
+    setIsOpen(false);
+    window.setTimeout(() => triggerRef.current?.focus());
+  }
+
+  function cancelAndClose() {
+    const originalDraft = formatShootingOrderForDraft(value, totalCut);
+    draftValueRef.current = originalDraft;
+    setDraftValue(originalDraft);
+    setDraftNumbers(savedNumbers);
     setIsOpen(false);
   }
 
-  function updateFromSlots(nextNumbers: number[]) {
-    onChange(nextNumbers.join("-"));
-  }
-
-  function handleSlotClick(slotIndex: number) {
-    if (savedValidation.error) return;
-    if (slotIndex < savedNumbers.length) {
-      updateFromSlots(savedNumbers.filter((_, index) => index !== slotIndex));
-      return;
-    }
+  function appendRemainingCuts() {
+    if (isInputDisabled || savedValidation.error) return;
     const usedNumbers = new Set(savedNumbers);
-    const nextNumber = Array.from({ length: totalCutCount }, (_, index) => index + 1)
-      .find((cutNumber) => !usedNumbers.has(cutNumber));
-    if (nextNumber !== undefined) updateFromSlots([...savedNumbers, nextNumber]);
-  }
-
-  function updatePosition() {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const width = Math.min(320, window.innerWidth - 24);
-    const estimatedHeight = 126;
-    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
-    const top = rect.bottom + estimatedHeight <= window.innerHeight - 12
-      ? rect.bottom + 6
-      : Math.max(12, rect.top - estimatedHeight - 6);
-    setPosition({ left, top, width });
+    const remainingNumbers = Array.from(
+      { length: totalCutCount },
+      (_, index) => index + 1
+    ).filter((cutNumber) => !usedNumbers.has(cutNumber));
+    if (remainingNumbers.length > 0) {
+      onChange([...savedNumbers, ...remainingNumbers].join("-"));
+    }
   }
 
   function insertAtCursor(text: string) {
     const input = inputRef.current;
-    const start = input?.selectionStart ?? draftValueRef.current.length;
-    const end = input?.selectionEnd ?? start;
+    const isInputFocused = input !== null && document.activeElement === input;
+    const start = isInputFocused
+      ? input.selectionStart ?? draftValueRef.current.length
+      : draftValueRef.current.length;
+    const end = isInputFocused ? input.selectionEnd ?? start : start;
     const nextValue = `${draftValueRef.current.slice(0, start)}${text}${draftValueRef.current.slice(end)}`;
     updateDraft(nextValue);
-    window.setTimeout(() => {
-      input?.focus();
+    if (isInputFocused) window.setTimeout(() => {
       input?.setSelectionRange(start + text.length, start + text.length);
     });
   }
 
   function deleteAtCursor() {
     const input = inputRef.current;
-    const start = input?.selectionStart ?? draftValueRef.current.length;
-    const end = input?.selectionEnd ?? start;
+    const isInputFocused = input !== null && document.activeElement === input;
+    const start = isInputFocused
+      ? input.selectionStart ?? draftValueRef.current.length
+      : draftValueRef.current.length;
+    const end = isInputFocused ? input.selectionEnd ?? start : start;
     if (start === 0 && end === 0) return;
     const deleteStart = start === end ? start - 1 : start;
     const nextValue = `${draftValueRef.current.slice(0, deleteStart)}${draftValueRef.current.slice(end)}`;
     updateDraft(nextValue);
-    window.setTimeout(() => {
-      input?.focus();
+    if (isInputFocused) window.setTimeout(() => {
       input?.setSelectionRange(deleteStart, deleteStart);
     });
   }
 
   useEffect(() => {
     if (!isOpen) return;
-    updatePosition();
-
-    function handlePointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (popoverRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      commitAndClose();
-    }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") commitAndClose();
+      if (event.key === "Escape") cancelAndClose();
     }
 
-    document.addEventListener("pointerdown", handlePointerDown);
     window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
     return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
       window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [isOpen]);
+  }, [isOpen, value, totalCut]);
 
   return (
     <>
-      <div
-        className={`flex min-h-[38px] w-full min-w-0 flex-wrap items-center justify-center gap-1 rounded-md border bg-white px-1 py-1 ${
-          savedValidation.error ? "border-field-danger ring-1 ring-field-danger/20" : "border-field-border"
-        }`}
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`flex min-h-10 w-full min-w-0 items-center rounded-md border bg-white px-2.5 py-2 text-left text-sm font-bold leading-[1.35] transition-colors ${
+          savedValidation.error
+            ? "border-field-danger text-field-danger ring-1 ring-field-danger/20"
+            : displayValue
+              ? "border-field-border text-field-text hover:border-field-primary"
+              : "border-field-border text-field-muted hover:border-field-primary"
+        } disabled:cursor-not-allowed disabled:bg-field-soft disabled:text-field-muted`}
+        onClick={() => {
+          if (isInputDisabled) return;
+          const normalizedDraft = formatShootingOrderForDraft(value, totalCut);
+          const normalizedNumbers = getShootingOrderValidation(value, totalCut).numbers;
+          draftValueRef.current = normalizedDraft;
+          setDraftValue(normalizedDraft);
+          setDraftNumbers(normalizedNumbers);
+          setIsOpen(true);
+        }}
+        disabled={isInputDisabled}
         aria-label={ariaLabel}
         aria-invalid={Boolean(savedValidation.error)}
+        aria-expanded={isOpen}
+        title={displayValue || "촬영 순서를 입력하세요"}
       >
-        {totalCutCount > 0 ? Array.from({ length: totalCutCount }, (_, slotIndex) => (
-          <span key={slotIndex} className="inline-flex items-center gap-1">
-            {slotIndex > 0 ? <span className="text-[11px] font-black text-field-muted" aria-hidden>-</span> : null}
-            <button
-              type="button"
-              className={`flex h-7 min-h-7 w-7 min-w-7 items-center justify-center rounded border text-[11px] font-black ${
-                slotIndex < savedNumbers.length
-                  ? "border-field-primary bg-field-soft text-field-primary"
-                  : "border-dashed border-field-border bg-white text-field-muted hover:border-field-primary hover:bg-field-soft"
-              }`}
-              onClick={() => handleSlotClick(slotIndex)}
-              disabled={Boolean(savedValidation.error)}
-              aria-label={slotIndex < savedNumbers.length
-                ? `${ariaLabel} ${slotIndex + 1}번째 값 ${savedNumbers[slotIndex]} 삭제`
-                : `${ariaLabel} ${slotIndex + 1}번째 빈 칸 자동 입력`}
-              title={slotIndex < savedNumbers.length ? "눌러서 삭제" : "가장 낮은 미사용 컷 번호 입력"}
-            >
-              {savedNumbers[slotIndex] ?? ""}
-            </button>
-          </span>
-        )) : <span className="text-xs font-bold text-field-muted">—</span>}
+        <span className="block min-w-0 max-w-full overflow-x-auto whitespace-nowrap">
+          {displayValue || "촬영 순서를 입력하세요"}
+        </span>
+      </button>
+      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
         <button
-          ref={triggerRef}
           type="button"
-          className="ml-0.5 flex h-7 min-h-7 w-7 min-w-7 items-center justify-center rounded border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
-          onClick={() => {
-            const normalizedDisplay = formatShootingOrderForDisplay(value, totalCut);
-            draftValueRef.current = normalizedDisplay;
-            setDraftValue(normalizedDisplay);
-            setIsOpen((current) => !current);
-          }}
-          aria-label={`${ariaLabel} 직접 입력`}
-          aria-expanded={isOpen}
-          title={displayValue || "촬영 순서 직접 입력"}
+          className="min-h-9 rounded-md border border-field-border bg-field-soft px-2 py-1.5 text-[11px] font-bold leading-[1.35] text-field-primary transition-colors hover:border-field-primary disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={appendRemainingCuts}
+          disabled={isInputDisabled || Boolean(savedValidation.error)}
         >
-          <MoreHorizontal className="h-4 w-4" aria-hidden />
+          이후 순서대로
+        </button>
+        <button
+          type="button"
+          className="min-h-9 rounded-md border border-field-border bg-white px-2 py-1.5 text-[11px] font-bold leading-[1.35] text-field-danger transition-colors hover:border-field-danger disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={() => onChange("")}
+          disabled={!value}
+        >
+          전체삭제
         </button>
       </div>
       {savedValidation.error ? (
         <p className="mt-1 text-[10px] font-bold leading-[1.35] text-field-danger">{savedValidation.error}</p>
+      ) : isInputDisabled ? (
+        <p className="mt-1 text-[10px] font-bold leading-[1.35] text-field-muted">총 컷수를 먼저 입력해주세요.</p>
       ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
-          ref={popoverRef}
-          role="dialog"
-          aria-label={`${ariaLabel} 입력`}
-          className="fixed z-[80] rounded-md border border-field-border bg-white p-2 shadow-xl"
-          style={position}
-          data-shooting-order-popover
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/20 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) cancelAndClose();
+          }}
         >
-          <div className="flex items-center gap-1.5">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${ariaLabel} 입력`}
+            className="w-full max-w-sm rounded-t-xl border border-field-border bg-white p-3 shadow-xl sm:rounded-xl"
+            data-shooting-order-popover
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <p className="mb-2 text-center text-xs font-bold leading-[1.35] text-field-muted">
+              숫자 사이를 스페이스로 구분하세요
+            </p>
             <input
               ref={inputRef}
-              autoFocus
               type="text"
-              inputMode="tel"
+              inputMode="text"
               maxLength={240}
-              className={`${compactInputClass} min-w-0 flex-1 text-center`}
+              className={`${compactInputClass} min-h-11 w-full text-center text-base`}
               value={draftValue}
               onChange={(event) => updateDraft(event.currentTarget.value)}
               onKeyDown={(event) => {
-                if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/[0-9-]/.test(event.key)) {
+                if (
+                  !event.metaKey
+                  && !event.ctrlKey
+                  && !event.altKey
+                  && event.key.length === 1
+                  && !/[0-9\s,\-/]/.test(event.key)
+                ) {
                   event.preventDefault();
                 }
                 if (event.key === "Enter") {
                   event.preventDefault();
                   commitAndClose();
-                  triggerRef.current?.focus();
-                }
-                if (event.key === "Tab") {
-                  event.preventDefault();
-                  const trigger = triggerRef.current;
-                  commitAndClose();
-                  window.setTimeout(() => focusAdjacentElement(trigger, event.shiftKey ? -1 : 1));
                 }
               }}
-              placeholder="예: 4-2"
+              placeholder="예: 4 2 1 3 5"
               aria-label={`${ariaLabel} 값`}
               aria-invalid={Boolean(draftValidation.error)}
             />
-            <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-field-border text-field-muted" onClick={commitAndClose} aria-label={`${ariaLabel} 닫기`}>
-              <X className="h-4 w-4" aria-hidden />
-            </button>
-          </div>
-          {draftValidation.error ? (
-            <p className="mt-1 text-[11px] font-bold leading-[1.35] text-field-danger">{draftValidation.error}</p>
-          ) : null}
-          <div className="mt-2 grid grid-cols-3 gap-1.5">
-            <button type="button" className="min-h-[38px] rounded border border-field-border bg-field-soft py-1.5 text-sm font-black leading-[1.35] text-field-primary" onPointerDown={(event) => event.preventDefault()} onClick={() => insertAtCursor("-")}>
-              -
-            </button>
-            <button type="button" className="min-h-[38px] rounded border border-field-border bg-white px-1 py-1.5 text-[11px] font-black leading-[1.35] text-field-text" onPointerDown={(event) => event.preventDefault()} onClick={deleteAtCursor}>
-              지우기
-            </button>
-            <button type="button" className="min-h-[38px] rounded border border-field-border bg-white px-1 py-1.5 text-[11px] font-black leading-[1.35] text-field-danger" onPointerDown={(event) => event.preventDefault()} onClick={() => updateDraft("")}>
-              전체삭제
-            </button>
+            <div className="mt-2 min-h-5" aria-live="polite">
+              {draftValidation.error ? (
+                <p className="text-[11px] font-bold leading-[1.35] text-field-danger">{draftValidation.error}</p>
+              ) : draftNumbers.length > 0 ? (
+                <p className="truncate text-center text-[11px] font-bold leading-[1.35] text-field-muted">
+                  {draftNumbers.join("-")}
+                </p>
+              ) : null}
+            </div>
+            <div className="mt-1 grid grid-cols-3 gap-1.5">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((number) => (
+                <button
+                  key={number}
+                  type="button"
+                  className="min-h-11 rounded-md border border-field-border bg-white py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => insertAtCursor(String(number))}
+                >
+                  {number}
+                </button>
+              ))}
+              <span aria-hidden />
+              <button
+                type="button"
+                className="min-h-11 rounded-md border border-field-border bg-white py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => insertAtCursor("0")}
+              >
+                0
+              </button>
+              <button
+                type="button"
+                className="min-h-11 rounded-md border border-field-border bg-white px-1 py-2 text-xs font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={deleteAtCursor}
+              >
+                지우기
+              </button>
+              <button
+                type="button"
+                className="col-span-3 min-h-11 rounded-md border border-field-primary bg-field-soft px-3 py-2 text-sm font-bold leading-[1.35] text-field-primary active:bg-field-primary/15"
+                onPointerDown={(event) => event.preventDefault()}
+                onClick={() => insertAtCursor(" ")}
+              >
+                스페이스
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                className="min-h-10 rounded-md border border-field-border bg-white px-3 py-2 text-sm font-bold leading-[1.35] text-field-muted"
+                onClick={cancelAndClose}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="min-h-10 rounded-md border border-field-primary bg-field-primary px-3 py-2 text-sm font-bold leading-[1.35] text-white disabled:cursor-not-allowed disabled:opacity-45"
+                onClick={commitAndClose}
+                disabled={Boolean(draftValidation.error)}
+              >
+                완료
+              </button>
+            </div>
           </div>
         </div>,
         document.body
@@ -3508,36 +3546,36 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
   ].some((value) => String(value ?? "").trim());
 }
 
-function normalizeShootingOrder(value: string, totalCut: string) {
+type ShootingOrderValue = string | number[] | null | undefined;
+
+function normalizeShootingOrder(value: ShootingOrderValue, totalCut: string) {
   const validation = getShootingOrderValidation(value, totalCut);
   return validation.error ? "" : validation.numbers.join("-");
 }
 
-function formatShootingOrderForDisplay(value: string, totalCut: string) {
+function formatShootingOrderForDisplay(value: ShootingOrderValue, totalCut: string) {
   return getShootingOrderValidation(value, totalCut).numbers.join("-");
 }
 
-function getShootingOrderValidation(value: string, totalCut: string): {
+function formatShootingOrderForDraft(value: ShootingOrderValue, totalCut: string) {
+  return getShootingOrderValidation(value, totalCut).numbers.join(" ");
+}
+
+function getShootingOrderValidation(value: ShootingOrderValue, totalCut: string): {
   numbers: number[];
   error: string;
 } {
-  const source = String(value ?? "").trim();
+  const source = (Array.isArray(value) ? value.join(" ") : String(value ?? "")).trim();
   if (!source) return { numbers: [], error: "" };
   const count = parseCutCount(totalCut);
   if (count === 0) {
-    return { numbers: [], error: "총 컷수를 먼저 입력해주세요." };
+    return { numbers: parseShootingOrderTokens(source, 0), error: "총 컷수를 먼저 입력해주세요." };
   }
   if (/[^0-9,\-\/\s]/.test(source)) {
-    return { numbers: [], error: "촬영 순서는 숫자와 하이픈만 사용할 수 있습니다." };
+    return { numbers: [], error: "촬영 순서는 숫자만 입력해주세요." };
   }
 
-  const hasSeparator = /[-,/\s]/.test(source);
-  const tokens = hasSeparator
-    ? source.split(/[-,/\s]+/).filter(Boolean)
-    : [];
-  const numbers = hasSeparator
-    ? tokens.map(Number)
-    : parseCompactShootingOrder(source, count);
+  const numbers = parseShootingOrderTokens(source, count);
 
   if (numbers.length === 0) {
     return { numbers: [], error: `1부터 ${count}까지의 컷 번호를 입력해주세요.` };
@@ -3775,7 +3813,24 @@ function formatProgressSyncFailure(saved: SaveDailyPlanResult) {
 }
 
 function sanitizeShootingOrderInput(value: string) {
-  return value.replace(/[^0-9-]/g, "");
+  const allowed = value.replace(/[^0-9,\-\/\s]/g, "");
+  const hasTrailingSeparator = /[-,/\s]$/.test(allowed);
+  const normalized = allowed
+    .split(/[-,/\s]+/)
+    .filter(Boolean)
+    .join(" ");
+  return hasTrailingSeparator && normalized ? `${normalized} ` : normalized;
+}
+
+function parseShootingOrderTokens(value: string, totalCut: number) {
+  const hasSeparator = /[-,/\s]/.test(value);
+  if (hasSeparator) {
+    return value.split(/[-,/\s]+/).filter(Boolean).map(Number);
+  }
+  if (totalCut <= 0) {
+    return /^\d+$/.test(value) ? [Number(value)] : [];
+  }
+  return parseCompactShootingOrder(value, totalCut);
 }
 
 function parseCompactShootingOrder(value: string, totalCut: number) {
