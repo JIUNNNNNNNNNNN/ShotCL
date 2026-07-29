@@ -6,7 +6,12 @@ import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
+import {
+  buildSceneCutCountMap,
+  type SceneCutCountMap
+} from "@/lib/sceneCutCount";
 import type { Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 const DailyPlanEditor = dynamic(
@@ -27,6 +32,7 @@ export default function NewDailyPlanPage() {
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
+  const [sceneCutCounts, setSceneCutCounts] = useState<SceneCutCountMap>({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
@@ -35,15 +41,17 @@ export default function NewDailyPlanPage() {
 
     async function loadProject() {
       try {
-        const [data, basicInfo, staffList] = await Promise.all([
+        const [data, basicInfo, staffList, sceneList] = await Promise.all([
           getProject(projectId),
           getProjectBasicInfo(projectId).catch(() => null),
-          listProjectStaffMembers(projectId).catch(() => null)
+          listProjectStaffMembers(projectId).catch(() => null),
+          getProjectSceneList(projectId)
         ]);
         setProject(data);
         setProjectBasicInfo(data ? basicInfo : null);
         setProjectStaffMembers(data ? staffList?.members ?? [] : []);
         setProjectStaffDepartments(data ? staffList?.departments ?? [] : []);
+        setSceneCutCounts(data && sceneList ? buildSceneCutCountMap(sceneList.items) : {});
         setErrorMessage("");
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "프로젝트 정보를 불러오지 못했습니다.");
@@ -69,6 +77,7 @@ export default function NewDailyPlanPage() {
       projectBasicInfo={projectBasicInfo}
       projectStaffMembers={projectStaffMembers}
       projectStaffDepartments={projectStaffDepartments}
+      sceneCutCounts={sceneCutCounts}
     />
   );
 }

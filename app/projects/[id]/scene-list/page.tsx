@@ -28,6 +28,10 @@ import {
 } from "@/lib/data/sceneList";
 import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
+import {
+  MAX_SCENE_CUT_COUNT,
+  validateSceneCutCountInput
+} from "@/lib/sceneCutCount";
 import type {
   Project,
   ProjectSceneActorCell,
@@ -46,6 +50,7 @@ type SceneValueColumn =
   | "dayNight"
   | "interiorExterior"
   | "sceneContent"
+  | "cutCount"
   | "props";
 
 type SceneActorColumn = `actor:${string}`;
@@ -142,7 +147,7 @@ function useProjectId() {
   return Array.isArray(params.id) ? params.id[0] : params.id;
 }
 
-/** 일촬표와 분리된 프로젝트 공통 씬리스트를 수동 저장 방식으로 편집합니다. */
+/** 프로젝트 공통 씬리스트를 수동 저장하며 Cut 값은 일촬표 컷수와 공유합니다. */
 export default function ProjectSceneListPage() {
   const projectId = useProjectId();
   const { role } = useProjectAccess();
@@ -155,6 +160,7 @@ export default function ProjectSceneListPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [cutInputErrors, setCutInputErrors] = useState<Record<string, string>>({});
   const [selectedCell, setSelectedCell] = useState<SelectedSceneCell | null>(null);
   const [selectedRange, setSelectedRange] = useState<SceneCellRange | null>(null);
   const [editingCell, setEditingCell] = useState<SelectedSceneCell | null>(null);
@@ -203,6 +209,7 @@ export default function ProjectSceneListPage() {
       setSelectedCell(null);
       setSelectedRange(null);
       setEditingCell(null);
+      setCutInputErrors({});
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "씬리스트를 불러오지 못했습니다.");
     } finally {
@@ -308,6 +315,7 @@ export default function ProjectSceneListPage() {
       "interiorExterior",
       "sceneContent",
       ...actorRoles.map((role): SceneActorColumn => `actor:${role}`),
+      "cutCount",
       "props"
     ],
     [actorRoles]
@@ -332,6 +340,7 @@ export default function ProjectSceneListPage() {
       "minmax(0,.36fr)",
       compactLocationLayout ? "minmax(0,3.37fr)" : "minmax(0,2.8fr)",
       ...actorRoles.map(() => "minmax(0,.42fr)"),
+      "minmax(3.75rem,.5fr)",
       "minmax(0,1.05fr)"
     ].join(" "),
     [actorRoles, compactLocationLayout]
@@ -378,6 +387,16 @@ export default function ProjectSceneListPage() {
     setIsDirty(true);
     setErrorMessage("");
   }, [canEdit]);
+
+  const updateCutInputError = useCallback((id: string, message: string) => {
+    setCutInputErrors((current) => {
+      if (!message && !(id in current)) return current;
+      const next = { ...current };
+      if (message) next[id] = message;
+      else delete next[id];
+      return next;
+    });
+  }, []);
 
   const selectCell = useCallback((
     rowId: string,
@@ -983,11 +1002,19 @@ export default function ProjectSceneListPage() {
 
   const deleteItem = useCallback((item: ProjectSceneItem) => {
     if (!canEdit) return;
+    updateCutInputError(item.id, "");
     commitItems(items.filter((currentItem) => currentItem.id !== item.id));
-  }, [canEdit, commitItems, items]);
+  }, [canEdit, commitItems, items, updateCutInputError]);
 
   async function save() {
     if (!canEdit || !projectId) return;
+    const activeCutError = Object.entries(cutInputErrors).find(([itemId, message]) => (
+      message && items.some((item) => item.id === itemId)
+    ));
+    if (activeCutError) {
+      setErrorMessage(activeCutError[1]);
+      return;
+    }
     setIsSaving(true);
     setErrorMessage("");
     try {
@@ -995,6 +1022,7 @@ export default function ProjectSceneListPage() {
       setItems(saved.items);
       setScenarioReference(saved.scenarioReference);
       setIsDirty(false);
+      setCutInputErrors({});
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "씬리스트를 저장하지 못했습니다.");
     } finally {
@@ -1020,7 +1048,7 @@ export default function ProjectSceneListPage() {
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
-      <section className="overflow-hidden rounded-xl border border-field-border bg-white">
+      <section className="overflow-clip rounded-xl border border-field-border bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
           <h1 className="font-display min-w-0 truncate text-lg font-black text-field-primary">
             {project.name} 씬리스트
@@ -1059,6 +1087,9 @@ export default function ProjectSceneListPage() {
           items={items}
           actorRoles={actorRoles}
           locationStyles={locationStyles}
+          canEdit={canEdit}
+          onUpdate={updateItem}
+          onCutValidationChange={updateCutInputError}
         />
 
         <div
@@ -1075,7 +1106,7 @@ export default function ProjectSceneListPage() {
         >
           <div
             role="row"
-            className="grid border-b border-[#bfc5bf] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary"
+            className="sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] z-50 grid border-b border-[#aeb6ae] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary print:static"
             style={{ gridTemplateColumns }}
           >
             <SceneHeaderCell
@@ -1084,29 +1115,18 @@ export default function ProjectSceneListPage() {
               className="border-r border-[#bfc5bf]"
               onLongPress={startHeaderHelpLongPress}
             />
-            {compactLocationLayout ? (
-              <SceneHeaderCell
-                label="Location"
-                description="장소"
-                className="col-span-2 border-r border-[#bfc5bf]"
-                onLongPress={startHeaderHelpLongPress}
-              />
-            ) : (
-              <>
-                <SceneHeaderCell
-                  label="Location"
-                  description="대장소"
-                  className="border-r border-[#bfc5bf]"
-                  onLongPress={startHeaderHelpLongPress}
-                />
-                <SceneHeaderCell
-                  label="Sub-Location"
-                  description="세부장소"
-                  className="border-r border-[#bfc5bf]"
-                  onLongPress={startHeaderHelpLongPress}
-                />
-              </>
-            )}
+            <SceneHeaderCell
+              label="Location"
+              description="대장소"
+              className="border-r border-[#bfc5bf]"
+              onLongPress={startHeaderHelpLongPress}
+            />
+            <SceneHeaderCell
+              label="Sub-Location"
+              description="세부장소"
+              className="border-r border-[#bfc5bf]"
+              onLongPress={startHeaderHelpLongPress}
+            />
             <SceneHeaderCell
               label="Day"
               className="border-r border-[#bfc5bf]"
@@ -1144,6 +1164,13 @@ export default function ProjectSceneListPage() {
               );
             })}
             <SceneHeaderCell
+              label="Cut"
+              description="총 컷수"
+              showDescription
+              className="border-r border-[#bfc5bf]"
+              onLongPress={startHeaderHelpLongPress}
+            />
+            <SceneHeaderCell
               label="Memo"
               description="소품&특이사항"
               onLongPress={startHeaderHelpLongPress}
@@ -1174,6 +1201,7 @@ export default function ProjectSceneListPage() {
                 onActorCellTextLongPress={startActorCellTextLongPress}
                 onConsumeActorCellClickSuppression={consumeActorCellClickSuppression}
                 onUpdate={updateItem}
+                onCutValidationChange={updateCutInputError}
               />
             )}
           />
@@ -1302,21 +1330,27 @@ export default function ProjectSceneListPage() {
   );
 }
 
-const mobileSceneGridTemplate = ".42fr .8fr .44fr .58fr 1.47fr 1.04fr 1.04fr";
+const mobileSceneGridTemplate = ".42fr .78fr .42fr .56fr 1.28fr .96fr .5fr .98fr";
 
 function MobileSceneList({
   items,
   actorRoles,
-  locationStyles
+  locationStyles,
+  canEdit,
+  onUpdate,
+  onCutValidationChange
 }: {
   items: ProjectSceneItem[];
   actorRoles: string[];
   locationStyles: Map<string, PaletteStyle>;
+  canEdit: boolean;
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onCutValidationChange: (id: string, message: string) => void;
 }) {
   return (
     <div
       className="scene-list-mobile min-w-0 touch-pan-y select-none"
-      aria-label="모바일 읽기 전용 씬리스트"
+      aria-label="모바일 씬리스트"
       draggable={false}
       style={{
         touchAction: "pan-y",
@@ -1324,7 +1358,7 @@ function MobileSceneList({
         WebkitTouchCallout: "none"
       }}
     >
-      <div className="grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary"
+      <div className="sticky top-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] z-50 grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary print:static"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
@@ -1343,6 +1377,7 @@ function MobileSceneList({
         />
         <MobileSceneHeader entries={[["Content", "씬 내용"]]} />
         <MobileSceneHeader entries={[["Characters", "등장인물"]]} />
+        <MobileSceneHeader entries={[["Cut", "총 컷수"]]} />
         <MobileSceneHeader entries={[["Memo", "소품&특이사항"]]} />
       </div>
 
@@ -1353,6 +1388,9 @@ function MobileSceneList({
           index={index}
           actorRoles={actorRoles}
           locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+          canEdit={canEdit}
+          onUpdate={onUpdate}
+          onCutValidationChange={onCutValidationChange}
         />
       )) : (
         <p className="border-x border-b border-[#bfc5bf] px-3 py-8 text-center text-xs font-semibold text-field-muted">
@@ -1367,12 +1405,18 @@ function MobileSceneRow({
   item,
   index,
   actorRoles,
-  locationStyle
+  locationStyle,
+  canEdit,
+  onUpdate,
+  onCutValidationChange
 }: {
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
   locationStyle: PaletteStyle;
+  canEdit: boolean;
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onCutValidationChange: (id: string, message: string) => void;
 }) {
   const actorCells = actorRoles
     .map((role, actorIndex) => ({
@@ -1446,6 +1490,15 @@ function MobileSceneRow({
           ) : null}
         </span>
       </MobileSceneCell>
+      <MobileSceneCell className="row-span-2 !overflow-visible !p-0" align="center">
+        <SceneCutInput
+          item={item}
+          canEdit={canEdit}
+          compact
+          onChange={(cutCount) => onUpdate(item.id, { cutCount })}
+          onValidationChange={(message) => onCutValidationChange(item.id, message)}
+        />
+      </MobileSceneCell>
       <MobileSceneCell className="row-span-2" align="left">
         {item.props}
       </MobileSceneCell>
@@ -1472,10 +1525,10 @@ function MobileSceneHeader({
       role="columnheader"
       className="flex min-w-0 flex-col items-stretch justify-center border-b border-r border-[#bfc5bf] text-center [overflow-wrap:anywhere]"
     >
-      {entries.map(([label]) => (
+      {entries.map(([label, description]) => (
         <span
           key={label}
-          className={`flex min-h-5 flex-1 touch-pan-y select-none items-center justify-center py-0.5 text-center ${
+          className={`flex min-h-5 flex-1 touch-pan-y select-none flex-col items-center justify-center py-0.5 text-center ${
             label === "Int/Ext" || label === "#S"
               ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
               : "px-0.5"
@@ -1483,6 +1536,11 @@ function MobileSceneHeader({
           draggable={false}
         >
           {label}
+          {label === "Cut" && description ? (
+            <small className="block text-[7px] font-bold leading-none text-field-muted">
+              {description}
+            </small>
+          ) : null}
         </span>
       ))}
     </div>
@@ -1528,7 +1586,8 @@ function SceneHeaderCell({
   style,
   title,
   ariaLabel,
-  onLongPress
+  onLongPress,
+  showDescription = false
 }: {
   label: string;
   description?: string;
@@ -1537,19 +1596,25 @@ function SceneHeaderCell({
   title?: string;
   ariaLabel?: string;
   onLongPress: HeaderLongPressHandler;
+  showDescription?: boolean;
 }) {
   return (
     <div
       role="columnheader"
       title={title}
       aria-label={ariaLabel}
-      className={`flex min-w-0 touch-none select-none items-center justify-center truncate px-1 py-1.5 text-center ${className}`}
+      className={`flex min-w-0 touch-none select-none flex-col items-center justify-center truncate px-1 py-1 text-center ${className}`}
       style={style}
       onPointerDown={description
         ? (event) => onLongPress(event, description)
         : undefined}
     >
-      {label}
+      <span className="block leading-4">{label}</span>
+      {showDescription && description ? (
+        <small className="block text-[8px] font-bold leading-3 text-field-muted">
+          {description}
+        </small>
+      ) : null}
     </div>
   );
 }
@@ -1622,6 +1687,7 @@ const SceneTableRow = memo(function SceneTableRow({
   onActorCellTextLongPress,
   onConsumeActorCellClickSuppression,
   onUpdate,
+  onCutValidationChange,
 }: {
   item: ProjectSceneItem;
   index: number;
@@ -1655,6 +1721,7 @@ const SceneTableRow = memo(function SceneTableRow({
   ) => void;
   onConsumeActorCellClickSuppression: (itemId: string, role: string) => boolean;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onCutValidationChange: (id: string, message: string) => void;
 }) {
   const getCellInteraction = (
     column: SceneCellColumn,
@@ -1717,6 +1784,7 @@ const SceneTableRow = memo(function SceneTableRow({
   const interiorExteriorInteraction = getCellInteraction("interiorExterior");
   const concealInteriorExterior = isVisuallyMerged(interiorExteriorInteraction);
   const sceneContentInteraction = getCellInteraction("sceneContent");
+  const cutCountInteraction = getCellInteraction("cutCount");
   const propsInteraction = getCellInteraction("props");
 
   function toggleActorColor(role: string) {
@@ -1972,6 +2040,20 @@ const SceneTableRow = memo(function SceneTableRow({
         </div>
       ) : null}
 
+      <SceneCellFrame interaction={cutCountInteraction} value={getSceneCellValue(item, "cutCount")}>
+        <SceneCutInput
+          item={item}
+          canEdit={canEdit}
+          onFocus={() => {
+            onCellSelect(item.id, "cutCount", index);
+            onCellEditStart(item.id, "cutCount");
+          }}
+          onBlur={() => onCellEditEnd(item.id, "cutCount")}
+          onChange={(cutCount) => onUpdate(item.id, { cutCount })}
+          onValidationChange={(message) => onCutValidationChange(item.id, message)}
+        />
+      </SceneCellFrame>
+
       <SceneCellFrame interaction={propsInteraction} value={item.props}>
         {canEdit ? (
           <AutoGrowSceneTextarea
@@ -2104,6 +2186,83 @@ type SceneCellInteraction = {
   onEditEnd: (rowId: string, column: SceneCellColumn) => void;
   onLongPress?: (event: ReactPointerEvent<HTMLDivElement>) => void;
 };
+
+function SceneCutInput({
+  item,
+  canEdit,
+  compact = false,
+  onFocus,
+  onBlur,
+  onChange,
+  onValidationChange
+}: {
+  item: ProjectSceneItem;
+  canEdit: boolean;
+  compact?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  onChange: (value: number | null) => void;
+  onValidationChange: (message: string) => void;
+}) {
+  const formattedValue = item.cutCount == null ? "" : String(item.cutCount);
+  const [draft, setDraft] = useState(formattedValue);
+  const [validationMessage, setValidationMessage] = useState("");
+  const onValidationChangeRef = useRef(onValidationChange);
+
+  useEffect(() => {
+    onValidationChangeRef.current = onValidationChange;
+  }, [onValidationChange]);
+
+  useEffect(() => {
+    setDraft(formattedValue);
+    setValidationMessage("");
+    onValidationChangeRef.current("");
+  }, [formattedValue]);
+
+  if (!canEdit) {
+    return (
+      <span className="flex h-full min-h-9 items-center justify-center px-1 py-1.5 text-center font-bold">
+        {formattedValue}
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-9 min-w-0 flex-col items-stretch justify-center">
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={String(MAX_SCENE_CUT_COUNT).length}
+        value={draft}
+        aria-label={`${item.sceneNo || "현재 씬"} 총 컷수`}
+        aria-invalid={Boolean(validationMessage)}
+        aria-describedby={validationMessage ? `scene-cut-error-${item.id}` : undefined}
+        className={`${inputClassName} !min-h-8 px-1 text-center ${
+          compact ? "!text-[16px]" : ""
+        } ${validationMessage ? "text-field-danger ring-1 ring-inset ring-field-danger" : ""}`}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onChange={(event) => {
+          const nextDraft = event.currentTarget.value;
+          const validation = validateSceneCutCountInput(nextDraft);
+          setDraft(nextDraft);
+          setValidationMessage(validation.error);
+          onValidationChange(validation.error);
+          if (!validation.error) onChange(validation.value);
+        }}
+      />
+      {validationMessage ? (
+        <small
+          id={`scene-cut-error-${item.id}`}
+          className="block px-0.5 pb-0.5 text-center text-[8px] font-bold leading-3 text-field-danger"
+        >
+          0–{MAX_SCENE_CUT_COUNT}
+        </small>
+      ) : null}
+    </div>
+  );
+}
 
 function SceneCell({
   value,
@@ -2409,21 +2568,35 @@ function getVisualMergeRange(
   const value = getSceneCellValue(items[rowIndex], column).trim();
   if (!value) return single;
   if (isActorColumn(column) && value !== ACTOR_COLOR_CELL_VALUE) return single;
-  if (isEditingCell(items[rowIndex], column, editingCell)) return single;
+  const locationColumn = isLocationColumn(column);
+  const isEditingCurrent = locationColumn
+    ? isEditingLocationCell(items[rowIndex], editingCell)
+    : isEditingCell(items[rowIndex], column, editingCell);
+  if (isEditingCurrent) return single;
+  const matchesCurrentGroup = (candidate: ProjectSceneItem | undefined) => (
+    locationColumn
+      ? hasSameLocationPair(items[rowIndex], candidate)
+      : getSceneCellValue(candidate, column).trim() === value
+  );
+  const isEditingCandidate = (candidate: ProjectSceneItem | undefined) => (
+    locationColumn
+      ? isEditingLocationCell(candidate, editingCell)
+      : isEditingCell(candidate, column, editingCell)
+  );
 
   let startIndex = rowIndex;
   let endIndex = rowIndex;
   while (
     startIndex > 0 &&
-    !isEditingCell(items[startIndex - 1], column, editingCell) &&
-    getSceneCellValue(items[startIndex - 1], column).trim() === value
+    !isEditingCandidate(items[startIndex - 1]) &&
+    matchesCurrentGroup(items[startIndex - 1])
   ) {
     startIndex -= 1;
   }
   while (
     endIndex < items.length - 1 &&
-    !isEditingCell(items[endIndex + 1], column, editingCell) &&
-    getSceneCellValue(items[endIndex + 1], column).trim() === value
+    !isEditingCandidate(items[endIndex + 1]) &&
+    matchesCurrentGroup(items[endIndex + 1])
   ) {
     endIndex += 1;
   }
@@ -2455,14 +2628,13 @@ function getHorizontalLocationMergeRange(
   if (!item || !isSameHorizontalLocation(item)) return single;
   if (isEditingLocationCell(item, editingCell)) return single;
 
-  const value = item.mainLocation.trim();
   let startIndex = rowIndex;
   let endIndex = rowIndex;
   while (
     startIndex > 0 &&
     isSameHorizontalLocation(items[startIndex - 1]) &&
     !isEditingLocationCell(items[startIndex - 1], editingCell) &&
-    items[startIndex - 1].mainLocation.trim() === value
+    hasSameLocationPair(item, items[startIndex - 1])
   ) {
     startIndex -= 1;
   }
@@ -2470,7 +2642,7 @@ function getHorizontalLocationMergeRange(
     endIndex < items.length - 1 &&
     isSameHorizontalLocation(items[endIndex + 1]) &&
     !isEditingLocationCell(items[endIndex + 1], editingCell) &&
-    items[endIndex + 1].mainLocation.trim() === value
+    hasSameLocationPair(item, items[endIndex + 1])
   ) {
     endIndex += 1;
   }
@@ -2484,6 +2656,24 @@ function isSameHorizontalLocation(item: ProjectSceneItem | undefined) {
     mainLocation &&
     mainLocation === item.subLocation.trim()
   );
+}
+
+function hasSameLocationPair(
+  left: ProjectSceneItem | undefined,
+  right: ProjectSceneItem | undefined
+) {
+  if (!left || !right) return false;
+  const leftMain = normalizeLocationMergeValue(left.mainLocation);
+  const leftSub = normalizeLocationMergeValue(left.subLocation);
+  if (!leftMain && !leftSub) return false;
+  return (
+    leftMain === normalizeLocationMergeValue(right.mainLocation) &&
+    leftSub === normalizeLocationMergeValue(right.subLocation)
+  );
+}
+
+function normalizeLocationMergeValue(value: unknown) {
+  return String(value ?? "").trim();
 }
 
 function isEditingLocationCell(
@@ -2637,7 +2827,10 @@ function isLocationColumn(
 
 function getSceneCellValue(item: ProjectSceneItem | undefined, column: SceneCellColumn) {
   if (!item) return "";
-  if (!isActorColumn(column)) return item[column];
+  if (!isActorColumn(column)) {
+    if (column === "cutCount") return item.cutCount == null ? "" : String(item.cutCount);
+    return item[column];
+  }
   const role = column.slice("actor:".length);
   const state = getActorCellState(item, role);
   if (state.mode === "color") return ACTOR_COLOR_CELL_VALUE;
@@ -2668,7 +2861,10 @@ function setSceneCellValue(
   }
 
   let value = rawValue.replace(/\r?\n/g, " ");
-  if (column === "dayNight") {
+  if (column === "cutCount") {
+    const validation = validateSceneCutCountInput(value);
+    return validation.error ? item : { ...item, cutCount: validation.value };
+  } else if (column === "dayNight") {
     const normalized = value.trim().toUpperCase();
     value = normalized === "D" || normalized === "N" ? normalized : "";
   } else if (column === "interiorExterior") {

@@ -137,8 +137,7 @@
     display: block;
   }
 
-  .scene-list-landscape,
-  .scene-list-edit-action {
+  .scene-list-landscape {
     display: none;
   }
 }

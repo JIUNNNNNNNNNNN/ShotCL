@@ -451,6 +451,7 @@ export type ProjectSceneItem = {
   characterNotes: string;
   actorCells: Record<string, ProjectSceneActorCell>;
   props: string;
+  cutCount: number | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;

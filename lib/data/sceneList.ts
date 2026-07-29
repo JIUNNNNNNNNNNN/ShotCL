@@ -1,5 +1,6 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
+import { normalizeSceneCutCount } from "@/lib/sceneCutCount";
 import type {
   ProjectSceneActorCell,
   ProjectSceneItem,
@@ -40,13 +41,14 @@ export function createBlankProjectSceneItem(
     characterNotes: "",
     actorCells: {},
     props: "",
+    cutCount: null,
     sortOrder,
     createdAt: now,
     updatedAt: now
   };
 }
 
-/** 일촬표와 무관한 프로젝트 공통 씬리스트를 불러옵니다. */
+/** 프로젝트 공통 씬리스트를 불러오며 Cut은 일촬표 컷수 기준값으로 공유합니다. */
 export async function getProjectSceneList(projectId: string): Promise<ProjectSceneListResult> {
   try {
     const response = await fetch(
@@ -122,6 +124,7 @@ function normalizeSceneList(
       characterNotes: String(item.characterNotes ?? "").slice(0, 4000),
       actorCells: normalizeActorCells(item.actorCells),
       props: String(item.props ?? "").slice(0, 1000),
+      cutCount: normalizeSceneCutCount(item.cutCount),
       sortOrder: index + 1,
       updatedAt: new Date().toISOString()
     })),
@@ -144,6 +147,7 @@ function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
     characterNotes: String(row.character_notes ?? ""),
     actorCells: normalizeActorCells(row.actor_cells),
     props: String(row.props ?? ""),
+    cutCount: normalizeSceneCutCount(row.cut_count),
     sortOrder: Number(row.sort_order) || 1,
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
@@ -178,7 +182,8 @@ function readLocalSceneList(projectId: string): ProjectSceneList {
             ...item,
             characterNotes: String(item.characterNotes ?? ""),
             actorCells: normalizeActorCells(item.actorCells),
-            props: String(item.props ?? "")
+            props: String(item.props ?? ""),
+            cutCount: normalizeSceneCutCount(item.cutCount)
           }))),
           scenarioReference: current.scenarioReference ?? ""
         }

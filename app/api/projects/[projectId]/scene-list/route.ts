@@ -7,6 +7,7 @@ import {
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
+import { validateSceneCutCountInput } from "@/lib/sceneCutCount";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -23,6 +24,7 @@ type SceneItemInput = {
   characterNotes?: unknown;
   actorCells?: unknown;
   props?: unknown;
+  cutCount?: unknown;
 };
 
 const SCENE_COLUMNS = [
@@ -39,6 +41,7 @@ const SCENE_COLUMNS = [
   "character_notes",
   "actor_cells",
   "props",
+  "cut_count",
   "sort_order",
   "created_at",
   "updated_at"
@@ -104,6 +107,23 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     if (!Array.isArray(body.items) || body.items.length > 1000) {
       return NextResponse.json({ error: "씬리스트 데이터가 올바르지 않습니다." }, { status: 400 });
     }
+    if (body.items.some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
+      return NextResponse.json({ error: "씬 행 입력값이 올바르지 않습니다." }, { status: 400 });
+    }
+
+    const invalidCutIndex = body.items.findIndex(
+      (item) => Boolean(validateSceneCutCountInput(item.cutCount).error)
+    );
+    if (invalidCutIndex >= 0) {
+      return NextResponse.json(
+        {
+          error: `${invalidCutIndex + 1}행 ${validateSceneCutCountInput(
+            body.items[invalidCutIndex].cutCount
+          ).error}`
+        },
+        { status: 400 }
+      );
+    }
 
     const rows = body.items.map((item, index) => normalizeItem(item, projectId, index));
     if (rows.some((item) => !item)) {
@@ -131,21 +151,32 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 
     const { data: existingRows, error: existingError } = await supabase
       .from("project_scene_items")
-      .select("id")
+      .select(SCENE_COLUMNS)
       .eq("project_id", projectId);
     if (existingError) throw existingError;
 
-    if (normalizedRows.length > 0) {
+    const typedExistingRows = (existingRows ?? []) as unknown as Array<Record<string, unknown>>;
+    const existingRowsById = new Map(
+      typedExistingRows.map((row) => [
+        String(row.id),
+        row
+      ])
+    );
+    const changedRows = normalizedRows.filter((row) => (
+      hasSceneRowChanged(existingRowsById.get(row.id), row)
+    ));
+
+    if (changedRows.length > 0) {
       const { error } = await supabase
         .from("project_scene_items")
-        .upsert(normalizedRows, { onConflict: "id" });
+        .upsert(changedRows, { onConflict: "id" });
       if (error) throw error;
     }
 
     const submittedIds = new Set(ids);
-    const deletedIds = (existingRows ?? [])
-      .filter((row) => !submittedIds.has(row.id))
-      .map((row) => row.id);
+    const deletedIds = typedExistingRows
+      .map((row) => String(row.id))
+      .filter((id) => !submittedIds.has(id));
     if (deletedIds.length > 0) {
       const { error } = await supabase
         .from("project_scene_items")
@@ -218,6 +249,8 @@ async function getProjectId(context: RouteContext) {
 function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
   const id = normalizeText(item.id, 36);
   if (!isUuid(id)) return null;
+  const cutCount = validateSceneCutCountInput(item.cutCount);
+  if (cutCount.error) return null;
   return {
     id,
     project_id: projectId,
@@ -232,6 +265,7 @@ function normalizeItem(item: SceneItemInput, projectId: string, index: number) {
     character_notes: normalizeMultilineText(item.characterNotes, 4000),
     actor_cells: normalizeActorCells(item.actorCells),
     props: normalizeMultilineText(item.props, 1000),
+    cut_count: cutCount.value,
     sort_order: index + 1
   };
 }
@@ -276,6 +310,49 @@ function normalizeActorCells(value: unknown) {
   return normalized;
 }
 
+type NormalizedSceneRow = NonNullable<ReturnType<typeof normalizeItem>>;
+
+function hasSceneRowChanged(
+  current: Record<string, unknown> | undefined,
+  next: NormalizedSceneRow
+) {
+  if (!current) return true;
+
+  const textColumns = [
+    "project_id",
+    "scene_no",
+    "main_location",
+    "sub_location",
+    "day_label",
+    "day_night",
+    "interior_exterior",
+    "scene_content",
+    "characters",
+    "character_notes",
+    "props"
+  ] as const;
+  if (textColumns.some((column) => (
+    String(current[column] ?? "") !== String(next[column] ?? "")
+  ))) {
+    return true;
+  }
+
+  const currentCutCount = current.cut_count == null ? null : Number(current.cut_count);
+  if (currentCutCount !== next.cut_count) return true;
+  if (Number(current.sort_order) !== next.sort_order) return true;
+
+  return serializeActorCells(current.actor_cells) !== serializeActorCells(next.actor_cells);
+}
+
+function serializeActorCells(value: unknown) {
+  const normalized = normalizeActorCells(value);
+  return JSON.stringify(
+    Object.keys(normalized)
+      .sort((left, right) => left.localeCompare(right, "ko-KR"))
+      .map((role) => [role, normalized[role]])
+  );
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -307,6 +384,16 @@ function sceneListError(error: unknown, fallback: string) {
   if (propsColumnMissing) {
     return NextResponse.json(
       { error: "씬리스트 주요 소품 migration을 먼저 적용해주세요." },
+      { status: 503 }
+    );
+  }
+  const cutCountColumnMissing = (
+    code === "42703" ||
+    code === "PGRST204"
+  ) && /cut_count/i.test(message);
+  if (cutCountColumnMissing) {
+    return NextResponse.json(
+      { error: "씬리스트 Cut migration을 먼저 적용해주세요." },
       { status: 503 }
     );
   }

@@ -40,6 +40,12 @@ import {
   resolveKoreanWeatherRegion
 } from "@/lib/koreanWeatherRegions";
 import { MAX_DAILY_PLAN_MAIN_STAFF } from "@/lib/projectBasicInfo";
+import {
+  MAX_SCENE_CUT_COUNT,
+  normalizeSceneCutCount,
+  type SceneCutCountMap
+} from "@/lib/sceneCutCount";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
@@ -59,6 +65,7 @@ type DailyPlanEditorProps = {
   initialShots?: DailyPlanShot[];
   initialDraft?: DailyPlanDraft;
   initialShotDrafts?: DailyPlanShotDraft[];
+  sceneCutCounts?: SceneCutCountMap;
   notice?: string;
 };
 
@@ -195,10 +202,11 @@ const maxRuntimeMinutes = 1440;
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
 const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
+const emptySceneCutCounts: SceneCutCountMap = {};
 let daumPostcodeScriptPromise: Promise<void> | null = null;
 
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
-export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, notice }: DailyPlanEditorProps) {
+export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneCutCounts = emptySceneCutCounts, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const initialEditorState = useMemo(() => {
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
@@ -219,7 +227,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     );
     const initialLocations = buildInitialLocations(initialPlanDraft);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
-    const initialScenes = shotsToScenes(initialSourceShots, initialLocations);
+    const initialScenes = applySceneCutCounts(
+      shotsToScenes(initialSourceShots, initialLocations),
+      sceneCutCounts
+    );
     const managedShotKeys = new Set(
       initialSourceShots.length > 0
         ? dailyPlanShotsToShotDrafts(initialPlanDraft, scenesToShotDrafts(initialScenes)).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
@@ -234,7 +245,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       initialScenes,
       managedShotKeys
     };
-  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffDepartments, projectStaffMembers]);
+  }, [initialDraft, initialPlan, initialShotDrafts, initialShots, project, projectBasicInfo, projectStaffDepartments, projectStaffMembers, sceneCutCounts]);
   const {
     activeProjectBasicInfo,
     initialPrintMeta,
@@ -599,11 +610,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function updateScene(sceneIndex: number, patch: Partial<SceneBlockInput>) {
-    setScenes((current) => current.map((scene, index) => (index === sceneIndex ? { ...scene, ...patch } : scene)));
+    setScenes((current) => current.map((scene, index) => {
+      if (index !== sceneIndex) return scene;
+      const nextScene = { ...scene, ...patch };
+      return patch.sceneNumber === undefined
+        ? nextScene
+        : applySceneCutCount(nextScene, sceneCutCounts);
+    }));
   }
 
   function updateSceneCutCount(sceneIndex: number, value: string) {
-    const sanitized = value.replace(/\D/g, "").slice(0, 2);
+    const targetScene = scenes[sceneIndex];
+    if (targetScene && getLinkedSceneCutCount(targetScene.sceneNumber, sceneCutCounts) != null) return;
+    const sanitized = value
+      .replace(/\D/g, "")
+      .slice(0, String(MAX_SCENE_CUT_COUNT).length);
     const count = parseCutCount(sanitized);
     setScenes((current) => current.map((scene, index) => {
       if (index !== sceneIndex) return scene;
@@ -897,7 +918,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
       const nextMeals = buildInitialMeals(savedDraft);
-      const nextScenes = shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations);
+      const nextScenes = applySceneCutCounts(
+        shotsToScenes(saved.shots.map(dailyPlanShotToDraft), nextLocations),
+        sceneCutCounts
+      );
       automaticStartRowIdsRef.current = restoreAutomaticTimetableRowIds(
         getPersistedEditorTimetableRows(
           buildEditorTimetableRows(nextScenes, nextMeals, savedMeta.timetableRowOrder)
@@ -1401,6 +1425,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   const scene = row.item;
                   const sceneIndex = row.sourceIndex;
+                  const linkedSceneCutCount = getLinkedSceneCutCount(
+                    scene.sceneNumber,
+                    sceneCutCounts
+                  );
                   return (
                     <tr key={scene.id} className={`align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
@@ -1409,7 +1437,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-3`}><span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span><DraftInput aria-label={`촬영 행 ${sceneIndex + 1} SCENE`} className={compactInputClass} value={scene.sceneNumber} onCommit={(value) => updateScene(sceneIndex, { sceneNumber: value })} placeholder="S#1" /></td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>컷 수</span><input aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`} className={compactInputClass} type="text" inputMode="numeric" pattern="[0-9]*" maxLength={2} value={scene.cutCount} onChange={(event) => updateSceneCutCount(sceneIndex, event.currentTarget.value)} /></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}>
+                        <span className={mobileTimetableLabelClass}>컷 수</span>
+                        <input
+                          aria-label={`촬영 행 ${sceneIndex + 1} 컷 수`}
+                          className={`${compactInputClass} read-only:bg-field-soft read-only:text-field-muted`}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          maxLength={String(MAX_SCENE_CUT_COUNT).length}
+                          value={scene.cutCount}
+                          readOnly={linkedSceneCutCount != null}
+                          title={linkedSceneCutCount != null ? "씬리스트 Cut 값과 연동됩니다." : undefined}
+                          onChange={(event) => updateSceneCutCount(sceneIndex, event.currentTarget.value)}
+                        />
+                      </td>
                       <td className={`${timetableWideCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>배우</span><SceneCastSelector people={printMeta.starring} value={scene.subject} onChange={(value) => updateScene(sceneIndex, { subject: value })} ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 등장 배우`} /></td>
                       <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
                         <span className={mobileTimetableLabelClass}>내용</span>
@@ -3501,6 +3543,45 @@ function buildInitialMeals(plan: DailyPlanDraft): DailyPlanMealTime[] {
   return [createBlankOtherSchedule()];
 }
 
+function getLinkedSceneCutCount(
+  sceneNumber: string,
+  sceneCutCounts: SceneCutCountMap
+) {
+  const sceneKey = normalizeSceneNumber(sceneNumber);
+  if (!sceneKey || !(sceneKey in sceneCutCounts)) return null;
+  return normalizeSceneCutCount(sceneCutCounts[sceneKey]);
+}
+
+function applySceneCutCounts(
+  scenes: SceneBlockInput[],
+  sceneCutCounts: SceneCutCountMap
+) {
+  return scenes.map((scene) => applySceneCutCount(scene, sceneCutCounts));
+}
+
+function applySceneCutCount(
+  scene: SceneBlockInput,
+  sceneCutCounts: SceneCutCountMap
+) {
+  const count = getLinkedSceneCutCount(scene.sceneNumber, sceneCutCounts);
+  if (count == null) return scene;
+  const cuts = count > scene.cuts.length
+    ? Array.from({ length: count }, (_, cutIndex) => (
+        scene.cuts[cutIndex] ?? {
+          id: makeLocalId("cut"),
+          cutNumber: String(cutIndex + 1),
+          description: "",
+          memo: ""
+        }
+      )).map((cut, cutIndex) => ({ ...cut, cutNumber: String(cutIndex + 1) }))
+    : scene.cuts;
+  return {
+    ...scene,
+    cutCount: String(count),
+    cuts
+  };
+}
+
 function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation[]): SceneBlockInput[] {
   if (shots.length === 0) return [createBlankScene(1, locations[0])];
 
@@ -3815,9 +3896,7 @@ function getNextCutNumber(currentValue: string | undefined, fallback: number) {
 }
 
 function parseCutCount(value: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.min(80, Math.floor(parsed));
+  return normalizeSceneCutCount(value) ?? 0;
 }
 
 function isMeaningfulTimetableScene(scene: SceneBlockInput) {
@@ -3844,11 +3923,26 @@ function normalizeShootingOrder(value: ShootingOrderValue, totalCut: string) {
 }
 
 function formatShootingOrderForDisplay(value: ShootingOrderValue, totalCut: string) {
-  return getShootingOrderValidation(value, totalCut).numbers.join("-");
+  const validation = getShootingOrderValidation(value, totalCut);
+  return validation.error
+    ? formatRawShootingOrder(value, "-")
+    : validation.numbers.join("-");
 }
 
 function formatShootingOrderForDraft(value: ShootingOrderValue, totalCut: string) {
-  return getShootingOrderValidation(value, totalCut).numbers.join(" ");
+  const validation = getShootingOrderValidation(value, totalCut);
+  return validation.error
+    ? formatRawShootingOrder(value, " ")
+    : validation.numbers.join(" ");
+}
+
+function formatRawShootingOrder(value: ShootingOrderValue, separator: "-" | " ") {
+  const source = Array.isArray(value) ? value.join(" ") : String(value ?? "");
+  return source
+    .replace(/[^0-9,\-\/\s]/g, "")
+    .split(/[-,/\s]+/)
+    .filter(Boolean)
+    .join(separator);
 }
 
 function getShootingOrderValidation(value: ShootingOrderValue, totalCut: string): {
@@ -3910,10 +4004,10 @@ function expandLegacyCutNumbers(value: string) {
   const normalized = String(value ?? "").trim();
   if (/^\d+$/.test(normalized)) {
     const cutNumber = Number(normalized);
-    return Number.isInteger(cutNumber) && cutNumber > 0 && cutNumber <= 80 ? [String(cutNumber)] : [];
+    return Number.isInteger(cutNumber) && cutNumber > 0 && cutNumber <= MAX_SCENE_CUT_COUNT ? [String(cutNumber)] : [];
   }
 
-  const tokens = normalized.split(/[-,/\s]+/).map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0 && item <= 80);
+  const tokens = normalized.split(/[-,/\s]+/).map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0 && item <= MAX_SCENE_CUT_COUNT);
   const highestCut = Math.max(0, ...tokens);
   return Array.from({ length: highestCut }, (_, index) => String(index + 1));
 }
