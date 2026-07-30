@@ -22,9 +22,17 @@ export function HomeButton() {
   const [isPressing, setIsPressing] = useState(false);
   const [isArmed, setIsArmed] = useState(false);
 
-  useEffect(() => () => {
-    cleanupPress({ suppressClick: true });
-    clearPressTimer(navigationUnlockTimerRef);
+  useEffect(() => {
+    const handleWindowBlur = () => {
+      cleanupPress({ suppressClick: true });
+    };
+
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("blur", handleWindowBlur);
+      cleanupPress({ suppressClick: true });
+      clearPressTimer(navigationUnlockTimerRef);
+    };
   }, []);
 
   if (pathname === "/") return null;
@@ -122,9 +130,6 @@ export function HomeButton() {
       onPointerCancel={() => {
         cleanupPress({ suppressClick: true });
       }}
-      onPointerLeave={() => {
-        cleanupPress({ suppressClick: true });
-      }}
       onClick={(event) => {
         event.preventDefault();
         if (Date.now() < suppressClickUntilRef.current) return;
@@ -137,17 +142,21 @@ export function HomeButton() {
       <svg
         aria-hidden
         viewBox="0 0 44 44"
-        className={`pointer-events-none absolute -inset-[3px] h-[calc(100%+6px)] w-[calc(100%+6px)] -rotate-90 ${
+        className={`pointer-events-none absolute -inset-[3px] h-[calc(100%+6px)] w-[calc(100%+6px)] ${
           isPressing || isArmed ? "opacity-100" : "opacity-0"
         }`}
       >
-        <circle
-          cx="22"
-          cy="22"
-          r="19"
+        <rect
+          x="3"
+          y="3"
+          width="38"
+          height="38"
+          rx="2"
           fill="none"
           stroke="#d7b95f"
           strokeWidth="2.5"
+          strokeLinecap="square"
+          strokeLinejoin="miter"
           pathLength="100"
           strokeDasharray="100"
           strokeDashoffset={isPressing || isArmed ? 0 : 100}
