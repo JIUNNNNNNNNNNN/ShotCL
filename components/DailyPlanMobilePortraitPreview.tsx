@@ -3,11 +3,9 @@ import {
   type DailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
 import {
-  compactPreviewFields,
-  compactPreviewRowCells,
-  compactPreviewRows,
-  getPreviewColumnCount,
-  hasDisplayValue,
+  filterRenderablePreviewRows,
+  getPreviewCellText,
+  hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
@@ -55,21 +53,20 @@ const eventRowClass = "daily-plan-preview-event";
 /** Google Sheet의 `세로` 시트와 같은 10열 구성으로 모바일 일촬표를 표시합니다. */
 export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanMobilePortraitPreviewProps) {
   const locationRows = locations.filter(isPrintableLocation);
-  const sheetTimetableRows = compactPreviewRows(timetableRows, getTimetableRowDisplayValues);
-  const starringRows = compactPreviewRows(meta.starring, getPersonDisplayValues);
-  const teamRows = compactPreviewRows(meta.teams, getTeamDisplayValues);
-  const mainStaffRows = compactPreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
+  const sheetTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
+  const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
+  const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
+  const mainStaffRows = filterRenderablePreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
     member.role,
     member.name,
     member.contact
   ]);
-  const weatherFields = compactPreviewFields(createWeatherFields(meta));
-  const timetableSummaryFields = compactPreviewFields(createTimetableSummaryFields(sheetTimetableRows));
-  const timetableDetailFields = compactPreviewFields(createTimetableDetailFields(sheetTimetableRows));
-  const memoFields = compactPreviewFields([
-    { key: "notice", label: "Notice", span: 1, value: plan.safetyNotice },
-    { key: "memo", label: "Memo", span: 1, value: meta.memoText }
-  ]);
+  const weatherRows = filterRenderablePreviewRows(
+    chunkRows(createWeatherFields(meta), 3),
+    (row) => row.map((field) => field.value)
+  );
+  const timetableSummaryFields = createTimetableSummaryFields();
+  const timetableDetailFields = createTimetableDetailFields();
 
   return (
     <article
@@ -80,51 +77,41 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         <SheetColumns />
         <tbody>
           <tr className="h-[54px]">
-            {hasDisplayValue(meta.day) ? (
-              <td className={`${cellClass} whitespace-nowrap font-bold`}>
-                <span className="text-[8px]">DAY</span>
-                <span className="ml-0.5 text-[22px] leading-[1.2]">{meta.day}</span>
-              </td>
-            ) : null}
+            <td className={`${cellClass} whitespace-nowrap font-bold`}>
+              <span className="text-[8px]">DAY</span>
+              <span className="ml-0.5 text-[22px] leading-[1.2]">{getPreviewCellText(meta.day)}</span>
+            </td>
             <td
-              colSpan={sheetColumnCount - (hasDisplayValue(meta.day) ? 1 : 0)}
+              colSpan={sheetColumnCount - 1}
               className={`${cellClass} ${accentCellClass} px-1`}
             >
               <span className="text-[16px] font-bold">
-                {hasDisplayValue(plan.title) ? `〈${plan.title}〉` : "기본정보가 없습니다."}
+                {hasMeaningfulRowValue(plan.title) ? `〈${plan.title}〉` : "기본정보가 없습니다."}
               </span>
               <span className="ml-1.5 text-[14px] font-normal">TIME TABLE</span>
             </td>
           </tr>
-          {hasDisplayValue([plan.shootingDate, plan.callTime]) ? (
+          {hasMeaningfulRowValue([plan.shootingDate, plan.callTime]) ? (
             <tr className="h-8">
               <td className={`${cellClass} text-[8px] font-bold`}>CALL TIME</td>
               <td colSpan={9} className={`${cellClass} ${accentCellClass}`}>
                 <div className="flex items-baseline justify-center gap-1.5 whitespace-nowrap">
-                  {hasDisplayValue(plan.shootingDate) ? (
-                    <>
-                      <span className="text-[8px] font-bold">Day</span>
-                      <span className="text-[15px] font-bold">{formatDate(plan.shootingDate)}</span>
-                    </>
-                  ) : null}
-                  {hasDisplayValue(plan.callTime) ? (
-                    <>
-                      <span className="text-[8px] font-bold">Time</span>
-                      <span className="text-[15px] font-bold">{plan.callTime}</span>
-                    </>
-                  ) : null}
+                  <span className="text-[8px] font-bold">Day</span>
+                  <span className="text-[15px] font-bold">{formatDate(plan.shootingDate)}</span>
+                  <span className="text-[8px] font-bold">Time</span>
+                  <span className="text-[15px] font-bold">{getPreviewCellText(plan.callTime)}</span>
                 </div>
               </td>
             </tr>
           ) : null}
           {mainStaffRows.length > 0 ? mainStaffRows.map((member) => (
             <tr key={`portrait-main-staff-${member.id}`}>
-              <CompactCells fields={createMainStaffFields(member)} totalColumns={sheetColumnCount} />
+              <FixedCells fields={createMainStaffFields(member)} />
             </tr>
           )) : (
             <tr><td colSpan={sheetColumnCount} className={cellClass}>등록된 메인 스태프가 없습니다.</td></tr>
           )}
-          {hasDisplayValue(meta.totalCrew) ? (
+          {hasMeaningfulRowValue(meta.totalCrew) ? (
             <tr>
               <td colSpan={5} className={cellClass}>Total Crew</td>
               <td colSpan={5} className={`${cellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
@@ -136,12 +123,12 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
       <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
         <SheetColumns />
         <tbody>
-          {weatherFields.length > 0 ? chunkRows(weatherFields, 3).map((row, rowIndex) => (
+          {weatherRows.length > 0 ? weatherRows.map((row, rowIndex) => (
             <tr key={`portrait-weather-${rowIndex}`}>
               {spreadFields(row, sheetColumnCount).map((field) => (
                 <td key={field.key} colSpan={field.span} className={cellClass}>
                   <span className="font-bold">{field.label}</span>
-                  <span className="ml-1">{String(field.value)}</span>
+                  <span className="ml-1">{getPreviewCellText(field.value)}</span>
                 </td>
               ))}
             </tr>
@@ -157,10 +144,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
           {locationRows.length > 0 ? locationRows.map((location, index) => (
             <tr key={location?.id || `portrait-location-${index}`} className="h-[21px]">
               <td colSpan={2} className={cellClass}>LOCATION {index + 1}</td>
-              <CompactCells
-                fields={createLocationFields(location)}
-                totalColumns={sheetColumnCount - 2}
-              />
+              <FixedCells fields={createLocationFields(location)} />
             </tr>
           )) : (
             <tr><td colSpan={sheetColumnCount} className={cellClass}>등록된 장소가 없습니다.</td></tr>
@@ -169,82 +153,60 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
       </table>
 
       <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
-        <SheetColumns count={Math.max(1, getPreviewColumnCount(timetableSummaryFields))} />
-        {timetableSummaryFields.length > 0 ? (
-          <thead>
-            <tr>
-              {timetableSummaryFields.map((field) => (
-                <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
+        <SheetColumns />
+        <thead>
+          <tr>
+            {timetableSummaryFields.map((field) => (
+              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {sheetTimetableRows.length > 0 ? sheetTimetableRows.map((row, index) => (
             <tr key={`portrait-time-${index}`} className={`${row.type === "break" ? eventRowClass : ""} h-[21px]`}>
-              <CompactCells
+              <FixedCells
                 fields={timetableSummaryFields.map((field) => ({
                   ...field,
                   value: getTimetableFieldValue(row, field.key, "summary")
                 }))}
-                totalColumns={getPreviewColumnCount(timetableSummaryFields)}
               />
             </tr>
           )) : (
-            <tr><td className={cellClass}>등록된 일정이 없습니다.</td></tr>
+            <tr><td colSpan={sheetColumnCount} className={cellClass}>등록된 일정이 없습니다.</td></tr>
           )}
         </tbody>
       </table>
 
-      {timetableDetailFields.length > 0 ? (
-        <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
-          <SheetColumns count={getPreviewColumnCount(timetableDetailFields)} />
-          <thead>
-            <tr>
-              {timetableDetailFields.map((field) => (
-                <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sheetTimetableRows.map((row, index) => (
-              <tr key={`portrait-detail-${index}`} className={`${row.type === "break" ? eventRowClass : ""} h-[21px]`}>
-                <CompactCells
-                  fields={timetableDetailFields.map((field) => ({
-                    ...field,
-                    value: getTimetableFieldValue(row, field.key, "detail")
-                  }))}
-                  totalColumns={getPreviewColumnCount(timetableDetailFields)}
-                />
-              </tr>
+      <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
+        <SheetColumns />
+        <thead>
+          <tr>
+            {timetableDetailFields.map((field) => (
+              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
             ))}
-            <tr>
-              <td colSpan={getPreviewColumnCount(timetableDetailFields)} className={`${cellClass} ${crewCellClass} py-1 text-center font-bold`}>
-                총 컷수 {totalCutCount}컷
-              </td>
+          </tr>
+        </thead>
+        <tbody>
+          {sheetTimetableRows.map((row, index) => (
+            <tr key={`portrait-detail-${index}`} className={`${row.type === "break" ? eventRowClass : ""} h-[21px]`}>
+              <FixedCells
+                fields={timetableDetailFields.map((field) => ({
+                  ...field,
+                  value: getTimetableFieldValue(row, field.key, "detail")
+                }))}
+              />
             </tr>
-          </tbody>
-        </table>
-      ) : (
-        <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
-          <tbody>
-            <tr>
-              <td className={`${cellClass} ${crewCellClass} py-1 text-center font-bold`}>
-                총 컷수 {totalCutCount}컷
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      )}
+          ))}
+          <tr>
+            <td colSpan={sheetColumnCount} className={`${cellClass} ${crewCellClass} py-1 text-center font-bold`}>
+              총 컷수 {totalCutCount}컷
+            </td>
+          </tr>
+        </tbody>
+      </table>
 
-      {memoFields.length > 0 ? memoFields.map((field) => (
-        <SheetMemoSection key={field.key} title={field.label} value={String(field.value)} />
-      )) : (
-        <section className="mt-1 border-2 border-black">
-          <h3 className="daily-plan-preview-header border-b border-black py-1 text-center text-[11px] font-normal">Notice / Memo</h3>
-          <p className="px-1 py-2 text-center">기재된 주의사항·메모가 없습니다.</p>
-        </section>
-      )}
+      <SheetMemoSection title="Notice" value={plan.safetyNotice} />
+      <SheetMemoSection title="Memo" value={meta.memoText} />
 
       <CallSheetTable
         title="Starring"
@@ -286,30 +248,21 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
   );
 }
 
-function SheetColumns({ count = sheetColumnCount }: { count?: number }) {
-  const safeCount = Math.max(1, count);
+function SheetColumns() {
   return (
     <colgroup>
-      {Array.from({ length: safeCount }, (_, index) => (
-        <col key={index} style={{ width: `${100 / safeCount}%` }} />
+      {Array.from({ length: sheetColumnCount }, (_, index) => (
+        <col key={index} style={{ width: `${100 / sheetColumnCount}%` }} />
       ))}
     </colgroup>
   );
 }
 
-function CompactCells({
-  fields,
-  totalColumns
-}: {
-  fields: PreviewDisplayField[];
-  totalColumns: number;
-}) {
-  const cells = compactPreviewRowCells(fields);
-  if (cells.length === 0) {
-    return <td colSpan={Math.max(1, totalColumns)} className={cellClass}>정보 없음</td>;
-  }
-  return cells.map((cell) => (
-    <td key={cell.key} colSpan={cell.span} className={cellClass}>{String(cell.value)}</td>
+function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((field) => (
+    <td key={field.key} colSpan={field.span} className={cellClass}>
+      {getPreviewCellText(field.value)}
+    </td>
   ));
 }
 
@@ -350,36 +303,25 @@ function CallSheetTable({
   fields: Array<Omit<PreviewDisplayField, "value">>;
   rows: Array<Record<string, string>>;
 }) {
-  const visibleFields = compactPreviewFields(fields.map((field) => ({
-    ...field,
-    value: rows.map((row) => row[field.key])
-  })));
-  const columnCount = Math.max(1, getPreviewColumnCount(visibleFields));
-
   return (
     <section className="mt-1">
       <h3 className="sr-only">{title}</h3>
       <table className="w-full table-fixed border-collapse border-y-2 border-black text-center">
-        <SheetColumns count={columnCount} />
-        {visibleFields.length > 0 ? (
-          <thead>
-            <tr>
-              {visibleFields.map((field) => (
-                <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
+        <SheetColumns />
+        <thead>
+          <tr>
+            {fields.map((field) => (
+              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {rows.length > 0 ? rows.map((row, rowIndex) => (
             <tr key={`${title}-${rowIndex}`} className="h-[21px]">
-              <CompactCells
-                fields={visibleFields.map((field) => ({ ...field, value: row[field.key] }))}
-                totalColumns={columnCount}
-              />
+              <FixedCells fields={fields.map((field) => ({ ...field, value: row[field.key] }))} />
             </tr>
           )) : (
-            <tr><td colSpan={columnCount} className={cellClass}>{emptyMessage}</td></tr>
+            <tr><td colSpan={sheetColumnCount} className={cellClass}>{emptyMessage}</td></tr>
           )}
         </tbody>
       </table>
@@ -426,78 +368,72 @@ function createLocationFields(location: DailyPlanLocation): PreviewDisplayField[
   ];
 }
 
-function createTimetableSummaryFields(rows: MobileDailyPlanTimetableRow[]): PreviewDisplayField[] {
-  return compactPreviewFields([
-    { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
-    { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
-    { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
+function createTimetableSummaryFields(): PreviewDisplayField[] {
+  return [
+    { key: "start", label: "START", span: 1, value: "" },
+    { key: "end", label: "END", span: 1, value: "" },
+    { key: "runtime", label: "RT", span: 1, value: "" },
+    { key: "location", label: "LOCATION", span: 2, value: "" },
     {
       key: "dayNight",
       label: "D/N/S",
       span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.dayNight : "")
+      value: ""
     },
     {
       key: "sceneNumber",
       label: "SCENE",
       span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.sceneNumber : "")
+      value: ""
     },
     {
       key: "totalCut",
       label: "Total CUT",
       span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
+      value: ""
     },
     {
       key: "shootingOrder",
       label: "Shooting order",
       span: 2,
-      value: rows.map((row) => row.type === "scene" ? row.shootingOrder : "")
-    },
-    {
-      key: "eventDescription",
-      label: "일정",
-      span: 3,
-      value: rows.map((row) => row.type === "break" ? row.description : "")
+      value: ""
     }
-  ]);
+  ];
 }
 
-function createTimetableDetailFields(rows: MobileDailyPlanTimetableRow[]): PreviewDisplayField[] {
-  return compactPreviewFields([
+function createTimetableDetailFields(): PreviewDisplayField[] {
+  return [
     {
       key: "sceneNumber",
       label: "SCENE",
       span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.sceneNumber : "")
+      value: ""
     },
     {
       key: "description",
       label: "Description",
       span: 3,
-      value: rows.map((row) => row.description)
+      value: ""
     },
     {
       key: "shootingOrder",
       label: "Shooting order",
       span: 2,
-      value: rows.map((row) => row.type === "scene" ? row.shootingOrder : "")
+      value: ""
     },
     {
       key: "cast",
       label: "Actor",
       span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.cast : "")
+      value: ""
     },
     {
       key: "notes",
       label: "Notes",
       span: 3,
-      value: rows.map((row) => row.type === "scene" ? row.notes : "")
+      value: ""
     }
-  ]);
+  ];
 }
 
 function getTimetableFieldValue(
@@ -507,7 +443,6 @@ function getTimetableFieldValue(
 ) {
   if (row.type === "break") {
     if (key === "start" || key === "end" || key === "runtime" || key === "location") return row[key];
-    if (section === "summary" && key === "eventDescription") return row.description;
     if (section === "detail" && key === "description") return formatBreakDescription(row);
     return "";
   }

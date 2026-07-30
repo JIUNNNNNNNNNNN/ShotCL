@@ -52,11 +52,9 @@ import {
   hasDailyPlanLocationSearchMetadata
 } from "@/lib/dailyPlan/location";
 import {
-  compactPreviewFields,
-  compactPreviewRowCells,
-  compactPreviewRows,
-  getPreviewColumnCount,
-  hasDisplayValue,
+  filterRenderablePreviewRows,
+  getPreviewCellText,
+  hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
@@ -3585,64 +3583,49 @@ const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-b
 
 function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
   const locations = data.locations.filter(isPrintableLocation);
-  const timetableRows = compactPreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
-  const starringRows = compactPreviewRows(data.meta.starring, getPrintPersonDisplayValues);
-  const teamRows = compactPreviewRows(data.meta.teams, getPrintTeamDisplayValues);
-  const mainStaffRows = compactPreviewRows(getDailyPlanMainStaffRows(data.plan, data.meta), (member) => [
+  const timetableRows = filterRenderablePreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
+  const starringRows = filterRenderablePreviewRows(data.meta.starring, getPrintPersonDisplayValues);
+  const teamRows = filterRenderablePreviewRows(data.meta.teams, getPrintTeamDisplayValues);
+  const mainStaffRows = filterRenderablePreviewRows(getDailyPlanMainStaffRows(data.plan, data.meta), (member) => [
     member.role,
     member.name,
     member.contact
   ]);
-  const weatherFields = compactPreviewFields(createPrintWeatherFields(data.meta));
-  const timetableFields = fillPrintFieldSpans(
-    compactPreviewFields(createPrintTimetableFields(timetableRows)),
-    PRINT_GRID_COLUMN_COUNT
-  );
-  const timetableColumnCount = timetableFields.length > 0
-    ? getPreviewColumnCount(timetableFields)
-    : PRINT_GRID_COLUMN_COUNT;
-  const memoFields = fillPrintFieldSpans(compactPreviewFields([
+  const weatherFields = filterRenderablePreviewRows(createPrintWeatherFields(data.meta), (field) => field.value);
+  const timetableFields = createPrintTimetableFields(timetableRows);
+  const memoFields: PreviewDisplayField[] = [
     { key: "notice", label: "Notice", span: 8, value: data.plan.safetyNotice },
     { key: "memo", label: "Memo", span: 8, value: data.meta.memoText }
-  ]), PRINT_GRID_COLUMN_COUNT);
-  const hasTotalCrew = hasDisplayValue(data.meta.totalCrew);
-  const hasDay = hasDisplayValue(data.meta.day);
+  ];
 
   return (
     <article className={`daily-plan-print-document ${className}`}>
       <table className="daily-plan-grid daily-plan-export-table w-full border-collapse border-2 border-black text-center">
         <tbody>
           <tr className="pdf-section-start daily-plan-preview-accent">
-            {hasDay ? (
-              <td colSpan={2} className={`${printCellClass} font-black`}>
-                <span className="text-[10px]">DAY</span>
-                <span className="ml-1 text-2xl">{data.meta.day}</span>
-              </td>
-            ) : null}
-            <td
-              colSpan={PRINT_GRID_COLUMN_COUNT - (hasDay ? 2 : 0) - (hasTotalCrew ? 2 : 0)}
-              className={`${printCellClass} text-2xl font-black`}
-            >
-              {hasDisplayValue(data.plan.title) ? data.plan.title : "기본정보가 없습니다."} TIME TABLE
+            <td colSpan={2} className={`${printCellClass} font-black`}>
+              <span className="text-[10px]">DAY</span>
+              <span className="ml-1 text-2xl">{getPreviewCellText(data.meta.day)}</span>
             </td>
-            {hasTotalCrew ? (
-              <td colSpan={2} className={`${printCellClass} daily-plan-preview-summary`}>
-                <span className="block text-[9px] font-bold">Total Crew</span>
-                <span className="text-lg font-black">{data.meta.totalCrew}</span>
-              </td>
-            ) : null}
+            <td colSpan={12} className={`${printCellClass} text-2xl font-black`}>
+              {hasMeaningfulRowValue(data.plan.title) ? data.plan.title : "기본정보가 없습니다."} TIME TABLE
+            </td>
+            <td colSpan={2} className={`${printCellClass} daily-plan-preview-summary`}>
+              <span className="block text-[9px] font-bold">Total Crew</span>
+              <span className="text-lg font-black">{getPreviewCellText(data.meta.totalCrew)}</span>
+            </td>
           </tr>
-          {hasDisplayValue([data.plan.shootingDate, data.plan.callTime]) ? (
+          {hasMeaningfulRowValue([data.plan.shootingDate, data.plan.callTime]) ? (
             <tr className="daily-plan-preview-accent">
               <td colSpan={2} className={`${printCellClass} font-black`}>CALL TIME</td>
               <td colSpan={14} className={`${printCellClass} text-base`}>
-                {hasDisplayValue(data.plan.shootingDate) ? (
+                {hasMeaningfulRowValue(data.plan.shootingDate) ? (
                   <>
                     <span className="mr-1 text-[9px] font-bold">Day</span>
                     <span className="font-black">{formatDateForPreview(data.plan.shootingDate)}</span>
                   </>
                 ) : null}
-                {hasDisplayValue(data.plan.callTime) ? (
+                {hasMeaningfulRowValue(data.plan.callTime) ? (
                   <>
                     <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
                     <span className="font-black">{data.plan.callTime}</span>
@@ -3653,7 +3636,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
           ) : null}
           {mainStaffRows.length > 0 ? mainStaffRows.map((member) => (
             <tr key={member.id}>
-              <PrintCompactCells fields={createPrintMainStaffFields(member)} totalColumns={PRINT_GRID_COLUMN_COUNT} />
+              <PrintFixedCells fields={createPrintMainStaffFields(member)} />
             </tr>
           )) : (
             <tr><td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 메인 스태프가 없습니다.</td></tr>
@@ -3664,7 +3647,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               className={index === weatherFields.length - 1 ? "pdf-section-end" : undefined}
             >
               <td colSpan={4} className={printHeaderCellClass}>{field.label}</td>
-              <td colSpan={12} className={printCellClass}>{String(field.value)}</td>
+              <td colSpan={12} className={printCellClass}>{getPreviewCellText(field.value)}</td>
             </tr>
           )) : (
             <tr className="pdf-section-end">
@@ -3677,75 +3660,59 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               className={`${index === 0 ? "pdf-section-start" : ""} ${index === locations.length - 1 ? "pdf-section-end" : ""}`}
             >
               <td colSpan={2} className={`${printCellClass} whitespace-nowrap text-left font-black`}>LOCATION {index + 1}</td>
-              <PrintCompactCells fields={createPrintLocationFields(location)} totalColumns={14} />
+              <PrintFixedCells fields={createPrintLocationFields(location)} />
             </tr>
           )) : (
             <tr className="pdf-section-start pdf-section-end">
               <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 장소가 없습니다.</td>
             </tr>
           )}
-          {timetableFields.length > 0 ? (
-            <tr className="pdf-section-start daily-plan-preview-header font-black">
-              {timetableFields.map((field) => (
-                <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
-              ))}
-            </tr>
-          ) : null}
+          <tr className="pdf-section-start daily-plan-preview-header font-black">
+            {timetableFields.map((field) => (
+              <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
+            ))}
+          </tr>
           {timetableRows.length > 0 ? timetableRows.map((row, index) => (
             <tr
               key={`time-row-${index}`}
               className={row.type === "break" ? "daily-plan-preview-event" : undefined}
             >
-              <PrintCompactCells
+              <PrintFixedCells
                 fields={timetableFields.map((field) => ({
                   ...field,
                   value: getPrintTimetableFieldValue(row, field.key)
                 }))}
-                totalColumns={timetableColumnCount}
               />
             </tr>
           )) : (
             <tr className="pdf-section-start">
-              <td colSpan={timetableColumnCount} className={printCellClass}>등록된 일정이 없습니다.</td>
+              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 일정이 없습니다.</td>
             </tr>
           )}
           <tr className="pdf-section-end">
             <td
-              colSpan={timetableColumnCount}
+              colSpan={PRINT_GRID_COLUMN_COUNT}
               className={`${printCellClass} daily-plan-preview-summary py-1 text-center font-black`}
             >
               총 컷수 {data.totalCutCount}컷
             </td>
           </tr>
-          {memoFields.length > 0 ? (
-            <>
-              <tr className="pdf-section-start daily-plan-preview-header font-black">
-                {memoFields.map((field) => (
-                  <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
-                ))}
-              </tr>
-              <tr className="pdf-section-end">
-                {memoFields.map((field) => (
-                  <td
-                    key={field.key}
-                    colSpan={field.span}
-                    className={`${printCellClass} min-h-24 whitespace-pre-wrap align-top text-left`}
-                  >
-                    {String(field.value)}
-                  </td>
-                ))}
-              </tr>
-            </>
-          ) : (
-            <>
-              <tr className="pdf-section-start daily-plan-preview-header">
-                <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printHeaderCellClass}>Notice / Memo</td>
-              </tr>
-              <tr className="pdf-section-end">
-                <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>기재된 주의사항·메모가 없습니다.</td>
-              </tr>
-            </>
-          )}
+          <tr className="pdf-section-start daily-plan-preview-header font-black">
+            {memoFields.map((field) => (
+              <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
+            ))}
+          </tr>
+          <tr className="pdf-section-end">
+            {memoFields.map((field) => (
+              <td
+                key={field.key}
+                colSpan={field.span}
+                className={`${printCellClass} min-h-24 whitespace-pre-wrap align-top text-left`}
+              >
+                {getPreviewCellText(field.value)}
+              </td>
+            ))}
+          </tr>
           <tr>
             <td colSpan={PRINT_GRID_COLUMN_COUNT} className="border-0 p-0 align-top">
               <div className="grid grid-cols-2 gap-1">
@@ -3794,24 +3761,14 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
   );
 }
 
-function PrintCompactCells({
-  fields,
-  totalColumns
-}: {
-  fields: PreviewDisplayField[];
-  totalColumns: number;
-}) {
-  const cells = compactPreviewRowCells(fields);
-  if (cells.length === 0) {
-    return <td colSpan={Math.max(1, totalColumns)} className={printCellClass}>정보 없음</td>;
-  }
-  return cells.map((cell) => (
+function PrintFixedCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((cell) => (
     <td
       key={cell.key}
       colSpan={cell.span}
       className={`${printCellClass} break-words [overflow-wrap:anywhere]`}
     >
-      {String(cell.value)}
+      {getPreviewCellText(cell.value)}
     </td>
   ));
 }
@@ -3827,58 +3784,31 @@ function PrintCallSheetTable({
   fields: Array<Omit<PreviewDisplayField, "value">>;
   rows: Array<Record<string, string>>;
 }) {
-  const visibleFields = fillPrintFieldSpans(compactPreviewFields(fields.map((field) => ({
-    ...field,
-    value: rows.map((row) => row[field.key])
-  }))), PRINT_GRID_COLUMN_COUNT);
-  const columnCount = Math.max(1, getPreviewColumnCount(visibleFields));
-
   return (
     <table className="daily-plan-export-table w-full table-fixed border-collapse border-2 border-black text-center">
       <thead>
-        {visibleFields.length > 0 ? (
-          <tr className="daily-plan-preview-header">
-            {visibleFields.map((field) => (
-              <th key={field.key} colSpan={field.span} className={printHeaderCellClass}>{field.label}</th>
-            ))}
-          </tr>
-        ) : (
-          <tr className="daily-plan-preview-header">
-            <th colSpan={columnCount} className={printHeaderCellClass}>{title}</th>
-          </tr>
-        )}
+        <tr className="daily-plan-preview-header">
+          {fields.map((field) => (
+            <th key={field.key} colSpan={field.span} className={printHeaderCellClass}>{field.label}</th>
+          ))}
+        </tr>
       </thead>
       <tbody>
         {rows.length > 0 ? rows.map((row, index) => (
           <tr key={`${title}-${index}`}>
-            <PrintCompactCells
-              fields={visibleFields.map((field) => ({
+            <PrintFixedCells
+              fields={fields.map((field) => ({
                 ...field,
                 value: row[field.key]
               }))}
-              totalColumns={columnCount}
             />
           </tr>
         )) : (
-          <tr><td colSpan={columnCount} className={printCellClass}>{emptyMessage}</td></tr>
+          <tr><td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>{emptyMessage}</td></tr>
         )}
       </tbody>
     </table>
   );
-}
-
-function fillPrintFieldSpans(
-  fields: readonly PreviewDisplayField[],
-  totalColumns: number
-): PreviewDisplayField[] {
-  if (fields.length === 0) return [];
-  const currentColumns = getPreviewColumnCount(fields);
-  const remainder = Math.max(0, totalColumns - currentColumns);
-  return fields.map((field, index) => (
-    index === fields.length - 1 && remainder > 0
-      ? { ...field, span: field.span + remainder }
-      : { ...field }
-  ));
 }
 
 function createPrintMainStaffFields(member: DailyPlanMainStaffRow): PreviewDisplayField[] {

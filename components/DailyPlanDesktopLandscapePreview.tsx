@@ -4,11 +4,9 @@ import {
   type DailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
 import {
-  compactPreviewFields,
-  compactPreviewRowCells,
-  compactPreviewRows,
-  getPreviewColumnCount,
-  hasDisplayValue,
+  filterRenderablePreviewRows,
+  getPreviewCellText,
+  hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
@@ -29,25 +27,27 @@ const headerCellClass = `${cellClass} daily-plan-preview-header font-black`;
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
 const eventRowClass = "daily-plan-preview-event";
+const timetableColumnSpans = [1, 1, 1, 3, 1, 1, 1, 3, 1, 2, 1] as const;
+const timetableColumnCount = timetableColumnSpans.reduce((total, span) => total + span, 0);
+const callSheetColumnCount = 8;
 
 /** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
 export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDesktopLandscapePreviewProps) {
   const printableLocations = locations.filter(isPrintableLocation);
-  const printableTimetableRows = compactPreviewRows(timetableRows, getTimetableRowDisplayValues);
-  const starringRows = compactPreviewRows(meta.starring, getPersonDisplayValues);
-  const teamRows = compactPreviewRows(meta.teams, getTeamDisplayValues);
-  const printableMainStaffRows = compactPreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
+  const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
+  const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
+  const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
+  const printableMainStaffRows = filterRenderablePreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
     member.role,
     member.name,
     member.contact
   ]);
-  const weatherFields = compactPreviewFields(createWeatherFields(meta));
-  const timetableFields = compactPreviewFields(createTimetableFields(printableTimetableRows));
-  const timetableColumnCount = Math.max(1, getPreviewColumnCount(timetableFields));
-  const memoFields = compactPreviewFields([
+  const weatherFields = filterRenderablePreviewRows(createWeatherFields(meta), (field) => field.value);
+  const timetableFields = createTimetableFields(printableTimetableRows);
+  const memoFields: PreviewDisplayField[] = [
     { key: "notice", label: "Notice", span: 1, value: plan.safetyNotice },
     { key: "memo", label: "Memo", span: 1, value: meta.memoText }
-  ]);
+  ];
 
   return (
     <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-tight text-black">
@@ -56,50 +56,35 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           <EqualColumns count={12} />
           <tbody>
             <tr>
-              {hasDisplayValue(meta.day) ? (
-                <td className={`${cellClass} font-black`}>
-                  <span className="text-[9px]">DAY</span>
-                  <span className="ml-1 text-2xl leading-none">{meta.day}</span>
-                </td>
-              ) : null}
-              <td
-                colSpan={12 - (hasDisplayValue(meta.day) ? 1 : 0) - (hasDisplayValue(meta.totalCrew) ? 2 : 0)}
-                className={cellClass}
-              >
+              <td className={`${cellClass} font-black`}>
+                <span className="text-[9px]">DAY</span>
+                <span className="ml-1 text-2xl leading-none">{getPreviewCellText(meta.day)}</span>
+              </td>
+              <td colSpan={9} className={cellClass}>
                 <span className="text-2xl font-black">
-                  {hasDisplayValue(plan.title) ? `〈${plan.title}〉` : "기본정보가 없습니다."}
+                  {getPreviewCellText(plan.title).trim() ? `〈${plan.title}〉` : "기본정보가 없습니다."}
                 </span>
                 <span className="ml-2 text-lg font-normal">TIME TABLE</span>
               </td>
-              {hasDisplayValue(meta.totalCrew) ? (
-                <td colSpan={2} className={`${cellClass} ${crewCellClass}`}>
-                  <span className="block text-[9px] font-bold">Total Crew</span>
-                  <span className="text-lg font-black">{meta.totalCrew}</span>
-                </td>
-              ) : null}
+              <td colSpan={2} className={`${cellClass} ${crewCellClass}`}>
+                <span className="block text-[9px] font-bold">Total Crew</span>
+                <span className="text-lg font-black">{getPreviewCellText(meta.totalCrew)}</span>
+              </td>
             </tr>
-            {hasDisplayValue([plan.shootingDate, plan.callTime]) ? (
+            {hasMeaningfulRowValue([plan.shootingDate, plan.callTime]) ? (
               <tr>
                 <td colSpan={2} className={`${cellClass} font-black`}>CALL TIME</td>
                 <td colSpan={10} className={`${cellClass} ${accentCellClass}`}>
-                  {hasDisplayValue(plan.shootingDate) ? (
-                    <>
-                      <span className="mr-1 text-[9px] font-bold">Day</span>
-                      <span className="text-lg font-black">{formatDate(plan.shootingDate)}</span>
-                    </>
-                  ) : null}
-                  {hasDisplayValue(plan.callTime) ? (
-                    <>
-                      <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
-                      <span className="text-lg font-black">{plan.callTime}</span>
-                    </>
-                  ) : null}
+                  <span className="mr-1 text-[9px] font-bold">Day</span>
+                  <span className="text-lg font-black">{formatDate(plan.shootingDate)}</span>
+                  <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
+                  <span className="text-lg font-black">{getPreviewCellText(plan.callTime)}</span>
                 </td>
               </tr>
             ) : null}
             {printableMainStaffRows.length > 0 ? printableMainStaffRows.map((member) => (
               <tr key={member.id}>
-                <CompactCells fields={createMainStaffFields(member)} totalColumns={12} />
+                <FixedCells fields={createMainStaffFields(member)} />
               </tr>
             )) : (
               <tr><td colSpan={12} className={cellClass}>등록된 메인 스태프가 없습니다.</td></tr>
@@ -113,7 +98,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
             {weatherFields.length > 0 ? weatherFields.map((field) => (
               <tr key={field.key}>
                 <td className={`${cellClass} font-bold`}>{field.label}</td>
-                <td className={cellClass}>{String(field.value)}</td>
+                <td className={cellClass}>{getPreviewCellText(field.value)}</td>
               </tr>
             )) : (
               <tr><td colSpan={2} className={cellClass}>날씨 정보가 없습니다.</td></tr>
@@ -128,7 +113,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           {printableLocations.length > 0 ? printableLocations.map((location, index) => (
             <tr key={location.id || `landscape-location-${index}`}>
               <td colSpan={2} className={`${cellClass} whitespace-nowrap font-black`}>LOCATION {index + 1}</td>
-              <CompactCells fields={createLocationFields(location)} totalColumns={14} />
+              <FixedCells fields={createLocationFields(location)} />
             </tr>
           )) : (
             <tr><td colSpan={16} className={cellClass}>등록된 장소가 없습니다.</td></tr>
@@ -138,24 +123,21 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
 
       <table className={sectionTableClass}>
         <EqualColumns count={timetableColumnCount} />
-        {timetableFields.length > 0 ? (
-          <thead>
-            <tr>
-              {timetableFields.map((field) => (
-                <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
+        <thead>
+          <tr>
+            {timetableFields.map((field) => (
+              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+            ))}
+          </tr>
+        </thead>
         <tbody>
           {printableTimetableRows.length > 0 ? printableTimetableRows.map((row, index) => (
             <tr key={`landscape-row-${index}`} className={row.type === "break" ? eventRowClass : undefined}>
-              <CompactCells
+              <FixedCells
                 fields={timetableFields.map((field) => ({
                   ...field,
                   value: getTimetableFieldValue(row, field.key)
                 }))}
-                totalColumns={timetableColumnCount}
               />
             </tr>
           )) : (
@@ -169,26 +151,19 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
         </tbody>
       </table>
 
-      <div className={`mt-1 grid gap-1 ${memoFields.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
-        {memoFields.length > 0 ? memoFields.map((field) => (
+      <div className="mt-1 grid grid-cols-2 gap-1">
+        {memoFields.map((field) => (
           <table key={field.key} className={halfTableClass}>
             <tbody>
               <tr><td className={`${headerCellClass} font-black`}>{field.label}</td></tr>
-              <tr><td className={`${cellClass} min-h-20 whitespace-pre-wrap align-top`}>{String(field.value)}</td></tr>
+              <tr><td className={`${cellClass} min-h-20 whitespace-pre-wrap align-top`}>{getPreviewCellText(field.value)}</td></tr>
             </tbody>
           </table>
-        )) : (
-          <table className={halfTableClass}>
-            <tbody>
-              <tr><td className={headerCellClass}>Notice / Memo</td></tr>
-              <tr><td className={cellClass}>기재된 주의사항·메모가 없습니다.</td></tr>
-            </tbody>
-          </table>
-        )}
+        ))}
       </div>
 
       <div className="mt-1 grid grid-cols-2 gap-1">
-        <DynamicCallSheetTable
+        <FixedCallSheetTable
           title="Starring"
           emptyMessage="등록된 배우가 없습니다."
           fields={[
@@ -206,7 +181,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
             notes: person.notes
           }))}
         />
-        <DynamicCallSheetTable
+        <FixedCallSheetTable
           title="Team"
           emptyMessage="등록된 스태프 부서가 없습니다."
           fields={[
@@ -240,25 +215,15 @@ function EqualColumns({ count }: { count: number }) {
   );
 }
 
-function CompactCells({
-  fields,
-  totalColumns
-}: {
-  fields: PreviewDisplayField[];
-  totalColumns: number;
-}) {
-  const cells = compactPreviewRowCells(fields);
-  if (cells.length === 0) {
-    return <td colSpan={Math.max(1, totalColumns)} className={cellClass}>정보 없음</td>;
-  }
-  return cells.map((cell) => (
-    <td key={cell.key} colSpan={cell.span} className={`${cellClass} break-words [overflow-wrap:anywhere]`}>
-      {String(cell.value)}
+function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((field) => (
+    <td key={field.key} colSpan={field.span} className={`${cellClass} break-words [overflow-wrap:anywhere]`}>
+      {getPreviewCellText(field.value)}
     </td>
   ));
 }
 
-function DynamicCallSheetTable({
+function FixedCallSheetTable({
   title,
   emptyMessage,
   fields,
@@ -269,33 +234,25 @@ function DynamicCallSheetTable({
   fields: Array<Omit<PreviewDisplayField, "value">>;
   rows: Array<Record<string, string>>;
 }) {
-  const visibleFields = compactPreviewFields(fields.map((field) => ({
-    ...field,
-    value: rows.map((row) => row[field.key])
-  })));
-  const columnCount = Math.max(1, getPreviewColumnCount(visibleFields));
   return (
     <table className={halfTableClass}>
-      <EqualColumns count={columnCount} />
-      {visibleFields.length > 0 ? (
-        <thead>
-          <tr>
-            {visibleFields.map((field) => (
-              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
-            ))}
-          </tr>
-        </thead>
-      ) : null}
+      <EqualColumns count={callSheetColumnCount} />
+      <thead>
+        <tr>
+          {fields.map((field) => (
+            <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+          ))}
+        </tr>
+      </thead>
       <tbody>
         {rows.length > 0 ? rows.map((row, index) => (
           <tr key={`${title}-${index}`}>
-            <CompactCells
-              fields={visibleFields.map((field) => ({ ...field, value: row[field.key] }))}
-              totalColumns={columnCount}
+            <FixedCells
+              fields={fields.map((field) => ({ ...field, value: row[field.key] }))}
             />
           </tr>
         )) : (
-          <tr><td colSpan={columnCount} className={cellClass}>{emptyMessage}</td></tr>
+          <tr><td colSpan={callSheetColumnCount} className={cellClass}>{emptyMessage}</td></tr>
         )}
       </tbody>
     </table>
