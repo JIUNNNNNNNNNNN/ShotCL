@@ -154,6 +154,8 @@ export type DailyPlanPrintMeta = {
   maxTemperature: string;
   rainProbability: string;
   timetableRowOrder: DailyPlanTimetableRowType[];
+  /** 앞 행의 종료 시각을 따라 자동 계산되는 TIME TABLE 행의 stable key입니다. */
+  automaticTimetableRowIds: string[];
   /** 순서를 유지하며 0컷 씬 행까지 저장하는 버전형 TIME TABLE 메타데이터입니다. */
   timetableScenes: DailyPlanTimetableSceneMeta[];
   memoText: string;
@@ -186,6 +188,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     maxTemperature: "",
     rainProbability: "",
     timetableRowOrder: [],
+    automaticTimetableRowIds: [],
     timetableScenes: [],
     memoText: "",
     mainStaff: [],
@@ -269,6 +272,7 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     maxTemperature: meta.maxTemperature ?? "",
     rainProbability: meta.rainProbability ?? "",
     timetableRowOrder: normalizeTimetableRowOrder(meta.timetableRowOrder),
+    automaticTimetableRowIds: normalizeAutomaticTimetableRowIds(meta.automaticTimetableRowIds),
     timetableScenes: normalizeDailyPlanTimetableScenes(meta.timetableScenes),
     memoText: meta.memoText ?? "",
     mainStaff: normalizeMainStaff(meta.mainStaff),
@@ -322,6 +326,13 @@ export function mergeDailyPlanTimetableRows<TScene, TEvent>(
 function normalizeTimetableRowOrder(value: DailyPlanTimetableRowType[] | undefined) {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is DailyPlanTimetableRowType => item === "scene" || item === "event");
+}
+
+function normalizeAutomaticTimetableRowIds(value: string[] | undefined) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .map((item) => String(item ?? "").trim())
+    .filter((item) => /^(scene|event):.+/.test(item)))];
 }
 
 /**

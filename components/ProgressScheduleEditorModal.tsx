@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { ImageIcon, Save, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { getDailyPlanAdditionalScheduleDisplay } from "@/lib/dailyPlan/additionalSchedule";
 import type { DailyPlanMealTime } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -110,7 +111,7 @@ export function ProgressScheduleEditorModal({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={values.imageUrl}
-                  alt={`${item.memo.trim() || "기타일정"} 그림`}
+                  alt={`${getDailyPlanAdditionalScheduleDisplay(item)} 그림`}
                   className="block max-h-44 w-full rounded-none object-contain"
                 />
               </div>

@@ -8,6 +8,9 @@ export type DailyPlanLocation = {
   id: string;
   name: string;
   detail: string;
+  inputMode?: "search" | "manual" | "none";
+  /** 검색 주소와 별도로 보존하는 직접입력 주소입니다. */
+  manualAddress?: string;
   isPrimary?: boolean;
   searchQuery?: string;
   address?: string;
@@ -20,10 +23,13 @@ export type DailyPlanLocation = {
   naverMapUrl?: string;
 };
 
+export type DailyPlanAdditionalScheduleType = "집합장소" | "이동" | "식사" | "준비" | "휴식" | "기타";
+
 export type DailyPlanMealTime = {
   id: string;
   startTime: string;
   endTime: string;
+  scheduleType?: DailyPlanAdditionalScheduleType;
   runtimeMinutes?: number | null;
   runtime?: string;
   locationId?: string;

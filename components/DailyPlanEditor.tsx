@@ -39,6 +39,26 @@ import {
   deriveDailyPlanGatheringPoints,
   reconcileDailyPlanGatheringPoints
 } from "@/lib/dailyPlan/gatheringPoints";
+import {
+  dailyPlanAdditionalScheduleTypes,
+  getDailyPlanAdditionalScheduleDisplay,
+  isDailyPlanAdditionalScheduleType,
+  normalizeDailyPlanAdditionalScheduleType
+} from "@/lib/dailyPlan/additionalSchedule";
+import {
+  getDailyPlanLocationAddress as getLocationAddress,
+  getDailyPlanManualAddress,
+  getDailyPlanSearchAddress,
+  hasDailyPlanLocationSearchMetadata
+} from "@/lib/dailyPlan/location";
+import {
+  compactPreviewFields,
+  compactPreviewRowCells,
+  compactPreviewRows,
+  getPreviewColumnCount,
+  hasDisplayValue,
+  type PreviewDisplayField
+} from "@/lib/dailyPlan/previewDisplay";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
@@ -188,6 +208,8 @@ type WindowWithDaumPostcode = Window & {
 
 type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring";
 
+type LocationInputMode = "search" | "manual";
+
 type EditorTimetableRow =
   | { type: "scene"; sourceIndex: number; item: SceneBlockInput }
   | { type: "event"; sourceIndex: number; item: DailyPlanMealTime };
@@ -210,7 +232,6 @@ type OpenMeteoResponse = {
 };
 
 const dayNightOptions = ["D", "N"];
-
 const inputClass =
   "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
 
@@ -235,6 +256,7 @@ let daumPostcodeScriptPromise: Promise<void> | null = null;
 export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneListItems = emptySceneListItems, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const initialEditorState = useMemo(() => {
+    const isNewDailyPlan = !initialPlan && !initialDraft;
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
     const sourcePlanDraft = initialDraft ?? (initialPlan ? planToDraft(initialPlan) : createBlankDailyPlanDraft(project));
     const sourcePrintMeta = decodeDailyPlanMemo(sourcePlanDraft.memo);
@@ -244,21 +266,30 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       activeProjectBasicInfo
     );
     const initialPlanDraft = initialDefaults.plan;
-    const initialPrintMeta = applyProjectStaffDefaults(
+    const staffPrintMeta = applyProjectStaffDefaults(
       initialDefaults.printMeta,
       projectStaffMembers,
       activeProjectBasicInfo?.actors ?? [],
       projectStaffDepartments,
       initialPlanDraft.episode || initialDefaults.printMeta.day
     );
+    const initialPrintMeta: DailyPlanPrintMeta = isNewDailyPlan
+      ? { ...staffPrintMeta, timetableRowOrder: ["event"] }
+      : staffPrintMeta;
     const initialLocations = buildInitialLocations(initialPlanDraft);
+    const initialMeals = buildInitialMeals(initialPlanDraft, isNewDailyPlan);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
-    const initialScenes = restoreTimetableScenes(
-      initialPrintMeta.timetableScenes,
-      initialSourceShots,
-      initialLocations,
-      sceneListItems
-    );
+    const hasStoredSceneRows = initialPrintMeta.timetableScenes.length > 0 || initialSourceShots.length > 0;
+    const shouldStartWithoutScenes = isNewDailyPlan
+      || (!hasStoredSceneRows && (initialMeals.length > 0 || Boolean(initialPlan)));
+    const initialScenes = shouldStartWithoutScenes
+      ? []
+      : restoreTimetableScenes(
+        initialPrintMeta.timetableScenes,
+        initialSourceShots,
+        initialLocations,
+        sceneListItems
+      );
     const managedShotKeys = new Set(
       initialSourceShots.length > 0
         ? dailyPlanShotsToShotDrafts(initialPlanDraft, initialSourceShots).map((shot) => getShotIdentityKey(shot, initialPlan?.id))
@@ -269,7 +300,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       initialPrintMeta,
       initialEditablePlanDraft: { ...initialPlanDraft, memo: initialPrintMeta.memoText },
       initialLocations,
-      initialMeals: buildInitialMeals(initialPlanDraft),
+      initialMeals,
       initialScenes,
       managedShotKeys
     };
@@ -288,6 +319,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [plan, setPlan] = useState<DailyPlanDraft>(initialEditablePlanDraft);
   const [printMeta, setPrintMeta] = useState<DailyPlanPrintMeta>(initialPrintMeta);
   const [locations, setLocations] = useState<DailyPlanLocation[]>(initialLocations);
+  const [locationInputModes, setLocationInputModes] = useState<Record<string, LocationInputMode>>(
+    () => buildLocationInputModes(initialLocations)
+  );
   const [mealTimes, setMealTimes] = useState<DailyPlanMealTime[]>(initialMeals);
   const [scenes, setScenes] = useState<SceneBlockInput[]>(initialScenes);
   const [savedEditorFingerprint, setSavedEditorFingerprint] = useState(() => (
@@ -319,7 +353,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
   const printFrameRef = useRef<number | null>(null);
-  const automaticStartRowIdsRef = useRef<Set<string>>(new Set());
+  const automaticStartRowIdsRef = useRef<Set<string>>(
+    new Set(initialPrintMeta.automaticTimetableRowIds)
+  );
 
   const flattenedShots = useMemo(() => scenesToShotDrafts(scenes), [scenes]);
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
@@ -380,7 +416,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           : { ...event, startTime: "", endTime: "" };
     }));
   }, [timetableRows]);
-  const canPrint = previewData.scenes.length > 0;
+  const canPrint = previewData.scenes.length > 0 || previewData.mealTimes.length > 0;
   const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
   const episodeOptions = activeProjectBasicInfo
     ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
@@ -521,6 +557,32 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setLocations((current) => [...current, createBlankLocation()]);
   }
 
+  function toggleManualLocationInput(index: number) {
+    const target = locations[index];
+    if (!target) return;
+    const nextMode = locationInputModes[target.id] === "manual" ? undefined : "manual";
+    setLocationInputModes((current) => {
+      if (nextMode === "manual") return { ...current, [target.id]: "manual" };
+      const next = { ...current };
+      delete next[target.id];
+      return next;
+    });
+    setLocations((current) => current.map((location, locationIndex) => {
+      if (locationIndex !== index) return location;
+      if (nextMode !== "manual") return { ...location, inputMode: "none" };
+      const legacyManualAddress = !location.manualAddress?.trim()
+        && location.inputMode !== "search"
+        && !hasDailyPlanLocationSearchMetadata(location)
+        ? getDailyPlanSearchAddress(location)
+        : "";
+      return {
+        ...location,
+        inputMode: "manual",
+        manualAddress: location.manualAddress || legacyManualAddress
+      };
+    }));
+  }
+
   function updateLocation(index: number, patch: Partial<DailyPlanLocation>) {
     const addressRegion = resolveKoreanWeatherRegion(patch.roadAddress || patch.address);
     if (addressRegion) {
@@ -551,6 +613,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const target = locations[index];
     setLocations((current) => current.filter((_, locationIndex) => locationIndex !== index));
     if (target) {
+      setLocationInputModes((current) => {
+        const next = { ...current };
+        delete next[target.id];
+        return next;
+      });
       setScenes((current) => current.map((scene) => (scene.locationId === target.id ? { ...scene, locationId: "", locationName: "" } : scene)));
       setMealTimes((current) => current.map((meal) => (meal.locationId === target.id ? { ...meal, locationId: "" } : meal)));
     }
@@ -587,8 +654,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           updateLocation(index, {
             roadAddress: address,
             address: data.jibunAddress || data.address || address,
+            inputMode: "search",
+            searchQuery: "",
+            mapx: "",
+            mapy: "",
+            lat: null,
+            lng: null,
+            category: "",
             naverMapUrl: ""
           });
+          setLocationInputModes((current) => ({ ...current, [target.id]: "search" }));
           setAddressSearchMessage("선택한 주소를 입력했습니다. 상세 메모는 필요하면 직접 적어주세요.");
           setAddressSearchLocationId(target.id);
         },
@@ -1030,9 +1105,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
     try {
       const persistedTimetableRows = getPersistedEditorTimetableRows(timetableRows);
+      const persistedAutomaticRowIds = persistedTimetableRows
+        .map(getEditorTimetableRowKey)
+        .filter((rowKey) => automaticStartRowIdsRef.current.has(rowKey));
       const printMetaForSave = deriveDailyPlanHeadcount({
         ...printMeta,
         timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder),
+        automaticTimetableRowIds: persistedAutomaticRowIds,
         timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
       });
       const planForSave = buildPlanForSave(
@@ -1062,23 +1141,32 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       const savedDraft = planToDraft(saved.plan);
       const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
       const nextLocations = buildInitialLocations(savedDraft);
-      const nextMeals = buildInitialMeals(savedDraft);
-      const nextScenes = restoreTimetableScenes(
-        savedMeta.timetableScenes,
-        saved.shots.map(dailyPlanShotToDraft),
-        nextLocations,
-        sceneListItems
+      const nextMeals = buildInitialMeals(savedDraft, false);
+      const savedShotDrafts = saved.shots.map(dailyPlanShotToDraft);
+      const hasStoredSceneRows = savedMeta.timetableScenes.length > 0 || savedShotDrafts.length > 0;
+      const nextScenes = hasStoredSceneRows
+        ? restoreTimetableScenes(
+          savedMeta.timetableScenes,
+          savedShotDrafts,
+          nextLocations,
+          sceneListItems
+        )
+        : [];
+      const nextPersistedTimetableRows = getPersistedEditorTimetableRows(
+        buildEditorTimetableRows(nextScenes, nextMeals, savedMeta.timetableRowOrder)
       );
-      automaticStartRowIdsRef.current = restoreAutomaticTimetableRowIds(
-        getPersistedEditorTimetableRows(
-          buildEditorTimetableRows(nextScenes, nextMeals, savedMeta.timetableRowOrder)
-        ),
-        automaticRowPositions
+      const nextTimetableRowKeys = new Set(nextPersistedTimetableRows.map(getEditorTimetableRowKey));
+      const savedAutomaticRowIds = new Set(
+        savedMeta.automaticTimetableRowIds.filter((rowKey) => nextTimetableRowKeys.has(rowKey))
       );
+      automaticStartRowIdsRef.current = savedAutomaticRowIds.size > 0
+        ? savedAutomaticRowIds
+        : restoreAutomaticTimetableRowIds(nextPersistedTimetableRows, automaticRowPositions);
       setDailyPlanId(saved.plan.id);
       setPlan({ ...savedDraft, memo: savedMeta.memoText });
       setPrintMeta(savedMeta);
       setLocations(nextLocations);
+      setLocationInputModes(buildLocationInputModes(nextLocations));
       setMealTimes(nextMeals);
       setScenes(nextScenes);
       setSavedEditorFingerprint(createDailyPlanEditorFingerprint(
@@ -1408,11 +1496,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 {locations.map((location, index) => (
                   <div
                     key={location.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 rounded-md border border-field-border bg-white p-1.5 md:grid-cols-[7.5rem_minmax(0,1fr)_auto] md:gap-3 md:p-2.5"
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[3px] border border-field-border bg-white p-2 md:p-2.5"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "locations", index)}
                   >
-                    <div className="col-start-1 row-start-1 flex min-w-0 items-center justify-center gap-1 whitespace-nowrap md:min-w-[7.5rem] md:gap-2.5">
+                    <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 whitespace-nowrap md:gap-2.5">
                       <DragHandle label={`LOCATION ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
                       <h4 className="min-w-0 whitespace-nowrap text-center text-xs font-black text-field-primary">
                         <span className="md:hidden">L{index + 1}</span>
@@ -1420,38 +1508,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       </h4>
                     </div>
 
-                    <div className="col-span-2 row-start-2 grid min-w-0 grid-cols-[minmax(0,0.75fr)_minmax(0,1.25fr)_2.5rem] items-center gap-1 md:col-span-1 md:col-start-2 md:row-start-1 md:gap-3">
-                      <label className="min-w-0">
-                        <span className="sr-only">LOCATION {index + 1} 장소명</span>
-                        <DraftInput
-                          className={`${inputClass} truncate whitespace-nowrap`}
-                          value={location.name}
-                          onCommit={(value) => updateLocation(index, { name: value, naverMapUrl: "" })}
-                          placeholder="장소명"
-                          title={location.name}
-                        />
-                      </label>
-                      <label className="min-w-0">
-                        <span className="sr-only">LOCATION {index + 1} 주소</span>
-                        <DraftInput
-                          className={`${inputClass} truncate whitespace-nowrap`}
-                          value={getLocationAddress(location)}
-                          onCommit={(value) => updateLocation(index, { roadAddress: value, address: "", naverMapUrl: "" })}
-                          placeholder="주소"
-                          title={getLocationAddress(location)}
-                        />
-                      </label>
-                      <IconButton label={`LOCATION ${index + 1} 주소 검색`} onClick={() => openDaumAddressSearch(index)}>
-                        <Search className="h-4 w-4" aria-hidden />
-                      </IconButton>
-                    </div>
-
-                    <div className="col-start-2 row-start-1 flex items-center justify-end gap-2 md:col-start-3">
+                    <div className="col-start-2 row-start-1 flex items-center justify-end gap-1.5 md:gap-2">
                       <button
                         type="button"
                         aria-pressed={Boolean(location.isPrimary)}
                         onClick={() => setMeetingLocation(index)}
-                        className={`inline-flex min-h-9 items-center justify-center whitespace-nowrap rounded-md border px-2 py-1.5 text-[11px] font-black leading-[1.35] ${
+                        className={`inline-flex min-h-9 items-center justify-center whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] font-black leading-[1.35] ${
                           location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
                         }`}
                       >
@@ -1460,7 +1522,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <button
                         type="button"
                         onClick={() => setExpandedLocationDetailId((current) => (current === location.id ? null : location.id))}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
                         aria-expanded={expandedLocationDetailId === location.id}
                         aria-label={`LOCATION ${index + 1} 상세 메모 ${expandedLocationDetailId === location.id ? "닫기" : "열기"}`}
                         title="상세 메모"
@@ -1470,8 +1532,77 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
                     </div>
 
+                    <div className="col-span-2 row-start-2 grid min-w-0 gap-2 border-t border-field-border pt-2">
+                      <div
+                        className="grid grid-cols-2 gap-1.5"
+                        role="group"
+                        aria-label={`LOCATION ${index + 1} 입력 방식`}
+                      >
+                        <button
+                          type="button"
+                          aria-pressed={locationInputModes[location.id] === "search"}
+                          onClick={() => openDaumAddressSearch(index)}
+                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-[3px] border px-3 py-2 text-sm font-black ${
+                            locationInputModes[location.id] === "search"
+                              ? "border-field-primary bg-field-light text-field-primary"
+                              : "border-field-border bg-white text-field-primary"
+                          }`}
+                        >
+                          <Search className="h-4 w-4" aria-hidden />
+                          장소 검색
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={locationInputModes[location.id] === "manual"}
+                          onClick={() => toggleManualLocationInput(index)}
+                          className={`min-h-10 rounded-[3px] border px-3 py-2 text-sm font-black ${
+                            locationInputModes[location.id] === "manual"
+                              ? "border-field-primary bg-field-light text-field-primary"
+                              : "border-field-border bg-white text-field-primary"
+                          }`}
+                        >
+                          직접입력
+                        </button>
+                      </div>
+
+                      <label className="min-w-0">
+                        <span className="sr-only">LOCATION {index + 1} 장소명</span>
+                        <DraftInput
+                          className={`${inputClass} truncate whitespace-nowrap`}
+                          value={location.name}
+                          onCommit={(value) => updateLocation(index, { name: value })}
+                          placeholder="장소명"
+                          title={location.name}
+                        />
+                      </label>
+
+                      {locationInputModes[location.id] === "manual" ? (
+                        <label className="grid min-w-0 gap-1">
+                          <span className="text-xs font-black text-field-primary">상세주소</span>
+                          <DraftTextarea
+                            className={`${inputClass} min-h-11 resize-y break-words py-2 leading-[1.45]`}
+                            value={getDailyPlanManualAddress(location)}
+                            onCommit={(value) => updateLocation(index, {
+                              manualAddress: value,
+                              inputMode: "manual",
+                            })}
+                            placeholder="전체 주소 또는 장소 설명을 직접 입력"
+                          />
+                        </label>
+                      ) : getLocationAddress(location).trim() ? (
+                        <div className="grid min-w-0 gap-0.5 rounded-[3px] border border-field-border bg-field-soft px-2 py-1.5 text-left">
+                          <span className="text-[10px] font-black text-field-muted">
+                            {location.inputMode === "search" ? "선택된 주소" : "보존된 주소"}
+                          </span>
+                          <span className="break-words text-xs font-bold leading-[1.45] text-field-text">
+                            {getLocationAddress(location)}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+
                     {expandedLocationDetailId === location.id ? (
-                      <label className="col-span-2 grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 border-t border-field-border pt-2 md:col-span-3">
+                      <label className="col-span-2 grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 border-t border-field-border pt-2">
                         <span className="text-xs font-black text-field-primary">상세 메모</span>
                         <DraftInput
                           className={`${inputClass} truncate whitespace-nowrap`}
@@ -1485,11 +1616,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                     {addressSearchLocationId === location.id && addressSearchMessage ? (
                       addressSearchMessage === ADDRESS_SEARCH_LOADING ? (
-                        <div className="col-span-2 flex justify-center md:col-span-3">
+                        <div className="col-span-2 flex justify-center">
                           <PixelDogLoader size="xs" compact />
                         </div>
                       ) : (
-                        <span className="col-span-2 text-center text-[11px] font-bold text-field-muted md:col-span-3" aria-live="polite">{addressSearchMessage}</span>
+                        <span className="col-span-2 text-center text-[11px] font-bold text-field-muted" aria-live="polite">{addressSearchMessage}</span>
                       )
                     ) : null}
                   </div>
@@ -1569,13 +1700,30 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           </select>
                         </td>
                         <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-12`}>
-                          <span className={mobileTimetableLabelClass}>내용</span>
-                          <MemoPopoverField
-                            value={meal.memo}
-                            placeholder="점심 식사 & 세팅 / 이동 / 정리"
-                            ariaLabel={`기타 일정 ${mealIndex + 1} 내용 수정`}
-                            onChange={(value) => updateMealTime(mealIndex, { memo: value })}
-                          />
+                          <div className="grid min-w-0 gap-1 sm:grid-cols-[7rem_minmax(0,1fr)]">
+                            <label className="min-w-0">
+                              <span className={mobileTimetableLabelClass}>유형</span>
+                              <select
+                                className={compactInputClass}
+                                value={normalizeDailyPlanAdditionalScheduleType(meal.scheduleType ?? meal.memo)}
+                                onChange={(event) => updateMealTime(mealIndex, {
+                                  scheduleType: normalizeDailyPlanAdditionalScheduleType(event.target.value)
+                                })}
+                                aria-label={`기타 일정 ${mealIndex + 1} 유형`}
+                              >
+                                {dailyPlanAdditionalScheduleTypes.map((option) => <option key={option} value={option}>{option}</option>)}
+                              </select>
+                            </label>
+                            <div className="min-w-0">
+                              <span className={mobileTimetableLabelClass}>내용</span>
+                              <MemoPopoverField
+                                value={meal.memo}
+                                placeholder="집합장소 / 이동 / 식사 / 준비 / 휴식"
+                                ariaLabel={`기타 일정 ${mealIndex + 1} 내용 수정`}
+                                onChange={(value) => updateMealTime(mealIndex, { memo: value })}
+                              />
+                            </div>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -3513,173 +3661,425 @@ function PrintDailyPlanView({ data }: { data: DailyPlanPreviewData }) {
   );
 }
 
-const printTimetableColumnSpans = [1, 1, 1, 2, 1, 1, 1, 3, 1, 2, 2] as const;
-const printTimetableColumnCount = printTimetableColumnSpans.reduce((total, span) => total + span, 0);
+const PRINT_GRID_COLUMN_COUNT = 16;
+const printCellClass = "border border-black px-1.5 py-1 text-center align-middle";
+const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-black`;
 
 function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
   const locations = data.locations.filter(isPrintableLocation);
-  const timetableRows = getPrintTimetableRows(data);
-  const starringRows = padRows(data.meta.starring, 9);
-  const teamRows = padRows(data.meta.teams, 10);
-  const mainStaffRows = getDailyPlanMainStaffRows(data.plan, data.meta);
-  const printableMainStaffRows = mainStaffRows.length > 0
-    ? mainStaffRows
-    : [{ id: "empty-main-staff", role: "", name: "", contact: "" }];
-  const headerRowSpan = printableMainStaffRows.length + 1;
+  const timetableRows = compactPreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
+  const starringRows = compactPreviewRows(data.meta.starring, getPrintPersonDisplayValues);
+  const teamRows = compactPreviewRows(data.meta.teams, getPrintTeamDisplayValues);
+  const mainStaffRows = compactPreviewRows(getDailyPlanMainStaffRows(data.plan, data.meta), (member) => [
+    member.role,
+    member.name,
+    member.contact
+  ]);
+  const weatherFields = compactPreviewFields(createPrintWeatherFields(data.meta));
+  const timetableFields = fillPrintFieldSpans(
+    compactPreviewFields(createPrintTimetableFields(timetableRows)),
+    PRINT_GRID_COLUMN_COUNT
+  );
+  const timetableColumnCount = timetableFields.length > 0
+    ? getPreviewColumnCount(timetableFields)
+    : PRINT_GRID_COLUMN_COUNT;
+  const memoFields = fillPrintFieldSpans(compactPreviewFields([
+    { key: "notice", label: "Notice", span: 8, value: data.plan.safetyNotice },
+    { key: "memo", label: "Memo", span: 8, value: data.meta.memoText }
+  ]), PRINT_GRID_COLUMN_COUNT);
+  const hasTotalCrew = hasDisplayValue(data.meta.totalCrew);
+  const hasDay = hasDisplayValue(data.meta.day);
 
   return (
-    <article className={className}>
+    <article className={`daily-plan-print-document ${className}`}>
       <table className="daily-plan-grid daily-plan-export-table w-full border-collapse border-2 border-black text-center">
         <tbody>
-          <tr>
-            <td rowSpan={headerRowSpan} className="border border-black font-black">
-              <span className="text-[10px]">DAY</span>
-              <span className="ml-1 text-2xl">{data.meta.day || "-"}</span>
+          <tr className="pdf-section-start daily-plan-preview-accent">
+            {hasDay ? (
+              <td colSpan={2} className={`${printCellClass} font-black`}>
+                <span className="text-[10px]">DAY</span>
+                <span className="ml-1 text-2xl">{data.meta.day}</span>
+              </td>
+            ) : null}
+            <td
+              colSpan={PRINT_GRID_COLUMN_COUNT - (hasDay ? 2 : 0) - (hasTotalCrew ? 2 : 0)}
+              className={`${printCellClass} text-2xl font-black`}
+            >
+              {hasDisplayValue(data.plan.title) ? data.plan.title : "기본정보가 없습니다."} TIME TABLE
             </td>
-            <td rowSpan={headerRowSpan} colSpan={11} className="border border-black text-2xl font-black">
-              {data.plan.title || "작품명"} TIME TABLE
-            </td>
-            <MainStaffPrintCells member={printableMainStaffRows[0]} />
+            {hasTotalCrew ? (
+              <td colSpan={2} className={`${printCellClass} daily-plan-preview-summary`}>
+                <span className="block text-[9px] font-bold">Total Crew</span>
+                <span className="text-lg font-black">{data.meta.totalCrew}</span>
+              </td>
+            ) : null}
           </tr>
-          {printableMainStaffRows.slice(1).map((member) => (
-            <tr key={member.id}><MainStaffPrintCells member={member} /></tr>
-          ))}
-          <tr>
-            <td colSpan={2} className="border border-black">Total Crew</td>
-            <td colSpan={2} className="border border-black">{data.meta.totalCrew || "-"}</td>
-          </tr>
-          <tr>
-            <td rowSpan={2} className="border border-black font-black">CALL TIME</td>
-            <td rowSpan={2} colSpan={8} className="border border-black text-base">
-              Day {formatDateForPreview(data.plan.shootingDate) || "-"}
-              {data.plan.callTime ? <span className="ml-2">Time {data.plan.callTime}</span> : null}
-            </td>
-            <td className="border border-black">Sunset</td>
-            <td className="border border-black">{data.meta.sunset || "-"}</td>
-            <td className="border border-black">최고 기온</td>
-            <td className="border border-black">{data.meta.maxTemperature || "-"}</td>
-            <td className="border border-black">Weather</td>
-            <td colSpan={2} className="border border-black">{formatDailyPlanWeatherSummary(data.meta) || "-"}</td>
-          </tr>
-          <tr>
-            <td className="border border-black">최저 기온</td>
-            <td className="border border-black">{data.meta.minTemperature || "-"}</td>
-            <td className="border border-black"></td>
-            <td className="border border-black"></td>
-            <td className="border border-black">강수 확률</td>
-            <td colSpan={2} className="border border-black">{data.meta.rainProbability || "-"}</td>
-          </tr>
-          <tr><td colSpan={16} className="h-1 border-0 p-0" /></tr>
-          {locations.map((location, index) => (
+          {hasDisplayValue([data.plan.shootingDate, data.plan.callTime]) ? (
+            <tr className="daily-plan-preview-accent">
+              <td colSpan={2} className={`${printCellClass} font-black`}>CALL TIME</td>
+              <td colSpan={14} className={`${printCellClass} text-base`}>
+                {hasDisplayValue(data.plan.shootingDate) ? (
+                  <>
+                    <span className="mr-1 text-[9px] font-bold">Day</span>
+                    <span className="font-black">{formatDateForPreview(data.plan.shootingDate)}</span>
+                  </>
+                ) : null}
+                {hasDisplayValue(data.plan.callTime) ? (
+                  <>
+                    <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
+                    <span className="font-black">{data.plan.callTime}</span>
+                  </>
+                ) : null}
+              </td>
+            </tr>
+          ) : null}
+          {mainStaffRows.length > 0 ? mainStaffRows.map((member) => (
+            <tr key={member.id}>
+              <PrintCompactCells fields={createPrintMainStaffFields(member)} totalColumns={PRINT_GRID_COLUMN_COUNT} />
+            </tr>
+          )) : (
+            <tr><td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 메인 스태프가 없습니다.</td></tr>
+          )}
+          {weatherFields.length > 0 ? weatherFields.map((field, index) => (
             <tr
-              key={`print-location-${location?.id ?? index}`}
+              key={field.key}
+              className={index === weatherFields.length - 1 ? "pdf-section-end" : undefined}
+            >
+              <td colSpan={4} className={printHeaderCellClass}>{field.label}</td>
+              <td colSpan={12} className={printCellClass}>{String(field.value)}</td>
+            </tr>
+          )) : (
+            <tr className="pdf-section-end">
+              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>날씨 정보가 없습니다.</td>
+            </tr>
+          )}
+          {locations.length > 0 ? locations.map((location, index) => (
+            <tr
+              key={`print-location-${location.id ?? index}`}
               className={`${index === 0 ? "pdf-section-start" : ""} ${index === locations.length - 1 ? "pdf-section-end" : ""}`}
             >
-              <td className="border border-black text-left font-black">LOCATION {index + 1}</td>
-              <td colSpan={7} className="border border-black">{location?.name || "-"}</td>
-              <td colSpan={8} className="border border-black">{getLocationAddress(location ?? undefined) || location?.detail || "-"}</td>
+              <td colSpan={2} className={`${printCellClass} whitespace-nowrap text-left font-black`}>LOCATION {index + 1}</td>
+              <PrintCompactCells fields={createPrintLocationFields(location)} totalColumns={14} />
             </tr>
-          ))}
-          <tr><td colSpan={16} className="h-1 border-0 p-0" /></tr>
-          <tr className={`pdf-section-start bg-[#d9d9d9] font-black ${timetableRows.length === 0 ? "pdf-section-end" : ""}`}>
-            <td className="border border-black">START</td>
-            <td className="border border-black">END</td>
-            <td className="border border-black">RT</td>
-            <td colSpan={2} className="border border-black">LOCATION</td>
-            <td className="border border-black">D/N/S</td>
-            <td className="border border-black">SCENE</td>
-            <td className="border border-black">Total CUT</td>
-            <td colSpan={3} className="border border-black">Description</td>
-            <td className="border border-black">배역</td>
-            <td colSpan={2} className="border border-black">Shooting order</td>
-            <td colSpan={2} className="border border-black">Notes</td>
-          </tr>
-          {timetableRows.map((row, index) =>
-            row.type === "break" ? (
-              <tr key={`time-row-${index}`} className="bg-[#fff2cc]">
-                <td className="border border-black">{row.start}</td>
-                <td className="border border-black">{row.end}</td>
-                <td className="border border-black">{row.runtime}</td>
-                {row.location ? (
-                  <>
-                    <td colSpan={2} className="border border-black">{row.location}</td>
-                    <td colSpan={11} className="border border-black font-black">{row.description || "-"}</td>
-                  </>
-                ) : (
-                  <td colSpan={13} className="border border-black font-black">{row.description || "-"}</td>
-                )}
-              </tr>
-            ) : (
-              <tr key={`time-row-${index}`}>
-                <td className="border border-black">{row.start}</td>
-                <td className="border border-black">{row.end}</td>
-                <td className="border border-black">{row.runtime}</td>
-                <td colSpan={2} className="border border-black">{row.location}</td>
-                <td className="border border-black">{row.dayNight}</td>
-                <td className="border border-black">{row.sceneNumber}</td>
-                <td className="border border-black">{row.totalCut}</td>
-                <td colSpan={3} className="border border-black">{row.description}</td>
-                <td className="border border-black">{row.cast}</td>
-                <td colSpan={2} className="border border-black">{row.shootingOrder}</td>
-                <td colSpan={2} className="border border-black">{row.notes}</td>
-              </tr>
-            )
+          )) : (
+            <tr className="pdf-section-start pdf-section-end">
+              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 장소가 없습니다.</td>
+            </tr>
+          )}
+          {timetableFields.length > 0 ? (
+            <tr className="pdf-section-start daily-plan-preview-header font-black">
+              {timetableFields.map((field) => (
+                <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
+              ))}
+            </tr>
+          ) : null}
+          {timetableRows.length > 0 ? timetableRows.map((row, index) => (
+            <tr
+              key={`time-row-${index}`}
+              className={row.type === "break" ? "daily-plan-preview-event" : undefined}
+            >
+              <PrintCompactCells
+                fields={timetableFields.map((field) => ({
+                  ...field,
+                  value: getPrintTimetableFieldValue(row, field.key)
+                }))}
+                totalColumns={timetableColumnCount}
+              />
+            </tr>
+          )) : (
+            <tr className="pdf-section-start">
+              <td colSpan={timetableColumnCount} className={printCellClass}>등록된 일정이 없습니다.</td>
+            </tr>
           )}
           <tr className="pdf-section-end">
             <td
-              colSpan={printTimetableColumnCount}
-              className="border border-black py-1 text-center font-black"
+              colSpan={timetableColumnCount}
+              className={`${printCellClass} daily-plan-preview-summary py-1 text-center font-black`}
             >
               총 컷수 {data.totalCutCount}컷
             </td>
           </tr>
-          <tr><td colSpan={16} className="h-2 border-0 p-0" /></tr>
-          <tr className="pdf-section-start">
-            <td colSpan={8} className="border border-black font-black">Notice</td>
-            <td colSpan={8} className="border border-black font-black">Memo</td>
-          </tr>
-          <tr className="pdf-section-end">
-            <td colSpan={8} className="h-24 whitespace-pre-wrap border border-black align-top text-left">{data.plan.safetyNotice || ""}</td>
-            <td colSpan={8} className="h-24 whitespace-pre-wrap border border-black align-top text-left">{data.meta.memoText || ""}</td>
-          </tr>
-          <tr><td colSpan={16} className="h-2 border-0 p-0" /></tr>
-          <tr className="pdf-section-start bg-[#d9d9d9] font-black">
-            <td colSpan={2} className="border border-black">Starring</td>
-            <td colSpan={2} className="border border-black">Roll</td>
-            <td className="border border-black">CALL</td>
-            <td colSpan={2} className="border border-black">Call Location</td>
-            <td className="border border-black">Notes</td>
-            <td colSpan={2} className="border border-black">Team</td>
-            <td className="border border-black">Total</td>
-            <td className="border border-black">CALL</td>
-            <td colSpan={2} className="border border-black">Call Location</td>
-            <td colSpan={2} className="border border-black">Notes</td>
-          </tr>
-          {Array.from({ length: Math.max(starringRows.length, teamRows.length) }, (_, index) => {
-            const person = starringRows[index];
-            const team = teamRows[index];
-            return (
-              <tr
-                key={`call-sheet-${index}`}
-                className={index === Math.max(starringRows.length, teamRows.length) - 1 ? "pdf-section-end" : undefined}
-              >
-                <td colSpan={2} className="border border-black">{person?.name || ""}</td>
-                <td colSpan={2} className="border border-black">{person?.role || ""}</td>
-                <td className="border border-black">{person?.callTime || ""}</td>
-                <td colSpan={2} className="border border-black">{person?.callLocation || ""}</td>
-                <td className="border border-black">{person?.notes || ""}</td>
-                <td colSpan={2} className="border border-black">{team?.team || ""}</td>
-                <td className="border border-black">{team?.total || ""}</td>
-                <td className="border border-black">{team?.callTime || ""}</td>
-                <td colSpan={2} className="border border-black">{team?.callLocation || ""}</td>
-                <td colSpan={2} className="border border-black">{team?.notes || ""}</td>
+          {memoFields.length > 0 ? (
+            <>
+              <tr className="pdf-section-start daily-plan-preview-header font-black">
+                {memoFields.map((field) => (
+                  <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
+                ))}
               </tr>
-            );
-          })}
+              <tr className="pdf-section-end">
+                {memoFields.map((field) => (
+                  <td
+                    key={field.key}
+                    colSpan={field.span}
+                    className={`${printCellClass} min-h-24 whitespace-pre-wrap align-top text-left`}
+                  >
+                    {String(field.value)}
+                  </td>
+                ))}
+              </tr>
+            </>
+          ) : (
+            <>
+              <tr className="pdf-section-start daily-plan-preview-header">
+                <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printHeaderCellClass}>Notice / Memo</td>
+              </tr>
+              <tr className="pdf-section-end">
+                <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>기재된 주의사항·메모가 없습니다.</td>
+              </tr>
+            </>
+          )}
+          <tr>
+            <td colSpan={PRINT_GRID_COLUMN_COUNT} className="border-0 p-0 align-top">
+              <div className="grid grid-cols-2 gap-1">
+                <PrintCallSheetTable
+                  title="Actor"
+                  emptyMessage="등록된 배우가 없습니다."
+                  fields={[
+                    { key: "name", label: "Starring", span: 4 },
+                    { key: "role", label: "Actor", span: 4 },
+                    { key: "callTime", label: "CALL", span: 2 },
+                    { key: "callLocation", label: "Call Location", span: 3 },
+                    { key: "notes", label: "Notes", span: 3 }
+                  ]}
+                  rows={starringRows.map((person) => ({
+                    name: person.name,
+                    role: person.role,
+                    callTime: person.callTime,
+                    callLocation: person.callLocation,
+                    notes: person.notes
+                  }))}
+                />
+                <PrintCallSheetTable
+                  title="Team"
+                  emptyMessage="등록된 스태프 부서가 없습니다."
+                  fields={[
+                    { key: "team", label: "Team", span: 4 },
+                    { key: "total", label: "Total", span: 2 },
+                    { key: "callTime", label: "CALL", span: 2 },
+                    { key: "callLocation", label: "Call Location", span: 4 },
+                    { key: "notes", label: "Notes", span: 4 }
+                  ]}
+                  rows={teamRows.map((team) => ({
+                    team: team.team,
+                    total: team.total,
+                    callTime: team.callTime,
+                    callLocation: team.callLocation,
+                    notes: team.notes
+                  }))}
+                />
+              </div>
+            </td>
+          </tr>
         </tbody>
       </table>
     </article>
   );
+}
+
+function PrintCompactCells({
+  fields,
+  totalColumns
+}: {
+  fields: PreviewDisplayField[];
+  totalColumns: number;
+}) {
+  const cells = compactPreviewRowCells(fields);
+  if (cells.length === 0) {
+    return <td colSpan={Math.max(1, totalColumns)} className={printCellClass}>정보 없음</td>;
+  }
+  return cells.map((cell) => (
+    <td
+      key={cell.key}
+      colSpan={cell.span}
+      className={`${printCellClass} break-words [overflow-wrap:anywhere]`}
+    >
+      {String(cell.value)}
+    </td>
+  ));
+}
+
+function PrintCallSheetTable({
+  title,
+  emptyMessage,
+  fields,
+  rows
+}: {
+  title: string;
+  emptyMessage: string;
+  fields: Array<Omit<PreviewDisplayField, "value">>;
+  rows: Array<Record<string, string>>;
+}) {
+  const visibleFields = fillPrintFieldSpans(compactPreviewFields(fields.map((field) => ({
+    ...field,
+    value: rows.map((row) => row[field.key])
+  }))), PRINT_GRID_COLUMN_COUNT);
+  const columnCount = Math.max(1, getPreviewColumnCount(visibleFields));
+
+  return (
+    <table className="daily-plan-export-table w-full table-fixed border-collapse border-2 border-black text-center">
+      <thead>
+        {visibleFields.length > 0 ? (
+          <tr className="daily-plan-preview-header">
+            {visibleFields.map((field) => (
+              <th key={field.key} colSpan={field.span} className={printHeaderCellClass}>{field.label}</th>
+            ))}
+          </tr>
+        ) : (
+          <tr className="daily-plan-preview-header">
+            <th colSpan={columnCount} className={printHeaderCellClass}>{title}</th>
+          </tr>
+        )}
+      </thead>
+      <tbody>
+        {rows.length > 0 ? rows.map((row, index) => (
+          <tr key={`${title}-${index}`}>
+            <PrintCompactCells
+              fields={visibleFields.map((field) => ({
+                ...field,
+                value: row[field.key]
+              }))}
+              totalColumns={columnCount}
+            />
+          </tr>
+        )) : (
+          <tr><td colSpan={columnCount} className={printCellClass}>{emptyMessage}</td></tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function fillPrintFieldSpans(
+  fields: readonly PreviewDisplayField[],
+  totalColumns: number
+): PreviewDisplayField[] {
+  if (fields.length === 0) return [];
+  const currentColumns = getPreviewColumnCount(fields);
+  const remainder = Math.max(0, totalColumns - currentColumns);
+  return fields.map((field, index) => (
+    index === fields.length - 1 && remainder > 0
+      ? { ...field, span: field.span + remainder }
+      : { ...field }
+  ));
+}
+
+function createPrintMainStaffFields(member: DailyPlanMainStaffRow): PreviewDisplayField[] {
+  return [
+    { key: "role", label: "역할", span: 3, value: member.role },
+    { key: "name", label: "이름", span: 5, value: member.name },
+    { key: "contact", label: "연락처", span: 8, value: member.contact }
+  ];
+}
+
+function createPrintWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
+  return [
+    { key: "sunrise", label: "일출", span: 1, value: meta.sunrise },
+    { key: "sunset", label: "일몰", span: 1, value: meta.sunset },
+    { key: "weather", label: "날씨", span: 1, value: formatDailyPlanWeatherSummary(meta) },
+    { key: "rainProbability", label: "강수 확률", span: 1, value: meta.rainProbability },
+    { key: "minTemperature", label: "최저 기온", span: 1, value: meta.minTemperature },
+    { key: "maxTemperature", label: "최고 기온", span: 1, value: meta.maxTemperature }
+  ];
+}
+
+function createPrintLocationFields(location: DailyPlanLocation): PreviewDisplayField[] {
+  return [
+    { key: "name", label: "장소명", span: 6, value: location.name },
+    {
+      key: "address",
+      label: "주소",
+      span: 8,
+      value: getLocationAddress(location) || location.detail
+    }
+  ];
+}
+
+function createPrintTimetableFields(rows: PrintTimetableRow[]): PreviewDisplayField[] {
+  return [
+    { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
+    { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
+    { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
+    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
+    {
+      key: "dayNight",
+      label: "D/N",
+      span: 1,
+      value: rows.map((row) => row.type === "scene" ? row.dayNight : "")
+    },
+    {
+      key: "sceneNumber",
+      label: "SCENE",
+      span: 1,
+      value: rows.map((row) => row.type === "scene" ? row.sceneNumber : "")
+    },
+    {
+      key: "totalCut",
+      label: "Total CUT",
+      span: 1,
+      value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
+    },
+    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.description) },
+    {
+      key: "cast",
+      label: "Actor",
+      span: 1,
+      value: rows.map((row) => row.type === "scene" ? row.cast : "")
+    },
+    {
+      key: "shootingOrder",
+      label: "Shooting order",
+      span: 2,
+      value: rows.map((row) => row.type === "scene" ? row.shootingOrder : "")
+    },
+    {
+      key: "notes",
+      label: "Notes",
+      span: 2,
+      value: rows.map((row) => row.type === "scene" ? row.notes : "")
+    }
+  ];
+}
+
+function getPrintTimetableFieldValue(row: PrintTimetableRow, key: string) {
+  if (key === "start") return row.start;
+  if (key === "end") return row.end;
+  if (key === "runtime") return row.runtime;
+  if (key === "location") return row.location;
+  if (key === "description") return row.description;
+  if (row.type === "break") return "";
+  if (key === "dayNight") return row.dayNight;
+  if (key === "sceneNumber") return row.sceneNumber;
+  if (key === "totalCut") return row.totalCut;
+  if (key === "cast") return row.cast;
+  if (key === "shootingOrder") return row.shootingOrder;
+  if (key === "notes") return row.notes;
+  return "";
+}
+
+function getPrintTimetableRowDisplayValues(row: PrintTimetableRow) {
+  return row.type === "break"
+    ? [row.start, row.end, row.runtime, row.location, row.description]
+    : [
+        row.start,
+        row.end,
+        row.runtime,
+        row.location,
+        row.dayNight,
+        row.sceneNumber,
+        row.totalCut,
+        row.description,
+        row.cast,
+        row.shootingOrder,
+        row.notes
+      ];
+}
+
+function getPrintPersonDisplayValues(person: CallSheetPerson) {
+  return [person.name, person.role, person.callTime, person.callLocation, person.notes];
+}
+
+function getPrintTeamDisplayValues(team: TeamCallSheetRow) {
+  return [team.team, team.total, team.callTime, team.callLocation, team.notes];
 }
 
 type PrintTimetableRow = MobileDailyPlanTimetableRow;
@@ -3710,13 +4110,13 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     end: meal.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
     location: data.locations.find((location) => location.id === meal.locationId)?.name ?? "",
-    description: meal.memo || "기타 일정"
+    description: getDailyPlanAdditionalScheduleDisplay(meal)
   }));
 
   const orderedRows = hasExplicitTimetableOrder
     ? mergeDailyPlanTimetableRows(sceneRows, breakRows, data.meta.timetableRowOrder)
     : [...sceneRows, ...breakRows];
-  return orderedRows.concat(createBlankPrintRows(Math.max(0, 7 - orderedRows.length)));
+  return orderedRows;
 }
 
 function sortScenesNaturallyForPreview(scenes: DailyPlanPreviewScene[]) {
@@ -3744,27 +4144,6 @@ function getSceneNaturalNumber(value: string) {
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function createBlankPrintRows(count: number): PrintTimetableRow[] {
-  return Array.from({ length: count }, () => ({
-    type: "scene",
-    start: "",
-    end: "",
-    runtime: "",
-    location: "",
-    dayNight: "",
-    sceneNumber: "",
-    totalCut: "",
-    cast: "",
-    description: "",
-    shootingOrder: "",
-    notes: ""
-  }));
-}
-
-function padRows<T>(rows: T[], minLength: number) {
-  return [...rows, ...Array.from({ length: Math.max(0, minLength - rows.length) }, () => null as T | null)];
 }
 
 function isPrintableLocation(location: DailyPlanLocation) {
@@ -3988,16 +4367,6 @@ function getDailyPlanMainStaffRows(
   ].filter((member) => member.name.trim() || member.contact.trim());
 }
 
-function MainStaffPrintCells({ member }: { member: DailyPlanMainStaffRow }) {
-  return (
-    <>
-      <td className="border border-black">{member.role || "-"}</td>
-      <td className="border border-black">{member.name || "-"}</td>
-      <td colSpan={2} className="border border-black">{member.contact || "-"}</td>
-    </>
-  );
-}
-
 function joinMainStaffNames(rows: DailyPlanMainStaffRow[]) {
   return rows.map((member) => member.name).filter(Boolean).join(" / ");
 }
@@ -4101,7 +4470,10 @@ function buildPlanForSave(
     mealTimes: nextMeals,
     shootingLocation: nextLocations.map((location) => location.name.trim()).filter(Boolean).join(", "),
     mealTime: nextMeals
-      .map((meal) => [formatTimeRange(meal.startTime, meal.endTime), meal.memo].filter(Boolean).join(" / "))
+      .map((meal) => [
+        formatTimeRange(meal.startTime, meal.endTime),
+        getDailyPlanAdditionalScheduleDisplay(meal)
+      ].filter(Boolean).join(" / "))
       .filter(Boolean)
       .join(", ")
   };
@@ -4109,9 +4481,8 @@ function buildPlanForSave(
 
 function sanitizeManualLocation(location: DailyPlanLocation): DailyPlanLocation {
   return {
-    id: location.id,
-    name: location.name,
-    detail: location.detail,
+    ...location,
+    manualAddress: location.manualAddress ?? "",
     isPrimary: Boolean(location.isPrimary),
     address: location.address ?? "",
     roadAddress: location.roadAddress ?? ""
@@ -4119,20 +4490,77 @@ function sanitizeManualLocation(location: DailyPlanLocation): DailyPlanLocation 
 }
 
 function buildInitialLocations(plan: DailyPlanDraft): DailyPlanLocation[] {
-  if (plan.shootingLocations?.length) return plan.shootingLocations;
+  if (plan.shootingLocations?.length) {
+    return plan.shootingLocations.map(materializeLegacyManualLocation);
+  }
   if (plan.shootingLocation.trim()) return [{ id: makeLocalId("loc"), name: plan.shootingLocation, detail: "" }];
   return [createBlankLocation()];
 }
 
-function buildInitialMeals(plan: DailyPlanDraft): DailyPlanMealTime[] {
+function materializeLegacyManualLocation(location: DailyPlanLocation): DailyPlanLocation {
+  const storedAddress = getDailyPlanSearchAddress(location);
+  const shouldTreatAsManual = location.inputMode === "manual"
+    || (
+      location.inputMode === undefined
+      && Boolean(storedAddress)
+      && !hasDailyPlanLocationSearchMetadata(location)
+    );
+  if (!shouldTreatAsManual || location.manualAddress?.trim()) return location;
+  return {
+    ...location,
+    inputMode: "manual",
+    manualAddress: storedAddress
+  };
+}
+
+function buildLocationInputModes(locations: DailyPlanLocation[]): Record<string, LocationInputMode> {
+  return Object.fromEntries(
+    locations.flatMap((location) => {
+      const mode = location.inputMode === "search" || location.inputMode === "manual"
+        ? location.inputMode
+        : location.inputMode === "none"
+          ? undefined
+          : hasDailyPlanLocationSearchMetadata(location)
+            ? "search"
+            : getDailyPlanSearchAddress(location)
+              ? "manual"
+              : undefined;
+      return mode ? [[location.id, mode] as const] : [];
+    })
+  );
+}
+
+function buildInitialMeals(plan: DailyPlanDraft, isNewDailyPlan: boolean): DailyPlanMealTime[] {
   if (plan.mealTimes?.length) {
     return plan.mealTimes.map((meal) => {
       const runtimeMinutes = getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime);
-      return { ...meal, runtimeMinutes, runtime: formatRuntimeMinutes(runtimeMinutes) };
+      const legacyType = !meal.scheduleType && isDailyPlanAdditionalScheduleType(meal.memo)
+        ? meal.memo
+        : null;
+      return {
+        ...meal,
+        scheduleType: normalizeDailyPlanAdditionalScheduleType(meal.scheduleType ?? legacyType),
+        memo: legacyType ? "" : meal.memo,
+        runtimeMinutes,
+        runtime: formatRuntimeMinutes(runtimeMinutes)
+      };
     });
   }
-  if (plan.mealTime.trim()) return [{ id: makeLocalId("meal"), startTime: "", endTime: "", runtimeMinutes: null, runtime: "", memo: plan.mealTime }];
-  return [createBlankOtherSchedule()];
+  if (plan.mealTime.trim()) {
+    const legacyType = isDailyPlanAdditionalScheduleType(plan.mealTime.trim())
+      ? plan.mealTime.trim()
+      : null;
+    return [{
+      id: makeLocalId("meal"),
+      startTime: "",
+      endTime: "",
+      scheduleType: normalizeDailyPlanAdditionalScheduleType(legacyType),
+      runtimeMinutes: null,
+      runtime: "",
+      memo: legacyType ? "" : plan.mealTime
+    }];
+  }
+  return isNewDailyPlan ? [createBlankOtherSchedule("집합장소")] : [];
 }
 
 function formatSceneSourceOption(item: ProjectSceneItem, index: number) {
@@ -4443,16 +4871,20 @@ function createBlankLocation(): DailyPlanLocation {
     id: makeLocalId("loc"),
     name: "",
     detail: "",
+    manualAddress: "",
     address: "",
     roadAddress: ""
   };
 }
 
-function createBlankOtherSchedule(): DailyPlanMealTime {
+function createBlankOtherSchedule(
+  scheduleType: (typeof dailyPlanAdditionalScheduleTypes)[number] = "기타"
+): DailyPlanMealTime {
   return {
     id: makeLocalId("meal"),
     startTime: "",
     endTime: "",
+    scheduleType,
     runtimeMinutes: null,
     runtime: "",
     locationId: "",
@@ -4570,6 +5002,7 @@ function getAutomaticTimetableStartUpdates(
 function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
   return Boolean(
     event.endTime.trim()
+    || Boolean(event.scheduleType)
     || event.runtimeMinutes != null
     || event.runtime?.trim()
     || event.locationId?.trim()
@@ -5060,11 +5493,6 @@ function parseDurationMinutes(value: string) {
   if (!/^\d{1,4}$/.test(value)) return null;
   const minutes = Number(value);
   return Number.isInteger(minutes) && minutes >= 1 && minutes <= maxRuntimeMinutes ? minutes : null;
-}
-
-function getLocationAddress(location: Partial<DailyPlanLocation> | undefined) {
-  if (!location) return "";
-  return [location.roadAddress, location.address].find((value) => value?.trim()) ?? "";
 }
 
 function loadDaumPostcodeScript() {

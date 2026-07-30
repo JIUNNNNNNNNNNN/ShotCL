@@ -12,6 +12,10 @@ import type {
   ShotDraft,
   ShotStatus
 } from "@/lib/types";
+import {
+  isDailyPlanAdditionalScheduleType,
+  normalizeDailyPlanAdditionalScheduleType
+} from "@/lib/dailyPlan/additionalSchedule";
 import { normalizeProjectBasicInfo } from "@/lib/projectBasicInfo";
 
 type AnyRow = Record<string, any>;
@@ -47,6 +51,10 @@ function normalizeLocations(value: unknown): DailyPlanLocation[] {
       id: source.id || `loc_${index + 1}`,
       name: source.name || "",
       detail: source.detail || "",
+      inputMode: source.inputMode === "search" || source.inputMode === "manual" || source.inputMode === "none"
+        ? source.inputMode
+        : undefined,
+      manualAddress: source.manualAddress || "",
       isPrimary: Boolean(source.isPrimary),
       searchQuery: source.searchQuery || "",
       address: source.address || "",
@@ -66,14 +74,22 @@ export function normalizeDailyPlanMealTimes(value: unknown): DailyPlanMealTime[]
 
   return value.map((item, index) => {
     const source = item as Partial<DailyPlanMealTime> & { type?: string; time?: string };
+    const legacyMemo = source.memo || source.type || "";
+    const hasStoredType = isDailyPlanAdditionalScheduleType(source.scheduleType);
+    const inferredType = normalizeDailyPlanAdditionalScheduleType(
+      hasStoredType ? source.scheduleType : legacyMemo
+    );
     return {
       id: source.id || `meal_${index + 1}`,
       startTime: source.startTime || source.time || "",
       endTime: source.endTime || "",
+      scheduleType: hasStoredType || isDailyPlanAdditionalScheduleType(legacyMemo)
+        ? inferredType
+        : undefined,
       runtimeMinutes: typeof source.runtimeMinutes === "number" ? source.runtimeMinutes : null,
       runtime: source.runtime || "",
       locationId: source.locationId || "",
-      memo: source.memo || source.type || "",
+      memo: !hasStoredType && isDailyPlanAdditionalScheduleType(legacyMemo) ? "" : legacyMemo,
       progressMemo: source.progressMemo || "",
       imageUrl: source.imageUrl || null
     };

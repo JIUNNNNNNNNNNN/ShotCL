@@ -1,6 +1,7 @@
 "use client";
 
 import { Clock3 } from "lucide-react";
+import { getDailyPlanAdditionalScheduleDisplay } from "@/lib/dailyPlan/additionalSchedule";
 import type { DailyPlanMealTime } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +14,7 @@ type ProgressScheduleCardProps = {
 /** 촬영 컷이 아닌 기타 일정을 진행표 순서 안에 표시합니다. */
 export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressScheduleCardProps) {
   const time = formatScheduleTimeRange(item.startTime, item.endTime);
-  const title = item.memo.trim() || "기타 일정";
+  const title = getDailyPlanAdditionalScheduleDisplay(item);
 
   return (
     <article

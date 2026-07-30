@@ -284,16 +284,48 @@ a[class*="min-h-"][class*="items-center"] {
   color: #000000;
   --daily-plan-section-line: rgba(28, 28, 28, 0.82);
   --daily-plan-card-line: rgba(78, 78, 78, 0.68);
+  --daily-plan-header-fill: #f2f2f2;
+  --daily-plan-accent-fill: #fbf5f5;
+  --daily-plan-summary-fill: #f3f8f1;
+  --daily-plan-event-fill: #fffaf0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
 .daily-plan-print-document {
   --daily-plan-section-line: rgba(28, 28, 28, 0.82);
   --daily-plan-card-line: rgba(78, 78, 78, 0.68);
+  --daily-plan-header-fill: #f2f2f2;
+  --daily-plan-accent-fill: #fbf5f5;
+  --daily-plan-summary-fill: #f3f8f1;
+  --daily-plan-event-fill: #fffaf0;
+}
+
+.daily-plan-preview-surface {
+  --daily-plan-header-fill: #f2f2f2;
+  --daily-plan-accent-fill: #fbf5f5;
+  --daily-plan-summary-fill: #f3f8f1;
+  --daily-plan-event-fill: #fffaf0;
+}
+
+.daily-plan-preview-header {
+  background-color: var(--daily-plan-header-fill);
+}
+
+.daily-plan-preview-accent {
+  background-color: var(--daily-plan-accent-fill);
+}
+
+.daily-plan-preview-summary {
+  background-color: var(--daily-plan-summary-fill);
+}
+
+.daily-plan-preview-event {
+  background-color: var(--daily-plan-event-fill);
 }
 
 .daily-plan-template table,
-.daily-plan-template .daily-plan-grid {
+.daily-plan-template .daily-plan-grid,
+.daily-plan-print-document .daily-plan-grid {
   table-layout: fixed;
 }
 

@@ -1,4 +1,5 @@
 import type { DailyPlan, DailyPlanDraft, DailyPlanShot, DailyPlanShotDraft, ShotDraft } from "@/lib/types";
+import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
 
 /** 일촬표 행을 회차별 컷 진행 데이터로 변환합니다. 기타 일정과 비어 있는 씬은 제외합니다. */
 export function buildProgressShotDrafts(
@@ -22,7 +23,7 @@ export function buildProgressShotDrafts(
       const cutNumber = String(index + 1);
       const location = findDailyPlanLocation(plan.shootingLocations ?? [], shot);
       const locationAddress = formatDailyPlanLocationAddress(location);
-      const locationMapUrl = location?.naverMapUrl ?? "";
+      const locationMapUrl = location?.inputMode === "manual" ? "" : location?.naverMapUrl ?? "";
       const timeMemo = [shot.startTime, shot.endTime].filter(Boolean).join("~");
       const sceneMemo = stripShootingOrderMetadata(shot.sceneMemo ?? "");
       const extraMemo = [
@@ -72,5 +73,5 @@ function findDailyPlanLocation(locations: DailyPlan["shootingLocations"], shot: 
 
 function formatDailyPlanLocationAddress(location: DailyPlan["shootingLocations"][number] | undefined) {
   if (!location) return "";
-  return [location.roadAddress, location.address].find((value) => value?.trim()) ?? location.detail ?? "";
+  return getDailyPlanLocationAddress(location) || location.detail || "";
 }

@@ -6,6 +6,7 @@ import {
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
+import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
 import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 
 export type DerivedGatheringDepartment = {
@@ -112,7 +113,7 @@ export function deriveDailyPlanGatheringPoints(
       locationId: locationId || null,
       locationName,
       address: location ? getLocationAddress(location) : String(storedPoint?.address ?? "").trim(),
-      mapUrl: location?.naverMapUrl?.trim() || "",
+      mapUrl: location?.inputMode === "manual" ? "" : location?.naverMapUrl?.trim() || "",
       note: uniqueText([department.note, storedPoint?.note]),
       departments: [department],
       photos: storedPoint?.photos ?? []
@@ -436,7 +437,7 @@ function findLocation(locations: DailyPlanLocation[], locationId: string, locati
 }
 
 function getLocationAddress(location: DailyPlanLocation) {
-  return String(location.roadAddress || location.address || location.detail || "").trim();
+  return getDailyPlanLocationAddress(location) || String(location.detail || "").trim();
 }
 
 function unique(values: Array<string | undefined>) {
