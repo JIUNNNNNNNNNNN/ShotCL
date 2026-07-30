@@ -6,6 +6,7 @@ import { getKoreanWeatherRegionLabel } from "@/lib/koreanWeatherRegions";
 
 import {
   KOREA_WEATHER_REGION_CALLOUTS,
+  KOREA_WEATHER_REGION_COMPACT_LABELS,
   KOREA_WEATHER_REGION_PATHS,
   KOREA_WEATHER_REGION_VALUES,
   type KoreaWeatherRegionCallout,
@@ -20,8 +21,13 @@ type KoreaWeatherRegionMapProps = {
   ariaLabel?: string;
 };
 
-const CALLOUT_WIDTH = 68;
-const CALLOUT_HEIGHT = 34;
+const CALLOUT_WIDTH = 60;
+const CALLOUT_HEIGHT = 28;
+const CALLOUT_HIT_X_PADDING = 6;
+const CALLOUT_HIT_Y_PADDING = 22;
+const CITY_PATH_HIT_RADIUS = 15;
+const COMPACT_VIEW_BOX = "-4 -4 564 616";
+const JEJU_INSET_TRANSFORM = "translate(250 -145)";
 
 const calloutByRegion = new Map<KoreaWeatherRegionValue, KoreaWeatherRegionCallout>(
   KOREA_WEATHER_REGION_CALLOUTS.map((callout) => [callout.value, callout])
@@ -41,21 +47,12 @@ function Callout({
 
   return (
     <>
-      <line
-        className="korea-weather-map-connector"
-        x1={callout.anchorX}
-        y1={callout.anchorY}
-        x2={centerX}
-        y2={centerY}
-        vectorEffect="non-scaling-stroke"
-        aria-hidden="true"
-      />
       <rect
         className="korea-weather-map-callout-hit"
-        x={callout.x - 8}
-        y={callout.y - 18}
-        width={CALLOUT_WIDTH + 16}
-        height={CALLOUT_HEIGHT + 36}
+        x={callout.x - CALLOUT_HIT_X_PADDING}
+        y={callout.y - CALLOUT_HIT_Y_PADDING}
+        width={CALLOUT_WIDTH + CALLOUT_HIT_X_PADDING * 2}
+        height={CALLOUT_HEIGHT + CALLOUT_HIT_Y_PADDING * 2}
         aria-hidden="true"
       />
       <rect
@@ -110,7 +107,7 @@ export function KoreaWeatherRegionMap({
   return (
     <svg
       className={`korea-weather-region-map ${className}`.trim()}
-      viewBox="0 0 560 759"
+      viewBox={COMPACT_VIEW_BOX}
       preserveAspectRatio="xMidYMid meet"
       role="group"
       aria-label={ariaLabel}
@@ -119,7 +116,9 @@ export function KoreaWeatherRegionMap({
         .korea-weather-region-map {
           display: block;
           width: 100%;
-          height: auto;
+          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
           overflow: visible;
           touch-action: manipulation;
         }
@@ -157,6 +156,11 @@ export function KoreaWeatherRegionMap({
           stroke-width: 3;
         }
 
+        .korea-weather-map-region:focus-visible .korea-weather-map-province-hit {
+          stroke: #c45a2c;
+          stroke-width: 2;
+        }
+
         .korea-weather-map-region-label,
         .korea-weather-map-callout-label {
           fill: #173c31;
@@ -164,7 +168,7 @@ export function KoreaWeatherRegionMap({
             "Noto Sans KR", sans-serif;
           font-weight: 750;
           text-anchor: middle;
-          dominant-baseline: central;
+          dominant-baseline: middle;
           pointer-events: none;
           user-select: none;
         }
@@ -182,6 +186,11 @@ export function KoreaWeatherRegionMap({
           fill: #ffffff;
         }
 
+        .korea-weather-map-region[data-selected="false"][data-disabled="false"]:hover
+          .korea-weather-map-region-label {
+          fill: #c45a2c;
+        }
+
         .korea-weather-map-connector {
           stroke: #6e776f;
           stroke-width: 1.25;
@@ -194,7 +203,8 @@ export function KoreaWeatherRegionMap({
         }
 
         .korea-weather-map-city-hit,
-        .korea-weather-map-callout-hit {
+        .korea-weather-map-callout-hit,
+        .korea-weather-map-province-hit {
           fill: transparent;
           stroke: transparent;
           pointer-events: all;
@@ -203,21 +213,17 @@ export function KoreaWeatherRegionMap({
 
       {KOREA_WEATHER_REGION_PATHS.map((region) => {
         const selected = selectedValue === region.value;
-        const callout = calloutByRegion.get(region.value);
+        const transform = region.value === "제주" ? JEJU_INSET_TRANSFORM : undefined;
 
         return (
           <g
-            key={region.value}
+            key={`${region.value}-surface`}
             className="korea-weather-map-region"
-            role="button"
-            tabIndex={interactive ? 0 : -1}
-            aria-label={`${region.value} 선택`}
-            aria-pressed={selected}
-            aria-disabled={!interactive}
+            aria-hidden="true"
             data-selected={selected ? "true" : "false"}
             data-disabled={interactive ? "false" : "true"}
+            transform={transform}
             onClick={() => selectRegion(region.value)}
-            onKeyDown={(event) => handleKeyDown(event, region.value)}
           >
             <path
               className="korea-weather-map-surface"
@@ -226,30 +232,100 @@ export function KoreaWeatherRegionMap({
               vectorEffect="non-scaling-stroke"
               aria-hidden="true"
             />
+          </g>
+        );
+      })}
 
-            {callout ? (
-              <>
-                <circle
-                  className="korea-weather-map-city-hit"
-                  cx={callout.anchorX}
-                  cy={callout.anchorY}
-                  r={18}
-                  aria-hidden="true"
-                />
-                <Callout callout={callout} />
-              </>
-            ) : null}
+      {KOREA_WEATHER_REGION_PATHS.map((region) => {
+        if (!region.label || calloutByRegion.has(region.value)) return null;
+        const selected = selectedValue === region.value;
+        const label = KOREA_WEATHER_REGION_COMPACT_LABELS[region.value] ?? region.label;
+        const transform = region.value === "제주" ? JEJU_INSET_TRANSFORM : undefined;
 
-            {region.label ? (
-              <text
-                className="korea-weather-map-region-label"
-                x={region.label.x}
-                y={region.label.y}
-                aria-hidden="true"
-              >
-                {region.value}
-              </text>
-            ) : null}
+        return (
+          <g
+            key={`${region.value}-label`}
+            className="korea-weather-map-region"
+            role="button"
+            tabIndex={interactive ? 0 : -1}
+            aria-label={`${region.value} 선택`}
+            aria-pressed={selected}
+            aria-disabled={!interactive}
+            data-selected={selected ? "true" : "false"}
+            data-disabled={interactive ? "false" : "true"}
+            transform={transform}
+            onClick={() => selectRegion(region.value)}
+            onKeyDown={(event) => handleKeyDown(event, region.value)}
+          >
+            <rect
+              className="korea-weather-map-province-hit"
+              x={label.x - 26}
+              y={label.y - 20}
+              width={52}
+              height={40}
+              vectorEffect="non-scaling-stroke"
+              aria-hidden="true"
+            />
+            <text
+              className="korea-weather-map-region-label"
+              x={label.x}
+              y={label.y}
+              aria-hidden="true"
+            >
+              {region.value}
+            </text>
+          </g>
+        );
+      })}
+
+      {KOREA_WEATHER_REGION_CALLOUTS.map((callout) => {
+        const selected = selectedValue === callout.value;
+
+        return (
+          <g
+            key={`${callout.value}-connector`}
+            className="korea-weather-map-region"
+            data-selected={selected ? "true" : "false"}
+            data-disabled={interactive ? "false" : "true"}
+            aria-hidden="true"
+          >
+            <line
+              className="korea-weather-map-connector"
+              x1={callout.anchorX}
+              y1={callout.anchorY}
+              x2={callout.x + CALLOUT_WIDTH / 2}
+              y2={callout.y + CALLOUT_HEIGHT / 2}
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle
+              className="korea-weather-map-city-hit"
+              cx={callout.anchorX}
+              cy={callout.anchorY}
+              r={CITY_PATH_HIT_RADIUS}
+              onClick={() => selectRegion(callout.value)}
+            />
+          </g>
+        );
+      })}
+
+      {KOREA_WEATHER_REGION_CALLOUTS.map((callout) => {
+        const selected = selectedValue === callout.value;
+
+        return (
+          <g
+            key={`${callout.value}-callout`}
+            className="korea-weather-map-region"
+            role="button"
+            tabIndex={interactive ? 0 : -1}
+            aria-label={`${callout.value} 선택`}
+            aria-pressed={selected}
+            aria-disabled={!interactive}
+            data-selected={selected ? "true" : "false"}
+            data-disabled={interactive ? "false" : "true"}
+            onClick={() => selectRegion(callout.value)}
+            onKeyDown={(event) => handleKeyDown(event, callout.value)}
+          >
+            <Callout callout={callout} />
           </g>
         );
       })}

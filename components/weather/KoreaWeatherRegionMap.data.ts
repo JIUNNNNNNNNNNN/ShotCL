@@ -44,12 +44,27 @@ export type KoreaWeatherRegionCallout = {
 };
 
 export const KOREA_WEATHER_REGION_CALLOUTS: readonly KoreaWeatherRegionCallout[] = [
-  { value: "인천", x: 72, y: 122, anchorX: 226, anchorY: 155 },
-  { value: "서울", x: 192, y: 88, anchorX: 261, anchorY: 148 },
-  { value: "세종", x: 184, y: 231, anchorX: 290, anchorY: 285 },
-  { value: "대전", x: 190, y: 304, anchorX: 305, anchorY: 315 },
-  { value: "광주", x: 142, y: 447, anchorX: 241, anchorY: 478 },
-  { value: "대구", x: 471, y: 326, anchorX: 436, anchorY: 385 },
-  { value: "울산", x: 474, y: 387, anchorX: 513, anchorY: 422 },
-  { value: "부산", x: 471, y: 452, anchorX: 494, anchorY: 470 },
+  { value: "인천", x: 74, y: 128, anchorX: 226, anchorY: 155 },
+  { value: "서울", x: 184, y: 82, anchorX: 261, anchorY: 148 },
+  { value: "세종", x: 172, y: 215, anchorX: 290, anchorY: 285 },
+  { value: "대전", x: 166, y: 298, anchorX: 305, anchorY: 315 },
+  { value: "광주", x: 134, y: 446, anchorX: 241, anchorY: 478 },
+  { value: "대구", x: 490, y: 310, anchorX: 436, anchorY: 385 },
+  { value: "울산", x: 484, y: 390, anchorX: 513, anchorY: 422 },
+  { value: "부산", x: 470, y: 470, anchorX: 494, anchorY: 470 },
 ];
+
+/** compact 지도에서 도 이름과 광역시 callout이 겹치지 않는 시각 중심점입니다. */
+export const KOREA_WEATHER_REGION_COMPACT_LABELS: Readonly<
+  Partial<Record<KoreaWeatherRegionValue, { x: number; y: number }>>
+> = {
+  경기: { x: 306, y: 184 },
+  강원: { x: 414, y: 120 },
+  충북: { x: 390, y: 270 },
+  충남: { x: 260, y: 338 },
+  전북: { x: 286, y: 408 },
+  전남: { x: 270, y: 530 },
+  경북: { x: 454, y: 292 },
+  경남: { x: 396, y: 462 },
+  제주: { x: 208, y: 725 }
+};

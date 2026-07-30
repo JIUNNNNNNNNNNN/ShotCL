@@ -4,7 +4,7 @@ import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -63,8 +63,7 @@ import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
   getKoreanWeatherRegionQuery,
-  resolveKoreanWeatherRegion,
-  type KoreanWeatherRegion
+  resolveKoreanWeatherRegion
 } from "@/lib/koreanWeatherRegions";
 import {
   getProjectMainStaffForEpisode,
@@ -83,7 +82,7 @@ import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { KoreaWeatherRegionMap } from "@/components/weather/KoreaWeatherRegionMap";
+import { WeatherRegionPicker } from "@/components/weather/WeatherRegionPicker";
 import { Button } from "@/components/ui/Button";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -2462,87 +2461,6 @@ function EditableWeatherCard({
       <span className="text-[11px] font-black text-field-muted">{label}</span>
       <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
-  );
-}
-
-function WeatherRegionPicker({
-  value,
-  onChange
-}: {
-  value: string;
-  onChange: (region: KoreanWeatherRegion | null) => void;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
-  const selected = resolveKoreanWeatherRegion(value);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setIsOpen(false);
-      triggerRef.current?.focus();
-    };
-
-    document.addEventListener("pointerdown", handleOutsidePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("pointerdown", handleOutsidePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isOpen]);
-
-  const selectRegion = (regionValue: string) => {
-    const region = resolveKoreanWeatherRegion(regionValue);
-    if (!region) return;
-    onChange(region);
-    setIsOpen(false);
-    requestAnimationFrame(() => triggerRef.current?.focus());
-  };
-
-  return (
-    <div ref={rootRef} className="min-w-0">
-      <button
-        ref={triggerRef}
-        type="button"
-        className="grid min-h-11 w-full grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-[3px] border border-field-border bg-white px-3 py-2 text-left transition-colors hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-        onClick={() => setIsOpen((current) => !current)}
-        aria-expanded={isOpen}
-        aria-controls={panelId}
-        aria-label={`날씨 기준 지역 ${selected?.label ?? "지역 선택"}`}
-      >
-        <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
-        <span className="truncate text-sm font-black text-field-text">
-          {selected?.label ?? "지역 선택"}
-        </span>
-        <ChevronDown
-          className={`h-4 w-4 text-field-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
-
-      {isOpen ? (
-        <div
-          id={panelId}
-          className="mt-2 w-full max-w-full overflow-hidden rounded-[3px] border border-field-border bg-field-bg p-2 sm:p-3"
-          aria-label="대한민국 날씨 기준 지역 지도"
-        >
-          <div className="mx-auto w-full max-w-[22rem]">
-            <KoreaWeatherRegionMap
-              value={selected?.label ?? ""}
-              onSelect={selectRegion}
-            />
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }
 
