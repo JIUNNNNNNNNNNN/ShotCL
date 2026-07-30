@@ -97,6 +97,39 @@ export type OptimizedArchiveImage = {
   thumbnailFile: File;
 };
 
+export type ArchiveCropBatchRequest = {
+  page: ArchiveImportPage;
+  crop: RelativeCrop;
+  filename: string;
+};
+
+export type ArchiveCropBatchFiles = {
+  displayFile: File;
+  thumbnailFile: File;
+  timings: {
+    cropDrawMs: number;
+    imageEncodeMs: number;
+  };
+};
+
+export type ArchiveCropBatchProgress = {
+  completedCount: number;
+  totalCount: number;
+  succeededCount: number;
+  failedCount: number;
+};
+
+export type ArchiveCropBatchOptions = {
+  concurrency?: number;
+  onProgress?: (progress: ArchiveCropBatchProgress) => void;
+};
+
+export type ArchiveCropSession = {
+  pageId: string;
+  createFiles: (crop: RelativeCrop, filename: string) => Promise<ArchiveCropBatchFiles>;
+  close: () => void;
+};
+
 const ARCHIVE_DISPLAY_MAX_SIDE = 1600;
 const ARCHIVE_THUMBNAIL_MAX_SIDE = 420;
 const ARCHIVE_DISPLAY_QUALITY = 0.78;
@@ -167,19 +200,23 @@ export async function renderArchivePdfPages(
       const canvas = documentCanvas(viewport.width, viewport.height);
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("PDF 페이지 캔버스를 준비하지 못했습니다.");
-      await page.render({ canvas, canvasContext: context, viewport }).promise;
-      const blob = await canvasBlob(canvas, "image/jpeg", ARCHIVE_DISPLAY_QUALITY);
-      pages.push({
-        id: `pdf-${sourceFileIndex}-${pageIndex}`,
-        index: pageIndex,
-        sourceFileIndex,
-        name: `${stripExtension(file.name)}-${pageIndex + 1}.jpg`,
-        width: canvas.width,
-        height: canvas.height,
-        previewUrl: URL.createObjectURL(blob),
-        blob
-      });
-      page.cleanup();
+      try {
+        await page.render({ canvas, canvasContext: context, viewport }).promise;
+        const blob = await canvasBlob(canvas, "image/jpeg", ARCHIVE_DISPLAY_QUALITY);
+        pages.push({
+          id: `pdf-${sourceFileIndex}-${pageIndex}`,
+          index: pageIndex,
+          sourceFileIndex,
+          name: `${stripExtension(file.name)}-${pageIndex + 1}.jpg`,
+          width: canvas.width,
+          height: canvas.height,
+          previewUrl: URL.createObjectURL(blob),
+          blob
+        });
+      } finally {
+        releaseCanvas(canvas);
+        page.cleanup();
+      }
       onProgress?.(pageIndex + 1, document.numPages);
     }
     return pages;
@@ -445,6 +482,118 @@ export function createStoryboardAutoCrops(
   return createStoryboardGridCells(template, page, origin);
 }
 
+/**
+ * 같은 PDF 페이지나 이미지에서 여러 crop을 만들 때 디코딩된 원본을 공유합니다.
+ * close 도중 실행 중인 createFiles가 있으면 마지막 작업이 끝난 직후 원본을 정리합니다.
+ */
+export async function createArchiveCropSession(
+  page: Pick<ArchiveImportPage, "id" | "blob">
+): Promise<ArchiveCropSession> {
+  const decoded = await decodeArchiveImage(page.blob);
+  let activeCount = 0;
+  let closeRequested = false;
+  let closed = false;
+
+  function releaseSource() {
+    if (closed || !closeRequested || activeCount > 0) return;
+    closed = true;
+    decoded.close();
+  }
+
+  return {
+    pageId: page.id,
+    async createFiles(crop, filename) {
+      if (closeRequested || closed) {
+        throw new Error("이미 종료된 crop source는 다시 사용할 수 없습니다.");
+      }
+      activeCount += 1;
+      try {
+        return await createArchiveCropFilesFromSource(decoded, crop, filename);
+      } finally {
+        activeCount -= 1;
+        releaseSource();
+        await yieldArchiveMainThread();
+      }
+    },
+    close() {
+      closeRequested = true;
+      releaseSource();
+    }
+  };
+}
+
+/**
+ * 요청을 page별로 묶고 각 page Blob을 한 번만 디코딩해 display/thumbnail을 함께 만듭니다.
+ * 결과의 index는 입력 배열의 원래 index이므로 부분 실패를 안전하게 원본 요청에 연결할 수 있습니다.
+ */
+export async function createCroppedArchiveFilesBatch(
+  requests: ArchiveCropBatchRequest[],
+  options: ArchiveCropBatchOptions = {}
+): Promise<Array<SettledMapFulfilled<ArchiveCropBatchFiles> | SettledMapRejected>> {
+  if (requests.length === 0) return [];
+
+  type PageGroup = {
+    page: ArchiveImportPage;
+    remainingCount: number;
+    sessionPromise: Promise<ArchiveCropSession> | null;
+  };
+
+  const pageGroups = new Map<string, PageGroup>();
+  for (const request of requests) {
+    const key = archiveCropPageKey(request.page);
+    const existing = pageGroups.get(key);
+    if (existing) {
+      existing.remainingCount += 1;
+    } else {
+      pageGroups.set(key, {
+        page: request.page,
+        remainingCount: 1,
+        sessionPromise: null
+      });
+    }
+  }
+
+  const totalCount = requests.length;
+  let completedCount = 0;
+  let succeededCount = 0;
+  let failedCount = 0;
+  const requestedConcurrency = options.concurrency ?? 3;
+  const concurrency = Number.isFinite(requestedConcurrency)
+    ? Math.min(4, Math.max(1, Math.floor(requestedConcurrency)))
+    : 3;
+
+  return mapSettledWithConcurrency(requests, concurrency, async (request) => {
+    const group = pageGroups.get(archiveCropPageKey(request.page));
+    if (!group) throw new Error("crop source page를 찾을 수 없습니다.");
+    if (!group.sessionPromise) {
+      group.sessionPromise = createArchiveCropSession(group.page);
+    }
+
+    try {
+      const session = await group.sessionPromise;
+      const files = await session.createFiles(request.crop, request.filename);
+      succeededCount += 1;
+      return files;
+    } catch (error) {
+      failedCount += 1;
+      throw error;
+    } finally {
+      completedCount += 1;
+      group.remainingCount -= 1;
+      if (group.remainingCount === 0 && group.sessionPromise) {
+        void group.sessionPromise.then((session) => session.close()).catch(() => undefined);
+        group.sessionPromise = null;
+      }
+      notifyArchiveCropProgress(options.onProgress, {
+        completedCount,
+        totalCount,
+        succeededCount,
+        failedCount
+      });
+    }
+  });
+}
+
 export async function createCroppedArchiveFile(
   page: ArchiveImportPage,
   crop: RelativeCrop,
@@ -461,19 +610,23 @@ export async function createCroppedArchiveFile(
   const canvas = documentCanvas(targetWidth, targetHeight);
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("crop 캔버스를 준비하지 못했습니다.");
-  context.drawImage(
-    image,
-    sourceX,
-    sourceY,
-    Math.min(sourceWidth, image.naturalWidth - sourceX),
-    Math.min(sourceHeight, image.naturalHeight - sourceY),
-    0,
-    0,
-    targetWidth,
-    targetHeight
-  );
-  const blob = await canvasBlob(canvas, "image/jpeg", ARCHIVE_DISPLAY_QUALITY);
-  return new File([blob], ensureJpegName(filename), { type: "image/jpeg" });
+  try {
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      Math.min(sourceWidth, image.naturalWidth - sourceX),
+      Math.min(sourceHeight, image.naturalHeight - sourceY),
+      0,
+      0,
+      targetWidth,
+      targetHeight
+    );
+    const blob = await canvasBlob(canvas, "image/jpeg", ARCHIVE_DISPLAY_QUALITY);
+    return new File([blob], ensureJpegName(filename), { type: "image/jpeg" });
+  } finally {
+    releaseCanvas(canvas);
+  }
 }
 
 export async function optimizeArchiveImage(file: File): Promise<OptimizedArchiveImage> {
@@ -549,13 +702,24 @@ async function resizeImage(
   const canvas = documentCanvas(sourceWidth * scale, sourceHeight * scale);
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("이미지 최적화 캔버스를 준비하지 못했습니다.");
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvasBlob(canvas, "image/jpeg", quality);
+  try {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return await canvasBlob(canvas, "image/jpeg", quality);
+  } finally {
+    releaseCanvas(canvas);
+  }
 }
 
-async function decodeArchiveImage(file: File) {
+type DecodedArchiveImage = {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  close: () => void;
+};
+
+async function decodeArchiveImage(file: Blob): Promise<DecodedArchiveImage> {
   if (typeof createImageBitmap === "function") {
     try {
       const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
@@ -584,6 +748,140 @@ async function decodeArchiveImage(file: File) {
     URL.revokeObjectURL(sourceUrl);
     throw error;
   }
+}
+
+async function createArchiveCropFilesFromSource(
+  decoded: DecodedArchiveImage,
+  crop: RelativeCrop,
+  filename: string
+): Promise<ArchiveCropBatchFiles> {
+  const sourceX = Math.min(decoded.width - 1, Math.round(clamp(crop.x) * decoded.width));
+  const sourceY = Math.min(decoded.height - 1, Math.round(clamp(crop.y) * decoded.height));
+  const sourceWidth = Math.max(1, Math.round(clamp(crop.width, 0.01) * decoded.width));
+  const sourceHeight = Math.max(1, Math.round(clamp(crop.height, 0.01) * decoded.height));
+  const safeSourceWidth = Math.max(1, Math.min(sourceWidth, decoded.width - sourceX));
+  const safeSourceHeight = Math.max(1, Math.min(sourceHeight, decoded.height - sourceY));
+  const displayScale = Math.min(
+    1,
+    ARCHIVE_DISPLAY_MAX_SIDE / Math.max(safeSourceWidth, safeSourceHeight)
+  );
+  const thumbnailScale = Math.min(
+    1,
+    ARCHIVE_THUMBNAIL_MAX_SIDE / Math.max(safeSourceWidth, safeSourceHeight)
+  );
+  const displayCanvas = documentCanvas(
+    safeSourceWidth * displayScale,
+    safeSourceHeight * displayScale
+  );
+  const thumbnailCanvas = documentCanvas(
+    safeSourceWidth * thumbnailScale,
+    safeSourceHeight * thumbnailScale
+  );
+
+  try {
+    const drawStartedAt = archiveClientNow();
+    drawArchiveCrop(
+      displayCanvas,
+      decoded.source,
+      sourceX,
+      sourceY,
+      safeSourceWidth,
+      safeSourceHeight
+    );
+    drawArchiveCrop(
+      thumbnailCanvas,
+      decoded.source,
+      sourceX,
+      sourceY,
+      safeSourceWidth,
+      safeSourceHeight
+    );
+    const cropDrawMs = archiveClientNow() - drawStartedAt;
+    const encodeStartedAt = archiveClientNow();
+    const [displayBlob, thumbnailBlob] = await Promise.all([
+      canvasBlob(displayCanvas, "image/jpeg", ARCHIVE_DISPLAY_QUALITY),
+      canvasBlob(thumbnailCanvas, "image/jpeg", ARCHIVE_THUMBNAIL_QUALITY)
+    ]);
+    const imageEncodeMs = archiveClientNow() - encodeStartedAt;
+    return {
+      displayFile: new File([displayBlob], ensureJpegName(filename), { type: "image/jpeg" }),
+      thumbnailFile: new File(
+        [thumbnailBlob],
+        `${stripExtension(filename)}-thumb.jpg`,
+        { type: "image/jpeg" }
+      ),
+      timings: {
+        cropDrawMs,
+        imageEncodeMs
+      }
+    };
+  } finally {
+    releaseCanvas(displayCanvas);
+    releaseCanvas(thumbnailCanvas);
+  }
+}
+
+function drawArchiveCrop(
+  canvas: HTMLCanvasElement,
+  source: CanvasImageSource,
+  sourceX: number,
+  sourceY: number,
+  sourceWidth: number,
+  sourceHeight: number
+) {
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("crop 캔버스를 준비하지 못했습니다.");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(
+    source,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+}
+
+function releaseCanvas(canvas: HTMLCanvasElement) {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+function archiveCropPageKey(page: Pick<ArchiveImportPage, "id" | "sourceFileIndex">) {
+  return `${page.sourceFileIndex}:${page.id}`;
+}
+
+function notifyArchiveCropProgress(
+  onProgress: ArchiveCropBatchOptions["onProgress"],
+  progress: ArchiveCropBatchProgress
+) {
+  if (!onProgress) return;
+  try {
+    onProgress(progress);
+  } catch {
+    // 진행 UI 오류가 이미지 생성 결과에 영향을 주지 않게 합니다.
+  }
+}
+
+async function yieldArchiveMainThread() {
+  const scheduler = (
+    globalThis as typeof globalThis & {
+      scheduler?: { yield?: () => Promise<void> };
+    }
+  ).scheduler;
+  if (typeof scheduler?.yield === "function") {
+    await scheduler.yield();
+    return;
+  }
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+}
+
+function archiveClientNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function loadImage(url: string) {

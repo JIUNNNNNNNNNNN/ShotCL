@@ -12,6 +12,93 @@ import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type ApiError = { error?: string; detail?: string };
 
+export type ProjectReferenceAssetUploadMetadata = {
+  assetId?: string;
+  dailyPlanId?: string;
+  sceneNo?: string;
+  cutNo?: string;
+  shotRef?: string;
+  groupId?: string;
+  cropRatio?: number | null;
+  cropX?: number;
+  cropY?: number;
+  cropWidth?: number;
+  cropHeight?: number;
+  sourceType?: ProjectReferenceCrop["sourceType"];
+  sourceAssetId?: string;
+  pageIndex?: number;
+  sourceFilename?: string;
+  sourceKind?: ProjectReferenceCrop["sourceKind"];
+  sourcePageNumber?: number;
+  importBatchId?: string;
+  templateId?: string;
+  manuallyPositioned?: boolean;
+  customSize?: boolean;
+  title?: string;
+  memo?: string;
+  sortOrder?: number;
+  basePageWidth?: number;
+  basePageHeight?: number;
+  templateCropWidth?: number;
+  templateCropHeight?: number;
+  aspectRatio?: number;
+  clickPlacementMode?: "center";
+  centerX?: number;
+  centerY?: number;
+  cropOrderIndex?: number;
+  rowStep?: number;
+  rowsPerPage?: number;
+  targetColumn?: "storyboard";
+  includeContext?: false;
+  folderId?: string | null;
+  originalFolderName?: string;
+  relativePath?: string;
+  displayName?: string;
+  originalFilename?: string;
+  episodeNumber?: number;
+  sceneId?: string;
+  sceneNumber?: string;
+  cutNumber?: number;
+  cropIndex?: number;
+  thumbnailFile?: File;
+};
+
+export type StoryboardCropBulkUploadItem = {
+  clientResultId: string;
+  file: File;
+  thumbnailFile: File;
+  metadata: ProjectReferenceAssetUploadMetadata & {
+    assetId: string;
+    importBatchId: string;
+    cropIndex: number;
+    sourceType: "image_crop" | "pdf_crop";
+  };
+};
+
+export type StoryboardCropBulkUploadItemResult = {
+  clientResultId: string;
+  assetId: string;
+  status: "saved" | "existing" | "failed";
+  asset?: ProjectReferenceAsset;
+  error?: string;
+};
+
+export type StoryboardCropBulkUploadResult = {
+  results: StoryboardCropBulkUploadItemResult[];
+  assets: ProjectReferenceAsset[];
+  storageCleanupWarning: string;
+  timings: {
+    requestMs: number;
+    uploadMs: number;
+    databaseMs: number;
+    totalMs: number;
+    requestCount: number;
+  };
+};
+
+const STORYBOARD_BULK_MAX_COUNT = 8;
+const STORYBOARD_BULK_MAX_BYTES = 3 * 1024 * 1024;
+
 async function fetchArchiveApi(input: RequestInfo | URL, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   const supabase = getSupabaseBrowserClient();
@@ -90,56 +177,7 @@ export async function uploadProjectReferenceAsset(
   projectId: string,
   assetType: ProjectReferenceAssetType,
   file: File,
-  metadata: {
-    assetId?: string;
-    dailyPlanId?: string;
-    sceneNo?: string;
-    cutNo?: string;
-    shotRef?: string;
-    groupId?: string;
-    cropRatio?: number | null;
-    cropX?: number;
-    cropY?: number;
-    cropWidth?: number;
-    cropHeight?: number;
-    sourceType?: ProjectReferenceCrop["sourceType"];
-    sourceAssetId?: string;
-    pageIndex?: number;
-    sourceFilename?: string;
-    sourceKind?: ProjectReferenceCrop["sourceKind"];
-    sourcePageNumber?: number;
-    importBatchId?: string;
-    templateId?: string;
-    manuallyPositioned?: boolean;
-    customSize?: boolean;
-    title?: string;
-    memo?: string;
-    sortOrder?: number;
-    basePageWidth?: number;
-    basePageHeight?: number;
-    templateCropWidth?: number;
-    templateCropHeight?: number;
-    aspectRatio?: number;
-    clickPlacementMode?: "center";
-    centerX?: number;
-    centerY?: number;
-    cropOrderIndex?: number;
-    rowStep?: number;
-    rowsPerPage?: number;
-    targetColumn?: "storyboard";
-    includeContext?: false;
-    folderId?: string | null;
-    originalFolderName?: string;
-    relativePath?: string;
-    displayName?: string;
-    originalFilename?: string;
-    episodeNumber?: number;
-    sceneId?: string;
-    sceneNumber?: string;
-    cutNumber?: number;
-    cropIndex?: number;
-    thumbnailFile?: File;
-  } = {}
+  metadata: ProjectReferenceAssetUploadMetadata = {}
 ): Promise<ProjectReferenceAsset> {
   const formData = new FormData();
   formData.set("assetType", assetType);
@@ -162,6 +200,167 @@ export async function uploadProjectReferenceAsset(
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료를 업로드하지 못했습니다.");
   }
   return payload.asset;
+}
+
+/**
+ * 콘티 crop 결과를 작은 multipart 묶음으로 저장합니다.
+ * 한 요청이 서버리스 body 제한을 넘지 않도록 8개·약 3MB 중 먼저 도달하는 기준으로 나눕니다.
+ */
+export async function uploadStoryboardCropAssetsBulk(
+  projectId: string,
+  items: StoryboardCropBulkUploadItem[],
+  options: {
+    signal?: AbortSignal;
+    onChunkComplete?: (completedCount: number, totalCount: number) => void;
+  } = {}
+): Promise<StoryboardCropBulkUploadResult> {
+  const startedAt = nowMs();
+  const normalizedItems = items.map((item) => ({
+    ...item,
+    clientResultId: item.clientResultId.trim(),
+    metadata: {
+      ...item.metadata,
+      assetId: item.metadata.assetId.trim().toLowerCase()
+    }
+  }));
+  const duplicateAssetId = firstDuplicateValue(
+    normalizedItems.map((item) => item.metadata.assetId)
+  );
+  const duplicateResultId = firstDuplicateValue(
+    normalizedItems.map((item) => item.clientResultId)
+  );
+  if (duplicateAssetId || duplicateResultId) {
+    throw new Error("같은 crop 식별값이 전체 추출 목록에 중복되어 있습니다.");
+  }
+  const chunks = chunkStoryboardCropUploads(normalizedItems);
+  const results: StoryboardCropBulkUploadItemResult[] = [];
+  const timings = {
+    requestMs: 0,
+    uploadMs: 0,
+    databaseMs: 0,
+    totalMs: 0,
+    requestCount: 0
+  };
+  const cleanupWarnings = new Set<string>();
+  let completedCount = 0;
+
+  for (const chunk of chunks) {
+    if (options.signal?.aborted) throw new DOMException("작업이 취소되었습니다.", "AbortError");
+
+    if (chunk.length === 1 && storyboardCropUploadBytes(chunk[0]) > STORYBOARD_BULK_MAX_BYTES) {
+      const item = chunk[0];
+      results.push({
+        clientResultId: item.clientResultId,
+        assetId: item.metadata.assetId,
+        status: "failed",
+        error: "crop 이미지와 썸네일 합계가 3MB를 초과했습니다."
+      });
+      completedCount += 1;
+      options.onChunkComplete?.(completedCount, normalizedItems.length);
+      continue;
+    }
+
+    const formData = new FormData();
+    formData.set("operation", "bulk_storyboard_crop");
+    formData.set("manifest", JSON.stringify(chunk.map((item) => {
+      const { thumbnailFile: _thumbnailFile, ...metadata } = item.metadata;
+      return {
+        clientResultId: item.clientResultId,
+        assetId: item.metadata.assetId,
+        metadata
+      };
+    })));
+    for (const item of chunk) {
+      formData.set(`file:${item.metadata.assetId}`, item.file);
+      formData.set(`thumbnail:${item.metadata.assetId}`, item.thumbnailFile);
+    }
+
+    const requestStartedAt = nowMs();
+    timings.requestCount += 1;
+    const response = await fetchArchiveApi(
+      `/api/projects/${encodeURIComponent(projectId)}/reference-assets`,
+      { method: "POST", body: formData, signal: options.signal }
+    );
+    const payload = (await response.json().catch(() => ({}))) as ApiError & {
+      results?: StoryboardCropBulkUploadItemResult[];
+      storageCleanupWarning?: string;
+      timings?: Partial<typeof timings>;
+    };
+    timings.requestMs += nowMs() - requestStartedAt;
+    timings.uploadMs += Number(payload.timings?.uploadMs ?? 0);
+    timings.databaseMs += Number(payload.timings?.databaseMs ?? 0);
+    if (payload.storageCleanupWarning) cleanupWarnings.add(payload.storageCleanupWarning);
+
+    if (payload.results) {
+      results.push(...payload.results);
+    } else {
+      const message = [payload.error, payload.detail].filter(Boolean).join(" · ")
+        || "콘티 crop 묶음을 업로드하지 못했습니다.";
+      results.push(...chunk.map((item) => ({
+        clientResultId: item.clientResultId,
+        assetId: item.metadata.assetId,
+        status: "failed" as const,
+        error: message
+      })));
+    }
+    completedCount += chunk.length;
+    options.onChunkComplete?.(completedCount, normalizedItems.length);
+  }
+
+  const byClientResultId = new Map(results.map((result) => [result.clientResultId, result]));
+  const orderedResults = normalizedItems.map((item) => (
+    byClientResultId.get(item.clientResultId) ?? {
+      clientResultId: item.clientResultId,
+      assetId: item.metadata.assetId,
+      status: "failed" as const,
+      error: "콘티 crop 저장 결과를 확인하지 못했습니다."
+    }
+  ));
+  timings.totalMs = nowMs() - startedAt;
+  return {
+    results: orderedResults,
+    assets: orderedResults.flatMap((result) => result.asset ? [result.asset] : []),
+    storageCleanupWarning: [...cleanupWarnings].join(" · "),
+    timings
+  };
+}
+
+function chunkStoryboardCropUploads(items: StoryboardCropBulkUploadItem[]) {
+  const chunks: StoryboardCropBulkUploadItem[][] = [];
+  let current: StoryboardCropBulkUploadItem[] = [];
+  let currentBytes = 0;
+  for (const item of items) {
+    const itemBytes = storyboardCropUploadBytes(item);
+    if (
+      current.length > 0
+      && (current.length >= STORYBOARD_BULK_MAX_COUNT || currentBytes + itemBytes > STORYBOARD_BULK_MAX_BYTES)
+    ) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(item);
+    currentBytes += itemBytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function storyboardCropUploadBytes(item: StoryboardCropBulkUploadItem) {
+  return item.file.size + item.thumbnailFile.size;
+}
+
+function firstDuplicateValue(values: string[]) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) return value;
+    seen.add(value);
+  }
+  return "";
+}
+
+function nowMs() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 export async function updateProjectReferenceAsset(

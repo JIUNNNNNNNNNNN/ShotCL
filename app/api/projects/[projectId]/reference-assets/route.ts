@@ -18,6 +18,26 @@ import type {
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 type AssetType = "scenario" | "storyboard" | "overhead";
+type BulkStoryboardCropManifestItem = {
+  clientResultId: string;
+  assetId: string;
+  metadata: Record<string, unknown>;
+};
+type BulkStoryboardCropPreparedItem = BulkStoryboardCropManifestItem & {
+  file: File;
+  thumbnail: File;
+  rawCropData: Record<string, unknown>;
+  archiveMetadata: ArchiveSceneCutMetadata;
+  uploadedPath: string;
+  thumbnailPath: string;
+};
+type BulkStoryboardCropResult = {
+  clientResultId: string;
+  assetId: string;
+  status: "saved" | "existing" | "failed";
+  asset?: ReturnType<typeof mapAssetRow>;
+  error?: string;
+};
 type ReferenceMediaLinkTypeUpdate = {
   id: string;
   previousShotRef: string;
@@ -29,6 +49,9 @@ type ReferenceMediaLinkTypeUpdate = {
 const STORAGE_BUCKET = "storyboards";
 const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,scenario_scenes,scenario_parse_error,sort_order,created_at,updated_at";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const BULK_STORYBOARD_MAX_ITEMS = 8;
+const BULK_STORYBOARD_MAX_BYTES = 3 * 1024 * 1024;
+const BULK_STORYBOARD_UPLOAD_CONCURRENCY = 4;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -92,6 +115,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const formData = await request.formData();
+    if (formData.get("operation") === "bulk_storyboard_crop") {
+      return handleBulkStoryboardCropUpload(projectId, formData);
+    }
     const assetType = normalizeAssetType(formData.get("assetType"));
     const file = formData.get("file");
     const thumbnail = formData.get("thumbnail");
@@ -323,6 +349,373 @@ export async function POST(request: NextRequest, context: RouteContext) {
       await cleanupUploadedPaths(cleanupClient, uploadedPaths, "upload-failure");
     }
     return materialError(error, "자료를 업로드하지 못했습니다.");
+  }
+}
+
+async function handleBulkStoryboardCropUpload(projectId: string, formData: FormData) {
+  const startedAt = performance.now();
+  let cleanupClient: ReturnType<typeof requireProjectAccessDb> | null = null;
+  let cleanupItems: BulkStoryboardCropPreparedItem[] = [];
+  const timings = {
+    validationMs: 0,
+    uploadMs: 0,
+    databaseMs: 0,
+    cleanupMs: 0,
+    totalMs: 0
+  };
+  try {
+  const validationStartedAt = performance.now();
+  const manifest = parseBulkStoryboardManifest(formData.get("manifest"));
+  if (!manifest) {
+    return NextResponse.json({ error: "콘티 crop 묶음 정보가 올바르지 않습니다." }, { status: 400 });
+  }
+  if (manifest.length === 0 || manifest.length > BULK_STORYBOARD_MAX_ITEMS) {
+    return NextResponse.json(
+      { error: `콘티 crop은 한 번에 1~${BULK_STORYBOARD_MAX_ITEMS}개까지 저장할 수 있습니다.` },
+      { status: 400 }
+    );
+  }
+  const expectedFileKeys = new Set(
+    manifest.flatMap((item) => [`file:${item.assetId}`, `thumbnail:${item.assetId}`])
+  );
+  const unexpectedFileKey = [...formData.entries()].find(
+    ([key, value]) => value instanceof File && !expectedFileKeys.has(key)
+  )?.[0];
+  if (unexpectedFileKey) {
+    return NextResponse.json({ error: "manifest에 없는 crop 파일이 포함되어 있습니다." }, { status: 400 });
+  }
+
+  const duplicateAssetId = firstDuplicate(manifest.map((item) => item.assetId));
+  const duplicateResultId = firstDuplicate(manifest.map((item) => item.clientResultId));
+  if (duplicateAssetId || duplicateResultId) {
+    return NextResponse.json(
+      { error: "같은 crop 식별값이 묶음 안에 중복되어 있습니다." },
+      { status: 409 }
+    );
+  }
+
+  const candidates: Array<{
+    manifestItem: BulkStoryboardCropManifestItem;
+    file: File;
+    thumbnail: File;
+    rawCropData: Record<string, unknown>;
+  }> = [];
+  const failures = new Map<string, BulkStoryboardCropResult>();
+  const totalBytes = [...formData.values()].reduce(
+    (sum, value) => sum + (value instanceof File ? value.size : 0),
+    0
+  );
+  for (const item of manifest) {
+    const file = formData.get(`file:${item.assetId}`);
+    const thumbnail = formData.get(`thumbnail:${item.assetId}`);
+    const error = validateBulkStoryboardManifestItem(item, file, thumbnail);
+    if (error || !(file instanceof File) || !(thumbnail instanceof File)) {
+      failures.set(item.clientResultId, bulkFailure(item, error || "crop 이미지 파일이 없습니다."));
+      continue;
+    }
+    const rawCropData = {
+      ...parseBulkCropMetadata(item.metadata, file),
+      clientResultId: item.clientResultId
+    };
+    const metadataError = validateRawArchiveMetadata(rawCropData);
+    if (metadataError) {
+      failures.set(item.clientResultId, bulkFailure(item, metadataError));
+      continue;
+    }
+    if (rawCropData.sourceType !== "image_crop" && rawCropData.sourceType !== "pdf_crop") {
+      failures.set(item.clientResultId, bulkFailure(item, "콘티 crop 원본 종류가 올바르지 않습니다."));
+      continue;
+    }
+    const folderId = cleanText(rawCropData.folderId, 100);
+    const sourceAssetId = cleanText(rawCropData.sourceAssetId, 100);
+    const sceneId = cleanText(rawCropData.sceneId, 100);
+    if (folderId && !UUID_PATTERN.test(folderId)) {
+      failures.set(item.clientResultId, bulkFailure(item, "선택한 폴더 ID가 올바르지 않습니다."));
+      continue;
+    }
+    if (sourceAssetId && !UUID_PATTERN.test(sourceAssetId)) {
+      failures.set(item.clientResultId, bulkFailure(item, "crop 원본 자료 ID가 올바르지 않습니다."));
+      continue;
+    }
+    if (sceneId && !UUID_PATTERN.test(sceneId)) {
+      failures.set(item.clientResultId, bulkFailure(item, "선택한 씬 ID가 올바르지 않습니다."));
+      continue;
+    }
+    candidates.push({ manifestItem: item, file, thumbnail, rawCropData });
+  }
+  if (totalBytes > BULK_STORYBOARD_MAX_BYTES) {
+    return NextResponse.json(
+      { error: "콘티 crop 묶음은 약 3MB 이하로 나누어 업로드해주세요." },
+      { status: 413 }
+    );
+  }
+
+  const supabase = requireProjectAccessDb();
+  cleanupClient = supabase;
+  const assetIds = candidates.map(({ manifestItem }) => manifestItem.assetId);
+  const folderIds = uniqueNonEmpty(candidates.map(({ rawCropData }) => cleanText(rawCropData.folderId, 100)));
+  const sourceAssetIds = uniqueNonEmpty(candidates.map(({ rawCropData }) => cleanText(rawCropData.sourceAssetId, 100)));
+  const sceneIds = uniqueNonEmpty(candidates.map(({ rawCropData }) => cleanText(rawCropData.sceneId, 100)));
+  const [
+    existingRowsResult,
+    folderRowsResult,
+    sourceRowsResult,
+    sceneRowsResult
+  ] = await Promise.all([
+    assetIds.length > 0
+      ? supabase.from("project_reference_assets").select(SELECT_COLUMNS).in("id", assetIds)
+      : Promise.resolve({ data: [], error: null }),
+    folderIds.length > 0
+      ? supabase.from("project_archive_folders").select("id").eq("project_id", projectId).in("id", folderIds)
+      : Promise.resolve({ data: [], error: null }),
+    sourceAssetIds.length > 0
+      ? supabase.from("project_reference_assets").select("id").eq("project_id", projectId).in("id", sourceAssetIds)
+      : Promise.resolve({ data: [], error: null }),
+    sceneIds.length > 0
+      ? supabase.from("project_scene_items").select("id,scene_no,cut_count").eq("project_id", projectId).in("id", sceneIds)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+  if (existingRowsResult.error) throw existingRowsResult.error;
+  if (folderRowsResult.error) throw folderRowsResult.error;
+  if (sourceRowsResult.error) throw sourceRowsResult.error;
+  if (sceneRowsResult.error) throw sceneRowsResult.error;
+
+  const existingById = new Map(
+    (existingRowsResult.data ?? []).map((row) => [String(row.id), row as Record<string, unknown>])
+  );
+  const validFolderIds = new Set((folderRowsResult.data ?? []).map((row) => String(row.id)));
+  const validSourceAssetIds = new Set((sourceRowsResult.data ?? []).map((row) => String(row.id)));
+  const sceneById = new Map(
+    (sceneRowsResult.data ?? []).map((row) => [String(row.id), {
+      id: String(row.id),
+      sceneNo: normalizeSceneNumber(String(row.scene_no ?? "")) || cleanText(row.scene_no, 100),
+      cutCount: nullablePositiveInteger(row.cut_count)
+    }])
+  );
+  const results = new Map<string, BulkStoryboardCropResult>(failures);
+  const prepared: BulkStoryboardCropPreparedItem[] = [];
+  const uploadAttemptId = randomUUID();
+
+  for (const candidate of candidates) {
+    const item = candidate.manifestItem;
+    const existing = existingById.get(item.assetId);
+    if (existing) {
+      if (!isMatchingStableAsset(existing, projectId, "storyboard")) {
+        results.set(item.clientResultId, bulkFailure(
+          item,
+          "같은 자료 ID가 다른 프로젝트 또는 자료 종류에서 사용 중입니다."
+        ));
+      } else {
+        results.set(item.clientResultId, {
+          clientResultId: item.clientResultId,
+          assetId: item.assetId,
+          status: "existing",
+          asset: mapAssetRow(existing)
+        });
+      }
+      continue;
+    }
+
+    const folderId = cleanText(candidate.rawCropData.folderId, 100);
+    if (folderId && !validFolderIds.has(folderId)) {
+      results.set(item.clientResultId, bulkFailure(item, "선택한 폴더를 찾을 수 없습니다."));
+      continue;
+    }
+    const sourceAssetId = cleanText(candidate.rawCropData.sourceAssetId, 100);
+    if (sourceAssetId && !validSourceAssetIds.has(sourceAssetId)) {
+      results.set(item.clientResultId, bulkFailure(item, "crop 원본 자료를 찾을 수 없습니다."));
+      continue;
+    }
+    const sceneId = cleanText(candidate.rawCropData.sceneId, 100);
+    const resolvedScene = sceneId ? sceneById.get(sceneId) ?? null : null;
+    if (sceneId && !resolvedScene) {
+      results.set(item.clientResultId, bulkFailure(item, "선택한 씬을 찾을 수 없습니다."));
+      continue;
+    }
+    const archiveMetadata = normalizeSceneCutMetadata({
+      ...candidate.rawCropData,
+      sceneId: sceneId || null,
+      sceneNumber: resolvedScene?.sceneNo || candidate.rawCropData.sceneNumber,
+      cutNumber: candidate.rawCropData.cutNumber
+    }, { assetType: "storyboard" });
+    const archiveMetadataError = validateSceneCutMetadata(archiveMetadata);
+    if (archiveMetadataError) {
+      results.set(item.clientResultId, bulkFailure(item, archiveMetadataError));
+      continue;
+    }
+    if (resolvedScene && archiveMetadata.cutNumber && !resolvedScene.cutCount) {
+      results.set(item.clientResultId, bulkFailure(item, "선택한 씬의 총 컷수를 먼저 입력해주세요."));
+      continue;
+    }
+    if (
+      resolvedScene?.cutCount
+      && archiveMetadata.cutNumber
+      && archiveMetadata.cutNumber > resolvedScene.cutCount
+    ) {
+      results.set(item.clientResultId, bulkFailure(
+        item,
+        `선택한 씬의 총 컷수 ${resolvedScene.cutCount}를 초과했습니다.`
+      ));
+      continue;
+    }
+
+    prepared.push({
+      ...item,
+      file: candidate.file,
+      thumbnail: candidate.thumbnail,
+      rawCropData: candidate.rawCropData,
+      archiveMetadata,
+      uploadedPath: bulkStoryboardStoragePath(projectId, item.assetId, uploadAttemptId, "crop"),
+      thumbnailPath: bulkStoryboardStoragePath(projectId, item.assetId, uploadAttemptId, "thumbnail")
+    });
+  }
+  cleanupItems = prepared;
+  timings.validationMs = performance.now() - validationStartedAt;
+
+  const uploadStartedAt = performance.now();
+  const uploadTasks = prepared.flatMap((item) => [
+    { item, file: item.file, path: item.uploadedPath },
+    { item, file: item.thumbnail, path: item.thumbnailPath }
+  ]);
+  const uploadResults = await mapSettledWithConcurrency(
+    uploadTasks,
+    BULK_STORYBOARD_UPLOAD_CONCURRENCY,
+    async ({ file, path }) => {
+      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(
+        path,
+        Buffer.from(await file.arrayBuffer()),
+        {
+          contentType: file.type || "image/jpeg",
+          upsert: false
+        }
+      );
+      if (error) throw error;
+      return path;
+    }
+  );
+  timings.uploadMs = performance.now() - uploadStartedAt;
+  const uploadErrorByAssetId = new Map<string, string>();
+  uploadResults.forEach((result, index) => {
+    const task = uploadTasks[index];
+    if (result.status === "rejected" && !uploadErrorByAssetId.has(task.item.assetId)) {
+      uploadErrorByAssetId.set(task.item.assetId, safeError(result.reason).message);
+    }
+  });
+
+  const readyForInsert = prepared.filter((item) => {
+    const uploadError = uploadErrorByAssetId.get(item.assetId);
+    if (!uploadError) return true;
+    results.set(item.clientResultId, bulkFailure(item, `Storage 업로드 실패: ${uploadError}`));
+    return false;
+  });
+  const cleanupWarnings = new Set<string>();
+  const uploadFailedItems = prepared.filter((item) => uploadErrorByAssetId.has(item.assetId));
+  if (uploadFailedItems.length > 0) {
+    const cleanupStartedAt = performance.now();
+    const warning = await cleanupUnpersistedBulkStoryboardFiles(
+      supabase,
+      projectId,
+      uploadFailedItems
+    );
+    if (warning) cleanupWarnings.add(warning);
+    timings.cleanupMs += performance.now() - cleanupStartedAt;
+  }
+
+  const payloadByAssetId = new Map(
+    readyForInsert.map((item) => [item.assetId, buildBulkStoryboardPayload(projectId, item, supabase)])
+  );
+  const databaseStartedAt = performance.now();
+  if (payloadByAssetId.size > 0) {
+    const payloads = [...payloadByAssetId.values()];
+    const { data, error } = await supabase
+      .from("project_reference_assets")
+      .insert(payloads)
+      .select(SELECT_COLUMNS);
+
+    if (!error) {
+      for (const row of data ?? []) {
+        const item = readyForInsert.find((entry) => entry.assetId === String(row.id));
+        if (!item) continue;
+        results.set(item.clientResultId, {
+          clientResultId: item.clientResultId,
+          assetId: item.assetId,
+          status: "saved",
+          asset: mapAssetRow(row as Record<string, unknown>)
+        });
+      }
+      for (const item of readyForInsert) {
+        if (results.has(item.clientResultId)) continue;
+        results.set(
+          item.clientResultId,
+          bulkFailure(item, "DB 저장 결과에서 생성된 콘티 crop을 확인하지 못했습니다.")
+        );
+      }
+    } else {
+      // 묶음 전체가 원자적으로 실패하면 최대 8개에 한해 개별 저장으로 원인을 격리합니다.
+      const fallbacks = await mapSettledWithConcurrency(
+        readyForInsert,
+        2,
+        async (item) => saveBulkStoryboardPayloadWithRaceRecovery(
+          supabase,
+          projectId,
+          item,
+          payloadByAssetId.get(item.assetId)!
+        )
+      );
+      fallbacks.forEach((fallback, index) => {
+        const item = readyForInsert[index];
+        if (fallback.status === "fulfilled") {
+          results.set(item.clientResultId, fallback.value);
+        } else {
+          results.set(item.clientResultId, bulkFailure(
+            item,
+            `DB 저장 실패: ${safeError(fallback.reason).message}`
+          ));
+        }
+      });
+    }
+  }
+  timings.databaseMs = performance.now() - databaseStartedAt;
+
+  const unownedPersistItems = readyForInsert.filter(
+    (item) => results.get(item.clientResultId)?.status !== "saved"
+  );
+  if (unownedPersistItems.length > 0) {
+    const cleanupStartedAt = performance.now();
+    const warning = await cleanupUnpersistedBulkStoryboardFiles(
+      supabase,
+      projectId,
+      unownedPersistItems
+    );
+    if (warning) cleanupWarnings.add(warning);
+    timings.cleanupMs += performance.now() - cleanupStartedAt;
+  }
+
+  const orderedResults = manifest.map((item) => (
+    results.get(item.clientResultId)
+    ?? bulkFailure(item, "콘티 crop 저장 결과를 확인하지 못했습니다.")
+  ));
+  timings.totalMs = performance.now() - startedAt;
+  const failedCount = orderedResults.filter((result) => result.status === "failed").length;
+  return NextResponse.json({
+    ok: failedCount === 0,
+    results: orderedResults,
+    assets: orderedResults.flatMap((result) => result.asset ? [result.asset] : []),
+    storageCleanupWarning: [...cleanupWarnings].join(" · "),
+    timings: roundedTimings(timings)
+  }, { status: failedCount > 0 ? 207 : 201 });
+  } catch (error) {
+    if (cleanupClient && cleanupItems.length > 0) {
+      const warning = await cleanupUnpersistedBulkStoryboardFiles(
+        cleanupClient,
+        projectId,
+        cleanupItems
+      );
+      if (warning) {
+        console.error("[reference-assets:bulk-exception-cleanup]", warning);
+      }
+    }
+    return materialError(error, "콘티 crop 묶음을 저장하지 못했습니다.");
   }
 }
 
@@ -836,6 +1229,9 @@ function normalizeCrop(value: unknown) {
     ...(cleanText(source.importBatchId, 200)
       ? { importBatchId: cleanText(source.importBatchId, 200) }
       : {}),
+    ...(cleanText(source.clientResultId, 200)
+      ? { clientResultId: cleanText(source.clientResultId, 200) }
+      : {}),
     ...(cleanText(source.templateId, 200) ? { templateId: cleanText(source.templateId, 200) } : {}),
     ...(manuallyPositioned !== null ? { manuallyPositioned } : {}),
     ...(customSize !== null ? { customSize } : {}),
@@ -1272,6 +1668,304 @@ async function restoreReferenceMediaLinks(
     if (error) errors.push(safeError(error).message);
   }
   return errors;
+}
+
+function parseBulkStoryboardManifest(value: FormDataEntryValue | null): BulkStoryboardCropManifestItem[] | null {
+  if (typeof value !== "string" || value.length > 128 * 1024) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map((entry) => {
+      const source = objectValue(entry);
+      const metadata = objectValue(source.metadata);
+      const assetId = cleanText(source.assetId ?? metadata.assetId, 100).toLowerCase();
+      return {
+        clientResultId: cleanText(source.clientResultId, 200),
+        assetId,
+        metadata
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+function validateBulkStoryboardManifestItem(
+  item: BulkStoryboardCropManifestItem,
+  file: FormDataEntryValue | null,
+  thumbnail: FormDataEntryValue | null
+) {
+  if (!item.clientResultId) return "crop 결과 식별값이 없습니다.";
+  if (!UUID_PATTERN.test(item.assetId)) return "자료 ID가 올바른 UUID 형식이 아닙니다.";
+  if (
+    cleanText(item.metadata.assetId, 100)
+    && cleanText(item.metadata.assetId, 100).toLowerCase() !== item.assetId
+  ) {
+    return "manifest와 metadata의 자료 ID가 일치하지 않습니다.";
+  }
+  if (!(file instanceof File) || file.size <= 0) return "crop 이미지 파일이 없습니다.";
+  if (!(thumbnail instanceof File) || thumbnail.size <= 0) return "crop 썸네일 파일이 없습니다.";
+  if (!isArchiveImage(file)) return "콘티 crop 결과는 이미지 파일이어야 합니다.";
+  if (!isArchiveImage(thumbnail)) return "콘티 crop 썸네일은 이미지 파일이어야 합니다.";
+  if (!cleanText(item.metadata.importBatchId, 200)) return "crop import batch 식별값이 없습니다.";
+  if (!hasValue(item.metadata.cropIndex) || nullableNonNegativeInteger(item.metadata.cropIndex) === null) {
+    return "crop 순서는 0 이상의 정수로 입력해주세요.";
+  }
+  return "";
+}
+
+function parseBulkCropMetadata(metadata: Record<string, unknown>, file: File) {
+  const sourceType = normalizeStoredSourceType(metadata.sourceType)
+    ?? normalizeSourceType(null, file);
+  return {
+    x: metadata.cropX,
+    y: metadata.cropY,
+    width: metadata.cropWidth,
+    height: metadata.cropHeight,
+    ratio: metadata.cropRatio,
+    sourceType,
+    sourceAssetId: metadata.sourceAssetId,
+    pageIndex: metadata.pageIndex,
+    sourceFilename: metadata.sourceFilename,
+    sourceKind: metadata.sourceKind,
+    sourcePageNumber: metadata.sourcePageNumber,
+    importBatchId: metadata.importBatchId,
+    templateId: metadata.templateId,
+    manuallyPositioned: metadata.manuallyPositioned,
+    customSize: metadata.customSize,
+    title: metadata.title,
+    memo: metadata.memo,
+    basePageWidth: metadata.basePageWidth,
+    basePageHeight: metadata.basePageHeight,
+    cropWidth: metadata.templateCropWidth,
+    cropHeight: metadata.templateCropHeight,
+    aspectRatio: metadata.aspectRatio,
+    clickPlacementMode: metadata.clickPlacementMode,
+    centerX: metadata.centerX,
+    centerY: metadata.centerY,
+    orderIndex: metadata.cropOrderIndex,
+    rowStep: metadata.rowStep,
+    rowsPerPage: metadata.rowsPerPage,
+    targetColumn: metadata.targetColumn,
+    includeContext: metadata.includeContext,
+    folderId: metadata.folderId,
+    originalFolderName: metadata.originalFolderName,
+    relativePath: metadata.relativePath,
+    displayName: metadata.displayName,
+    originalFilename: metadata.originalFilename,
+    episodeNumber: metadata.episodeNumber,
+    sceneId: metadata.sceneId,
+    sceneNumber: metadata.sceneNumber ?? metadata.sceneNo,
+    cutNumber: metadata.cutNumber ?? metadata.cutNo,
+    cropIndex: metadata.cropIndex
+  };
+}
+
+function buildBulkStoryboardPayload(
+  projectId: string,
+  item: BulkStoryboardCropPreparedItem,
+  supabase: ReturnType<typeof requireProjectAccessDb>
+) {
+  const originalFilename = cleanText(item.rawCropData.originalFilename, 500)
+    || item.file.name.slice(0, 500);
+  const displayName = cleanText(item.rawCropData.displayName, 240)
+    || cleanText(item.rawCropData.title, 240)
+    || stripFileExtension(originalFilename).slice(0, 240);
+  const sourceAssetId = cleanText(item.rawCropData.sourceAssetId, 100);
+  const thumbnailUrl = supabase.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(item.thumbnailPath).data.publicUrl;
+  const publicUrl = supabase.storage
+    .from(STORAGE_BUCKET)
+    .getPublicUrl(item.uploadedPath).data.publicUrl;
+  return {
+    id: item.assetId,
+    project_id: projectId,
+    asset_type: "storyboard",
+    filename: item.file.name.slice(0, 500),
+    storage_path: item.uploadedPath,
+    public_url: publicUrl,
+    mime_type: item.file.type || "image/jpeg",
+    size_bytes: item.file.size,
+    daily_plan_id: cleanText(item.metadata.dailyPlanId, 500) || null,
+    scene_no: item.archiveMetadata.sceneNumber || null,
+    cut_no: item.archiveMetadata.cutNumber ? String(item.archiveMetadata.cutNumber) : null,
+    shot_ref: cleanText(item.metadata.shotRef, 500) || null,
+    group_id: cleanText(item.metadata.groupId ?? item.metadata.importBatchId, 200) || null,
+    crop_data: normalizeCrop({
+      ...item.rawCropData,
+      sourceType: item.rawCropData.sourceType,
+      title: cleanText(item.rawCropData.title, 240) || displayName,
+      displayName,
+      originalFilename,
+      ...item.archiveMetadata,
+      sourceAssetId: sourceAssetId || null,
+      thumbnailPath: item.thumbnailPath,
+      thumbnailUrl
+    }),
+    scenario_scenes: [],
+    scenario_parse_error: null,
+    sort_order: toInteger(item.metadata.sortOrder)
+  };
+}
+
+async function saveBulkStoryboardPayloadWithRaceRecovery(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  item: BulkStoryboardCropPreparedItem,
+  payload: ReturnType<typeof buildBulkStoryboardPayload>
+): Promise<BulkStoryboardCropResult> {
+  const { data: existing, error: existingError } = await supabase
+    .from("project_reference_assets")
+    .select(SELECT_COLUMNS)
+    .eq("id", item.assetId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) {
+    if (!isMatchingStableAsset(existing as Record<string, unknown>, projectId, "storyboard")) {
+      throw new Error("같은 자료 ID가 다른 프로젝트 또는 자료 종류에서 사용 중입니다.");
+    }
+    return {
+      clientResultId: item.clientResultId,
+      assetId: item.assetId,
+      status: "existing",
+      asset: mapAssetRow(existing as Record<string, unknown>)
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("project_reference_assets")
+    .insert(payload)
+    .select(SELECT_COLUMNS)
+    .single();
+  if (error) {
+    if (safeError(error).code === "23505") {
+      const { data: raced, error: racedError } = await supabase
+        .from("project_reference_assets")
+        .select(SELECT_COLUMNS)
+        .eq("id", item.assetId)
+        .maybeSingle();
+      if (racedError) throw racedError;
+      if (raced && isMatchingStableAsset(raced as Record<string, unknown>, projectId, "storyboard")) {
+        return {
+          clientResultId: item.clientResultId,
+          assetId: item.assetId,
+          status: "existing",
+          asset: mapAssetRow(raced as Record<string, unknown>)
+        };
+      }
+    }
+    throw error;
+  }
+  return {
+    clientResultId: item.clientResultId,
+    assetId: item.assetId,
+    status: "saved",
+    asset: mapAssetRow(data as Record<string, unknown>)
+  };
+}
+
+async function cleanupUnpersistedBulkStoryboardFiles(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  items: BulkStoryboardCropPreparedItem[]
+) {
+  const ids = items.map((item) => item.assetId);
+  const { data, error } = await supabase
+    .from("project_reference_assets")
+    .select("id,storage_path,crop_data")
+    .eq("project_id", projectId)
+    .in("id", ids);
+  if (error) {
+    console.error("[reference-assets:bulk-cleanup-read]", safeError(error));
+    return "DB 저장 실패 후 Storage 정리 대상을 확인하지 못했습니다.";
+  }
+  const persistedById = new Map(
+    (data ?? []).map((row) => [String(row.id), row as Record<string, unknown>])
+  );
+  const paths = items.flatMap((item) => {
+    const persisted = persistedById.get(item.assetId);
+    if (!persisted) return [item.uploadedPath, item.thumbnailPath];
+    const persistedCrop = normalizeCrop(persisted.crop_data);
+    return [
+      cleanText(persisted.storage_path, 1_000) === item.uploadedPath ? "" : item.uploadedPath,
+      cleanText(persistedCrop.thumbnailPath, 1_000) === item.thumbnailPath ? "" : item.thumbnailPath
+    ].filter(Boolean);
+  });
+  return cleanupUploadedPaths(supabase, paths, "bulk-db-failure");
+}
+
+function bulkStoryboardStoragePath(
+  projectId: string,
+  assetId: string,
+  uploadAttemptId: string,
+  kind: "crop" | "thumbnail"
+) {
+  return kind === "crop"
+    ? `projects/${projectId}/archive/storyboard/crops/${assetId}-${uploadAttemptId}.jpg`
+    : `projects/${projectId}/archive/storyboard/thumbnails/${assetId}-${uploadAttemptId}.jpg`;
+}
+
+function bulkFailure(
+  item: Pick<BulkStoryboardCropManifestItem, "clientResultId" | "assetId">,
+  error: string
+): BulkStoryboardCropResult {
+  return {
+    clientResultId: item.clientResultId,
+    assetId: item.assetId,
+    status: "failed",
+    error
+  };
+}
+
+function uniqueNonEmpty(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function firstDuplicate(values: string[]) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) return value;
+    seen.add(value);
+  }
+  return "";
+}
+
+function isArchiveImage(file: File) {
+  return file.type.startsWith("image/")
+    || /\.(?:jpe?g|png|gif|webp|heic|heif)$/i.test(file.name);
+}
+
+async function mapSettledWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>
+) {
+  const output = new Array<
+    { status: "fulfilled"; value: R } | { status: "rejected"; reason: unknown }
+  >(values.length);
+  let nextIndex = 0;
+  async function run() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        output[index] = { status: "fulfilled", value: await worker(values[index], index) };
+      } catch (reason) {
+        output[index] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, run)
+  );
+  return output;
+}
+
+function roundedTimings(values: Record<string, number>) {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [key, Math.max(0, Math.round(value))])
+  );
 }
 
 function hasValue(value: unknown) {

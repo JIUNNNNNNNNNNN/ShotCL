@@ -61,6 +61,32 @@ export type ArchiveImportSaveReport = {
   failures: ArchiveImportSaveFailure[];
 };
 
+export type ArchiveImportProgressPhase =
+  | "idle"
+  | "preparing"
+  | "cropping"
+  | "optimizing"
+  | "uploading"
+  | "saving"
+  | "finalizing"
+  | "complete"
+  | "error"
+  | "cancelling"
+  | "cancelled";
+
+export type ArchiveImportProgressState = {
+  phase: ArchiveImportProgressPhase;
+  totalCount: number;
+  preparedCount: number;
+  croppedCount: number;
+  uploadedCount: number;
+  savedCount: number;
+  failedCount: number;
+  overallPercent: number;
+  importBatchId: string;
+  startedAt: number;
+};
+
 type StoryboardCandidateChangeOptions = {
   gridCell?: StoryboardGridCell;
   manuallyPositioned?: boolean;
@@ -77,6 +103,7 @@ export function ArchiveImportDialog({
   initialMetadata,
   isSaving,
   saveReport,
+  progress,
   onClose,
   onSave
 }: {
@@ -87,9 +114,11 @@ export function ArchiveImportDialog({
   initialMetadata?: ArchiveImportInitialMetadata;
   isSaving: boolean;
   saveReport?: ArchiveImportSaveReport | null;
+  progress?: ArchiveImportProgressState | null;
   onClose: () => void;
   onSave: (value: ArchiveImportCommit) => Promise<ArchiveImportSaveReport>;
 }) {
+  const saveGuardRef = useRef(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set(pages.map((page) => page.id)));
   const [referenceCrop, setReferenceCrop] = useState<RelativeCrop>(
     assetType === "storyboard"
@@ -135,6 +164,34 @@ export function ArchiveImportDialog({
         page,
         crop: applyCrop ? referenceCrop : null
       }));
+  const isProgressBlocking = isBlockingArchiveImportProgress(progress);
+  const isInteractionLocked = isSaving || isProgressBlocking;
+
+  useEffect(() => {
+    if (!isProgressBlocking) return undefined;
+    const blockEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener("keydown", blockEscape, true);
+    return () => document.removeEventListener("keydown", blockEscape, true);
+  }, [isProgressBlocking]);
+
+  function requestClose() {
+    if (isInteractionLocked || saveGuardRef.current) return;
+    onClose();
+  }
+
+  async function submitImport(value: ArchiveImportCommit) {
+    if (saveGuardRef.current || isInteractionLocked) return;
+    saveGuardRef.current = true;
+    try {
+      await onSave(value);
+    } finally {
+      saveGuardRef.current = false;
+    }
+  }
 
   function confirmTemplate() {
     if (!referencePage || !referenceSelected) return;
@@ -291,14 +348,14 @@ export function ArchiveImportDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
-      <section className="flex max-h-[96dvh] w-full max-w-7xl flex-col rounded-t-2xl border border-field-border bg-white shadow-[0_18px_54px_rgba(20,32,27,0.2)] sm:rounded-2xl">
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
+      <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col rounded-t-2xl border border-field-border bg-white shadow-[0_18px_54px_rgba(20,32,27,0.2)] sm:rounded-2xl">
         <header className="flex items-center justify-between border-b border-field-border px-4 py-3">
           <div className="min-w-0">
             <h2 className="font-display truncate text-lg font-black text-field-primary">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
             <p className="truncate text-xs font-bold text-field-muted">{sourceLabel} · {pages.length}페이지/이미지</p>
           </div>
-          <button type="button" onClick={onClose} disabled={isSaving} className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-border text-field-muted" aria-label="가져오기 닫기">
+          <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-border text-field-muted" aria-label="가져오기 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
@@ -315,7 +372,7 @@ export function ArchiveImportDialog({
               activePage={activePage}
               editingCandidate={editingCandidate}
               pageOrigin={activePage ? originForPage(activePage) : null}
-              isSaving={isSaving}
+              isSaving={isInteractionLocked}
               saveReport={saveReport}
               onReferenceCropChange={(crop) => {
                 setReferenceCrop(crop);
@@ -335,8 +392,8 @@ export function ArchiveImportDialog({
                 const last = candidates.at(-1);
                 if (last) removeCandidate(last.id);
               }}
-              onCancel={onClose}
-              onConfirmExtraction={() => onSave({
+              onCancel={requestClose}
+              onConfirmExtraction={() => void submitImport({
                 results,
                 cropTemplate,
                 title,
@@ -358,7 +415,7 @@ export function ArchiveImportDialog({
                   sceneId={sceneId}
                   sceneNo={sceneNo}
                   cutNo={cutNo}
-                  disabled={isSaving || Boolean(saveReport)}
+                  disabled={isInteractionLocked || Boolean(saveReport)}
                   onTitleChange={setTitle}
                   onMemoChange={setMemo}
                   onSceneChange={(nextSceneId, nextSceneNo) => {
@@ -382,7 +439,7 @@ export function ArchiveImportDialog({
                 crop={referenceCrop}
                 applyCrop={applyCrop}
                 referencePage={referencePage}
-                isSaving={isSaving}
+                isSaving={isInteractionLocked}
                 onSelectedIdsChange={setSelectedIds}
                 onCropChange={setReferenceCrop}
                 onApplyCropChange={setApplyCrop}
@@ -394,7 +451,7 @@ export function ArchiveImportDialog({
                 sceneId={sceneId}
                 sceneNo={sceneNo}
                 cutNo={cutNo}
-                disabled={isSaving}
+                disabled={isInteractionLocked}
                 onTitleChange={setTitle}
                 onMemoChange={setMemo}
                 onSceneChange={(nextSceneId, nextSceneNo) => {
@@ -413,8 +470,8 @@ export function ArchiveImportDialog({
               </p>
               <button
                 type="button"
-                disabled={isSaving || results.length === 0}
-                onClick={() => onSave({
+                disabled={isInteractionLocked || results.length === 0}
+                onClick={() => void submitImport({
                   results,
                   cropTemplate: null,
                   title,
@@ -426,14 +483,138 @@ export function ArchiveImportDialog({
                 className="inline-flex min-h-11 items-center gap-2 rounded-[3px] bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden />
-                {isSaving ? "저장 중" : "추출 확정"}
+                {isInteractionLocked ? "저장 중" : "추출 확정"}
               </button>
             </footer>
           </>
         )}
+        {progress && isProgressBlocking ? (
+          <ArchiveImportProgressOverlay progress={progress} />
+        ) : null}
       </section>
     </div>
   );
+}
+
+function ArchiveImportProgressOverlay({
+  progress
+}: {
+  progress: ArchiveImportProgressState;
+}) {
+  const total = Math.max(0, Math.round(progress.totalCount));
+  const current = Math.min(total, Math.max(0, archiveImportPhaseCount(progress)));
+  const percent = Math.min(100, Math.max(0, Math.round(progress.overallPercent)));
+  const phaseLabel = archiveImportPhaseLabel(progress.phase);
+
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-5">
+      <section
+        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-sm gap-3 overflow-y-auto rounded-[3px] border border-field-border bg-white p-4 shadow-[0_14px_34px_rgba(20,32,27,0.18)]"
+        role="status"
+        aria-live="polite"
+        aria-label={`콘티 이미지 처리 중, ${phaseLabel}, ${percent}%`}
+      >
+        <div className="grid gap-1">
+          <h3 className="font-display text-base font-black text-field-primary">
+            콘티 이미지 처리 중
+          </h3>
+          <p className="text-sm font-black text-field-text">{phaseLabel}</p>
+        </div>
+
+        <div className="flex items-end justify-between gap-3">
+          <p className="min-w-0 text-xs font-bold text-field-muted">
+            {current} / {total}
+          </p>
+          <p className="shrink-0 text-sm font-black text-field-primary">{percent}%</p>
+        </div>
+
+        <div
+          className="h-3 overflow-hidden rounded-[2px] border border-field-border bg-field-soft"
+          role="progressbar"
+          aria-label="콘티 이미지 처리 진행률"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+        >
+          <div
+            className="h-full rounded-none bg-field-primary transition-[width] duration-150 ease-linear motion-reduce:transition-none"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 border-y border-field-border text-xs font-bold text-field-muted">
+          <p className="border-r border-field-border px-2 py-2">
+            저장 {Math.max(0, progress.savedCount)}개
+          </p>
+          <p className="px-2 py-2">
+            실패 {Math.max(0, progress.failedCount)}개
+          </p>
+        </div>
+
+        <p className="text-xs font-bold leading-5 text-field-danger">
+          처리 중에는 화면을 닫거나 새로고침하지 마세요.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+function isBlockingArchiveImportProgress(progress?: ArchiveImportProgressState | null) {
+  return Boolean(
+    progress
+    && progress.phase !== "idle"
+    && progress.phase !== "complete"
+    && progress.phase !== "error"
+    && progress.phase !== "cancelled"
+  );
+}
+
+function archiveImportPhaseLabel(phase: ArchiveImportProgressPhase) {
+  switch (phase) {
+    case "preparing":
+      return "원본 준비 중";
+    case "cropping":
+      return "크롭 이미지 생성 중";
+    case "optimizing":
+      return "이미지 최적화 중";
+    case "uploading":
+      return "업로드 중";
+    case "saving":
+      return "저장 중";
+    case "finalizing":
+      return "마무리 중";
+    case "cancelling":
+      return "취소 중";
+    case "complete":
+      return "완료";
+    case "error":
+      return "처리 오류";
+    case "cancelled":
+      return "취소됨";
+    default:
+      return "준비 중";
+  }
+}
+
+function archiveImportPhaseCount(progress: ArchiveImportProgressState) {
+  switch (progress.phase) {
+    case "preparing":
+      return progress.preparedCount;
+    case "cropping":
+    case "optimizing":
+      return progress.croppedCount;
+    case "uploading":
+      return progress.uploadedCount;
+    case "saving":
+    case "finalizing":
+    case "complete":
+      return progress.savedCount;
+    case "error":
+    case "cancelled":
+      return progress.savedCount + progress.failedCount;
+    default:
+      return 0;
+  }
 }
 
 function ArchiveMetadataFields({

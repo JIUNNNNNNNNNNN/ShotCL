@@ -36,6 +36,7 @@ import { useParams } from "next/navigation";
 import {
   ArchiveImportDialog,
   type ArchiveImportCommit,
+  type ArchiveImportProgressState,
   type ArchiveImportSaveFailure,
   type ArchiveImportSaveReport
 } from "@/components/ArchiveImportDialog";
@@ -45,6 +46,7 @@ import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { Card } from "@/components/ui/Card";
 import {
+  createArchiveCropSession,
   createArchiveCropSource,
   createCroppedArchiveFile,
   createArchiveThumbnail,
@@ -75,8 +77,11 @@ import {
   moveProjectArchiveSelection,
   renameProjectArchiveFolderTree,
   updateProjectReferenceAsset,
-  uploadProjectReferenceAsset
+  uploadProjectReferenceAsset,
+  uploadStoryboardCropAssetsBulk,
+  type StoryboardCropBulkUploadItem
 } from "@/lib/data/projectReferenceAssets";
+import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { getProject } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import {
@@ -168,6 +173,32 @@ type FolderUploadReport = {
   verified: boolean;
 };
 
+type PreparedStoryboardCrop = {
+  displayFile: File;
+  thumbnailFile: File;
+  timings?: {
+    cropDrawMs: number;
+    imageEncodeMs: number;
+  };
+};
+
+type StoryboardImportTimings = {
+  sourcePrepareMs: number;
+  cropPipelineMs: number;
+  cropDrawMs: number;
+  imageEncodeMs: number;
+  requestMs: number;
+  storageUploadMs: number;
+  databaseMs: number;
+  archiveUpdateMs: number;
+  totalMs: number;
+  sourceDecodeCount: number;
+  cropCount: number;
+  requestCount: number;
+  cropConcurrency: number;
+  uploadWindowSize: number;
+};
+
 type ArchiveSelectionKind = "asset" | "diagram" | "folder";
 type ArchiveSelectionKey = `${ArchiveSelectionKind}:${string}`;
 
@@ -223,6 +254,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [moveFolderId, setMoveFolderId] = useState("");
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
+  const [importProgress, setImportProgress] = useState<ArchiveImportProgressState | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
   const [metadataAnchor, setMetadataAnchor] = useState<MetadataAnchor | null>(null);
@@ -263,6 +295,65 @@ export default function ProjectStoryboardOverheadPage() {
   const pendingImportRef = useRef<PendingImport | null>(null);
   const savedImportResultIdsRef = useRef(new Set<string>());
   const importResultAssetIdsRef = useRef(new Map<string, string>());
+  const preparedStoryboardCropsRef = useRef(new Map<string, PreparedStoryboardCrop>());
+  const importProcessingRef = useRef(false);
+  const importProgressRef = useRef<ArchiveImportProgressState | null>(null);
+  const importProgressTimerRef = useRef<number | null>(null);
+  const importAbortControllerRef = useRef<AbortController | null>(null);
+
+  useUnsavedChangesGuard(isActiveArchiveImportProgress(importProgress));
+
+  const flushImportProgress = useCallback(() => {
+    if (importProgressTimerRef.current !== null) {
+      window.clearTimeout(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+    setImportProgress(importProgressRef.current);
+  }, []);
+
+  const updateImportProgress = useCallback((
+    patch: Partial<ArchiveImportProgressState>,
+    immediate = false
+  ) => {
+    const current = importProgressRef.current;
+    if (!current) return;
+    const next = deriveArchiveImportProgress(current, patch);
+    importProgressRef.current = next;
+    if (immediate) {
+      flushImportProgress();
+      return;
+    }
+    if (importProgressTimerRef.current !== null) return;
+    importProgressTimerRef.current = window.setTimeout(() => {
+      importProgressTimerRef.current = null;
+      setImportProgress(importProgressRef.current);
+    }, 140);
+  }, [flushImportProgress]);
+
+  const startImportProgress = useCallback((
+    totalCount: number,
+    importBatchId: string,
+    savedCount: number
+  ) => {
+    const initial = deriveArchiveImportProgress({
+      phase: "preparing",
+      totalCount,
+      preparedCount: savedCount,
+      croppedCount: savedCount,
+      uploadedCount: savedCount,
+      savedCount,
+      failedCount: 0,
+      overallPercent: 0,
+      importBatchId,
+      startedAt: Date.now()
+    }, {});
+    importProgressRef.current = initial;
+    if (importProgressTimerRef.current !== null) {
+      window.clearTimeout(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+    setImportProgress(initial);
+  }, []);
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
@@ -337,6 +428,13 @@ export default function ProjectStoryboardOverheadPage() {
   }, [currentFolderPath, folders]);
 
   useEffect(() => () => {
+    importAbortControllerRef.current?.abort();
+    importAbortControllerRef.current = null;
+    if (importProgressTimerRef.current !== null) {
+      window.clearTimeout(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
+    preparedStoryboardCropsRef.current.clear();
     selectionPointerCleanupRef.current?.();
     if (selectionScrollFrameRef.current !== null) cancelAnimationFrame(selectionScrollFrameRef.current);
     if (dragPositionFrameRef.current !== null) cancelAnimationFrame(dragPositionFrameRef.current);
@@ -746,18 +844,32 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   function beginImport(nextImport: PendingImport) {
+    if (importProcessingRef.current) return;
     if (pendingImport) releaseArchivePages(pendingImport.pages);
     savedImportResultIdsRef.current = new Set();
     importResultAssetIdsRef.current = new Map();
+    preparedStoryboardCropsRef.current.clear();
+    importProgressRef.current = null;
+    setImportProgress(null);
     setImportSaveReport(null);
     setPendingImport(nextImport);
   }
 
-  function closeImport() {
+  function closeImport(force = false) {
+    if (importProcessingRef.current && !force) return;
     if (pendingImport) releaseArchivePages(pendingImport.pages);
+    importAbortControllerRef.current?.abort();
+    importAbortControllerRef.current = null;
+    if (importProgressTimerRef.current !== null) {
+      window.clearTimeout(importProgressTimerRef.current);
+      importProgressTimerRef.current = null;
+    }
     pendingImportRef.current = null;
     savedImportResultIdsRef.current = new Set();
     importResultAssetIdsRef.current = new Map();
+    preparedStoryboardCropsRef.current.clear();
+    importProgressRef.current = null;
+    setImportProgress(null);
     setImportSaveReport(null);
     setPendingImport(null);
   }
@@ -787,120 +899,281 @@ export default function ProjectStoryboardOverheadPage() {
       };
     }
 
+    const operationStartedAt = archivePerformanceNow();
     const pendingResults = value.results.filter(
       (result) => !savedImportResultIdsRef.current.has(result.id)
     );
-    const preparation = await mapSettledWithConcurrency(
-      pendingResults,
-      3,
-      async (result) => {
-        if (!result.crop) throw new Error("crop 범위가 없습니다.");
-        const inherited = inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex);
-        const baseTitle = value.title || inherited.displayName || "콘티";
-        const displayName = pageTitle(baseTitle, result.orderIndex, value.results.length)
-          || `콘티_${String(result.orderIndex + 1).padStart(2, "0")}`;
-        setProgressMessage(`crop 이미지 생성 중 ${result.orderIndex + 1}/${value.results.length}`);
-        const resultFile = await createCroppedArchiveFile(
-          result.page,
-          result.crop,
-          `${displayName}.jpg`
-        );
-        const thumbnailFile = await createArchiveThumbnail(resultFile);
-        return {
-          result,
-          inherited,
-          displayName,
-          resultFile,
-          thumbnailFile
-        };
-      }
+    const isMobile = window.matchMedia("(max-width: 767px), (pointer: coarse)").matches;
+    const hardwareConcurrency = Math.max(1, navigator.hardwareConcurrency || 4);
+    const cropConcurrency = Math.max(
+      1,
+      Math.min(isMobile ? 2 : 3, Math.floor(hardwareConcurrency / 2))
     );
+    const uploadWindowSize = isMobile ? 4 : 8;
+    const abortController = new AbortController();
+    importAbortControllerRef.current?.abort();
+    importAbortControllerRef.current = abortController;
 
-    const failures: ArchiveImportSaveFailure[] = preparation.flatMap((item) => {
-      if (item.status === "fulfilled") return [];
-      const result = pendingResults[item.index];
-      return [{
+    const failuresById = new Map<string, ArchiveImportSaveFailure>();
+    const uploadedAssets: ProjectReferenceAsset[] = [];
+    const preparedIds = new Set(savedImportResultIdsRef.current);
+    const croppedIds = new Set(savedImportResultIdsRef.current);
+    const uploadedIds = new Set(savedImportResultIdsRef.current);
+    const savedIds = new Set(savedImportResultIdsRef.current);
+    for (const result of pendingResults) {
+      if (!preparedStoryboardCropsRef.current.has(result.id)) continue;
+      preparedIds.add(result.id);
+      croppedIds.add(result.id);
+    }
+    const timings: StoryboardImportTimings = {
+      sourcePrepareMs: 0,
+      cropPipelineMs: 0,
+      cropDrawMs: 0,
+      imageEncodeMs: 0,
+      requestMs: 0,
+      storageUploadMs: 0,
+      databaseMs: 0,
+      archiveUpdateMs: 0,
+      totalMs: 0,
+      sourceDecodeCount: 0,
+      cropCount: pendingResults.length,
+      requestCount: 0,
+      cropConcurrency,
+      uploadWindowSize
+    };
+    startImportProgress(value.results.length, currentImport.importBatchId, savedIds.size);
+    updateImportProgress({
+      preparedCount: preparedIds.size,
+      croppedCount: croppedIds.size,
+      uploadedCount: uploadedIds.size,
+      savedCount: savedIds.size
+    }, true);
+    setProgressMessage("");
+    await yieldArchiveProcessingTask();
+
+    const pageGroups = new Map<string, typeof pendingResults>();
+    for (const result of pendingResults) {
+      const key = `${result.page.sourceFileIndex}:${result.page.id}`;
+      pageGroups.set(key, [...(pageGroups.get(key) ?? []), result]);
+    }
+
+    function failureFor(
+      result: (typeof pendingResults)[number],
+      message: string
+    ): ArchiveImportSaveFailure {
+      const inherited = inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex);
+      return {
         resultId: result.id,
         cropIndex: result.orderIndex + 1,
         label: pageTitle(
-          value.title || inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex).displayName,
+          value.title || inherited.displayName,
           result.orderIndex,
           value.results.length
         ) || result.page.name,
-        message: errorMessageOf(item.reason, "crop 이미지를 만들지 못했습니다.")
-      }];
-    });
-    const preparedItems = preparation.flatMap((item) => (
-      item.status === "fulfilled" ? [item.value] : []
-    ));
-
-    if (preparedItems.length > 0) {
-      setProgressMessage(`crop Blob ${preparedItems.length}개 준비 완료 · 업로드 시작`);
+        message
+      };
     }
-    const uploads = await mapSettledWithConcurrency(
-      preparedItems,
-      3,
-      async ({ result, inherited, displayName, resultFile, thumbnailFile }, uploadIndex) => {
-        const sourceFile = currentImport.sourceFiles[result.page.sourceFileIndex];
-        const sourceIsPdf = sourceFile ? isPdfFile(sourceFile) : currentImport.sourceKind === "pdf";
-        setProgressMessage(`crop 결과 업로드 중 ${uploadIndex + 1}/${preparedItems.length}`);
-        const saved = await uploadProjectReferenceAsset(
-          projectId,
-          "storyboard",
-          resultFile,
-          {
-            assetId: stableImportAssetId(result.id),
-            thumbnailFile,
-            sourceType: sourceIsPdf ? "pdf_crop" : "image_crop",
-            sourceAssetId: currentImport.existingSourceAssetIds?.[result.page.sourceFileIndex] || undefined,
-            pageIndex: result.page.index,
-            groupId: currentImport.importBatchId,
-            folderId: currentImport.folderId,
-            originalFolderName: currentImport.fileMetadata[result.page.sourceFileIndex]?.originalFolderName,
-            relativePath: currentImport.fileMetadata[result.page.sourceFileIndex]?.relativePath,
-            ...cropMetadata(result.crop, result.page, value.cropTemplate),
-            cropOrderIndex: result.orderIndex,
-            cropIndex: result.orderIndex + 1,
-            displayName,
-            originalFilename: resultFile.name,
-            sourceFilename: sourceFile?.name || inherited.originalFilename || result.page.name,
-            sourceKind: sourceIsPdf ? "pdf" : "image",
-            sourcePageNumber: result.page.index + 1,
-            importBatchId: currentImport.importBatchId,
-            templateId: result.templateId || value.cropTemplate?.templateId,
-            manuallyPositioned: result.manuallyPositioned,
-            customSize: result.customSize,
-            title: displayName,
-            memo: value.memo,
-            episodeNumber: inherited.episodeNumber ?? undefined,
-            sceneId: value.sceneId || inherited.sceneId || undefined,
-            sceneNumber: value.sceneNo || inherited.sceneNumber,
-            sceneNo: value.sceneNo || inherited.sceneNumber,
-            cutNo: value.cutNo,
-            sortOrder: currentImport.baseSortOrder + result.orderIndex
-          }
+
+    try {
+      for (const groupResults of pageGroups.values()) {
+        if (abortController.signal.aborted) throw new DOMException("작업이 취소되었습니다.", "AbortError");
+        const uncachedResults = groupResults.filter(
+          (result) => !preparedStoryboardCropsRef.current.has(result.id)
         );
-        return { result, saved };
-      }
-    );
+        let session: Awaited<ReturnType<typeof createArchiveCropSession>> | null = null;
 
-    const uploadedAssets: ProjectReferenceAsset[] = [];
-    for (const item of uploads) {
-      if (item.status === "fulfilled") {
-        savedImportResultIdsRef.current.add(item.value.result.id);
-        uploadedAssets.push(item.value.saved);
-        continue;
+        try {
+          if (uncachedResults.length > 0) {
+            const sourceStartedAt = archivePerformanceNow();
+            updateImportProgress({ phase: "preparing" });
+            try {
+              session = await createArchiveCropSession(groupResults[0].page);
+              timings.sourceDecodeCount += 1;
+              for (const result of uncachedResults) preparedIds.add(result.id);
+              updateImportProgress({
+                preparedCount: preparedIds.size,
+                failedCount: failuresById.size
+              });
+            } catch (error) {
+              const message = errorMessageOf(error, "원본 이미지를 준비하지 못했습니다.");
+              for (const result of uncachedResults) {
+                failuresById.set(result.id, failureFor(result, message));
+              }
+            } finally {
+              timings.sourcePrepareMs += archivePerformanceNow() - sourceStartedAt;
+            }
+          }
+
+          for (let offset = 0; offset < groupResults.length; offset += uploadWindowSize) {
+            if (abortController.signal.aborted) {
+              throw new DOMException("작업이 취소되었습니다.", "AbortError");
+            }
+            const windowResults = groupResults.slice(offset, offset + uploadWindowSize)
+              .filter((result) => !failuresById.has(result.id));
+            if (windowResults.length === 0) continue;
+
+            updateImportProgress({ phase: "cropping" });
+            const cropStartedAt = archivePerformanceNow();
+            const preparation = await mapSettledWithConcurrency(
+              windowResults,
+              cropConcurrency,
+              async (result) => {
+                if (abortController.signal.aborted) {
+                  throw new DOMException("작업이 취소되었습니다.", "AbortError");
+                }
+                const cached = preparedStoryboardCropsRef.current.get(result.id);
+                if (cached) return { result, files: cached, wasCached: true };
+                if (!result.crop) throw new Error("crop 범위가 없습니다.");
+                if (!session) throw new Error("crop 원본을 준비하지 못했습니다.");
+                const inherited = inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex);
+                const baseTitle = value.title || inherited.displayName || "콘티";
+                const displayName = pageTitle(baseTitle, result.orderIndex, value.results.length)
+                  || `콘티_${String(result.orderIndex + 1).padStart(2, "0")}`;
+                const files = await session.createFiles(result.crop, `${displayName}.jpg`);
+                preparedStoryboardCropsRef.current.set(result.id, files);
+                return { result, files, wasCached: false };
+              }
+            );
+            timings.cropPipelineMs += archivePerformanceNow() - cropStartedAt;
+
+            const preparedWindow: Array<{
+              result: (typeof pendingResults)[number];
+              files: PreparedStoryboardCrop;
+            }> = [];
+            for (const item of preparation) {
+              if (item.status === "fulfilled") {
+                croppedIds.add(item.value.result.id);
+                preparedWindow.push(item.value);
+                if (!item.value.wasCached) {
+                  timings.cropDrawMs += item.value.files.timings?.cropDrawMs ?? 0;
+                  timings.imageEncodeMs += item.value.files.timings?.imageEncodeMs ?? 0;
+                }
+                failuresById.delete(item.value.result.id);
+                continue;
+              }
+              const result = windowResults[item.index];
+              failuresById.set(
+                result.id,
+                failureFor(result, errorMessageOf(item.reason, "crop 이미지를 만들지 못했습니다."))
+              );
+            }
+            updateImportProgress({
+              phase: "optimizing",
+              croppedCount: croppedIds.size,
+              failedCount: failuresById.size
+            });
+            if (preparedWindow.length === 0) continue;
+
+            const bulkItems: StoryboardCropBulkUploadItem[] = preparedWindow.map(({ result, files }) => {
+              const inherited = inheritedArchiveMetadata(currentImport, result.page.sourceFileIndex);
+              const baseTitle = value.title || inherited.displayName || "콘티";
+              const displayName = pageTitle(baseTitle, result.orderIndex, value.results.length)
+                || `콘티_${String(result.orderIndex + 1).padStart(2, "0")}`;
+              const sourceFile = currentImport.sourceFiles[result.page.sourceFileIndex];
+              const sourceIsPdf = sourceFile
+                ? isPdfFile(sourceFile)
+                : currentImport.sourceKind === "pdf";
+              return {
+                clientResultId: result.id,
+                file: files.displayFile,
+                thumbnailFile: files.thumbnailFile,
+                metadata: {
+                  assetId: stableImportAssetId(result.id),
+                  sourceType: sourceIsPdf ? "pdf_crop" : "image_crop",
+                  sourceAssetId: currentImport.existingSourceAssetIds?.[result.page.sourceFileIndex] || undefined,
+                  pageIndex: result.page.index,
+                  groupId: currentImport.importBatchId,
+                  folderId: currentImport.folderId,
+                  originalFolderName: currentImport.fileMetadata[result.page.sourceFileIndex]?.originalFolderName,
+                  relativePath: currentImport.fileMetadata[result.page.sourceFileIndex]?.relativePath,
+                  ...cropMetadata(result.crop, result.page, value.cropTemplate),
+                  cropOrderIndex: result.orderIndex,
+                  cropIndex: result.orderIndex + 1,
+                  displayName,
+                  originalFilename: files.displayFile.name,
+                  sourceFilename: sourceFile?.name || inherited.originalFilename || result.page.name,
+                  sourceKind: sourceIsPdf ? "pdf" : "image",
+                  sourcePageNumber: result.page.index + 1,
+                  importBatchId: currentImport.importBatchId,
+                  templateId: result.templateId || value.cropTemplate?.templateId,
+                  manuallyPositioned: result.manuallyPositioned,
+                  customSize: result.customSize,
+                  title: displayName,
+                  memo: value.memo,
+                  episodeNumber: inherited.episodeNumber ?? undefined,
+                  sceneId: value.sceneId || inherited.sceneId || undefined,
+                  sceneNumber: value.sceneNo || inherited.sceneNumber,
+                  sceneNo: value.sceneNo || inherited.sceneNumber,
+                  cutNo: value.cutNo,
+                  sortOrder: currentImport.baseSortOrder + result.orderIndex
+                }
+              };
+            });
+
+            updateImportProgress({ phase: "uploading" });
+            const bulkResult = await uploadStoryboardCropAssetsBulk(projectId, bulkItems, {
+              signal: abortController.signal
+            });
+            timings.requestMs += bulkResult.timings.requestMs;
+            timings.storageUploadMs += bulkResult.timings.uploadMs;
+            timings.databaseMs += bulkResult.timings.databaseMs;
+            timings.requestCount += bulkResult.timings.requestCount;
+            updateImportProgress({ phase: "saving" });
+
+            for (const result of bulkResult.results) {
+              const sourceResult = windowResults.find((entry) => entry.id === result.clientResultId);
+              if (!sourceResult) continue;
+              if ((result.status === "saved" || result.status === "existing") && result.asset) {
+                savedImportResultIdsRef.current.add(sourceResult.id);
+                savedIds.add(sourceResult.id);
+                uploadedIds.add(sourceResult.id);
+                uploadedAssets.push(result.asset);
+                failuresById.delete(sourceResult.id);
+                preparedStoryboardCropsRef.current.delete(sourceResult.id);
+                continue;
+              }
+              failuresById.set(
+                sourceResult.id,
+                failureFor(
+                  sourceResult,
+                  result.error || "crop 결과를 업로드하거나 저장하지 못했습니다."
+                )
+              );
+            }
+            if (bulkResult.storageCleanupWarning) {
+              setErrorMessage(bulkResult.storageCleanupWarning);
+            }
+            updateImportProgress({
+              uploadedCount: uploadedIds.size,
+              savedCount: savedIds.size,
+              failedCount: failuresById.size
+            });
+          }
+        } finally {
+          session?.close();
+        }
       }
-      const prepared = preparedItems[item.index];
-      failures.push({
-        resultId: prepared.result.id,
-        cropIndex: prepared.result.orderIndex + 1,
-        label: prepared.displayName,
-        message: errorMessageOf(item.reason, "crop 결과를 업로드하지 못했습니다.")
-      });
+    } catch (error) {
+      const message = errorMessageOf(error, "콘티 crop 묶음 처리를 완료하지 못했습니다.");
+      for (const result of pendingResults) {
+        if (savedImportResultIdsRef.current.has(result.id) || failuresById.has(result.id)) continue;
+        failuresById.set(result.id, failureFor(result, message));
+      }
     }
-    mergeUploadedAssets("storyboard", uploadedAssets);
 
+    updateImportProgress({
+      phase: "finalizing",
+      uploadedCount: uploadedIds.size,
+      savedCount: savedIds.size,
+      failedCount: failuresById.size
+    }, true);
+    const archiveUpdateStartedAt = archivePerformanceNow();
+    mergeUploadedAssets("storyboard", uploadedAssets);
+    timings.archiveUpdateMs += archivePerformanceNow() - archiveUpdateStartedAt;
+    timings.totalMs = archivePerformanceNow() - operationStartedAt;
+
+    const failures = [...failuresById.values()]
+      .sort((left, right) => left.cropIndex - right.cropIndex);
     const report: ArchiveImportSaveReport = {
       total: value.results.length,
       succeededResultIds: [...savedImportResultIdsRef.current],
@@ -908,11 +1181,27 @@ export default function ProjectStoryboardOverheadPage() {
     };
     setImportSaveReport(report);
     setProgressMessage("");
+    logStoryboardImportTimings(timings, report);
 
     if (report.succeededResultIds.length === report.total && failures.length === 0) {
+      updateImportProgress({
+        phase: "complete",
+        preparedCount: report.total,
+        croppedCount: report.total,
+        uploadedCount: report.total,
+        savedCount: report.total,
+        failedCount: 0,
+        overallPercent: 100
+      }, true);
       setStatusMessage(`${report.total}개 콘티를 추출했습니다.`);
-      closeImport();
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 220));
+      closeImport(true);
     } else {
+      updateImportProgress({
+        phase: "error",
+        savedCount: report.succeededResultIds.length,
+        failedCount: failures.length
+      }, true);
       setErrorMessage(
         `콘티 ${report.succeededResultIds.length}/${report.total}개 저장 · ${failures.length}개 실패`
       );
@@ -921,15 +1210,18 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   async function saveImport(value: ArchiveImportCommit): Promise<ArchiveImportSaveReport> {
-    if (!projectId || !pendingImport || isSaving) {
+    if (!projectId || !pendingImport || isSaving || importProcessingRef.current) {
       return { total: value.results.length, succeededResultIds: [], failures: [] };
     }
+    importProcessingRef.current = true;
     setIsSaving(true);
     setErrorMessage("");
     if (pendingImport.assetType === "storyboard") {
       try {
         return await saveStoryboardImport(value, pendingImport);
       } finally {
+        importAbortControllerRef.current = null;
+        importProcessingRef.current = false;
         setIsSaving(false);
       }
     }
@@ -1128,6 +1420,7 @@ export default function ProjectStoryboardOverheadPage() {
         }))
       };
     } finally {
+      importProcessingRef.current = false;
       setIsSaving(false);
     }
   }
@@ -2648,6 +2941,7 @@ export default function ProjectStoryboardOverheadPage() {
           initialMetadata={archiveImportInitialMetadata(pendingImport)}
           isSaving={isSaving}
           saveReport={importSaveReport}
+          progress={importProgress}
           onClose={closeImport}
           onSave={saveImport}
         />
@@ -3293,6 +3587,105 @@ function createArchiveUuid() {
 
 function createArchiveSessionId() {
   return createArchiveUuid();
+}
+
+function isActiveArchiveImportProgress(progress: ArchiveImportProgressState | null) {
+  return Boolean(
+    progress
+    && progress.phase !== "idle"
+    && progress.phase !== "complete"
+    && progress.phase !== "error"
+    && progress.phase !== "cancelled"
+  );
+}
+
+function deriveArchiveImportProgress(
+  current: ArchiveImportProgressState,
+  patch: Partial<ArchiveImportProgressState>
+): ArchiveImportProgressState {
+  const totalCount = Math.max(0, Math.round(patch.totalCount ?? current.totalCount));
+  const clampCount = (value: number) => Math.min(totalCount, Math.max(0, Math.round(value)));
+  const next: ArchiveImportProgressState = {
+    ...current,
+    ...patch,
+    totalCount,
+    preparedCount: clampCount(patch.preparedCount ?? current.preparedCount),
+    croppedCount: clampCount(patch.croppedCount ?? current.croppedCount),
+    uploadedCount: clampCount(patch.uploadedCount ?? current.uploadedCount),
+    savedCount: clampCount(patch.savedCount ?? current.savedCount),
+    failedCount: clampCount(patch.failedCount ?? current.failedCount)
+  };
+  if (next.phase === "complete") {
+    next.overallPercent = 100;
+    return next;
+  }
+  const denominator = Math.max(1, totalCount);
+  const measuredPercent = (
+    (next.preparedCount / denominator) * 5
+    + (next.croppedCount / denominator) * 45
+    + (next.uploadedCount / denominator) * 40
+    + (next.savedCount / denominator) * 8
+  );
+  const phaseFloor = next.phase === "finalizing" ? 98 : 0;
+  next.overallPercent = Math.min(
+    99,
+    Math.max(
+      current.overallPercent,
+      Number.isFinite(patch.overallPercent) ? Number(patch.overallPercent) : 0,
+      measuredPercent,
+      phaseFloor
+    )
+  );
+  return next;
+}
+
+async function yieldArchiveProcessingTask() {
+  const scheduler = (
+    globalThis as typeof globalThis & {
+      scheduler?: { yield?: () => Promise<void> };
+    }
+  ).scheduler;
+  if (typeof scheduler?.yield === "function") {
+    await scheduler.yield();
+    return;
+  }
+  await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+}
+
+function archivePerformanceNow() {
+  return typeof performance === "undefined" ? Date.now() : performance.now();
+}
+
+function logStoryboardImportTimings(
+  timings: StoryboardImportTimings,
+  report: ArchiveImportSaveReport
+) {
+  if (process.env.NODE_ENV === "production") return;
+  const milliseconds = (value: number) => Math.round(value * 10) / 10;
+  console.info("[storyboard-crop:bulk-timing]", {
+    items: report.total,
+    saved: report.succeededResultIds.length,
+    failed: report.failures.length,
+    sourcePrepareMs: milliseconds(timings.sourcePrepareMs),
+    cropPipelineWallMs: milliseconds(timings.cropPipelineMs),
+    cropDrawMs: milliseconds(timings.cropDrawMs),
+    imageEncodeMs: milliseconds(timings.imageEncodeMs),
+    requestMs: milliseconds(timings.requestMs),
+    storageUploadMs: milliseconds(timings.storageUploadMs),
+    databaseMs: milliseconds(timings.databaseMs),
+    archiveUpdateMs: milliseconds(timings.archiveUpdateMs),
+    totalMs: milliseconds(timings.totalMs),
+    sourceDecodeCount: timings.sourceDecodeCount,
+    cropCount: timings.cropCount,
+    requestCount: timings.requestCount,
+    cropConcurrency: timings.cropConcurrency,
+    uploadWindowSize: timings.uploadWindowSize,
+    legacyFlowEstimate: {
+      sourceDecodes: timings.cropCount,
+      thumbnailRedecodes: timings.cropCount,
+      apiRequests: timings.cropCount
+    }
+  });
 }
 
 function errorMessageOf(error: unknown, fallback: string) {
