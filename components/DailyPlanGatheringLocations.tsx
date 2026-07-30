@@ -1,0 +1,426 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, ImagePlus, Save, Trash2, X } from "lucide-react";
+import { optimizeArchiveImage } from "@/lib/client/archiveMedia";
+import { saveDailyPlanGatheringPhotoDraft } from "@/lib/data/dailyPlanGatheringPhotos";
+import {
+  createGatheringPhotoId,
+  selectDailyPlanGatheringPoints,
+  type DerivedDailyPlanGatheringPoint
+} from "@/lib/dailyPlan/gatheringPoints";
+import type { DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
+import type { DailyPlan } from "@/lib/types";
+
+export type GatheringPhotoPreview = {
+  url: string;
+  title: string;
+};
+
+type DailyPlanGatheringLocationsProps = {
+  projectId: string;
+  plan: DailyPlan;
+  canEdit: boolean;
+  onPlanMetadataChange: (patch: Pick<DailyPlan, "memo" | "updatedAt">) => void;
+  onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
+};
+
+type ExistingDraftPhoto = {
+  key: string;
+  kind: "existing";
+  id: string;
+  previewUrl: string;
+  originalFilename: string;
+};
+
+type PendingDraftPhoto = {
+  key: string;
+  kind: "pending";
+  id: string;
+  previewUrl: string;
+  originalFilename: string;
+  displayFile: File;
+  thumbnailFile: File;
+};
+
+type DraftPhoto = ExistingDraftPhoto | PendingDraftPhoto;
+
+export function DailyPlanGatheringLocations({
+  projectId,
+  plan,
+  canEdit,
+  onPlanMetadataChange,
+  onPreview
+}: DailyPlanGatheringLocationsProps) {
+  const points = useMemo(
+    () => selectDailyPlanGatheringPoints(plan),
+    [plan.memo, plan.shootingLocations]
+  );
+  const [editingPointId, setEditingPointId] = useState<string | null>(null);
+  const [message, setMessage] = useState("");
+  const editingPoint = points.find((point) => point.id === editingPointId) ?? null;
+
+  return (
+    <section className="mb-3 rounded-[3px] border border-field-border bg-white px-3 py-2.5" aria-labelledby="gathering-locations-title">
+      <div className="flex items-center justify-between gap-3 border-b border-field-border pb-2">
+        <h2 id="gathering-locations-title" className="text-sm font-black text-field-primary">집합장소</h2>
+        {message ? <p className="min-w-0 truncate text-[11px] font-bold text-field-muted">{message}</p> : null}
+      </div>
+
+      {points.length === 0 ? (
+        <div className="py-2 text-xs font-bold leading-5 text-field-muted">
+          <p>등록된 집합장소가 없습니다.</p>
+          {canEdit ? <p>일촬표에서 부서별 집합장소를 입력하세요.</p> : null}
+        </div>
+      ) : (
+        <div className="divide-y divide-field-border">
+          {points.map((point) => (
+            <GatheringPointRow
+              key={point.id}
+              point={point}
+              canEdit={canEdit}
+              onManage={() => {
+                setMessage("");
+                setEditingPointId(point.id);
+              }}
+              onPreview={onPreview}
+            />
+          ))}
+        </div>
+      )}
+
+      {canEdit && editingPoint ? (
+        <GatheringPhotoEditor
+          projectId={projectId}
+          plan={plan}
+          point={editingPoint}
+          onClose={() => setEditingPointId(null)}
+          onSaved={(patch, nextMessage) => {
+            onPlanMetadataChange(patch);
+            setMessage(nextMessage);
+            setEditingPointId(null);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function GatheringPointRow({
+  point,
+  canEdit,
+  onManage,
+  onPreview
+}: {
+  point: DerivedDailyPlanGatheringPoint;
+  canEdit: boolean;
+  onManage: () => void;
+  onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
+}) {
+  const photoPreviews = point.photos.map((photo) => ({
+    url: photo.url,
+    title: `${point.locationName} · ${photo.originalFilename || "위치 사진"}`
+  }));
+  return (
+    <article className="grid gap-1.5 py-2.5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <h3 className="min-w-0 break-words text-[14px] font-black leading-5 text-field-text">{point.locationName}</h3>
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={onManage}
+              className="shrink-0 rounded-[3px] border border-field-border bg-white px-2 py-1 text-[11px] font-black text-field-primary transition-colors hover:border-field-secondary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+            >
+              사진 관리
+            </button>
+          ) : null}
+        </div>
+        <GatheringDepartmentTimes point={point} />
+        {point.address ? (
+          <p className="mt-0.5 truncate text-[11px] font-medium text-field-muted" title={point.address}>
+            {point.mapUrl ? (
+              <a href={point.mapUrl} target="_blank" rel="noreferrer" className="underline decoration-field-border underline-offset-2">
+                {point.address}
+              </a>
+            ) : point.address}
+          </p>
+        ) : null}
+        {point.note ? (
+          <p className="mt-0.5 truncate text-[11px] font-medium text-field-muted" title={point.note}>{point.note}</p>
+        ) : null}
+      </div>
+      {point.photos.length > 0 ? (
+        <GatheringPhotoStrip
+          photos={point.photos}
+          locationName={point.locationName}
+          onPreview={(index) => onPreview(photoPreviews, index)}
+        />
+      ) : null}
+    </article>
+  );
+}
+
+function GatheringDepartmentTimes({ point }: { point: DerivedDailyPlanGatheringPoint }) {
+  const timeValues = [...new Set(point.departments.map((department) => department.time).filter(Boolean))];
+  const departmentNames = point.departments.map((department) => department.name).join(", ");
+  if (timeValues.length <= 1) {
+    return (
+      <p className="mt-0.5 text-[12px] font-bold leading-5 text-field-muted">
+        {[timeValues[0] || "시간 미정", departmentNames].filter(Boolean).join(" · ")}
+      </p>
+    );
+  }
+  return (
+    <p className="mt-0.5 text-[12px] font-bold leading-5 text-field-muted">
+      {point.departments.map((department) => (
+        `${department.time || "시간 미정"} ${department.name}`
+      )).join(" · ")}
+    </p>
+  );
+}
+
+export function GatheringPhotoStrip({
+  photos,
+  locationName,
+  onPreview
+}: {
+  photos: DailyPlanGatheringPhoto[];
+  locationName: string;
+  onPreview: (index: number) => void;
+}) {
+  return (
+    <div className="flex max-w-full gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5 md:max-w-[18rem]" aria-label={`${locationName} 위치 사진`}>
+      {photos.map((photo, index) => (
+        <button
+          type="button"
+          key={photo.id}
+          onClick={() => onPreview(index)}
+          className="h-12 w-[4.5rem] shrink-0 overflow-hidden rounded-[2px] border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+          aria-label={`${locationName} 위치 사진 ${index + 1} 크게 보기`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photo.thumbnailUrl || photo.url}
+            alt=""
+            loading="lazy"
+            className="h-full w-full object-cover"
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function GatheringPhotoEditor({
+  projectId,
+  plan,
+  point,
+  onClose,
+  onSaved
+}: {
+  projectId: string;
+  plan: DailyPlan;
+  point: DerivedDailyPlanGatheringPoint;
+  onClose: () => void;
+  onSaved: (patch: Pick<DailyPlan, "memo" | "updatedAt">, message: string) => void;
+}) {
+  const [draftPhotos, setDraftPhotos] = useState<DraftPhoto[]>(() => point.photos.map(toExistingDraftPhoto));
+  const [deletedPhotoIds, setDeletedPhotoIds] = useState<string[]>([]);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const pendingUrlsRef = useRef<Set<string>>(new Set());
+  const initialOrder = point.photos.map((photo) => photo.id).join("|");
+
+  useEffect(() => () => {
+    pendingUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    pendingUrlsRef.current.clear();
+  }, []);
+
+  async function handleFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setIsPreparing(true);
+    setErrorMessage("");
+    try {
+      const additions: PendingDraftPhoto[] = [];
+      for (const file of Array.from(files).slice(0, 12)) {
+        const optimized = await optimizeArchiveImage(file);
+        const previewUrl = URL.createObjectURL(optimized.thumbnailFile);
+        pendingUrlsRef.current.add(previewUrl);
+        const id = createGatheringPhotoId();
+        additions.push({
+          key: `pending:${id}`,
+          kind: "pending",
+          id,
+          previewUrl,
+          originalFilename: file.name,
+          displayFile: optimized.displayFile,
+          thumbnailFile: optimized.thumbnailFile
+        });
+      }
+      setDraftPhotos((current) => [...current, ...additions]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "선택한 사진을 준비하지 못했습니다.");
+    } finally {
+      setIsPreparing(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  function removeDraftPhoto(index: number) {
+    setDraftPhotos((current) => {
+      const target = current[index];
+      if (!target) return current;
+      if (target.kind === "existing") {
+        setDeletedPhotoIds((ids) => ids.includes(target.id) ? ids : [...ids, target.id]);
+      } else {
+        URL.revokeObjectURL(target.previewUrl);
+        pendingUrlsRef.current.delete(target.previewUrl);
+      }
+      return current.filter((_, itemIndex) => itemIndex !== index);
+    });
+  }
+
+  function moveDraftPhoto(index: number, direction: -1 | 1) {
+    setDraftPhotos((current) => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function saveChanges() {
+    const pending = draftPhotos.filter((photo): photo is PendingDraftPhoto => photo.kind === "pending");
+    const finalOrder = draftPhotos.map((photo) => photo.id);
+    const hasOrderChange = finalOrder.join("|") !== initialOrder;
+    if (deletedPhotoIds.length === 0 && pending.length === 0 && !hasOrderChange) {
+      onClose();
+      return;
+    }
+
+    setIsSaving(true);
+    setErrorMessage("");
+    setProgress("변경사항 저장 중");
+    try {
+      const result = await saveDailyPlanGatheringPhotoDraft({
+        projectId,
+        dailyPlanId: plan.id,
+        gatheringPointId: point.persistedId,
+        departmentIds: point.departments.map((department) => department.id),
+        deletedPhotoIds,
+        orderedPhotoIds: finalOrder,
+        pendingPhotos: pending.map((photo) => ({
+          photoId: photo.id,
+          displayFile: photo.displayFile,
+          thumbnailFile: photo.thumbnailFile,
+          originalFilename: photo.originalFilename
+        })),
+        expectedUpdatedAt: plan.updatedAt
+      });
+      onSaved(
+        { memo: result.memo, updatedAt: result.updatedAt },
+        result.cleanupWarning
+          ? `위치 사진을 저장했습니다. ${result.cleanupWarning}`
+          : "위치 사진을 저장했습니다."
+      );
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "위치 사진 변경사항을 저장하지 못했습니다.");
+    } finally {
+      setIsSaving(false);
+      setProgress("");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 md:items-center md:justify-center md:p-4" role="dialog" aria-modal="true" aria-label={`${point.locationName} 위치 사진 관리`}>
+      <div className="max-h-[88dvh] w-full overflow-y-auto rounded-t-[4px] border border-field-border bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:max-w-xl md:rounded-[4px] md:pb-4 md:shadow-[0_10px_30px_rgba(0,0,0,0.16)]">
+        <div className="flex items-start justify-between gap-3 border-b border-field-border pb-3">
+          <div className="min-w-0">
+            <h2 className="break-words text-base font-black text-field-primary">{point.locationName}</h2>
+            <p className="mt-0.5 text-xs font-bold text-field-muted">위치 사진 관리</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+            aria-label="사진 관리 닫기"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+
+        <div className="mt-3 grid gap-2">
+          {draftPhotos.length === 0 ? (
+            <p className="border border-dashed border-field-border px-3 py-4 text-center text-xs font-bold text-field-muted">
+              저장된 위치 사진이 없습니다.
+            </p>
+          ) : draftPhotos.map((photo, index) => (
+            <div key={photo.key} className="grid grid-cols-[5rem_minmax(0,1fr)_auto] items-center gap-2 border-b border-field-border pb-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={photo.previewUrl} alt="" className="h-14 w-20 rounded-[2px] border border-field-border object-cover" />
+              <p className="min-w-0 truncate text-xs font-bold text-field-text">{photo.originalFilename || `사진 ${index + 1}`}</p>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => moveDraftPhoto(index, -1)} disabled={isSaving || index === 0} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-border bg-white disabled:opacity-30" aria-label="사진 순서 위로">
+                  <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <button type="button" onClick={() => moveDraftPhoto(index, 1)} disabled={isSaving || index === draftPhotos.length - 1} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-border bg-white disabled:opacity-30" aria-label="사진 순서 아래로">
+                  <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+                </button>
+                <button type="button" onClick={() => removeDraftPhoto(index)} disabled={isSaving} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-danger bg-white text-field-danger disabled:opacity-30" aria-label="사진 삭제">
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+          className="sr-only"
+          onChange={(event) => void handleFiles(event.currentTarget.files)}
+        />
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={isPreparing || isSaving}
+          className="mt-3 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-[3px] border border-field-border bg-field-soft px-3 py-2 text-sm font-black text-field-primary hover:border-field-secondary disabled:opacity-50"
+        >
+          <ImagePlus className="h-4 w-4" aria-hidden />
+          {isPreparing ? "사진 준비 중" : "사진 선택"}
+        </button>
+
+        {errorMessage ? <p className="mt-3 text-sm font-bold leading-5 text-field-danger">{errorMessage}</p> : null}
+        {progress ? <p className="mt-2 text-xs font-bold text-field-muted" role="status">{progress}</p> : null}
+
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-field-border pt-3">
+          <button type="button" onClick={onClose} disabled={isSaving} className="min-h-[42px] rounded-[3px] border border-field-border bg-white px-3 py-2 text-sm font-black text-field-muted disabled:opacity-50">
+            취소
+          </button>
+          <button type="button" onClick={() => void saveChanges()} disabled={isPreparing || isSaving} className="flex min-h-[42px] items-center justify-center gap-2 rounded-[3px] border border-field-primary bg-field-primary px-3 py-2 text-sm font-black text-white disabled:opacity-50">
+            <Save className="h-4 w-4" aria-hidden />
+            {isSaving ? "저장 중" : "저장"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function toExistingDraftPhoto(photo: DailyPlanGatheringPhoto): ExistingDraftPhoto {
+  return {
+    key: `existing:${photo.id}`,
+    kind: "existing",
+    id: photo.id,
+    previewUrl: photo.thumbnailUrl || photo.url,
+    originalFilename: photo.originalFilename
+  };
+}

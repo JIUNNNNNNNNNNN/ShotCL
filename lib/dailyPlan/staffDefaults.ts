@@ -170,6 +170,8 @@ function mergeDailyPlanTeamRows(
       totalOverride,
       callTime: firstValue(source, "callTime"),
       callLocation: firstDailyPlanLocation(source, members, key),
+      callLocationId: firstStableValue(source, "callLocationId"),
+      gatheringPointId: firstStableValue(source, "gatheringPointId"),
       notes: firstDailyPlanNotes(source, members, key)
     };
   });
@@ -189,6 +191,8 @@ function mergeDailyPlanTeamRows(
       contact: "",
       callTime: firstValue(rows, "callTime"),
       callLocation: firstDailyPlanLocation(rows, members, key),
+      callLocationId: firstStableValue(rows, "callLocationId"),
+      gatheringPointId: firstStableValue(rows, "gatheringPointId"),
       notes: firstDailyPlanNotes(rows, members, key)
     });
   });
@@ -224,6 +228,13 @@ function groupSourceTeamRows(rows: TeamCallSheetRow[]) {
 
 function firstValue(rows: TeamCallSheetRow[], field: "callTime" | "callLocation" | "notes") {
   return rows.find((row) => row[field].trim())?.[field].trim() ?? "";
+}
+
+function firstStableValue(
+  rows: TeamCallSheetRow[],
+  field: "callLocationId" | "gatheringPointId"
+) {
+  return rows.find((row) => String(row[field] ?? "").trim())?.[field]?.trim() || undefined;
 }
 
 function firstDailyPlanLocation(

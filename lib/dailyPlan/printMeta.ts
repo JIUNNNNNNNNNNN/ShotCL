@@ -26,7 +26,39 @@ export type TeamCallSheetRow = {
   contact?: string;
   callTime: string;
   callLocation: string;
+  /** 부서별 집합장소가 일반 LOCATION을 선택했을 때의 안정적인 장소 ID입니다. */
+  callLocationId?: string;
+  /** dailyPlan metadata 안에서 사진을 연결하는 안정적인 집합지점 ID입니다. */
+  gatheringPointId?: string;
   notes: string;
+};
+
+export type DailyPlanGatheringPhoto = {
+  id: string;
+  url: string;
+  thumbnailUrl: string;
+  storagePath: string;
+  thumbnailPath: string;
+  width?: number;
+  height?: number;
+  sortOrder: number;
+  originalFilename: string;
+};
+
+export type DailyPlanGatheringDepartmentTime = {
+  departmentId: string;
+  time: string;
+};
+
+export type DailyPlanGatheringPoint = {
+  id: string;
+  locationName: string;
+  locationId?: string;
+  address?: string;
+  note?: string;
+  departmentIds: string[];
+  departmentTimes: DailyPlanGatheringDepartmentTime[];
+  photos: DailyPlanGatheringPhoto[];
 };
 
 export type DailyPlanMainStaffRow = {
@@ -128,6 +160,8 @@ export type DailyPlanPrintMeta = {
   mainStaff: DailyPlanMainStaffRow[];
   starring: CallSheetPerson[];
   teams: TeamCallSheetRow[];
+  /** 부서별 집합정보에서 파생된 안정적인 지점과 위치 사진 metadata입니다. */
+  gatheringPoints: DailyPlanGatheringPoint[];
 };
 
 const META_START = "[[TODAY_BOARD_DAILY_PLAN_PRINT_META_V1]]";
@@ -156,7 +190,8 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     memoText: "",
     mainStaff: [],
     starring: [createBlankCallSheetPerson()],
-    teams: []
+    teams: [],
+    gatheringPoints: []
   };
 }
 
@@ -238,7 +273,8 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     memoText: meta.memoText ?? "",
     mainStaff: normalizeMainStaff(meta.mainStaff),
     starring: normalizePeople(meta.starring),
-    teams: normalizeTeams(meta.teams)
+    teams: normalizeTeams(meta.teams),
+    gatheringPoints: normalizeGatheringPoints(meta.gatheringPoints)
   };
 }
 
@@ -542,11 +578,74 @@ function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {
       contact: formatKoreanPhoneNumber(row.contact ?? ""),
       callTime: row.callTime ?? "",
       callLocation: row.callLocation ?? "",
+      callLocationId: String(row.callLocationId ?? "").trim() || undefined,
+      gatheringPointId: String(row.gatheringPointId ?? "").trim() || undefined,
       notes: row.notes ?? ""
     };
   });
 
   return next;
+}
+
+function normalizeGatheringPoints(rows: DailyPlanGatheringPoint[] | undefined) {
+  if (!Array.isArray(rows)) return [];
+
+  return rows.slice(0, 200).flatMap((row, index) => {
+    const id = String(row?.id ?? "").trim();
+    if (!id) return [];
+    const seenDepartments = new Set<string>();
+    const departmentIds = (Array.isArray(row.departmentIds) ? row.departmentIds : [])
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value && !seenDepartments.has(value) && seenDepartments.add(value));
+    const departmentTimes = (Array.isArray(row.departmentTimes) ? row.departmentTimes : [])
+      .slice(0, 200)
+      .flatMap((entry) => {
+        const departmentId = String(entry?.departmentId ?? "").trim();
+        if (!departmentId) return [];
+        return [{ departmentId, time: String(entry?.time ?? "").trim().slice(0, 40) }];
+      });
+    const photos = (Array.isArray(row.photos) ? row.photos : [])
+      .slice(0, 100)
+      .flatMap((photo, photoIndex) => {
+        const photoId = String(photo?.id ?? "").trim();
+        const url = normalizeGatheringPhotoUrl(photo?.url);
+        if (!photoId || !url) return [];
+        const width = Number(photo.width);
+        const height = Number(photo.height);
+        return [{
+          id: photoId,
+          url,
+          thumbnailUrl: normalizeGatheringPhotoUrl(photo.thumbnailUrl) || url,
+          storagePath: String(photo.storagePath ?? "").trim().slice(0, 1_000),
+          thumbnailPath: String(photo.thumbnailPath ?? "").trim().slice(0, 1_000),
+          ...(Number.isFinite(width) && width > 0 ? { width: Math.round(width) } : {}),
+          ...(Number.isFinite(height) && height > 0 ? { height: Math.round(height) } : {}),
+          sortOrder: Number.isFinite(Number(photo.sortOrder))
+            ? Math.max(0, Math.round(Number(photo.sortOrder)))
+            : photoIndex,
+          originalFilename: String(photo.originalFilename ?? "").trim().slice(0, 500)
+        }];
+      })
+      .sort((left, right) => left.sortOrder - right.sortOrder);
+
+    return [{
+      id: id.slice(0, 160),
+      locationName: String(row.locationName ?? "").trim().slice(0, 500),
+      locationId: String(row.locationId ?? "").trim().slice(0, 160) || undefined,
+      address: String(row.address ?? "").trim().slice(0, 1_000) || undefined,
+      note: String(row.note ?? "").trim().slice(0, 2_000) || undefined,
+      departmentIds,
+      departmentTimes,
+      photos: photos.map((photo, photoIndex) => ({ ...photo, sortOrder: photoIndex }))
+    }];
+  });
+}
+
+function normalizeGatheringPhotoUrl(value: unknown) {
+  const url = String(value ?? "").trim();
+  // local project fallback은 최적화된 thumbnail을 data URL로 보관하므로 중간에서 자르지 않습니다.
+  if (/^data:image\/(?:jpeg|png|webp);base64,/i.test(url)) return url;
+  return url.slice(0, 4_000);
 }
 
 /** 0을 포함한 0 이상의 정수만 인원 값으로 정규화합니다. */

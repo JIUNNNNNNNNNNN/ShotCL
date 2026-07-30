@@ -8,6 +8,10 @@ import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, Rota
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
+import {
+  DailyPlanGatheringLocations,
+  type GatheringPhotoPreview
+} from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import { ShotCard } from "@/components/ShotCard";
@@ -133,7 +137,12 @@ export default function ProjectDetailPage() {
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
+  const [preview, setPreview] = useState<{
+    url: string;
+    title: string;
+    images?: GatheringPhotoPreview[];
+    index?: number;
+  } | null>(null);
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
   const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
   const collapsedCutIdsRef = useRef(collapsedCutIds);
@@ -270,6 +279,16 @@ export default function ProjectDetailPage() {
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
   }, []);
+  const handleGatheringPhotoPreview = useCallback((images: GatheringPhotoPreview[], index: number) => {
+    const target = images[index];
+    if (!target) return;
+    setPreview({ url: target.url, title: target.title, images, index });
+  }, []);
+  const handleDailyPlanMetadataChange = useCallback((patch: Pick<DailyPlan, "memo" | "updatedAt">) => {
+    setDailyPlans((current) => current.map((item) => (
+      item.id === dailyPlanId ? { ...item, ...patch } : item
+    )));
+  }, [dailyPlanId]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     const wasProcessed = isProcessedCutStatus(targetShot.status);
@@ -547,6 +566,14 @@ export default function ProjectDetailPage() {
 
       <DailyProgressSummary progress={dailyProgress} />
 
+      <DailyPlanGatheringLocations
+        projectId={project.id}
+        plan={selectedPlan}
+        canEdit={role === "admin"}
+        onPlanMetadataChange={handleDailyPlanMetadataChange}
+        onPreview={handleGatheringPhotoPreview}
+      />
+
       {errorMessage ? (
         <div className="mb-3 rounded-[1.25rem] border border-field-danger bg-white p-3 text-sm font-bold text-field-danger">
           {errorMessage}
@@ -647,7 +674,25 @@ export default function ProjectDetailPage() {
         />
       ) : null}
 
-      {preview ? <ImagePreviewModal imageUrl={preview.url} title={preview.title} onClose={() => setPreview(null)} /> : null}
+      {preview ? (
+        <ImagePreviewModal
+          imageUrl={preview.url}
+          title={preview.title}
+          images={preview.images}
+          activeIndex={preview.index}
+          onNavigate={preview.images ? (index) => {
+            const target = preview.images?.[index];
+            if (!target) return;
+            setPreview((current) => current ? {
+              ...current,
+              url: target.url,
+              title: target.title,
+              index
+            } : current);
+          } : undefined}
+          onClose={() => setPreview(null)}
+        />
+      ) : null}
       {mediaPicker ? (
         <ShotArchivePicker
           shot={mediaPicker.shot}

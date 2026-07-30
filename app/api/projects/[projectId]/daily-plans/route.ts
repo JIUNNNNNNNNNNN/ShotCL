@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
+import { mergeLatestGatheringPhotoMetadata } from "@/lib/dailyPlan/gatheringPoints";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
+import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { ProgressShotsSyncError, syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
@@ -16,7 +18,7 @@ type DailyPlanSaveBody = {
 
 const SAVED_MESSAGE = "일촬표가 저장되었습니다.";
 const DUPLICATE_MESSAGE = "이미 저장된 일촬표입니다.";
-const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,meal_times,memo,created_at,updated_at";
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,shooting_locations,meal_times,memo,created_at,updated_at";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
@@ -86,6 +88,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       if (!existingPlan) {
         return NextResponse.json({ ok: false, status: "failed", error: "수정할 일촬표를 찾을 수 없습니다." }, { status: 404 });
       }
+      body.plan = {
+        ...body.plan,
+        memo: encodeDailyPlanMemo(mergeLatestGatheringPhotoMetadata(
+          decodeDailyPlanMemo(body.plan.memo),
+          decodeDailyPlanMemo(String(existingPlan.memo ?? "")),
+          body.plan.shootingLocations
+        ))
+      };
 
       const { data: oldShots, error: oldShotsError } = await supabase
         .from("daily_plan_shots")

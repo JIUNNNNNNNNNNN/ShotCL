@@ -35,6 +35,10 @@ import {
   deriveDailyPlanHeadcount,
   resolveTeamHeadcount
 } from "@/lib/dailyPlan/headcount";
+import {
+  deriveDailyPlanGatheringPoints,
+  reconcileDailyPlanGatheringPoints
+} from "@/lib/dailyPlan/gatheringPoints";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
@@ -55,6 +59,8 @@ import {
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
+import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
+import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Button } from "@/components/ui/Button";
@@ -297,6 +303,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [errorMessage, setErrorMessage] = useState("");
   const [printPreviewData, setPrintPreviewData] = useState<DailyPlanPreviewData | null>(null);
   const [printData, setPrintData] = useState<DailyPlanPreviewData | null>(null);
+  const [gatheringPhotoPreview, setGatheringPhotoPreview] = useState<{
+    images: Array<{ url: string; title: string }>;
+    index: number;
+  } | null>(null);
   const [isStaffOpen, setIsStaffOpen] = useState(false);
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
@@ -322,6 +332,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder)
     }),
     [printMeta, timetableRows]
+  );
+  const gatheringPoints = useMemo(
+    () => deriveDailyPlanGatheringPoints(effectivePrintMeta, locations),
+    [effectivePrintMeta, locations]
   );
   const previewSource = useMemo(
     () => ({ plan, locations, mealTimes, scenes, printMeta: effectivePrintMeta }),
@@ -1740,7 +1754,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
                         value={team.callLocation}
                         locations={locations}
-                        onChange={(value) => updateTeam(index, { callLocation: value })}
+                        onChange={(value, locationId) => updateTeam(index, {
+                          callLocation: value,
+                          callLocationId: locationId || undefined
+                        })}
                       />
                     </div>
                     <div className="col-span-2 md:col-span-1">
@@ -1749,6 +1766,29 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     </div>
                   </div>
                 ))}
+                {gatheringPoints.some((point) => point.photos.length > 0) ? (
+                  <div className="mt-2 border-t border-field-border pt-3 text-left">
+                    <p className="mb-2 text-xs font-black text-field-primary">집합장소 위치 사진</p>
+                    <div className="grid gap-2">
+                      {gatheringPoints.filter((point) => point.photos.length > 0).map((point) => {
+                        const images = point.photos.map((photo) => ({
+                          url: photo.url,
+                          title: `${point.locationName} · ${photo.originalFilename || "위치 사진"}`
+                        }));
+                        return (
+                          <div key={point.id} className="grid gap-1 border-b border-field-border pb-2 md:grid-cols-[minmax(7rem,1fr)_auto] md:items-center">
+                            <p className="min-w-0 truncate text-xs font-bold text-field-text">{point.locationName}</p>
+                            <GatheringPhotoStrip
+                              photos={point.photos}
+                              locationName={point.locationName}
+                              onPreview={(index) => setGatheringPhotoPreview({ images, index })}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </section>
           </div> : null}
@@ -1785,6 +1825,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
       {printPreviewData ? <PrintPreviewModal data={printPreviewData} onClose={() => setPrintPreviewData(null)} onPrint={handlePrint} /> : null}
       {printData ? <PrintDailyPlanView data={printData} /> : null}
+      {gatheringPhotoPreview ? (
+        <ImagePreviewModal
+          imageUrl={gatheringPhotoPreview.images[gatheringPhotoPreview.index]?.url ?? null}
+          title={gatheringPhotoPreview.images[gatheringPhotoPreview.index]?.title ?? "집합장소"}
+          images={gatheringPhotoPreview.images}
+          activeIndex={gatheringPhotoPreview.index}
+          onNavigate={(index) => setGatheringPhotoPreview((current) => current ? { ...current, index } : current)}
+          onClose={() => setGatheringPhotoPreview(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2411,10 +2461,25 @@ function CallLocationSelect({
   ariaLabel: string;
   value: string;
   locations: DailyPlanLocation[];
-  onChange: (value: string) => void;
+  onChange: (value: string, locationId: string) => void;
 }) {
   const listId = useId();
-  const locationNames = Array.from(new Set(locations.map((location) => location.name.trim()).filter(Boolean)));
+  const locationOptions = locations.flatMap((location, index) => {
+    const name = location.name.trim();
+    if (!name) return [];
+    const duplicateCount = locations.filter((candidate) => (
+      normalizeGatheringLocationNameForInput(candidate.name)
+      === normalizeGatheringLocationNameForInput(name)
+    )).length;
+    const detail = String(location.roadAddress || location.address || location.detail || "").trim();
+    return [{
+      id: location.id,
+      name,
+      value: duplicateCount > 1
+        ? `${name} · ${detail || `장소 ${index + 1}`}`
+        : name
+    }];
+  });
 
   return (
     <>
@@ -2423,17 +2488,33 @@ function CallLocationSelect({
         className={compactInputClass}
         value={value}
         list={listId}
-        onChange={(event) => onChange(event.currentTarget.value)}
+        onChange={(event) => {
+          const nextValue = event.currentTarget.value;
+          const selectedOption = locationOptions.find((option) => option.value === nextValue);
+          if (selectedOption) {
+            onChange(selectedOption.name, selectedOption.id);
+            return;
+          }
+          const normalizedName = normalizeGatheringLocationNameForInput(nextValue);
+          const matches = locations.filter((location) => (
+            normalizeGatheringLocationNameForInput(location.name) === normalizedName
+          ));
+          onChange(nextValue, matches.length === 1 ? matches[0].id : "");
+        }}
         placeholder="집합장소"
         aria-label={ariaLabel}
       />
       <datalist id={listId}>
-      {locationNames.map((locationName) => (
-          <option key={locationName} value={locationName} />
-      ))}
+        {locationOptions.map((option) => (
+          <option key={option.id} value={option.value} />
+        ))}
       </datalist>
     </>
   );
+}
+
+function normalizeGatheringLocationNameForInput(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
 }
 
 function ShootingOrderField({
@@ -3951,10 +4032,10 @@ function buildPlanForSave(
   scenes: SceneBlockInput[],
   sceneListItems: ProjectSceneItem[]
 ): DailyPlanDraft {
-  const derivedMeta = deriveDailyPlanHeadcount({
+  const derivedMeta = reconcileDailyPlanGatheringPoints(deriveDailyPlanHeadcount({
     ...meta,
     timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
-  });
+  }), locations);
   const nextLocations = locations
     .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
     .map(sanitizeManualLocation);

@@ -47,6 +47,7 @@ function normalizeLocations(value: unknown): DailyPlanLocation[] {
       id: source.id || `loc_${index + 1}`,
       name: source.name || "",
       detail: source.detail || "",
+      isPrimary: Boolean(source.isPrimary),
       searchQuery: source.searchQuery || "",
       address: source.address || "",
       roadAddress: source.roadAddress || "",
