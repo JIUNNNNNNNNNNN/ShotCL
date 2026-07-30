@@ -4,7 +4,7 @@ import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -43,8 +43,8 @@ import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
   getKoreanWeatherRegionQuery,
-  koreanWeatherRegions,
-  resolveKoreanWeatherRegion
+  resolveKoreanWeatherRegion,
+  type KoreanWeatherRegion
 } from "@/lib/koreanWeatherRegions";
 import {
   getProjectMainStaffForEpisode,
@@ -63,6 +63,7 @@ import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { KoreaWeatherRegionMap } from "@/components/weather/KoreaWeatherRegionMap";
 import { Button } from "@/components/ui/Button";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -523,7 +524,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   function updateLocation(index: number, patch: Partial<DailyPlanLocation>) {
     const addressRegion = resolveKoreanWeatherRegion(patch.roadAddress || patch.address);
     if (addressRegion) {
-      setPrintMeta((current) => (current.weatherRegion.trim()
+      setPrintMeta((current) => (resolveKoreanWeatherRegion(current.weatherRegion)
         ? current
         : {
             ...current,
@@ -1298,7 +1299,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           <div className="flex flex-col">
           <section className="field-subsection order-1 mt-3 p-2 md:mt-5 md:p-3">
             <h3 className="text-sm font-black text-field-primary">날씨 정보</h3>
-            <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+            <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
               <WeatherRegionPicker
                 value={printMeta.weatherRegion ?? ""}
                 onChange={(region) =>
@@ -2321,28 +2322,79 @@ function WeatherRegionPicker({
   onChange
 }: {
   value: string;
-  onChange: (region: (typeof koreanWeatherRegions)[number] | null) => void;
+  onChange: (region: KoreanWeatherRegion | null) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
   const selected = resolveKoreanWeatherRegion(value);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isOpen]);
+
+  const selectRegion = (regionValue: string) => {
+    const region = resolveKoreanWeatherRegion(regionValue);
+    if (!region) return;
+    onChange(region);
+    setIsOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
   return (
-    <label className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2">
-      <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
-      <select
-        className={compactInputClass}
-        value={selected?.label ?? ""}
-        onChange={(event) => {
-          const region = koreanWeatherRegions.find((item) => item.label === event.currentTarget.value) ?? null;
-          onChange(region);
-        }}
-        aria-label="날씨 기준 광역 지역"
+    <div ref={rootRef} className="min-w-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="grid min-h-11 w-full grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-[3px] border border-field-border bg-white px-3 py-2 text-left transition-colors hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-expanded={isOpen}
+        aria-controls={panelId}
+        aria-label={`날씨 기준 지역 ${selected?.label ?? "지역 선택"}`}
       >
-        <option value="">지역 선택</option>
-        {koreanWeatherRegions.map((region) => (
-          <option key={region.label} value={region.label}>{region.label}</option>
-        ))}
-      </select>
-    </label>
+        <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
+        <span className="truncate text-sm font-black text-field-text">
+          {selected?.label ?? "지역 선택"}
+        </span>
+        <ChevronDown
+          className={`h-4 w-4 text-field-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
+          aria-hidden
+        />
+      </button>
+
+      {isOpen ? (
+        <div
+          id={panelId}
+          className="mt-2 w-full max-w-full overflow-hidden rounded-[3px] border border-field-border bg-field-bg p-2 sm:p-3"
+          aria-label="대한민국 날씨 기준 지역 지도"
+        >
+          <div className="mx-auto w-full max-w-[22rem]">
+            <KoreaWeatherRegionMap
+              value={selected?.label ?? ""}
+              onSelect={selectRegion}
+            />
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

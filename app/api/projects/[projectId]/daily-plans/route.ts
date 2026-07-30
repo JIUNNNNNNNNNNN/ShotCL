@@ -63,6 +63,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     if (!body.plan || !Array.isArray(body.shots)) {
       return NextResponse.json({ ok: false, status: "failed", error: "저장할 일촬표 정보가 올바르지 않습니다." }, { status: 400 });
     }
+    body.plan = {
+      ...body.plan,
+      // 신규/수정 저장 모두 같은 정규화를 거쳐 허용된 광역 지역만 memo에 남깁니다.
+      // 알 수 없는 지역 문자열은 서울 등 임의 지역으로 대체하지 않고 미선택으로 저장합니다.
+      memo: encodeDailyPlanMemo(decodeDailyPlanMemo(body.plan.memo))
+    };
     const supabase = requireProjectAccessDb();
 
     if (!body.dailyPlanId && !body.allowDuplicate) {

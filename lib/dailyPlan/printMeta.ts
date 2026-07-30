@@ -658,8 +658,7 @@ export function normalizeDailyPlanCount(value: unknown): string | null {
 }
 
 export function formatDailyPlanWeatherSummary(meta: Pick<DailyPlanPrintMeta, "weatherRegion" | "weather">) {
-  const region = resolveKoreanWeatherRegion(meta.weatherRegion)?.label
-    ?? String(meta.weatherRegion ?? "").trim();
+  const region = resolveKoreanWeatherRegion(meta.weatherRegion)?.label ?? "";
   const weather = String(meta.weather ?? "").trim();
   if (!region) return weather;
   if (!weather || weather === region) return region;
@@ -703,9 +702,9 @@ function normalizeWeatherRegion(meta: DailyPlanPrintMeta) {
 
   if (!resolved) {
     return {
-      label: sourceLabel,
-      canonicalRegion: sourceProvince,
-      district: sourceDistrict
+      label: "",
+      canonicalRegion: "",
+      district: ""
     };
   }
 
