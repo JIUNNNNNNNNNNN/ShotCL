@@ -74,9 +74,10 @@ function getPopoverPosition(trigger: HTMLButtonElement): PopoverPosition {
     viewportTop + viewportPadding,
     Math.min(desiredTop, viewportBottom - measuredHeight - viewportPadding)
   );
+  const desiredLeft = triggerRect.left + triggerRect.width / 2 - width / 2;
   const left = Math.max(
     viewportLeft + viewportPadding,
-    Math.min(triggerRect.left, viewportRight - width - viewportPadding)
+    Math.min(desiredLeft, viewportRight - width - viewportPadding)
   );
 
   return { left, top, width, maxHeight, placement };
@@ -89,6 +90,7 @@ export function WeatherRegionPicker({
   readOnly = false
 }: WeatherRegionPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeRegionLabel, setActiveRegionLabel] = useState<string | null>(null);
   const [position, setPosition] = useState<PopoverPosition>({
     left: MOBILE_VIEWPORT_PADDING,
     top: MOBILE_VIEWPORT_PADDING,
@@ -104,6 +106,7 @@ export function WeatherRegionPicker({
 
   const closePopover = useCallback((restoreFocus = false) => {
     setIsOpen(false);
+    setActiveRegionLabel(null);
     if (restoreFocus) {
       requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
     }
@@ -239,9 +242,11 @@ export function WeatherRegionPicker({
               <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b border-field-border bg-white px-3 py-1.5">
                 <p id={titleId} className="min-w-0 text-xs font-black text-field-primary">
                   날씨 지역 선택
-                  {selected ? (
-                    <span className="ml-1.5 text-field-muted">— 현재: {selected.label}</span>
-                  ) : null}
+                  <span className="ml-1.5 text-field-muted">
+                    — {activeRegionLabel
+                      ? `가리킨 지역: ${activeRegionLabel}`
+                      : `현재: ${selected?.label ?? "미선택"}`}
+                  </span>
                 </p>
                 <button
                   type="button"
@@ -253,11 +258,12 @@ export function WeatherRegionPicker({
                   <X className="h-4 w-4" aria-hidden />
                 </button>
               </div>
-              <div className="min-h-0 overflow-y-auto px-3 py-2">
-                <div className="mx-auto w-full" style={{ height: mapHeight }}>
+              <div className="flex min-h-0 justify-center overflow-y-auto px-3 py-2">
+                <div className="mx-auto w-full max-w-[360px]" style={{ height: mapHeight }}>
                   <KoreaWeatherRegionMap
                     value={selected?.label ?? ""}
                     onSelect={readOnly ? undefined : selectRegion}
+                    onActiveRegionChange={setActiveRegionLabel}
                     readOnly={readOnly}
                     ariaLabel={readOnly
                       ? "대한민국 날씨 기준 지역 확인"

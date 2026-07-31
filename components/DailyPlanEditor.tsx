@@ -624,6 +624,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const target = locations[index];
     if (!target) return;
 
+    setLocationInputModes((current) => ({ ...current, [target.id]: "search" }));
+
     if (typeof window === "undefined") {
       setAddressSearchMessage("주소 검색을 열 수 없어 직접 입력해주세요.");
       setAddressSearchLocationId(target.id);
@@ -1401,8 +1403,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </Button>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-1.5 md:gap-2 xl:grid-cols-6 max-md:[&_button]:min-h-12 max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_label]:min-h-12 max-md:[&_label]:px-1 max-md:[&_label]:py-1">
-              <EditableWeatherCard
+            <div className="mt-3 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
+              <div className="grid min-w-[39rem] grid-cols-6 gap-1.5 md:min-w-0 md:gap-2">
+                <EditableWeatherCard
                 label="날씨"
                 value={printMeta.weather}
                 isEditing={editingWeatherField === "weather"}
@@ -1413,7 +1416,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }}
                 onCancel={() => setEditingWeatherField(null)}
               />
-              <EditableWeatherCard
+                <EditableWeatherCard
                 label="일출"
                 value={printMeta.sunrise}
                 placeholder="HHMM"
@@ -1426,7 +1429,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }}
                 onCancel={() => setEditingWeatherField(null)}
               />
-              <EditableWeatherCard
+                <EditableWeatherCard
                 label="일몰"
                 value={printMeta.sunset}
                 placeholder="HHMM"
@@ -1439,7 +1442,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }}
                 onCancel={() => setEditingWeatherField(null)}
               />
-              <EditableWeatherCard
+                <EditableWeatherCard
                 label="최저 기온"
                 value={printMeta.minTemperature}
                 isEditing={editingWeatherField === "minTemperature"}
@@ -1450,7 +1453,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }}
                 onCancel={() => setEditingWeatherField(null)}
               />
-              <EditableWeatherCard
+                <EditableWeatherCard
                 label="최고 기온"
                 value={printMeta.maxTemperature}
                 isEditing={editingWeatherField === "maxTemperature"}
@@ -1461,7 +1464,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }}
                 onCancel={() => setEditingWeatherField(null)}
               />
-              <EditableWeatherCard
+                <EditableWeatherCard
                 label="강수 확률"
                 value={printMeta.rainProbability}
                 isEditing={editingWeatherField === "rainProbability"}
@@ -1471,7 +1474,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   setEditingWeatherField(null);
                 }}
                 onCancel={() => setEditingWeatherField(null)}
-              />
+                />
+              </div>
             </div>
 
             {weatherStatus ? <p className="mt-3 hidden text-xs font-bold text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
@@ -1529,73 +1533,85 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
                     </div>
 
-                    <div className="col-span-2 row-start-2 grid min-w-0 gap-2 border-t border-field-border pt-2">
-                      <div
-                        className="grid grid-cols-2 gap-1.5"
-                        role="group"
-                        aria-label={`LOCATION ${index + 1} 입력 방식`}
+                    <div
+                      className="col-span-2 row-start-2 grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1.5 border-t border-field-border pt-2"
+                      role="group"
+                      aria-label={`LOCATION ${index + 1} 입력 방식과 주소`}
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={locationInputModes[location.id] === "search"}
+                        onClick={() => openDaumAddressSearch(index)}
+                        className={`inline-flex min-h-[38px] w-[4.25rem] shrink-0 items-center justify-center gap-1 rounded-[3px] border px-1.5 py-1.5 text-xs font-black md:w-[5.25rem] md:gap-1.5 ${
+                          locationInputModes[location.id] === "search"
+                            ? "border-field-primary bg-field-light text-field-primary"
+                            : "border-field-border bg-white text-field-primary"
+                        }`}
                       >
-                        <button
-                          type="button"
-                          aria-pressed={locationInputModes[location.id] === "search"}
-                          onClick={() => openDaumAddressSearch(index)}
-                          className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-[3px] border px-3 py-2 text-sm font-black ${
-                            locationInputModes[location.id] === "search"
-                              ? "border-field-primary bg-field-light text-field-primary"
-                              : "border-field-border bg-white text-field-primary"
-                          }`}
-                        >
-                          <Search className="h-4 w-4" aria-hidden />
-                          장소 검색
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={locationInputModes[location.id] === "manual"}
-                          onClick={() => toggleManualLocationInput(index)}
-                          className={`min-h-10 rounded-[3px] border px-3 py-2 text-sm font-black ${
-                            locationInputModes[location.id] === "manual"
-                              ? "border-field-primary bg-field-light text-field-primary"
-                              : "border-field-border bg-white text-field-primary"
-                          }`}
-                        >
-                          직접입력
-                        </button>
-                      </div>
+                        <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        검색
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={locationInputModes[location.id] === "manual"}
+                        onClick={() => toggleManualLocationInput(index)}
+                        className={`min-h-[38px] w-[4.5rem] shrink-0 rounded-[3px] border px-1.5 py-1.5 text-xs font-black md:w-[5.5rem] ${
+                          locationInputModes[location.id] === "manual"
+                            ? "border-field-primary bg-field-light text-field-primary"
+                            : "border-field-border bg-white text-field-primary"
+                        }`}
+                      >
+                        직접입력
+                      </button>
 
-                      <label className="min-w-0">
-                        <span className="sr-only">LOCATION {index + 1} 장소명</span>
-                        <DraftInput
-                          className={`${inputClass} truncate whitespace-nowrap`}
-                          value={location.name}
-                          onCommit={(value) => updateLocation(index, { name: value })}
-                          placeholder="장소명"
-                          title={location.name}
-                        />
-                      </label>
-
-                      {locationInputModes[location.id] === "manual" ? (
-                        <label className="grid min-w-0 gap-1">
-                          <span className="text-xs font-black text-field-primary">상세주소</span>
-                          <DraftTextarea
-                            className={`${inputClass} min-h-11 resize-y break-words py-2 leading-[1.45]`}
-                            value={getDailyPlanManualAddress(location)}
-                            onCommit={(value) => updateLocation(index, {
-                              manualAddress: value,
-                              inputMode: "manual",
-                            })}
-                            placeholder="전체 주소 또는 장소 설명을 직접 입력"
+                      <div
+                        className="grid min-w-0 grid-cols-[minmax(4.75rem,0.38fr)_minmax(0,1fr)] gap-1"
+                        role="group"
+                        aria-label={`LOCATION ${index + 1} 장소명과 주소`}
+                      >
+                        <label className="min-w-0">
+                          <span className="sr-only">LOCATION {index + 1} 장소명</span>
+                          <DraftInput
+                            className={`${inputClass} truncate whitespace-nowrap`}
+                            value={location.name}
+                            onCommit={(value) => updateLocation(index, { name: value })}
+                            placeholder="장소명"
+                            title={location.name}
                           />
                         </label>
-                      ) : getLocationAddress(location).trim() ? (
-                        <div className="grid min-w-0 gap-0.5 rounded-[3px] border border-field-border bg-field-soft px-2 py-1.5 text-left">
-                          <span className="text-[10px] font-black text-field-muted">
-                            {location.inputMode === "search" ? "선택된 주소" : "보존된 주소"}
-                          </span>
-                          <span className="break-words text-xs font-bold leading-[1.45] text-field-text">
-                            {getLocationAddress(location)}
-                          </span>
-                        </div>
-                      ) : null}
+
+                        {locationInputModes[location.id] === "manual" ? (
+                          <label className="min-w-0">
+                            <span className="sr-only">LOCATION {index + 1} 상세주소</span>
+                            <DraftInput
+                              className={`${inputClass} truncate whitespace-nowrap !text-left`}
+                              value={getDailyPlanManualAddress(location)}
+                              onCommit={(value) => updateLocation(index, {
+                                manualAddress: value,
+                                inputMode: "manual"
+                              })}
+                              placeholder="상세주소 직접입력"
+                              title={getDailyPlanManualAddress(location)}
+                            />
+                          </label>
+                        ) : (
+                          <div
+                            className="flex min-h-[38px] min-w-0 items-center overflow-hidden rounded-[3px] border border-field-border bg-field-soft px-2 text-left"
+                            title={getLocationAddress(location) || undefined}
+                            aria-live="polite"
+                          >
+                            {addressSearchLocationId === location.id && addressSearchMessage === ADDRESS_SEARCH_LOADING ? (
+                              <span className="flex w-full justify-center"><PixelDogLoader size="xs" compact /></span>
+                            ) : (
+                              <span className="block min-w-0 truncate text-xs font-bold text-field-text">
+                                {getLocationAddress(location)
+                                  || (addressSearchLocationId === location.id ? addressSearchMessage : "")
+                                  || "선택한 장소 또는 주소"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {expandedLocationDetailId === location.id ? (
@@ -1609,16 +1625,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           title={location.detail}
                         />
                       </label>
-                    ) : null}
-
-                    {addressSearchLocationId === location.id && addressSearchMessage ? (
-                      addressSearchMessage === ADDRESS_SEARCH_LOADING ? (
-                        <div className="col-span-2 flex justify-center">
-                          <PixelDogLoader size="xs" compact />
-                        </div>
-                      ) : (
-                        <span className="col-span-2 text-center text-[11px] font-bold text-field-muted" aria-live="polite">{addressSearchMessage}</span>
-                      )
                     ) : null}
                   </div>
                 ))}
@@ -2128,7 +2134,7 @@ function EpisodeField({
             value={value}
             onChange={(event) => onChange(event.currentTarget.value)}
           >
-            {isLegacyOutOfRange ? <option value={value}>{value} (기존값)</option> : null}
+            {isLegacyOutOfRange ? <option value={value}>{value}</option> : null}
             {options.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         ) : (
@@ -2153,7 +2159,7 @@ function EpisodeField({
           value={value}
           onChange={(event) => onChange(event.currentTarget.value)}
         >
-          {isLegacyOutOfRange ? <option value={value}>{value} (기존값 · 범위 밖)</option> : null}
+          {isLegacyOutOfRange ? <option value={value}>{value} (범위 밖)</option> : null}
           {options.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       ) : (
@@ -2412,12 +2418,12 @@ function EditableWeatherCard({
 
   if (isEditing) {
     return (
-      <label ref={cardRef} className="grid min-h-14 content-center rounded-md border border-field-primary bg-white px-2 py-1.5 text-center ring-1 ring-field-primary/20">
-        <span className="text-[11px] font-black text-field-muted">{label}</span>
+      <label ref={cardRef} className="grid min-h-12 content-center rounded-[3px] border border-field-primary bg-white px-1.5 py-1 text-center ring-1 ring-field-primary/20">
+        <span className="text-[10px] font-black text-field-muted">{label}</span>
         <input
           autoFocus
           aria-label={`${label} 수정`}
-          className={`mt-0.5 min-w-0 rounded border bg-white px-1.5 py-1 text-center text-[13px] font-black text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
+          className={`mt-0.5 min-w-0 rounded-[2px] border bg-white px-1 py-0.5 text-center text-xs font-black text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
           type="text"
           inputMode={timeValue ? "numeric" : undefined}
           pattern={timeValue ? "[0-9]*" : undefined}
@@ -2455,9 +2461,9 @@ function EditableWeatherCard({
   }
 
   return (
-    <button type="button" onClick={startEditing} className="grid min-h-14 content-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center hover:border-field-primary hover:bg-field-light">
-      <span className="text-[11px] font-black text-field-muted">{label}</span>
-      <span className="mt-0.5 break-words text-[13px] font-black text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
+    <button type="button" onClick={startEditing} className="grid min-h-12 content-center rounded-[3px] border border-field-border bg-white px-1.5 py-1 text-center hover:border-field-primary hover:bg-field-light">
+      <span className="text-[10px] font-black text-field-muted">{label}</span>
+      <span className="mt-0.5 truncate text-xs font-black text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
   );
 }
@@ -3036,10 +3042,10 @@ function SceneSourceSelector({
     >
       <option value="">씬 선택</option>
       {hasLegacyValue ? (
-        <option value="__legacy_scene__">{formatSceneNumber(legacySceneNumber)} · 기존값 (미연결)</option>
+        <option value="__legacy_scene__">{formatSceneSelectionNumber(legacySceneNumber) || "씬 선택"}</option>
       ) : null}
       {value && !selectedSourceExists ? (
-        <option value={value}>{formatSceneNumber(legacySceneNumber) || "씬"} · 연결된 씬 없음</option>
+        <option value={value}>{formatSceneSelectionNumber(legacySceneNumber) || "씬 선택"}</option>
       ) : null}
       {items.map((item, index) => (
         <option key={item.id} value={item.id}>
@@ -4412,10 +4418,11 @@ function buildInitialMeals(plan: DailyPlanDraft, isNewDailyPlan: boolean): Daily
 }
 
 function formatSceneSourceOption(item: ProjectSceneItem, index: number) {
-  const sceneNumber = formatSceneNumber(item.sceneNo) || `씬 ${index + 1}`;
-  const location = [item.mainLocation, item.subLocation].map((value) => value.trim()).filter(Boolean).join(" / ");
-  const content = item.sceneContent.trim().replace(/\s+/g, " ").slice(0, 28);
-  return [sceneNumber, location, content].filter(Boolean).join(" · ");
+  return formatSceneSelectionNumber(item.sceneNo) || String(index + 1);
+}
+
+function formatSceneSelectionNumber(value: string) {
+  return String(value ?? "").trim().replace(/^S#?\s*(?=\d)/i, "");
 }
 
 function normalizeSceneCharacters(value: string) {
