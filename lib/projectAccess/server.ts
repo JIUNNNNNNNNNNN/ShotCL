@@ -46,6 +46,15 @@ function hashSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * local UI preference namespace에만 쓰는 비인증용 식별자입니다.
+ * DB 조회에 사용하는 token hash와 domain을 분리하며 원본 cookie는 노출하지 않습니다.
+ */
+export function getAccessPreferenceScope(token: string | null) {
+  if (!token) return "";
+  return createHash("sha256").update(`shotcl-ui-preferences:${token}`).digest("hex");
+}
+
 export function getJoinAttemptKey(request: NextRequest, normalizedProjectName: string) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   return createHash("sha256").update(`${forwardedFor}:${normalizedProjectName}`).digest("hex");

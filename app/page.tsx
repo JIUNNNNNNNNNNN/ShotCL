@@ -4,15 +4,25 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import {
+  RememberedProjectActions,
+  RememberedProjectCard
+} from "@/components/RememberedProjectCard";
 import { listAccessibleProjects, verifyProjectAccess } from "@/lib/data/projects";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
+import {
+  dismissJoinedProject,
+  isProjectDismissed,
+  readDismissedProjectIds,
+  resolveDismissedProjectOwnerId,
+  restoreDismissedProject
+} from "@/lib/projectAccess/dismissedProjects";
 import {
   forgetProjectSelection,
   readRememberedProjectSelection,
   rememberProjectSelection
 } from "@/lib/projectAccess/recentProject";
 import { projectFromRow } from "@/lib/data/mappers";
-import { getLocalProjectIdCandidates } from "@/lib/projectId";
 import type { Project } from "@/lib/types";
 import {
   getBubbleTargetMeasurement,
@@ -23,39 +33,24 @@ import {
 
 type ProjectPickerMode = "new" | "progress" | "join";
 type WheelItemId = (typeof wheelItems)[number]["id"];
+type AccessibleProjectSnapshot = {
+  allProjects: Project[];
+  visibleProjects: Project[];
+  dismissedProjectIds: Set<string>;
+  preferenceOwnerId: string;
+};
+type RememberedProjectMenuTarget = {
+  project: Project;
+  left: number;
+  top: number;
+  triggerElement: HTMLButtonElement;
+};
 
-const HIDDEN_PROJECT_IDS_KEY = "shotcl:hiddenProjectIds";
 const MAIN_SELECTION_FEEDBACK_MS = 90;
 const NAVIGATION_LOCK_RELEASE_MS = 1500;
-
-function readHiddenProjectIds() {
-  if (typeof window === "undefined") return new Set<string>();
-
-  try {
-    const storedValue = JSON.parse(window.localStorage.getItem(HIDDEN_PROJECT_IDS_KEY) ?? "[]") as unknown;
-    return new Set(Array.isArray(storedValue) ? storedValue.filter((value): value is string => typeof value === "string") : []);
-  } catch {
-    return new Set<string>();
-  }
-}
-
-function writeHiddenProjectIds(projectIds: Set<string>) {
-  try {
-    window.localStorage.setItem(HIDDEN_PROJECT_IDS_KEY, JSON.stringify([...projectIds]));
-  } catch {
-    // 저장소가 차단된 브라우저에서도 현재 화면의 숨김 동작은 계속 허용합니다.
-  }
-}
-
-function unhideProject(projectId: string) {
-  const hiddenProjectIds = readHiddenProjectIds();
-  let didDelete = false;
-  getLocalProjectIdCandidates(projectId).forEach((candidate) => {
-    if (hiddenProjectIds.delete(candidate)) didDelete = true;
-  });
-  if (!didDelete) return;
-  writeHiddenProjectIds(hiddenProjectIds);
-}
+const PROJECT_CONTEXT_MENU_WIDTH = 176;
+const PROJECT_CONTEXT_MENU_HEIGHT = 48;
+const PROJECT_CONTEXT_MENU_EDGE = 8;
 
 const wheelItems = [
   {
@@ -97,6 +92,8 @@ export default function HomePage() {
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
   const [selectedMainId, setSelectedMainId] = useState<WheelItemId | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [rememberedProjectMenu, setRememberedProjectMenu] = useState<RememberedProjectMenuTarget | null>(null);
+  const [pendingProjectDismissal, setPendingProjectDismissal] = useState<Project | null>(null);
   const isProgressMode = pickerMode === "progress";
   const isProjectRingOpen = isProgressMode && projects.length > 0;
   const wheelRef = useRef<HTMLDivElement | null>(null);
@@ -112,10 +109,15 @@ export default function HomePage() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const compositionRef = useRef<HTMLDivElement | null>(null);
+  const projectActionsRef = useRef<HTMLDivElement | null>(null);
+  const rememberedProjectTriggerRef = useRef<HTMLButtonElement | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mainSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const projectsLoadPromiseRef = useRef<Promise<Project[]> | null>(null);
+  const projectsLoadPromiseRef = useRef<Promise<AccessibleProjectSnapshot> | null>(null);
+  const allAccessibleProjectsRef = useRef<Project[]>([]);
+  const dismissedProjectIdsRef = useRef(new Set<string>());
+  const preferenceOwnerIdRef = useRef("");
   const projectNavigationRef = useRef(false);
   const navigationAttemptRef = useRef(0);
   const joinSubmissionRef = useRef(false);
@@ -189,6 +191,9 @@ export default function HomePage() {
       setPickerMode(null);
       setFeedback(null);
       setIsResolvingGo(false);
+      setRememberedProjectMenu(null);
+      setPendingProjectDismissal(null);
+      rememberedProjectTriggerRef.current = null;
 
       [document.body, document.documentElement].forEach((element) => {
         if (element.style.cursor === "grabbing" || element.style.cursor === "grab") {
@@ -224,6 +229,12 @@ export default function HomePage() {
 
     function closeOnOutsideClick(event: PointerEvent) {
       if (!(event.target instanceof Node)) return;
+      if (projectActionsRef.current?.contains(event.target)) return;
+      if (pendingProjectDismissal) return;
+      if (rememberedProjectMenu) {
+        closeRememberedProjectMenu();
+        return;
+      }
       const clickedWheel = wheelRef.current?.contains(event.target);
       const clickedSubmenu = clusterRef.current?.contains(event.target);
       const clickedProjectWheel = projectWheelRef.current?.contains(event.target);
@@ -234,6 +245,14 @@ export default function HomePage() {
 
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (pendingProjectDismissal) {
+          cancelProjectDismissal();
+          return;
+        }
+        if (rememberedProjectMenu) {
+          closeRememberedProjectMenu(true);
+          return;
+        }
         closeProjectRing();
       }
     }
@@ -244,7 +263,13 @@ export default function HomePage() {
       document.removeEventListener("pointerdown", closeOnOutsideClick);
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [mainSpinner.cancelPending, pickerMode, projectSpinner.cancelPending]);
+  }, [
+    mainSpinner.cancelPending,
+    pendingProjectDismissal,
+    pickerMode,
+    projectSpinner.cancelPending,
+    rememberedProjectMenu
+  ]);
 
   useEffect(() => {
     if (pickerMode !== "progress") {
@@ -279,18 +304,39 @@ export default function HomePage() {
     }, 1500);
   }
 
-  function loadAccessibleProjectList(force = false): Promise<Project[]> {
-    if (!force && hasLoadedProjects) return Promise.resolve(projects);
+  function loadAccessibleProjectList(force = false): Promise<AccessibleProjectSnapshot> {
+    if (!force && hasLoadedProjects) {
+      return Promise.resolve({
+        allProjects: allAccessibleProjectsRef.current,
+        visibleProjects: projects,
+        dismissedProjectIds: new Set(dismissedProjectIdsRef.current),
+        preferenceOwnerId: preferenceOwnerIdRef.current
+      });
+    }
     if (projectsLoadPromiseRef.current) return projectsLoadPromiseRef.current;
     setIsLoading(true);
     setErrorMessage("");
     const request = listAccessibleProjects()
-      .then((data) => {
+      .then(async ({ projects: accessibleProjects, preferenceScope }) => {
+        const preferenceOwnerId = await resolveDismissedProjectOwnerId(preferenceScope);
+        const dismissedProjectIds = readDismissedProjectIds(preferenceOwnerId);
+        const visibleProjects = accessibleProjects.filter(
+          (project) => !isProjectDismissed(dismissedProjectIds, project.id)
+        );
+        const snapshot: AccessibleProjectSnapshot = {
+          allProjects: accessibleProjects,
+          visibleProjects,
+          dismissedProjectIds,
+          preferenceOwnerId
+        };
         if (isMountedRef.current) {
-          setProjects(data);
+          allAccessibleProjectsRef.current = accessibleProjects;
+          dismissedProjectIdsRef.current = dismissedProjectIds;
+          preferenceOwnerIdRef.current = preferenceOwnerId;
+          setProjects(visibleProjects);
           setHasLoadedProjects(true);
         }
-        return data;
+        return snapshot;
       })
       .catch((error) => {
         if (isMountedRef.current) {
@@ -368,13 +414,22 @@ export default function HomePage() {
     setErrorMessage("");
 
     try {
-      const accessibleProjects = await loadAccessibleProjectList(true);
+      const {
+        allProjects,
+        visibleProjects,
+        dismissedProjectIds
+      } = await loadAccessibleProjectList(true);
       if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
-      const accessibleById = new Map(accessibleProjects.map((project) => [project.id, project]));
+      const accessibleById = new Map(allProjects.map((project) => [project.id, project]));
+      const visibleById = new Map(visibleProjects.map((project) => [project.id, project]));
       const { activeProjectId, lastProjectId } = readRememberedProjectSelection();
 
       let revokedProjectFound = false;
       [activeProjectId, lastProjectId].forEach((projectId) => {
+        if (projectId && isProjectDismissed(dismissedProjectIds, projectId)) {
+          forgetProjectSelection(projectId);
+          return;
+        }
         if (projectId && !accessibleById.has(projectId)) {
           revokedProjectFound = true;
           forgetProjectSelection(projectId);
@@ -382,16 +437,13 @@ export default function HomePage() {
       });
 
       const candidateIds: string[] = [];
-      if (activeProjectId && accessibleById.has(activeProjectId)) candidateIds.push(activeProjectId);
+      if (activeProjectId && visibleById.has(activeProjectId)) candidateIds.push(activeProjectId);
       if (
         lastProjectId
         && lastProjectId !== activeProjectId
-        && accessibleById.has(lastProjectId)
+        && visibleById.has(lastProjectId)
       ) {
         candidateIds.push(lastProjectId);
-      }
-      if (accessibleProjects.length === 1 && !candidateIds.includes(accessibleProjects[0].id)) {
-        candidateIds.push(accessibleProjects[0].id);
       }
 
       for (const projectId of candidateIds) {
@@ -471,16 +523,103 @@ export default function HomePage() {
     setPickerMode(null);
   }
 
-  function hideProjectFromCurrentList(project: Project) {
-    if (!window.confirm("이 프로젝트를 목록에서 삭제할까요?")) return;
+  function openRememberedProjectMenu(
+    project: Project,
+    clientX: number,
+    clientY: number,
+    triggerElement: HTMLButtonElement
+  ) {
+    const visualViewport = window.visualViewport;
+    const viewportLeft = visualViewport?.offsetLeft ?? 0;
+    const viewportTop = visualViewport?.offsetTop ?? 0;
+    const viewportRight = viewportLeft + (visualViewport?.width ?? window.innerWidth);
+    const viewportBottom = viewportTop + (visualViewport?.height ?? window.innerHeight);
+    const left = Math.max(
+      viewportLeft + PROJECT_CONTEXT_MENU_EDGE,
+      Math.min(
+        clientX,
+        viewportRight - PROJECT_CONTEXT_MENU_WIDTH - PROJECT_CONTEXT_MENU_EDGE
+      )
+    );
+    const top = Math.max(
+      viewportTop + PROJECT_CONTEXT_MENU_EDGE,
+      Math.min(
+        clientY,
+        viewportBottom - PROJECT_CONTEXT_MENU_HEIGHT - PROJECT_CONTEXT_MENU_EDGE
+      )
+    );
+    setPendingProjectDismissal(null);
+    rememberedProjectTriggerRef.current = triggerElement;
+    setRememberedProjectMenu({ project, left, top, triggerElement });
+  }
+
+  function restoreRememberedProjectTriggerFocus() {
+    const triggerElement = rememberedProjectTriggerRef.current;
+    rememberedProjectTriggerRef.current = null;
+    if (!triggerElement) return;
+    window.requestAnimationFrame(() => {
+      if (triggerElement.isConnected) triggerElement.focus();
+    });
+  }
+
+  function closeRememberedProjectMenu(restoreFocus = false) {
+    setRememberedProjectMenu(null);
+    if (restoreFocus) {
+      restoreRememberedProjectTriggerFocus();
+    } else {
+      rememberedProjectTriggerRef.current = null;
+    }
+  }
+
+  function requestProjectDismissal(project: Project) {
+    setRememberedProjectMenu(null);
+    setPendingProjectDismissal(project);
+  }
+
+  function cancelProjectDismissal() {
+    setPendingProjectDismissal(null);
+    restoreRememberedProjectTriggerFocus();
+  }
+
+  function confirmProjectDismissal(project: Project) {
     projectSpinner.cancelPending();
     projectNavigationRef.current = false;
-    const hiddenProjectIds = readHiddenProjectIds();
-    hiddenProjectIds.add(project.id);
-    writeHiddenProjectIds(hiddenProjectIds);
-    const nextProjects = projects.filter((item) => item.id !== project.id);
-    setProjects(nextProjects);
-    if (nextProjects.length === 0) setPickerMode(null);
+    navigationAttemptRef.current += 1;
+
+    const preferenceOwnerId = preferenceOwnerIdRef.current;
+    const dismissedProjectIds = preferenceOwnerId
+      ? dismissJoinedProject(preferenceOwnerId, project.id)
+      : new Set(dismissedProjectIdsRef.current).add(project.id);
+    dismissedProjectIdsRef.current = dismissedProjectIds;
+    forgetProjectSelection(project.id);
+    setProjects((current) => current.filter((item) => item.id !== project.id));
+    setSelectedProjectId((current) => current === project.id ? null : current);
+    setIsResolvingGo(false);
+    setRememberedProjectMenu(null);
+    setPendingProjectDismissal(null);
+    rememberedProjectTriggerRef.current = null;
+  }
+
+  function restoreProjectToRememberedList(projectId: string) {
+    const preferenceOwnerId = preferenceOwnerIdRef.current;
+    if (!preferenceOwnerId) return;
+    dismissedProjectIdsRef.current = restoreDismissedProject(preferenceOwnerId, projectId);
+    setProjects(
+      allAccessibleProjectsRef.current.filter(
+        (project) => !isProjectDismissed(dismissedProjectIdsRef.current, project.id)
+      )
+    );
+  }
+
+  async function restoreProjectAfterJoin(projectId: string) {
+    if (!preferenceOwnerIdRef.current) {
+      try {
+        await loadAccessibleProjectList(true);
+      } catch {
+        // 이동 후 ProjectAccessGate가 서버 권한을 다시 확인하고 동일한 복구를 수행합니다.
+      }
+    }
+    restoreProjectToRememberedList(projectId);
   }
 
   function handleWheelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -617,7 +756,7 @@ export default function HomePage() {
       const payload = (await response.json()) as { project?: Record<string, unknown>; error?: string };
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
-      unhideProject(project.id);
+      restoreProjectToRememberedList(project.id);
       rememberProjectSelection(project.id);
       router.push(`/projects/${project.id}/basic-info`);
     } catch (error) {
@@ -646,7 +785,7 @@ export default function HomePage() {
       });
       const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
       if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
-      unhideProject(payload.projectId);
+      await restoreProjectAfterJoin(payload.projectId);
       setJoinPassword("");
       rememberProjectSelection(payload.projectId);
       const attemptId = navigationAttemptRef.current + 1;
@@ -775,7 +914,7 @@ export default function HomePage() {
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation();
-                    hideProjectFromCurrentList(project);
+                    requestProjectDismissal(project);
                   }}
                   className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label={`${project.name} 목록에서 숨기기`}
@@ -793,7 +932,13 @@ export default function HomePage() {
   }
 
   return (
-    <div className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div
+      className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        closeRememberedProjectMenu();
+      }}
+    >
       <div ref={canvasRef} className="flex h-full w-full overflow-auto overscroll-contain px-4 py-6 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden md:px-8">
         <div
           ref={compositionRef}
@@ -1083,25 +1228,16 @@ export default function HomePage() {
                       {projects.map((project) => {
                         const isOpening = selectedProjectId === project.id;
                         return (
-                          <button
+                          <RememberedProjectCard
                             key={project.id}
-                            type="button"
+                            project={project}
                             disabled={isCreatingProject || Boolean(selectedProjectId)}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void openPreviouslyJoinedProject(project);
+                            isOpening={isOpening}
+                            onOpen={(targetProject) => {
+                              void openPreviouslyJoinedProject(targetProject);
                             }}
-                            className="flex min-h-10 items-center justify-between gap-3 rounded-[3px] border border-field-border bg-field-bg px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-primary hover:bg-field-light active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
-                            aria-label={`${project.name} 프로젝트 홈 열기`}
-                            aria-busy={isOpening}
-                          >
-                            <span className="min-w-0 truncate text-xs font-black text-field-primary">
-                              <span className="font-display">{project.name}</span>
-                            </span>
-                            <span className="shrink-0 text-[9px] font-bold text-field-muted">
-                              {isOpening ? "확인 중" : project.accessRole === "admin" ? "Key staff" : "Staff"}
-                            </span>
-                          </button>
+                            onOpenMenu={openRememberedProjectMenu}
+                          />
                         );
                       })}
                     </div>
@@ -1125,6 +1261,15 @@ export default function HomePage() {
           </p>
         ) : null}
         </div>
+      </div>
+      <div ref={projectActionsRef} className="contents">
+        <RememberedProjectActions
+          menuTarget={rememberedProjectMenu}
+          confirmationTarget={pendingProjectDismissal}
+          onRequestRemoval={requestProjectDismissal}
+          onCancelRemoval={cancelProjectDismissal}
+          onConfirmRemoval={confirmProjectDismissal}
+        />
       </div>
       <style jsx global>{`
         @keyframes branch-reveal {

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listAccessGrants, ProjectAccessUnavailableError } from "@/lib/projectAccess/server";
+import {
+  getAccessPreferenceScope,
+  getSessionToken,
+  listAccessGrants,
+  ProjectAccessUnavailableError
+} from "@/lib/projectAccess/server";
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,8 +15,20 @@ export async function GET(request: NextRequest) {
       if (!project || (row.role !== "admin" && row.role !== "progress")) return [];
       return [{ ...project, access_role: row.role }];
     });
-    return NextResponse.json({ projects });
+    return NextResponse.json({
+      projects,
+      preferenceScope: getAccessPreferenceScope(getSessionToken(request))
+    });
   } catch (error) {
-    return NextResponse.json({ projects: [], error: error instanceof ProjectAccessUnavailableError ? error.message : "접근 프로젝트를 불러오지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
+    return NextResponse.json(
+      {
+        projects: [],
+        preferenceScope: "",
+        error: error instanceof ProjectAccessUnavailableError
+          ? error.message
+          : "접근 프로젝트를 불러오지 못했습니다."
+      },
+      { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 }
+    );
   }
 }

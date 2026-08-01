@@ -17,6 +17,10 @@ type ProjectApiErrorPayload = {
     hint?: string;
   } | null;
 };
+export type AccessibleProjectList = {
+  projects: Project[];
+  preferenceScope: string;
+};
 const projectRequests = new Map<string, Promise<Project | null>>();
 const projectBasicInfoRequests = new Map<string, Promise<ProjectBasicInfo>>();
 const projectBasicInfoCache = new Map<string, { value: ProjectBasicInfo; expiresAt: number }>();
@@ -50,18 +54,22 @@ export async function listProjects(): Promise<Project[]> {
 }
 
 /** 비밀번호 인증으로 생성된 현재 브라우저의 유효한 프로젝트 권한만 조회합니다. */
-export async function listAccessibleProjects(): Promise<Project[]> {
+export async function listAccessibleProjects(): Promise<AccessibleProjectList> {
   const response = await fetch("/api/projects/access-list", {
     cache: "no-store",
     credentials: "same-origin"
   });
   const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & {
     projects?: Record<string, unknown>[];
+    preferenceScope?: string;
   };
   if (!response.ok) {
     throw new Error(payload.error || "참여한 프로젝트를 불러오지 못했습니다.");
   }
-  return (payload.projects ?? []).map(projectFromRow);
+  return {
+    projects: (payload.projects ?? []).map(projectFromRow),
+    preferenceScope: payload.preferenceScope?.trim() ?? ""
+  };
 }
 
 /** 저장된 project ID만 믿지 않고 현재 서버 access grant를 다시 확인합니다. */

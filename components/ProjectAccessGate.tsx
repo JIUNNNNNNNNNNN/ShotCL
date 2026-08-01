@@ -5,6 +5,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
+import {
+  resolveDismissedProjectOwnerId,
+  restoreDismissedProject
+} from "@/lib/projectAccess/dismissedProjects";
 
 const ProjectAccessContext = createContext<{ role: SharedProjectRole | null; isShared: boolean }>({
   role: null,
@@ -15,11 +19,13 @@ export function ProjectAccessGate({
   projectId,
   projectName,
   role,
+  accessPreferenceScope,
   children
 }: {
   projectId: string;
   projectName: string | null;
   role: SharedProjectRole | null;
+  accessPreferenceScope: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -36,8 +42,17 @@ export function ProjectAccessGate({
   const denied = role === "progress" && !progressReadablePaths.has(pathname);
 
   useEffect(() => {
-    if (role) rememberProjectSelection(projectId);
-  }, [projectId, role]);
+    if (!role) return;
+    rememberProjectSelection(projectId);
+
+    let isCurrent = true;
+    void resolveDismissedProjectOwnerId(accessPreferenceScope).then((ownerId) => {
+      if (isCurrent && ownerId) restoreDismissedProject(ownerId, projectId);
+    });
+    return () => {
+      isCurrent = false;
+    };
+  }, [accessPreferenceScope, projectId, role]);
 
   useEffect(() => {
     if (denied) router.replace(progressPath);
