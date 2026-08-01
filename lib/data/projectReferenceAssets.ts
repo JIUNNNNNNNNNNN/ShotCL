@@ -402,7 +402,7 @@ export async function updateProjectReferenceAsset(
 export type ProjectReferenceAssetOrderUpdate = {
   id: string;
   sortOrder: number;
-  updatedAt?: string;
+  updatedAt: string;
 };
 
 export class ProjectReferenceAssetReorderError extends Error {
@@ -462,7 +462,7 @@ export async function updateProjectReferenceAssetSceneCut(
   input: {
     sceneId: string | null;
     cutNumber: number | null;
-    expectedUpdatedAt?: string;
+    expectedUpdatedAt: string;
   }
 ): Promise<ProjectReferenceAssetSceneCutUpdateResult> {
   const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
@@ -497,7 +497,7 @@ export async function reorderProjectReferenceAssets(
     sceneId: string | null;
     cutNumber: number | null;
     orderedAssetIds: string[];
-    expectedUpdatedAtById?: Record<string, string>;
+    expectedUpdatedAtById: Record<string, string>;
   }
 ): Promise<ProjectReferenceAssetOrderUpdate[]> {
   const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {

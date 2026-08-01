@@ -57,6 +57,7 @@ import {
   type ArchiveImportPage,
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
+import { KeyedMutationQueue } from "@/lib/client/keyedMutationQueue";
 import {
   deleteProjectReferenceAssets,
   inspectProjectReferenceAssets,
@@ -178,14 +179,14 @@ type ArchiveCutGroup = {
   items: ArchiveGroupItem[];
 };
 
-type ArchiveMetadataSnapshot = {
-  id: string;
+type ArchiveAssetPlacement = {
   sceneNo: string | null;
   cutNo: string | null;
   sortOrder: number;
   sceneId: string | null;
   sceneNumber: string;
   cutNumber: number | null;
+  updatedAt: string;
 };
 
 type ArchiveReorderSession = {
@@ -197,7 +198,6 @@ type ArchiveReorderSession = {
   allowReorder: boolean;
   originalIds: string[];
   currentIds: string[];
-  expectedUpdatedAtById: Record<string, string>;
   visualTargetId: string | null;
   moved: boolean;
   validDrop: boolean;
@@ -341,6 +341,17 @@ export default function ProjectStoryboardOverheadPage() {
   const archiveAssetsRef = useRef<ProjectReferenceAsset[]>([]);
   const pendingMetadataAssetIdsRef = useRef(new Set<string>());
   const pendingReorderGroupKeysRef = useRef(new Set<string>());
+  const pendingMetadataVersionByAssetIdRef = useRef(new Map<string, number>());
+  const pendingReorderVersionByGroupKeyRef = useRef(new Map<string, number>());
+  const assetOperationVersionRef = useRef(new Map<string, number>());
+  const renameOperationVersionRef = useRef(new Map<string, number>());
+  const groupOperationVersionRef = useRef(new Map<string, number>());
+  const deletedAssetIdsRef = useRef(new Set<string>());
+  const committedPlacementByAssetIdRef = useRef(new Map<string, ArchiveAssetPlacement>());
+  const archiveMutationQueueRef = useRef(new KeyedMutationQueue());
+  const archiveProjectEpochRef = useRef(0);
+  const activeProjectIdRef = useRef(projectId);
+  activeProjectIdRef.current = projectId;
   const collapsedSceneKeysRef = useRef(new Set<string>());
   const reorderModeGroupKeyRef = useRef<string | null>(null);
   const reorderSessionRef = useRef<ArchiveReorderSession | null>(null);
@@ -421,6 +432,7 @@ export default function ProjectStoryboardOverheadPage() {
 
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
+    const requestedProjectId = projectId;
     setIsLoading(true);
     try {
       const [project, overheadAssets, storyboardAssets, diagrams, sceneResult] = await Promise.all([
@@ -435,22 +447,51 @@ export default function ProjectStoryboardOverheadPage() {
             error: error instanceof Error ? error.message : "씬리스트를 불러오지 못했습니다."
           }))
       ]);
+      if (activeProjectIdRef.current !== requestedProjectId) return;
       setProjectName(project?.name ?? "프로젝트");
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
+      replaceCommittedArchivePlacements([...overheadAssets, ...storyboardAssets]);
       setDiagramArchives(diagrams);
       setSceneItems(sceneResult.value);
       setErrorMessage(sceneResult.error);
     } catch (error) {
+      if (activeProjectIdRef.current !== requestedProjectId) return;
       setErrorMessage(error instanceof Error ? error.message : "부감도와 콘티 아카이브를 불러오지 못했습니다.");
     } finally {
-      setIsLoading(false);
+      if (activeProjectIdRef.current === requestedProjectId) setIsLoading(false);
     }
   }, [projectId]);
 
   useEffect(() => {
     void loadArchive();
   }, [loadArchive]);
+
+  useEffect(() => {
+    archiveProjectEpochRef.current += 1;
+    pendingMetadataAssetIdsRef.current.clear();
+    pendingReorderGroupKeysRef.current.clear();
+    pendingMetadataVersionByAssetIdRef.current.clear();
+    pendingReorderVersionByGroupKeyRef.current.clear();
+    assetOperationVersionRef.current.clear();
+    renameOperationVersionRef.current.clear();
+    groupOperationVersionRef.current.clear();
+    deletedAssetIdsRef.current.clear();
+    committedPlacementByAssetIdRef.current.clear();
+    setPendingMetadataAssetIds(new Set());
+    setPendingReorderGroupKeys(new Set());
+    deleteActionInFlightRef.current = false;
+    deleteInspectionInFlightRef.current = false;
+    pendingDeleteAssetRef.current = null;
+    setPendingDeleteAsset(null);
+    setPendingConfirm(null);
+    selectedKeysRef.current = new Set();
+    setSelectedKeys(new Set());
+    setSelectionMode(false);
+    setEditingAsset(null);
+    setMetadataAnchor(null);
+    setRenamingAsset(null);
+  }, [projectId]);
 
   useEffect(() => {
     archiveAssetsRef.current = [...overheads, ...storyboards];
@@ -655,11 +696,13 @@ export default function ProjectStoryboardOverheadPage() {
     if (uploaded.length === 0) return;
     const byId = new Map(archiveAssetsRef.current.map((asset) => [asset.id, asset]));
     for (const asset of uploaded) byId.set(asset.id, asset);
+    commitArchiveAssetPlacements(uploaded);
     setCombinedArchiveAssets([...byId.values()]);
   }
 
   function removeAssetsFromLocalState(assetIds: Iterable<string>) {
     const ids = new Set(assetIds);
+    for (const id of ids) committedPlacementByAssetIdRef.current.delete(id);
     setCombinedArchiveAssets(archiveAssetsRef.current.filter((asset) => !ids.has(asset.id)));
     updateSelectedKeys((current) => {
       const next = new Set(current);
@@ -681,10 +724,25 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  function replaceAssetInLocalState(updated: ProjectReferenceAsset) {
-    const current = archiveAssetsRef.current;
-    const next = [...current.filter((asset) => asset.id !== updated.id), updated];
-    setCombinedArchiveAssets(next);
+  function applyArchiveAssetNameUpdate(updated: ProjectReferenceAsset) {
+    const committed = committedPlacementByAssetIdRef.current.get(updated.id);
+    if (committed) {
+      committedPlacementByAssetIdRef.current.set(updated.id, {
+        ...committed,
+        updatedAt: updated.updatedAt || committed.updatedAt
+      });
+    }
+    setCombinedArchiveAssets(archiveAssetsRef.current.map((asset) => asset.id === updated.id
+      ? {
+          ...asset,
+          updatedAt: updated.updatedAt || asset.updatedAt,
+          crop: {
+            ...asset.crop,
+            title: updated.crop.title,
+            displayName: updated.crop.displayName
+          }
+        }
+      : asset));
   }
 
   function setCombinedArchiveAssets(next: ProjectReferenceAsset[]) {
@@ -693,8 +751,138 @@ export default function ProjectStoryboardOverheadPage() {
     setStoryboards(next.filter((asset) => asset.assetType === "storyboard"));
   }
 
+  function replaceCommittedArchivePlacements(assets: ProjectReferenceAsset[]) {
+    committedPlacementByAssetIdRef.current = new Map(
+      assets.map((asset) => [asset.id, archiveAssetPlacement(asset)])
+    );
+  }
+
+  function commitArchiveAssetPlacements(assets: ProjectReferenceAsset[]) {
+    for (const asset of assets) {
+      committedPlacementByAssetIdRef.current.set(asset.id, archiveAssetPlacement(asset));
+    }
+  }
+
+  function commitOrderUpdates(updates: ProjectReferenceAssetOrderUpdate[]) {
+    for (const update of updates) {
+      const placement = committedPlacementByAssetIdRef.current.get(update.id);
+      if (!placement) continue;
+      committedPlacementByAssetIdRef.current.set(update.id, {
+        ...placement,
+        sortOrder: update.sortOrder,
+        updatedAt: update.updatedAt || placement.updatedAt
+      });
+    }
+  }
+
+  function commitSceneCutUpdate(result: ProjectReferenceAssetSceneCutUpdateResult) {
+    const placement = committedPlacementByAssetIdRef.current.get(result.asset.id);
+    if (placement) {
+      committedPlacementByAssetIdRef.current.set(result.asset.id, {
+        ...placement,
+        sceneNo: result.asset.sceneNumber || null,
+        cutNo: result.asset.cutNumber === null ? null : String(result.asset.cutNumber),
+        sceneId: result.asset.sceneId,
+        sceneNumber: result.asset.sceneNumber,
+        cutNumber: result.asset.cutNumber,
+        sortOrder: result.asset.sortOrder,
+        updatedAt: result.asset.updatedAt || placement.updatedAt
+      });
+    }
+    commitOrderUpdates(result.orders);
+  }
+
+  function restoreCommittedArchivePlacements(
+    assets: ProjectReferenceAsset[],
+    initialGroupKeys: Iterable<string>,
+    focusAssetId?: string
+  ) {
+    const affectedGroupKeys = new Set(initialGroupKeys);
+    if (focusAssetId) {
+      const currentAsset = assets.find((asset) => asset.id === focusAssetId);
+      if (currentAsset) affectedGroupKeys.add(archiveAssetOrderGroupKey(currentAsset));
+      const committed = committedPlacementByAssetIdRef.current.get(focusAssetId);
+      if (committed) {
+        affectedGroupKeys.add(archiveOrderGroupKey(committed.sceneId, committed.cutNumber));
+      }
+    }
+    return assets.map((asset) => {
+      const committed = committedPlacementByAssetIdRef.current.get(asset.id);
+      if (!committed) return asset;
+      const currentGroupKey = archiveAssetOrderGroupKey(asset);
+      const committedGroupKey = archiveOrderGroupKey(committed.sceneId, committed.cutNumber);
+      if (
+        asset.id !== focusAssetId
+        && !affectedGroupKeys.has(currentGroupKey)
+        && !affectedGroupKeys.has(committedGroupKey)
+      ) return asset;
+      return applyArchiveAssetPlacement(asset, committed);
+    });
+  }
+
+  function nextAssetOperationVersion(assetId: string) {
+    const version = (assetOperationVersionRef.current.get(assetId) ?? 0) + 1;
+    assetOperationVersionRef.current.set(assetId, version);
+    return version;
+  }
+
+  function nextRenameOperationVersion(assetId: string) {
+    const version = (renameOperationVersionRef.current.get(assetId) ?? 0) + 1;
+    renameOperationVersionRef.current.set(assetId, version);
+    return version;
+  }
+
+  function archiveOperationIsCurrent(operationProjectId: string, operationEpoch: number) {
+    return activeProjectIdRef.current === operationProjectId
+      && archiveProjectEpochRef.current === operationEpoch;
+  }
+
+  function nextGroupOperationVersions(groupKeys: Iterable<string>) {
+    const versions = new Map<string, number>();
+    for (const groupKey of new Set(groupKeys)) {
+      const version = (groupOperationVersionRef.current.get(groupKey) ?? 0) + 1;
+      groupOperationVersionRef.current.set(groupKey, version);
+      versions.set(groupKey, version);
+    }
+    return versions;
+  }
+
+  function groupOperationVersionsAreCurrent(versions: ReadonlyMap<string, number>) {
+    for (const [groupKey, version] of versions) {
+      if (groupOperationVersionRef.current.get(groupKey) !== version) return false;
+    }
+    return true;
+  }
+
+  function markMetadataPending(assetId: string, version: number) {
+    pendingMetadataVersionByAssetIdRef.current.set(assetId, version);
+    pendingMetadataAssetIdsRef.current.add(assetId);
+    setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
+  }
+
+  function clearMetadataPending(assetId: string, version: number) {
+    if (pendingMetadataVersionByAssetIdRef.current.get(assetId) !== version) return;
+    pendingMetadataVersionByAssetIdRef.current.delete(assetId);
+    pendingMetadataAssetIdsRef.current.delete(assetId);
+    setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
+  }
+
+  function markReorderPending(groupKey: string, version: number) {
+    pendingReorderVersionByGroupKeyRef.current.set(groupKey, version);
+    pendingReorderGroupKeysRef.current.add(groupKey);
+    setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
+  }
+
+  function clearReorderPending(groupKey: string, version: number) {
+    if (pendingReorderVersionByGroupKeyRef.current.get(groupKey) !== version) return;
+    pendingReorderVersionByGroupKeyRef.current.delete(groupKey);
+    pendingReorderGroupKeysRef.current.delete(groupKey);
+    setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
+  }
+
   function applyOrderUpdates(updates: ProjectReferenceAssetOrderUpdate[]) {
     if (updates.length === 0) return;
+    commitOrderUpdates(updates);
     const updateById = new Map(updates.map((entry) => [entry.id, entry]));
     setCombinedArchiveAssets(archiveAssetsRef.current.map((asset) => {
       const update = updateById.get(asset.id);
@@ -704,8 +892,14 @@ export default function ProjectStoryboardOverheadPage() {
     }));
   }
 
-  function applySceneCutUpdate(result: ProjectReferenceAssetSceneCutUpdateResult) {
-    const orderById = new Map(result.orders.map((entry) => [entry.id, entry]));
+  function applySceneCutUpdate(
+    result: ProjectReferenceAssetSceneCutUpdateResult,
+    applyOrders = true
+  ) {
+    commitSceneCutUpdate(result);
+    const orderById = applyOrders
+      ? new Map(result.orders.map((entry) => [entry.id, entry]))
+      : new Map<string, ProjectReferenceAssetOrderUpdate>();
     setCombinedArchiveAssets(archiveAssetsRef.current.map((asset) => {
       const orderUpdate = orderById.get(asset.id);
       const sortOrder = orderUpdate?.sortOrder ?? asset.sortOrder;
@@ -721,7 +915,7 @@ export default function ProjectStoryboardOverheadPage() {
         ...asset,
         sceneNo: result.asset.sceneNumber || null,
         cutNo: result.asset.cutNumber === null ? null : String(result.asset.cutNumber),
-        sortOrder: result.asset.sortOrder,
+        sortOrder: applyOrders ? result.asset.sortOrder : asset.sortOrder,
         updatedAt: result.asset.updatedAt || asset.updatedAt,
         crop: {
           ...asset.crop,
@@ -1527,6 +1721,8 @@ export default function ProjectStoryboardOverheadPage() {
   async function confirmPendingAction() {
     if (!projectId || !pendingConfirm || !canEdit || deleteActionInFlightRef.current) return;
     const action = pendingConfirm;
+    const operationProjectId = projectId;
+    const operationEpoch = archiveProjectEpochRef.current;
     deleteActionInFlightRef.current = true;
     setIsSaving(true);
     setErrorMessage("");
@@ -1537,28 +1733,62 @@ export default function ProjectStoryboardOverheadPage() {
     const warnings: string[] = [];
     try {
       if (action.assetIds.length > 0) {
+        for (const assetId of action.assetIds) deletedAssetIdsRef.current.add(assetId);
+        const assetMutationKeys = action.assetIds.map((assetId) => (
+          archiveAssetMutationKey(operationProjectId, assetId)
+        ));
+        // Tombstone first, then wait for older metadata/reorder work on these assets.
+        // This lets deletion lock the group that is actually committed on the server.
+        await archiveMutationQueueRef.current.enqueue(assetMutationKeys, async () => undefined);
+        if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
+        const deletingGroupKeys = new Set(action.assetIds.flatMap((assetId) => {
+          const committed = committedPlacementByAssetIdRef.current.get(assetId);
+          if (committed) return [archiveOrderGroupKey(committed.sceneId, committed.cutNumber)];
+          const asset = archiveAssetsRef.current.find((entry) => entry.id === assetId);
+          return asset ? [archiveAssetOrderGroupKey(asset)] : [];
+        }));
+        const deleteGroupVersions = nextGroupOperationVersions(deletingGroupKeys);
         try {
-          const result = await deleteProjectReferenceAssets(projectId, action.assetIds);
+          const result = await archiveMutationQueueRef.current.enqueue(
+            [
+              ...assetMutationKeys,
+              ...[...deletingGroupKeys].map((groupKey) => archiveGroupMutationKey(operationProjectId, groupKey))
+            ],
+            () => deleteProjectReferenceAssets(operationProjectId, action.assetIds)
+          );
+          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
           removeAssetsFromLocalState(action.assetIds);
-          applyOrderUpdates(result.orders);
+          commitOrderUpdates(result.orders);
+          if (groupOperationVersionsAreCurrent(deleteGroupVersions)) applyOrderUpdates(result.orders);
           deletedCount += action.assetIds.length;
           if (result.storageCleanupWarning) warnings.push(result.storageCleanupWarning);
           if (result.orderNormalizationWarning) warnings.push(result.orderNormalizationWarning);
         } catch (error) {
+          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
+          for (const assetId of action.assetIds) deletedAssetIdsRef.current.delete(assetId);
+          if (groupOperationVersionsAreCurrent(deleteGroupVersions)) {
+            setCombinedArchiveAssets(restoreCommittedArchivePlacements(
+              archiveAssetsRef.current,
+              deletingGroupKeys
+            ));
+          }
           remainingAssetIds = [...action.assetIds];
           failures.push(error instanceof Error ? error.message : "선택한 이미지를 삭제하지 못했습니다.");
         }
       }
       for (const item of action.diagrams) {
         try {
-          await deleteOverheadDiagramArchive(projectId, item.id);
+          await deleteOverheadDiagramArchive(operationProjectId, item.id);
+          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
           removeDiagramsFromLocalState([item.id]);
           deletedCount += 1;
         } catch (error) {
+          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
           remainingDiagrams.push(item);
           failures.push(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
         }
       }
+      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
       if (failures.length === 0) {
         setPendingConfirm(null);
         clearSelection();
@@ -1582,13 +1812,17 @@ export default function ProjectStoryboardOverheadPage() {
         ].filter(Boolean).join(" · "));
       }
     } finally {
-      deleteActionInFlightRef.current = false;
-      setIsSaving(false);
+      if (archiveOperationIsCurrent(operationProjectId, operationEpoch)) {
+        deleteActionInFlightRef.current = false;
+        setIsSaving(false);
+      }
     }
   }
 
   async function requestDraggedAssetDelete(assetId: string) {
     if (!projectId || !canEdit || pendingDeleteAssetRef.current || pendingConfirm) return;
+    const operationProjectId = projectId;
+    const operationEpoch = archiveProjectEpochRef.current;
     const asset = archiveAssetsRef.current.find((entry) => entry.id === assetId);
     if (!asset) {
       setErrorMessage("삭제할 이미지를 찾을 수 없습니다.");
@@ -1599,7 +1833,8 @@ export default function ProjectStoryboardOverheadPage() {
     setPendingDeleteAsset(pending);
     setErrorMessage("");
     try {
-      const inspection = await inspectProjectReferenceAssets(projectId, [pending.id]);
+      const inspection = await inspectProjectReferenceAssets(operationProjectId, [pending.id]);
+      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
       if (pendingDeleteAssetRef.current?.id !== pending.id) return;
       setPendingConfirm({
         assetIds: [pending.id],
@@ -1614,11 +1849,15 @@ export default function ProjectStoryboardOverheadPage() {
         ].filter(Boolean).join(" ")
       });
     } catch (error) {
+      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
       if (pendingDeleteAssetRef.current?.id === pending.id) {
         setErrorMessage(error instanceof Error ? error.message : "삭제할 이미지를 확인하지 못했습니다.");
       }
     } finally {
-      if (pendingDeleteAssetRef.current?.id === pending.id) {
+      if (
+        archiveOperationIsCurrent(operationProjectId, operationEpoch)
+        && pendingDeleteAssetRef.current?.id === pending.id
+      ) {
         pendingDeleteAssetRef.current = null;
         setPendingDeleteAsset(null);
       }
@@ -1663,16 +1902,15 @@ export default function ProjectStoryboardOverheadPage() {
 
   async function deleteSelectedAssets() {
     if (!projectId || selectedKeys.size === 0 || deleteInspectionInFlightRef.current) return;
-    if (selectedReferenceAssetIds.some((id) => pendingMetadataAssetIdsRef.current.has(id))) {
-      setErrorMessage("씬·컷 저장 중인 자료는 완료된 뒤 삭제해주세요.");
-      return;
-    }
+    const operationProjectId = projectId;
+    const operationEpoch = archiveProjectEpochRef.current;
     setErrorMessage("");
     deleteInspectionInFlightRef.current = true;
     try {
       const assetInspection = selectedReferenceAssetIds.length > 0
-        ? await inspectProjectReferenceAssets(projectId, selectedReferenceAssetIds)
+        ? await inspectProjectReferenceAssets(operationProjectId, selectedReferenceAssetIds)
         : null;
+      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
       setPendingConfirm({
         assetIds: selectedReferenceAssetIds,
         diagrams: selectedDiagramItems,
@@ -1680,9 +1918,12 @@ export default function ProjectStoryboardOverheadPage() {
         label: selectedCount ? `선택한 ${selectedCount}개 항목` : "선택한 항목"
       });
     } catch (error) {
+      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
       setErrorMessage(error instanceof Error ? error.message : "삭제할 자료를 확인하지 못했습니다.");
     } finally {
-      deleteInspectionInFlightRef.current = false;
+      if (archiveOperationIsCurrent(operationProjectId, operationEpoch)) {
+        deleteInspectionInFlightRef.current = false;
+      }
     }
   }
 
@@ -1711,10 +1952,6 @@ export default function ProjectStoryboardOverheadPage() {
 
   function renameSingleSelectedAsset() {
     if (!singleSelectedReferenceAsset) return;
-    if (pendingMetadataAssetIdsRef.current.has(singleSelectedReferenceAsset.id)) {
-      setErrorMessage("이 자료의 씬·컷을 저장하고 있습니다. 잠시 후 이름을 변경해주세요.");
-      return;
-    }
     setRenamingAsset(singleSelectedReferenceAsset);
     setRenameDraft(archiveDisplayName(singleSelectedReferenceAsset));
     setRenameError("");
@@ -1978,11 +2215,6 @@ export default function ProjectStoryboardOverheadPage() {
       allowReorder: press.allowReorder,
       originalIds: [...press.orderedAssetIds],
       currentIds: [...press.orderedAssetIds],
-      expectedUpdatedAtById: Object.fromEntries(
-        archiveAssetsRef.current
-          .filter((asset) => press.orderedAssetIds.includes(asset.id))
-          .map((asset) => [asset.id, asset.updatedAt])
-      ),
       visualTargetId: press.assetId,
       moved: false,
       validDrop: true,
@@ -2167,47 +2399,99 @@ export default function ProjectStoryboardOverheadPage() {
         if (!snapshot.allowReorder) exitReorderMode(snapshot.groupKey);
         return;
       }
-      pendingReorderGroupKeysRef.current.add(snapshot.groupKey);
-      setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
-      void reorderProjectReferenceAssets(projectId, {
-        sceneId: snapshot.sceneId,
-        cutNumber: snapshot.cutNumber,
-        orderedAssetIds: snapshot.currentIds,
-        expectedUpdatedAtById: snapshot.expectedUpdatedAtById
-      }).then((orders) => {
-        applyOrderUpdates(orders);
-        exitReorderMode(snapshot.groupKey);
-      }).catch((error: unknown) => {
-        const reconciledServerGroup = error instanceof ProjectReferenceAssetReorderError
-          && error.hasGroupSnapshot;
-        const reconciledServerOrder = error instanceof ProjectReferenceAssetReorderError
-          && error.orders.length > 0;
-        if (reconciledServerGroup) {
-          const serverAssetIds = new Set(error.assets.map((asset) => asset.id));
-          setCombinedArchiveAssets([
-            ...archiveAssetsRef.current.filter((asset) => (
-              !serverAssetIds.has(asset.id)
-              && (
-                !isOrderableArchiveAsset(asset)
-                || archiveAssetOrderGroupKey(asset) !== snapshot.groupKey
-              )
-            )),
-            ...error.assets
-          ]);
-        } else if (reconciledServerOrder) {
-          applyOrderUpdates(error.orders);
-        } else {
-          setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
+      const groupVersion = nextGroupOperationVersions([snapshot.groupKey]).get(snapshot.groupKey)!;
+      const operationProjectId = projectId;
+      markReorderPending(snapshot.groupKey, groupVersion);
+      void archiveMutationQueueRef.current.enqueue(
+        [
+          archiveGroupMutationKey(operationProjectId, snapshot.groupKey),
+          ...snapshot.currentIds.map((assetId) => archiveAssetMutationKey(operationProjectId, assetId))
+        ],
+        async () => {
+          try {
+            let expectedUpdatedAtById = archiveExpectedUpdatedAtById(
+              snapshot.currentIds,
+              committedPlacementByAssetIdRef.current,
+              archiveAssetsRef.current
+            );
+            let orders: ProjectReferenceAssetOrderUpdate[] | null = null;
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                orders = await reorderProjectReferenceAssets(operationProjectId, {
+                  sceneId: snapshot.sceneId,
+                  cutNumber: snapshot.cutNumber,
+                  orderedAssetIds: snapshot.currentIds,
+                  expectedUpdatedAtById
+                });
+                break;
+              } catch (error) {
+                if (error instanceof ProjectReferenceAssetReorderError) {
+                  commitArchiveAssetPlacements(error.assets);
+                  commitOrderUpdates(error.orders);
+                }
+                const retryTimestamps = error instanceof ProjectReferenceAssetReorderError
+                  ? archiveRetryTimestamps(snapshot.currentIds, error)
+                  : null;
+                if (
+                  attempt === 0
+                  && retryTimestamps
+                  && activeProjectIdRef.current === operationProjectId
+                ) {
+                  expectedUpdatedAtById = retryTimestamps;
+                  continue;
+                }
+                throw error;
+              }
+            }
+            if (!orders) throw new Error("자료 순서 저장 결과를 확인하지 못했습니다.");
+            if (activeProjectIdRef.current !== operationProjectId) return;
+            commitOrderUpdates(orders);
+            if (groupOperationVersionRef.current.get(snapshot.groupKey) !== groupVersion) return;
+            applyOrderUpdates(orders);
+            exitReorderMode(snapshot.groupKey);
+          } catch (error: unknown) {
+            if (activeProjectIdRef.current !== operationProjectId) return;
+            if (error instanceof ProjectReferenceAssetReorderError) {
+              commitArchiveAssetPlacements(error.assets);
+              commitOrderUpdates(error.orders);
+            }
+            if (groupOperationVersionRef.current.get(snapshot.groupKey) !== groupVersion) return;
+            const reconciledServerGroup = error instanceof ProjectReferenceAssetReorderError
+              && error.hasGroupSnapshot;
+            const reconciledServerOrder = error instanceof ProjectReferenceAssetReorderError
+              && error.orders.length > 0;
+            if (reconciledServerGroup) {
+              const serverAssetIds = new Set(error.assets.map((asset) => asset.id));
+              setCombinedArchiveAssets([
+                ...archiveAssetsRef.current.filter((asset) => (
+                  !serverAssetIds.has(asset.id)
+                  && (
+                    !isOrderableArchiveAsset(asset)
+                    || archiveAssetOrderGroupKey(asset) !== snapshot.groupKey
+                  )
+                )),
+                ...error.assets
+              ]);
+            } else if (reconciledServerOrder) {
+              applyOrderUpdates(error.orders);
+            } else {
+              setCombinedArchiveAssets(restoreCommittedArchivePlacements(
+                archiveAssetsRef.current,
+                new Set([snapshot.groupKey])
+              ));
+            }
+            setErrorMessage(`${error instanceof Error ? error.message : "자료 순서를 저장하지 못했습니다."} ${
+              reconciledServerGroup || reconciledServerOrder
+                ? "서버의 현재 순서로 맞췄습니다."
+                : "이전 순서로 되돌렸습니다."
+            }`);
+            exitReorderMode(snapshot.groupKey);
+          }
         }
-        setErrorMessage(`${error instanceof Error ? error.message : "자료 순서를 저장하지 못했습니다."} ${
-          reconciledServerGroup || reconciledServerOrder
-            ? "서버의 현재 순서로 맞췄습니다."
-            : "이전 순서로 되돌렸습니다."
-        }`);
-        exitReorderMode(snapshot.groupKey);
-      }).finally(() => {
-        pendingReorderGroupKeysRef.current.delete(snapshot.groupKey);
-        setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
+      ).finally(() => {
+        if (activeProjectIdRef.current === operationProjectId) {
+          clearReorderPending(snapshot.groupKey, groupVersion);
+        }
       });
     };
 
@@ -2291,8 +2575,8 @@ export default function ProjectStoryboardOverheadPage() {
 
   function openMetadata(asset: ProjectReferenceAsset, anchor?: { clientX: number; clientY: number }) {
     if (!canEdit) return;
-    if (pendingMetadataAssetIdsRef.current.has(asset.id)) {
-      setErrorMessage("이 자료의 씬·컷을 저장하고 있습니다.");
+    if (deletedAssetIdsRef.current.has(asset.id)) {
+      setErrorMessage("삭제 중인 자료는 수정할 수 없습니다.");
       return;
     }
     const currentSceneId = asset.crop.sceneId || "";
@@ -2306,9 +2590,12 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  async function saveMetadata() {
+  function saveMetadata() {
     if (!projectId || !editingAsset || !canEdit) return;
-    if (pendingMetadataAssetIdsRef.current.has(editingAsset.id)) return;
+    if (deletedAssetIdsRef.current.has(editingAsset.id)) {
+      setMetadataError("삭제 중인 자료는 수정할 수 없습니다.");
+      return;
+    }
     const cutNumber = metadataDraft.cutNo.trim() ? Number(metadataDraft.cutNo) : null;
     if (cutNumber !== null && (!Number.isInteger(cutNumber) || cutNumber < 1)) {
       setMetadataError("컷은 1 이상의 정수로 입력해주세요.");
@@ -2340,13 +2627,6 @@ export default function ProjectStoryboardOverheadPage() {
     const nextGroupKey = archiveOrderGroupKey(selectedScene?.id || null, cutNumber);
     const targetSceneKey = archiveSceneCollapseKey(selectedScene?.id || null);
     const targetWasCollapsed = collapsedSceneKeysRef.current.has(targetSceneKey);
-    if (
-      pendingReorderGroupKeysRef.current.has(previousGroupKey)
-      || pendingReorderGroupKeysRef.current.has(nextGroupKey)
-    ) {
-      setMetadataError("이 씬·컷의 순서를 저장하고 있습니다. 잠시 후 다시 시도해주세요.");
-      return;
-    }
     setMetadataError("");
     const assetId = editingAsset.id;
     const optimistic = moveArchiveAssetToOrderGroup(
@@ -2362,49 +2642,95 @@ export default function ProjectStoryboardOverheadPage() {
       setMetadataError("수정할 이미지 자료를 찾을 수 없습니다.");
       return;
     }
-    pendingMetadataAssetIdsRef.current.add(assetId);
-    setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
-    pendingReorderGroupKeysRef.current.add(previousGroupKey);
-    pendingReorderGroupKeysRef.current.add(nextGroupKey);
-    setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
+    const assetVersion = nextAssetOperationVersion(assetId);
+    const groupVersions = nextGroupOperationVersions([previousGroupKey, nextGroupKey]);
+    const operationProjectId = projectId;
+    markMetadataPending(assetId, assetVersion);
     expandScene(targetSceneKey);
     setCombinedArchiveAssets(optimistic.assets);
     closeMetadata();
-    try {
-      const result = await updateProjectReferenceAssetSceneCut(projectId, assetId, {
-        sceneId: selectedScene?.id || null,
-        cutNumber,
-        expectedUpdatedAt: currentAsset.updatedAt
-      });
-      applySceneCutUpdate(result);
-    } catch (error) {
-      if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
-        applySceneCutUpdate({ asset: error.asset, orders: error.orders });
-        if (targetWasCollapsed && error.asset.sceneId !== (selectedScene?.id || null)) {
-          updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
+    void archiveMutationQueueRef.current.enqueue(
+      [
+        archiveAssetMutationKey(operationProjectId, assetId),
+        archiveGroupMutationKey(operationProjectId, previousGroupKey),
+        archiveGroupMutationKey(operationProjectId, nextGroupKey)
+      ],
+      async () => {
+        try {
+          let expectedUpdatedAt = committedPlacementByAssetIdRef.current.get(assetId)?.updatedAt
+            || currentAsset.updatedAt;
+          let result: ProjectReferenceAssetSceneCutUpdateResult | null = null;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              result = await updateProjectReferenceAssetSceneCut(operationProjectId, assetId, {
+                sceneId: selectedScene?.id || null,
+                cutNumber,
+                expectedUpdatedAt
+              });
+              break;
+            } catch (error) {
+              if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
+                commitSceneCutUpdate({ asset: error.asset, orders: error.orders });
+              } else if (error instanceof ProjectReferenceAssetSceneCutError) {
+                commitOrderUpdates(error.orders);
+              }
+              if (
+                attempt === 0
+                && error instanceof ProjectReferenceAssetSceneCutError
+                && error.asset?.updatedAt
+                && activeProjectIdRef.current === operationProjectId
+                && !deletedAssetIdsRef.current.has(assetId)
+              ) {
+                expectedUpdatedAt = error.asset.updatedAt;
+                continue;
+              }
+              throw error;
+            }
+          }
+          if (!result) throw new Error("자료의 씬·컷 저장 결과를 확인하지 못했습니다.");
+          if (activeProjectIdRef.current !== operationProjectId) return;
+          commitSceneCutUpdate(result);
+          if (assetOperationVersionRef.current.get(assetId) !== assetVersion) return;
+          applySceneCutUpdate(result, groupOperationVersionsAreCurrent(groupVersions));
+        } catch (error) {
+          if (activeProjectIdRef.current !== operationProjectId) return;
+          if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
+            commitSceneCutUpdate({ asset: error.asset, orders: error.orders });
+          } else if (error instanceof ProjectReferenceAssetSceneCutError) {
+            commitOrderUpdates(error.orders);
+          }
+          const operationIsCurrent = assetOperationVersionRef.current.get(assetId) === assetVersion;
+          const groupsAreCurrent = groupOperationVersionsAreCurrent(groupVersions);
+          if (!operationIsCurrent || !groupsAreCurrent) return;
+
+          if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
+            applySceneCutUpdate({ asset: error.asset, orders: error.orders });
+            if (targetWasCollapsed && error.asset.sceneId !== (selectedScene?.id || null)) {
+              updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
+            }
+            setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
+          } else if (error instanceof ProjectReferenceAssetSceneCutError && error.orders.length > 0) {
+            removeAssetsFromLocalState([assetId]);
+            applyOrderUpdates(error.orders);
+            setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
+          } else {
+            setCombinedArchiveAssets(restoreCommittedArchivePlacements(
+              archiveAssetsRef.current,
+              new Set([previousGroupKey, nextGroupKey]),
+              assetId
+            ));
+            if (targetWasCollapsed) {
+              updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
+            }
+            setErrorMessage(`${error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다."} 변경을 되돌렸습니다.`);
+          }
         }
-        setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
-      } else if (error instanceof ProjectReferenceAssetSceneCutError && error.orders.length > 0) {
-        setCombinedArchiveAssets(archiveAssetsRef.current.filter((asset) => asset.id !== assetId));
-        applyOrderUpdates(error.orders);
-        setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
-      } else {
-        setCombinedArchiveAssets(restoreArchiveMetadataSnapshots(
-          archiveAssetsRef.current,
-          optimistic.snapshots
-        ));
-        if (targetWasCollapsed) {
-          updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
-        }
-        setErrorMessage(`${error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다."} 변경을 되돌렸습니다.`);
       }
-    } finally {
-      pendingMetadataAssetIdsRef.current.delete(assetId);
-      setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
-      pendingReorderGroupKeysRef.current.delete(previousGroupKey);
-      pendingReorderGroupKeysRef.current.delete(nextGroupKey);
-      setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
-    }
+    ).finally(() => {
+      if (activeProjectIdRef.current === operationProjectId) {
+        clearMetadataPending(assetId, assetVersion);
+      }
+    });
   }
 
   async function saveAssetName() {
@@ -2415,18 +2741,27 @@ export default function ProjectStoryboardOverheadPage() {
       return;
     }
     setRenameError("");
+    const assetId = renamingAsset.id;
+    const renameVersion = nextRenameOperationVersion(assetId);
+    const operationProjectId = projectId;
     setIsSaving(true);
     try {
-      const updated = await updateProjectReferenceAsset(projectId, renamingAsset.id, {
-        title: displayName,
-        displayName
-      });
-      replaceAssetInLocalState(updated);
-      setRenamingAsset(null);
+      const updated = await archiveMutationQueueRef.current.enqueue(
+        [archiveAssetMutationKey(operationProjectId, assetId)],
+        () => updateProjectReferenceAsset(operationProjectId, assetId, {
+          title: displayName,
+          displayName
+        })
+      );
+      if (activeProjectIdRef.current !== operationProjectId) return;
+      setRenamingAsset((current) => current?.id === assetId ? null : current);
+      if (renameOperationVersionRef.current.get(assetId) !== renameVersion) return;
+      applyArchiveAssetNameUpdate(updated);
     } catch (error) {
+      if (activeProjectIdRef.current !== operationProjectId) return;
       setRenameError(error instanceof Error ? error.message : "이름을 변경하지 못했습니다.");
     } finally {
-      setIsSaving(false);
+      if (activeProjectIdRef.current === operationProjectId) setIsSaving(false);
     }
   }
 
@@ -2678,8 +3013,7 @@ export default function ProjectStoryboardOverheadPage() {
                       && !(group.sceneId && !group.scene)
                       && !(group.sceneId === null && cutGroup.cutNumber !== null)
                       && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
-                      && orderedAssetIds.length > 1
-                      && !pendingReorderGroupKeys.has(orderGroupKey);
+                      && orderedAssetIds.length > 1;
                     return (
                       <div
                         key={`${group.key}-${cutGroup.key}`}
@@ -2687,7 +3021,12 @@ export default function ProjectStoryboardOverheadPage() {
                         className="grid min-w-0 gap-1.5"
                       >
                         <div className="flex min-h-8 items-center justify-between gap-2">
-                          <h4 className="text-xs font-black text-field-muted">{cutGroup.label}</h4>
+                          <h4 className="flex items-center gap-1.5 text-xs font-black text-field-muted">
+                            <span>{cutGroup.label}</span>
+                            {pendingReorderGroupKeys.has(orderGroupKey) ? (
+                              <span className="h-2 w-2 bg-[#d7b95f]" title="순서 저장 중" aria-label="순서 저장 중" />
+                            ) : null}
+                          </h4>
                           {groupInReorderMode ? (
                             <button
                               type="button"
@@ -2745,8 +3084,7 @@ export default function ProjectStoryboardOverheadPage() {
                         && !isSaving
                         && !pendingConfirm
                         && !pendingDeleteAsset
-                        && !pendingMetadataAssetIds.has(asset.id)
-                        && !pendingReorderGroupKeys.has(orderGroupKey);
+                        && !deletedAssetIdsRef.current.has(asset.id);
                       const assetReorderEnabled = dragDeleteEnabled && groupReorderEnabled;
                       const visibleOrderNumber = orderedAssetIds.indexOf(asset.id) + 1;
                       const orderNumber = activeType === "all" && !query.trim()
@@ -2763,8 +3101,13 @@ export default function ProjectStoryboardOverheadPage() {
                               : "border-field-border"
                           } ${pressedSelectionKey === key ? "scale-[0.98] border-[#ef8f39]" : ""} ${
                             reorderVisual?.assetId === asset.id ? "opacity-25" : ""
-                          } ${reorderVisual?.targetId === asset.id ? "ring-2 ring-[#ef8f39]/55" : ""}`}
+                          } ${reorderVisual?.targetId === asset.id ? "ring-2 ring-[#ef8f39]/55" : ""} ${
+                            pendingMetadataAssetIds.has(asset.id) ? "border-[#d7b95f]" : ""
+                          }`}
                         >
+                          {pendingMetadataAssetIds.has(asset.id) ? (
+                            <span className="pointer-events-none absolute left-1 top-1 z-20 h-2 w-2 bg-[#d7b95f]" title="정보 저장 중" aria-label="정보 저장 중" />
+                          ) : null}
                           <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center rounded-[3px] border border-field-border bg-white px-1 text-[11px] font-black text-field-primary shadow-sm">
                             {orderNumber}
                           </span>
@@ -2986,7 +3329,7 @@ export default function ProjectStoryboardOverheadPage() {
           scenes={sceneItems}
           anchor={metadataAnchor}
           errorMessage={metadataError}
-          isSaving={pendingMetadataAssetIds.has(editingAsset.id)}
+          isSaving={false}
           onChange={(value) => {
             setMetadataDraft(value);
             setMetadataError("");
@@ -3438,6 +3781,44 @@ function archiveOrderGroupKey(sceneId: string | null, cutNumber: number | null) 
   return `${sceneId || "unassigned"}::${cutNumber ?? "unassigned"}`;
 }
 
+function archiveAssetMutationKey(projectId: string, assetId: string) {
+  return `project:${projectId}:asset:${assetId}`;
+}
+
+function archiveGroupMutationKey(projectId: string, groupKey: string) {
+  return `project:${projectId}:group:${groupKey}`;
+}
+
+function archiveExpectedUpdatedAtById(
+  assetIds: string[],
+  committedPlacements: ReadonlyMap<string, ArchiveAssetPlacement>,
+  assets: ProjectReferenceAsset[]
+) {
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  return Object.fromEntries(assetIds.map((assetId) => {
+    const updatedAt = committedPlacements.get(assetId)?.updatedAt
+      || assetsById.get(assetId)?.updatedAt
+      || "";
+    if (!updatedAt) throw new Error("자료 순서를 저장할 최신 버전을 확인하지 못했습니다.");
+    return [assetId, updatedAt];
+  }));
+}
+
+function archiveRetryTimestamps(
+  assetIds: string[],
+  error: ProjectReferenceAssetReorderError
+) {
+  if (error.hasGroupSnapshot || error.orders.length !== assetIds.length) return null;
+  const requestedIds = new Set(assetIds);
+  const timestamps = new Map<string, string>();
+  for (const order of error.orders) {
+    if (!requestedIds.has(order.id) || !order.updatedAt || timestamps.has(order.id)) return null;
+    timestamps.set(order.id, order.updatedAt);
+  }
+  if (timestamps.size !== requestedIds.size) return null;
+  return Object.fromEntries(assetIds.map((assetId) => [assetId, timestamps.get(assetId)!]));
+}
+
 function archiveSceneCollapseKey(sceneId: string | null) {
   return sceneId ? `scene:${sceneId}` : "unassigned";
 }
@@ -3591,63 +3972,103 @@ function moveArchiveAssetToOrderGroup(
   if (!moving) return null;
   const previousGroupKey = archiveAssetOrderGroupKey(moving);
   const nextGroupKey = archiveOrderGroupKey(nextGroup.sceneId, nextGroup.cutNumber);
-  const snapshots: ArchiveMetadataSnapshot[] = [{
-    id: moving.id,
-    sceneNo: moving.sceneNo,
-    cutNo: moving.cutNo,
-    sortOrder: moving.sortOrder,
-    sceneId: moving.crop.sceneId?.trim() || null,
-    sceneNumber: moving.crop.sceneNumber || "",
-    cutNumber: nullableArchiveCutNumber(moving.crop.cutNumber ?? moving.cutNo)
-  }];
-  const targetMaxOrder = assets.reduce((maximum, asset) => (
-    asset.id !== assetId
-    && isOrderableArchiveAsset(asset)
-    && archiveAssetOrderGroupKey(asset) === nextGroupKey
-      ? Math.max(maximum, positiveArchiveSortOrder(asset.sortOrder) ?? 0)
-      : maximum
-  ), 0);
-  const nextSortOrder = previousGroupKey === nextGroupKey ? moving.sortOrder : targetMaxOrder + 1;
+  const affectedIds = new Set<string>();
+  const orderById = new Map<string, number>();
+  const previousAssets = assets
+    .filter((asset) => (
+      asset.id !== assetId
+      && isOrderableArchiveAsset(asset)
+      && archiveAssetOrderGroupKey(asset) === previousGroupKey
+    ))
+    .sort(compareArchiveAssetsForOrder);
+  previousAssets.forEach((asset, index) => {
+    affectedIds.add(asset.id);
+    orderById.set(asset.id, index + 1);
+  });
+
+  if (previousGroupKey === nextGroupKey) {
+    const sameGroupAssets = [...previousAssets, moving].sort(compareArchiveAssetsForOrder);
+    sameGroupAssets.forEach((asset, index) => {
+      affectedIds.add(asset.id);
+      orderById.set(asset.id, index + 1);
+    });
+  } else {
+    const nextAssets = assets
+      .filter((asset) => (
+        asset.id !== assetId
+        && isOrderableArchiveAsset(asset)
+        && archiveAssetOrderGroupKey(asset) === nextGroupKey
+      ))
+      .sort(compareArchiveAssetsForOrder);
+    nextAssets.forEach((asset, index) => {
+      affectedIds.add(asset.id);
+      orderById.set(asset.id, index + 1);
+    });
+    affectedIds.add(moving.id);
+    orderById.set(moving.id, nextAssets.length + 1);
+  }
+
   return {
-    assets: assets.map((asset) => asset.id === assetId
-      ? {
-          ...asset,
-          sceneNo: nextGroup.sceneNumber || null,
-          cutNo: nextGroup.cutNumber === null ? null : String(nextGroup.cutNumber),
-          sortOrder: nextSortOrder,
-          crop: {
-            ...asset.crop,
-            sceneId: nextGroup.sceneId,
-            sceneNumber: nextGroup.sceneNumber,
-            cutNumber: nextGroup.cutNumber
-          }
+    assets: assets.map((asset) => {
+      if (!affectedIds.has(asset.id)) return asset;
+      const sortOrder = orderById.get(asset.id) ?? asset.sortOrder;
+      if (asset.id !== assetId) {
+        return sortOrder === asset.sortOrder ? asset : { ...asset, sortOrder };
+      }
+      return {
+        ...asset,
+        sceneNo: nextGroup.sceneNumber || null,
+        cutNo: nextGroup.cutNumber === null ? null : String(nextGroup.cutNumber),
+        sortOrder,
+        crop: {
+          ...asset.crop,
+          sceneId: nextGroup.sceneId,
+          sceneNumber: nextGroup.sceneNumber,
+          cutNumber: nextGroup.cutNumber
         }
-      : asset),
-    snapshots
+      };
+    })
   };
 }
 
-function restoreArchiveMetadataSnapshots(
-  assets: ProjectReferenceAsset[],
-  snapshots: ArchiveMetadataSnapshot[]
+function archiveAssetPlacement(asset: ProjectReferenceAsset): ArchiveAssetPlacement {
+  return {
+    sceneNo: asset.sceneNo,
+    cutNo: asset.cutNo,
+    sortOrder: asset.sortOrder,
+    sceneId: asset.crop.sceneId?.trim() || null,
+    sceneNumber: asset.crop.sceneNumber || "",
+    cutNumber: nullableArchiveCutNumber(asset.crop.cutNumber ?? asset.cutNo),
+    updatedAt: asset.updatedAt
+  };
+}
+
+function applyArchiveAssetPlacement(
+  asset: ProjectReferenceAsset,
+  placement: ArchiveAssetPlacement
 ) {
-  const snapshotById = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
-  return assets.map((asset) => {
-    const snapshot = snapshotById.get(asset.id);
-    if (!snapshot) return asset;
-    return {
-      ...asset,
-      sceneNo: snapshot.sceneNo,
-      cutNo: snapshot.cutNo,
-      sortOrder: snapshot.sortOrder,
-      crop: {
-        ...asset.crop,
-        sceneId: snapshot.sceneId,
-        sceneNumber: snapshot.sceneNumber,
-        cutNumber: snapshot.cutNumber
-      }
-    };
-  });
+  return {
+    ...asset,
+    sceneNo: placement.sceneNo,
+    cutNo: placement.cutNo,
+    sortOrder: placement.sortOrder,
+    updatedAt: placement.updatedAt || asset.updatedAt,
+    crop: {
+      ...asset.crop,
+      sceneId: placement.sceneId,
+      sceneNumber: placement.sceneNumber,
+      cutNumber: placement.cutNumber
+    }
+  };
+}
+
+function compareArchiveAssetsForOrder(left: ProjectReferenceAsset, right: ProjectReferenceAsset) {
+  const sortOrder = (positiveArchiveSortOrder(left.sortOrder) ?? 0)
+    - (positiveArchiveSortOrder(right.sortOrder) ?? 0);
+  if (sortOrder !== 0) return sortOrder;
+  const createdOrder = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+  if (Number.isFinite(createdOrder) && createdOrder !== 0) return createdOrder;
+  return left.id.localeCompare(right.id);
 }
 
 function reorderArchiveAssetsByIds(assets: ProjectReferenceAsset[], orderedIds: string[]) {

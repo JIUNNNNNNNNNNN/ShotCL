@@ -1067,7 +1067,56 @@ async function updateReferenceAssetSceneCut(
   if (parsedCut.value !== null && !sceneId) {
     return NextResponse.json({ error: "컷을 설정하려면 씬을 먼저 선택해주세요." }, { status: 400 });
   }
+  if (!UUID_PATTERN.test(id)) {
+    return NextResponse.json({ error: "자료 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  if (sceneId && !UUID_PATTERN.test(sceneId)) {
+    return NextResponse.json({ error: "씬 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 100);
+  if (!expectedUpdatedAt) {
+    return NextResponse.json({ error: "자료의 저장 버전이 필요합니다." }, { status: 400 });
+  }
+  let atomicResponse = await supabase.rpc(
+    "archive_move_reference_asset_scene_cut",
+    {
+      p_project_id: projectId,
+      p_asset_id: id,
+      p_scene_id: sceneId,
+      p_cut_number: parsedCut.value,
+      p_expected_updated_at: expectedUpdatedAt
+    }
+  );
+  if (isRetryableArchiveOrderRpc(atomicResponse.error)) {
+    await waitForArchiveOrderRetry();
+    atomicResponse = await supabase.rpc(
+      "archive_move_reference_asset_scene_cut",
+      {
+        p_project_id: projectId,
+        p_asset_id: id,
+        p_scene_id: sceneId,
+        p_cut_number: parsedCut.value,
+        p_expected_updated_at: expectedUpdatedAt
+      }
+    );
+  }
+  const { data: atomicResult, error: atomicError } = atomicResponse;
+  if (!atomicError) {
+    const normalizedResult = normalizeArchiveSceneCutRpcResult(atomicResult);
+    if (!normalizedResult) throw new Error("씬·컷 저장 결과를 확인하지 못했습니다.");
+    if (objectValue(atomicResult).ok === false) {
+      return NextResponse.json({
+        error: "다른 작업의 변경을 확인했습니다. 최신 상태에서 다시 저장합니다.",
+        ...normalizedResult
+      }, { status: 409 });
+    }
+    return NextResponse.json({ ok: true, ...normalizedResult });
+  }
+  if (!isMissingArchiveOrderRpc(atomicError)) {
+    return archiveOrderRpcErrorResponse(atomicError, "자료의 씬·컷을 저장하지 못했습니다.");
+  }
 
+  // RPC가 아직 적용되지 않은 배포에서만 기존 guarded fallback을 사용합니다.
   const resolvedScene = await resolveProjectScene(supabase, projectId, sceneId ?? "");
   if (sceneId && !resolvedScene) {
     return NextResponse.json({ error: "선택한 씬을 찾을 수 없습니다." }, { status: 400 });
@@ -1116,7 +1165,6 @@ async function updateReferenceAssetSceneCut(
       }))
     };
   };
-  const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 100);
   if (expectedUpdatedAt && expectedUpdatedAt !== String(existing.updated_at ?? "")) {
     return NextResponse.json(
       {
@@ -1328,7 +1376,81 @@ async function reorderReferenceAssetsInCut(
   if (orderedAssetIds.error) {
     return NextResponse.json({ error: orderedAssetIds.error }, { status: 400 });
   }
+  if (sceneId && !UUID_PATTERN.test(sceneId)) {
+    return NextResponse.json({ error: "씬 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  const expectedUpdatedAtById = objectValue(body.expectedUpdatedAtById);
+  const expectedUpdatedAts = orderedAssetIds.value.map((id) => cleanText(expectedUpdatedAtById[id], 100));
+  if (expectedUpdatedAts.some((value) => !value)) {
+    return NextResponse.json({ error: "각 이미지의 저장 버전이 필요합니다." }, { status: 400 });
+  }
 
+  let atomicResponse = await supabase.rpc(
+    "archive_reorder_reference_assets",
+    {
+      p_project_id: projectId,
+      p_scene_id: sceneId,
+      p_cut_number: parsedCut.value,
+      p_ordered_asset_ids: orderedAssetIds.value,
+      p_expected_updated_ats: expectedUpdatedAts
+    }
+  );
+  if (isRetryableArchiveOrderRpc(atomicResponse.error)) {
+    await waitForArchiveOrderRetry();
+    atomicResponse = await supabase.rpc(
+      "archive_reorder_reference_assets",
+      {
+        p_project_id: projectId,
+        p_scene_id: sceneId,
+        p_cut_number: parsedCut.value,
+        p_ordered_asset_ids: orderedAssetIds.value,
+        p_expected_updated_ats: expectedUpdatedAts
+      }
+    );
+  }
+  const { data: atomicResult, error: atomicError } = atomicResponse;
+  if (!atomicError) {
+    const orders = normalizeArchiveOrderRpcResult(atomicResult);
+    if (!orders) throw new Error("자료 순서 저장 결과를 확인하지 못했습니다.");
+    const rpcStatus = cleanText(objectValue(atomicResult).code, 100);
+    if (objectValue(atomicResult).ok === false) {
+      if (rpcStatus === "GROUP_CHANGED") {
+        const ids = [...new Set([
+          ...orders.map((order) => order.id),
+          ...orderedAssetIds.value
+        ])];
+        const { data: currentAssets, error: currentAssetsError } = ids.length > 0
+          ? await supabase
+              .from("project_reference_assets")
+              .select(SELECT_COLUMNS)
+              .eq("project_id", projectId)
+              .in("id", ids)
+          : { data: [], error: null };
+        if (currentAssetsError) throw currentAssetsError;
+        const normalizedAssets = ((currentAssets ?? []) as Array<Record<string, unknown>>).map(mapAssetRow);
+        return NextResponse.json({
+          error: "같은 씬·컷의 이미지 구성이 변경되었습니다. 서버의 현재 상태로 맞춥니다.",
+          orders: normalizedAssets.map((asset) => ({
+            id: asset.id,
+            sortOrder: asset.sortOrder,
+            updatedAt: asset.updatedAt
+          })),
+          assets: normalizedAssets,
+          groupSnapshot: true
+        }, { status: 409 });
+      }
+      return NextResponse.json({
+        error: "다른 작업의 순서 변경을 확인했습니다. 최신 상태에서 다시 저장합니다.",
+        orders
+      }, { status: 409 });
+    }
+    return NextResponse.json({ ok: true, orders });
+  }
+  if (!isMissingArchiveOrderRpc(atomicError)) {
+    return archiveOrderRpcErrorResponse(atomicError, "자료 순서를 저장하지 못했습니다.");
+  }
+
+  // RPC가 아직 적용되지 않은 배포에서만 기존 guarded fallback을 사용합니다.
   const resolvedScene = await resolveProjectScene(supabase, projectId, sceneId ?? "");
   if (sceneId && !resolvedScene) {
     return NextResponse.json({ error: "순서를 바꿀 씬을 찾을 수 없습니다." }, { status: 400 });
@@ -1367,7 +1489,6 @@ async function reorderReferenceAssetsInCut(
       { status: 409 }
     );
   }
-  const expectedUpdatedAtById = objectValue(body.expectedUpdatedAtById);
   if (Object.keys(expectedUpdatedAtById).length > 0) {
     const expectedIds = Object.keys(expectedUpdatedAtById);
     const stale = !sameStringSet(scopedIds, expectedIds) || scopedRows.some((row) => (
@@ -1538,8 +1659,8 @@ async function listOrderableArchiveRows(
 
 function isOrderableArchiveRow(row: Record<string, unknown>) {
   const assetType = String(row.asset_type ?? "");
-  const mimeType = String(row.mime_type ?? "").toLowerCase();
-  const filename = String(row.filename ?? "").toLowerCase();
+  const mimeType = String(row.mime_type ?? "").trim().toLowerCase();
+  const filename = String(row.filename ?? "").trim().toLowerCase();
   // Keep this predicate aligned with detectArchiveCropSourceKind on the client.
   // Otherwise a legacy GIF/HEIC row hidden from the grid makes exact-set reorder validation fail.
   const isImage = /^(?:image\/jpeg|image\/png|image\/webp)$/i.test(mimeType)
@@ -1583,7 +1704,7 @@ function positiveArchiveOrder(value: unknown) {
 function parseArchiveCutNumber(value: unknown): { value: number | null; error: string } {
   if (value === null || value === undefined || value === "") return { value: null, error: "" };
   const numeric = Number(value);
-  if (!Number.isSafeInteger(numeric) || numeric < 1) {
+  if (!Number.isSafeInteger(numeric) || numeric < 1 || numeric > 2_147_483_647) {
     return { value: null, error: "컷은 1 이상의 정수로 입력해주세요." };
   }
   return { value: numeric, error: "" };
@@ -2596,6 +2717,91 @@ function firstDuplicate(values: string[]) {
 function isArchiveImage(file: File) {
   return file.type.startsWith("image/")
     || /\.(?:jpe?g|png|gif|webp|heic|heif)$/i.test(file.name);
+}
+
+function normalizeArchiveSceneCutRpcResult(value: unknown) {
+  const result = objectValue(value);
+  const assetValue = objectValue(result.asset);
+  const id = cleanText(assetValue.id, 100);
+  const numericSortOrder = Number(assetValue.sortOrder);
+  const sortOrder = Number.isSafeInteger(numericSortOrder) && numericSortOrder >= 0
+    ? numericSortOrder
+    : null;
+  const cutNumber = nullablePositiveInteger(assetValue.cutNumber);
+  const updatedAt = cleanText(assetValue.updatedAt, 100);
+  if (!UUID_PATTERN.test(id) || sortOrder === null || !updatedAt) return null;
+  const orders = normalizeArchiveOrderRpcResult({ orders: result.orders });
+  if (!orders) return null;
+  return {
+    asset: {
+      id,
+      sceneId: cleanText(assetValue.sceneId, 100) || null,
+      sceneNumber: cleanText(assetValue.sceneNumber, 100),
+      cutNumber,
+      sortOrder,
+      updatedAt
+    },
+    orders
+  };
+}
+
+function normalizeArchiveOrderRpcResult(value: unknown) {
+  const result = objectValue(value);
+  if (!Array.isArray(result.orders)) return null;
+  const orders = result.orders.map((entry) => {
+    const order = objectValue(entry);
+    const numericSortOrder = Number(order.sortOrder);
+    return {
+      id: cleanText(order.id, 100),
+      sortOrder: Number.isSafeInteger(numericSortOrder) && numericSortOrder >= 0
+        ? numericSortOrder
+        : null,
+      updatedAt: cleanText(order.updatedAt, 100)
+    };
+  });
+  if (orders.some((order) => (
+    !UUID_PATTERN.test(order.id)
+    || order.sortOrder === null
+    || !order.updatedAt
+  ))) return null;
+  return orders.map((order) => ({
+    id: order.id,
+    sortOrder: order.sortOrder!,
+    updatedAt: order.updatedAt
+  }));
+}
+
+function isMissingArchiveOrderRpc(error: unknown) {
+  const source = safeError(error);
+  return source.code === "PGRST202"
+    || source.code === "42883"
+    || /archive_(?:move|reorder)_reference_asset/i.test(source.message)
+      && /schema cache|could not find|does not exist/i.test(source.message);
+}
+
+function isRetryableArchiveOrderRpc(error: unknown) {
+  const code = safeError(error).code;
+  return code === "40001" || code === "40P01";
+}
+
+function waitForArchiveOrderRetry() {
+  return new Promise<void>((resolve) => setTimeout(resolve, 20));
+}
+
+function archiveOrderRpcErrorResponse(error: unknown, fallbackMessage: string) {
+  const source = safeError(error);
+  const status = source.code === "P0002"
+    ? 404
+    : source.code === "22023" || source.code === "22007" || source.code === "22003" || source.code === "22P02"
+      ? 400
+      : source.code === "40001" || source.code === "40P01"
+        ? 409
+        : 500;
+  if (status >= 500) console.error("[reference-assets/archive-order-rpc]", source);
+  return NextResponse.json({
+    error: source.message && source.message !== "Unknown error" ? source.message : fallbackMessage,
+    code: status === 409 ? "PROJECT_REFERENCE_CONFLICT" : "PROJECT_REFERENCE_ERROR"
+  }, { status });
 }
 
 async function mapSettledWithConcurrency<T, R>(
