@@ -816,11 +816,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (body.operation === "update_scene_cut") {
-      return updateReferenceAssetSceneCut(supabase, projectId, body);
+      return await updateReferenceAssetSceneCut(supabase, projectId, body);
     }
 
     if (body.operation === "reorder_cut_assets") {
-      return reorderReferenceAssetsInCut(supabase, projectId, body);
+      return await reorderReferenceAssetsInCut(supabase, projectId, body);
     }
 
     const id = cleanText(body.id, 100);
@@ -1091,17 +1091,46 @@ async function updateReferenceAssetSceneCut(
   if (!existing) {
     return NextResponse.json({ error: "수정할 이미지 자료를 찾을 수 없습니다." }, { status: 404 });
   }
+  const previousGroup = archiveOrderGroupFromRow(existing);
+  const nextGroup: ArchiveOrderGroup = { sceneId, cutNumber: parsedCut.value };
+  const sceneCutStateFromRows = (currentRows: Array<Record<string, unknown>>) => {
+    const currentAsset = currentRows.find((row) => String(row.id ?? "") === id) ?? null;
+    const affectedRows = currentRows.filter((row) => (
+      rowMatchesArchiveOrderGroup(row, previousGroup)
+      || rowMatchesArchiveOrderGroup(row, nextGroup)
+    ));
+    const currentCrop = currentAsset ? normalizeCrop(currentAsset.crop_data) : null;
+    return {
+      asset: currentAsset && currentCrop ? {
+        id,
+        sceneId: cleanText(currentCrop.sceneId, 100) || null,
+        sceneNumber: cleanText(currentCrop.sceneNumber, 100),
+        cutNumber: nullablePositiveInteger(currentCrop.cutNumber),
+        sortOrder: Number(currentAsset.sort_order ?? 0),
+        updatedAt: String(currentAsset.updated_at ?? "")
+      } : null,
+      orders: affectedRows.map((row) => ({
+        id: String(row.id ?? ""),
+        sortOrder: Number(row.sort_order ?? 0),
+        updatedAt: String(row.updated_at ?? "")
+      }))
+    };
+  };
   const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 100);
   if (expectedUpdatedAt && expectedUpdatedAt !== String(existing.updated_at ?? "")) {
     return NextResponse.json(
-      { error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요." },
+      {
+        error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요.",
+        ...sceneCutStateFromRows(rows)
+      },
       { status: 409 }
     );
   }
 
-  const previousGroup = archiveOrderGroupFromRow(existing);
-  const nextGroup: ArchiveOrderGroup = { sceneId, cutNumber: parsedCut.value };
   const sameGroup = sameArchiveOrderGroup(previousGroup, nextGroup);
+  const previousRows = rows
+    .filter((row) => String(row.id ?? "") !== id && rowMatchesArchiveOrderGroup(row, previousGroup))
+    .sort(compareArchiveOrderRows);
   const nextRows = rows
     .filter((row) => String(row.id ?? "") !== id && rowMatchesArchiveOrderGroup(row, nextGroup))
     .sort(compareArchiveOrderRows);
@@ -1111,50 +1140,177 @@ async function updateReferenceAssetSceneCut(
     sceneNumber: resolvedScene?.sceneNo || "",
     cutNumber: parsedCut.value
   });
-  const targetMaxOrder = nextRows.reduce(
-    (maximum, row) => Math.max(maximum, positiveArchiveOrder(row.sort_order) ?? 0),
-    0
-  );
   const storedOrder = Number(existing.sort_order ?? 0);
-  const movedOrder = sameGroup
-    ? Number.isSafeInteger(storedOrder) ? storedOrder : 0
-    : targetMaxOrder + 1;
-  let updateQuery = supabase
-    .from("project_reference_assets")
-    .update({
-      crop_data: nextCrop,
-      scene_no: resolvedScene?.sceneNo || null,
-      cut_no: parsedCut.value === null ? null : String(parsedCut.value),
-      sort_order: movedOrder
-    })
-    .eq("id", id)
-    .eq("project_id", projectId);
-  if (expectedUpdatedAt) updateQuery = updateQuery.eq("updated_at", expectedUpdatedAt);
-  const { data: moved, error } = await updateQuery
-    .select("id,crop_data,scene_no,cut_no,sort_order,updated_at")
-    .maybeSingle();
-  if (error) throw error;
-  if (!moved && expectedUpdatedAt) {
-    return NextResponse.json(
-      { error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요." },
-      { status: 409 }
-    );
+  const originalOrder = Number.isSafeInteger(storedOrder) ? storedOrder : 0;
+
+  if (sameGroup) {
+    const { data: moved, error } = await supabase
+      .from("project_reference_assets")
+      .update({
+        crop_data: nextCrop,
+        scene_no: resolvedScene?.sceneNo || null,
+        cut_no: parsedCut.value === null ? null : String(parsedCut.value)
+      })
+      .eq("id", id)
+      .eq("project_id", projectId)
+      .eq("updated_at", String(existing.updated_at ?? ""))
+      .select("id,crop_data,scene_no,cut_no,sort_order,updated_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!moved) {
+      const currentRows = await listOrderableArchiveRows(supabase, projectId);
+      return NextResponse.json(
+        {
+          error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요.",
+          ...sceneCutStateFromRows(currentRows)
+        },
+        { status: 409 }
+      );
+    }
+    const movedRow = moved as Record<string, unknown>;
+    const movedCrop = normalizeCrop(movedRow.crop_data);
+    return NextResponse.json({
+      ok: true,
+      asset: {
+        id,
+        sceneId: cleanText(movedCrop.sceneId, 100) || null,
+        sceneNumber: cleanText(movedCrop.sceneNumber, 100),
+        cutNumber: nullablePositiveInteger(movedCrop.cutNumber),
+        sortOrder: Number(movedRow.sort_order ?? originalOrder),
+        updatedAt: String(movedRow.updated_at ?? "")
+      },
+      orders: [{
+        id,
+        sortOrder: Number(movedRow.sort_order ?? originalOrder),
+        updatedAt: String(movedRow.updated_at ?? "")
+      }]
+    });
   }
-  if (!moved) throw new Error("수정한 자료의 저장 결과를 확인하지 못했습니다.");
-  const movedRow = moved as Record<string, unknown>;
-  const movedCrop = normalizeCrop(movedRow.crop_data);
-  return NextResponse.json({
-    ok: true,
-    asset: {
+
+  type SceneCutWrite = {
+    id: string;
+    expectedUpdatedAt: string;
+    patch: Record<string, unknown>;
+    rollback: Record<string, unknown>;
+  };
+  const normalizeRowOrder = (
+    row: Record<string, unknown>,
+    nextOrder: number
+  ): SceneCutWrite | null => {
+    const previousOrder = Number.isSafeInteger(Number(row.sort_order)) ? Number(row.sort_order) : 0;
+    if (previousOrder === nextOrder) return null;
+    return {
+      id: String(row.id ?? ""),
+      expectedUpdatedAt: String(row.updated_at ?? ""),
+      patch: { sort_order: nextOrder },
+      rollback: { sort_order: previousOrder }
+    };
+  };
+  const orderWrites = [
+    ...previousRows.map((row, index) => normalizeRowOrder(row, index + 1)),
+    ...nextRows.map((row, index) => normalizeRowOrder(row, index + 1))
+  ].filter((write): write is SceneCutWrite => write !== null);
+  const writes: SceneCutWrite[] = [
+    ...orderWrites,
+    {
       id,
-      sceneId: cleanText(movedCrop.sceneId, 100) || null,
-      sceneNumber: cleanText(movedCrop.sceneNumber, 100),
-      cutNumber: nullablePositiveInteger(movedCrop.cutNumber),
-      sortOrder: positiveArchiveOrder(movedRow.sort_order) ?? movedOrder,
-      updatedAt: String(movedRow.updated_at ?? "")
-    },
-    orders: [{ id, sortOrder: positiveArchiveOrder(movedRow.sort_order) ?? movedOrder }]
+      expectedUpdatedAt: String(existing.updated_at ?? ""),
+      patch: {
+        crop_data: nextCrop,
+        scene_no: resolvedScene?.sceneNo || null,
+        cut_no: parsedCut.value === null ? null : String(parsedCut.value),
+        sort_order: nextRows.length + 1
+      },
+      rollback: {
+        crop_data: existing.crop_data,
+        scene_no: existing.scene_no,
+        cut_no: existing.cut_no,
+        sort_order: originalOrder
+      }
+    }
+  ];
+  const attempts = await mapSettledWithConcurrency(writes, 6, async (write) => {
+    const { data, error } = await supabase
+      .from("project_reference_assets")
+      .update(write.patch)
+      .eq("id", write.id)
+      .eq("project_id", projectId)
+      .eq("updated_at", write.expectedUpdatedAt)
+      .select("id,updated_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("자료가 다른 요청에서 먼저 변경되었습니다.");
+    return { ...write, savedUpdatedAt: String(data.updated_at ?? "") };
   });
+  const applied = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : []);
+  const failed = attempts.filter((attempt) => attempt.status === "rejected");
+  const rollbackApplied = async () => {
+    const rollbacks = await mapSettledWithConcurrency(applied, 6, async (write) => {
+      const { data, error } = await supabase
+        .from("project_reference_assets")
+        .update(write.rollback)
+        .eq("id", write.id)
+        .eq("project_id", projectId)
+        .eq("updated_at", write.savedUpdatedAt)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("동시 변경으로 씬·컷 변경을 복구하지 못했습니다.");
+      return data;
+    });
+    return rollbacks.some((rollback) => rollback.status === "rejected");
+  };
+  const readCurrentState = async () => {
+    const currentRows = await listOrderableArchiveRows(supabase, projectId);
+    return {
+      rows: currentRows,
+      state: sceneCutStateFromRows(currentRows)
+    };
+  };
+
+  if (failed.length > 0) {
+    const rollbackFailed = await rollbackApplied();
+    const current = await readCurrentState();
+    console.error("[reference-assets/scene-cut] guarded update failed", {
+      projectId,
+      id,
+      failedCount: failed.length,
+      rollbackFailed
+    });
+    return NextResponse.json({
+      error: rollbackFailed
+        ? "다른 화면의 변경과 충돌해 씬·컷 변경을 안전하게 확정하지 못했습니다. 다시 확인해주세요."
+        : "다른 화면에서 자료가 먼저 변경되었습니다. 변경 전 상태로 복구했습니다.",
+      ...current.state
+    }, { status: 409 });
+  }
+
+  const current = await readCurrentState();
+  const normalizedPreviousRows = current.rows
+    .filter((row) => rowMatchesArchiveOrderGroup(row, previousGroup))
+    .sort(compareArchiveOrderRows);
+  const normalizedNextRows = current.rows
+    .filter((row) => rowMatchesArchiveOrderGroup(row, nextGroup))
+    .sort(compareArchiveOrderRows);
+  const normalized = current.state.asset?.sceneId === sceneId
+    && current.state.asset.cutNumber === parsedCut.value
+    && normalizedPreviousRows.every((row, index) => positiveArchiveOrder(row.sort_order) === index + 1)
+    && normalizedNextRows.every((row, index) => positiveArchiveOrder(row.sort_order) === index + 1);
+  if (!normalized) {
+    const rollbackFailed = await rollbackApplied();
+    const restored = await readCurrentState();
+    console.error("[reference-assets/scene-cut] post-write verification failed", {
+      projectId,
+      id,
+      rollbackFailed
+    });
+    return NextResponse.json({
+      error: "동시 변경으로 씬·컷과 순서를 확정하지 못했습니다. 다시 시도해주세요.",
+      ...restored.state
+    }, { status: 409 });
+  }
+  if (!current.state.asset) throw new Error("수정한 자료의 저장 결과를 확인하지 못했습니다.");
+  return NextResponse.json({ ok: true, ...current.state });
 }
 
 async function reorderReferenceAssetsInCut(
@@ -1189,9 +1345,25 @@ async function reorderReferenceAssetsInCut(
   const group: ArchiveOrderGroup = { sceneId, cutNumber: parsedCut.value };
   const scopedRows = rows.filter((row) => rowMatchesArchiveOrderGroup(row, group));
   const scopedIds = scopedRows.map((row) => String(row.id ?? ""));
+  const requestedIdSet = new Set(orderedAssetIds.value);
+  const snapshotRows = rows.filter((row) => (
+    rowMatchesArchiveOrderGroup(row, group)
+    || requestedIdSet.has(String(row.id ?? ""))
+  ));
+  const currentOrders = snapshotRows.map((row) => ({
+    id: String(row.id ?? ""),
+    sortOrder: Number(row.sort_order ?? 0),
+    updatedAt: String(row.updated_at ?? "")
+  }));
+  const currentAssets = snapshotRows.map(mapAssetRow);
   if (!sameStringSet(scopedIds, orderedAssetIds.value)) {
     return NextResponse.json(
-      { error: "같은 씬·컷의 전체 이미지 순서가 일치하지 않습니다. 화면을 다시 확인해주세요." },
+      {
+        error: "같은 씬·컷의 전체 이미지 순서가 일치하지 않습니다. 화면을 다시 확인해주세요.",
+        orders: currentOrders,
+        assets: currentAssets,
+        groupSnapshot: true
+      },
       { status: 409 }
     );
   }
@@ -1203,26 +1375,132 @@ async function reorderReferenceAssetsInCut(
     ));
     if (stale) {
       return NextResponse.json(
-        { error: "다른 화면에서 이 씬·컷 순서가 먼저 변경되었습니다. 다시 시도해주세요." },
+        {
+          error: "다른 화면에서 이 씬·컷 순서가 먼저 변경되었습니다. 다시 시도해주세요.",
+          orders: currentOrders,
+          assets: currentAssets,
+          groupSnapshot: true
+        },
         { status: 409 }
       );
     }
   }
 
   const rowById = new Map(scopedRows.map((row) => [String(row.id ?? ""), row]));
-  const updates = orderedAssetIds.value.map((id, index) => (
-    toReferenceAssetUpsertRow(rowById.get(id)!, { sort_order: index + 1 })
+  const updates = orderedAssetIds.value.map((id, index) => {
+    const row = rowById.get(id)!;
+    return {
+      id,
+      nextOrder: index + 1,
+      previousOrder: Number.isSafeInteger(Number(row.sort_order)) ? Number(row.sort_order) : 0,
+      expectedUpdatedAt: String(row.updated_at ?? "")
+    };
+  }).filter((update) => update.previousOrder !== update.nextOrder);
+  // PostgREST cannot atomically assign a different order to every row without a
+  // database RPC. Keep the public request batched, but use update-only CAS writes
+  // so a concurrent delete cannot be resurrected and metadata is never overwritten.
+  const attempts = await mapSettledWithConcurrency(updates, 6, async (update) => {
+    const { data, error } = await supabase
+      .from("project_reference_assets")
+      .update({ sort_order: update.nextOrder })
+      .eq("id", update.id)
+      .eq("project_id", projectId)
+      .eq("updated_at", update.expectedUpdatedAt)
+      .select("id,sort_order,updated_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("자료 순서가 다른 요청에서 먼저 변경되었습니다.");
+    return {
+      ...update,
+      savedUpdatedAt: String(data.updated_at ?? ""),
+      savedOrder: positiveArchiveOrder(data.sort_order) ?? update.nextOrder
+    };
+  });
+  const applied = attempts.flatMap((attempt) => attempt.status === "fulfilled" ? [attempt.value] : []);
+  const failed = attempts.filter((attempt) => attempt.status === "rejected");
+
+  const rollbackApplied = async () => {
+    const rollbacks = await mapSettledWithConcurrency(applied, 6, async (update) => {
+      const { data, error } = await supabase
+        .from("project_reference_assets")
+        .update({ sort_order: update.previousOrder })
+        .eq("id", update.id)
+        .eq("project_id", projectId)
+        .eq("updated_at", update.savedUpdatedAt)
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("동시 변경으로 순서 복구를 완료하지 못했습니다.");
+      return data;
+    });
+    return rollbacks.some((rollback) => rollback.status === "rejected");
+  };
+
+  const readCurrentGroupState = async () => {
+    const currentRows = await listOrderableArchiveRows(supabase, projectId);
+    const currentGroupRows = currentRows.filter((row) => (
+      rowMatchesArchiveOrderGroup(row, group)
+      || requestedIdSet.has(String(row.id ?? ""))
+    ));
+    return {
+      orders: currentGroupRows.map((row) => ({
+        id: String(row.id ?? ""),
+        sortOrder: Number(row.sort_order ?? 0),
+        updatedAt: String(row.updated_at ?? "")
+      })),
+      assets: currentGroupRows.map(mapAssetRow)
+    };
+  };
+
+  if (failed.length > 0) {
+    const rollbackFailed = await rollbackApplied();
+    const currentGroup = await readCurrentGroupState();
+    console.error("[reference-assets/reorder] guarded update failed", {
+      projectId,
+      group,
+      failedCount: failed.length,
+      rollbackFailed
+    });
+    return NextResponse.json(
+      {
+        error: rollbackFailed
+          ? "다른 화면의 변경과 충돌해 순서를 안전하게 확정하지 못했습니다. 자료를 다시 열어 확인해주세요."
+          : "다른 화면에서 이 씬·컷 자료가 먼저 변경되었습니다. 이전 순서로 복구했습니다.",
+        ...currentGroup,
+        groupSnapshot: true
+      },
+      { status: 409 }
+    );
+  }
+
+  const savedRows = await listOrderableArchiveRows(supabase, projectId);
+  const savedGroupRows = savedRows.filter((row) => rowMatchesArchiveOrderGroup(row, group));
+  const savedById = new Map(savedGroupRows.map((row) => [String(row.id ?? ""), row]));
+  const verified = sameStringSet(
+    savedGroupRows.map((row) => String(row.id ?? "")),
+    orderedAssetIds.value
+  ) && orderedAssetIds.value.every((id, index) => (
+    positiveArchiveOrder(savedById.get(id)?.sort_order) === index + 1
   ));
-  const { data, error } = await supabase
-    .from("project_reference_assets")
-    .upsert(updates, { onConflict: "id" })
-    .select("id,sort_order,updated_at");
-  if (error) throw error;
-  if ((data ?? []).length !== updates.length) {
-    throw new Error("자료 순서 저장 결과 일부를 확인하지 못했습니다.");
+  if (!verified) {
+    const rollbackFailed = await rollbackApplied();
+    const currentGroup = await readCurrentGroupState();
+    console.error("[reference-assets/reorder] post-write verification failed", {
+      projectId,
+      group,
+      rollbackFailed
+    });
+    return NextResponse.json(
+      {
+        error: "동시 변경으로 자료 순서를 확정하지 못했습니다. 다시 시도해주세요.",
+        ...currentGroup,
+        groupSnapshot: true
+      },
+      { status: 409 }
+    );
   }
   const savedOrder = new Map(
-    ((data ?? []) as Array<Record<string, unknown>>).map((row) => [
+    savedGroupRows.map((row) => [
       String(row.id ?? ""),
       {
         sortOrder: positiveArchiveOrder(row.sort_order) ?? 1,
@@ -1262,7 +1540,10 @@ function isOrderableArchiveRow(row: Record<string, unknown>) {
   const assetType = String(row.asset_type ?? "");
   const mimeType = String(row.mime_type ?? "").toLowerCase();
   const filename = String(row.filename ?? "").toLowerCase();
-  const isImage = mimeType.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(filename);
+  // Keep this predicate aligned with detectArchiveCropSourceKind on the client.
+  // Otherwise a legacy GIF/HEIC row hidden from the grid makes exact-set reorder validation fail.
+  const isImage = /^(?:image\/jpeg|image\/png|image\/webp)$/i.test(mimeType)
+    || /\.(?:jpe?g|png|webp)$/i.test(filename);
   return (assetType === "overhead" || assetType === "storyboard")
     && isImage
     && !String(row.group_id ?? "").startsWith("source:");
@@ -1285,8 +1566,9 @@ function sameArchiveOrderGroup(left: ArchiveOrderGroup, right: ArchiveOrderGroup
 }
 
 function compareArchiveOrderRows(left: Record<string, unknown>, right: Record<string, unknown>) {
-  const leftOrder = positiveArchiveOrder(left.sort_order) ?? Number.MAX_SAFE_INTEGER;
-  const rightOrder = positiveArchiveOrder(right.sort_order) ?? Number.MAX_SAFE_INTEGER;
+  // Match the archive grid: legacy/non-positive orders sort first, then created_at/id.
+  const leftOrder = positiveArchiveOrder(left.sort_order) ?? 0;
+  const rightOrder = positiveArchiveOrder(right.sort_order) ?? 0;
   if (leftOrder !== rightOrder) return leftOrder - rightOrder;
   const createdOrder = Date.parse(String(left.created_at ?? "")) - Date.parse(String(right.created_at ?? ""));
   if (Number.isFinite(createdOrder) && createdOrder !== 0) return createdOrder;
@@ -1325,34 +1607,6 @@ function sameStringSet(left: string[], right: string[]) {
   if (left.length !== right.length) return false;
   const expected = new Set(left);
   return right.every((value) => expected.has(value));
-}
-
-function toReferenceAssetUpsertRow(
-  row: Record<string, unknown>,
-  patch: Record<string, unknown>
-) {
-  return {
-    id: row.id,
-    project_id: row.project_id,
-    asset_type: row.asset_type,
-    filename: row.filename,
-    storage_path: row.storage_path,
-    public_url: row.public_url,
-    mime_type: row.mime_type,
-    size_bytes: row.size_bytes,
-    daily_plan_id: row.daily_plan_id,
-    scene_no: row.scene_no,
-    cut_no: row.cut_no,
-    shot_ref: row.shot_ref,
-    group_id: row.group_id,
-    crop_data: row.crop_data,
-    scenario_scenes: row.scenario_scenes,
-    scenario_parse_error: row.scenario_parse_error,
-    sort_order: row.sort_order,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
-    ...patch
-  };
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {

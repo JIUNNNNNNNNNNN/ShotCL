@@ -15,6 +15,8 @@ import {
 } from "react";
 import {
   Clapperboard,
+  ChevronDown,
+  ChevronRight,
   Crop,
   FileImage,
   FileText,
@@ -58,12 +60,15 @@ import {
   deleteProjectReferenceAssets,
   inspectProjectReferenceAssets,
   listProjectReferenceAssets,
+  ProjectReferenceAssetReorderError,
+  ProjectReferenceAssetSceneCutError,
   reorderProjectReferenceAssets,
   updateProjectReferenceAsset,
   updateProjectReferenceAssetSceneCut,
   uploadProjectReferenceAsset,
   uploadStoryboardCropAssetsBulk,
   type ProjectReferenceAssetOrderUpdate,
+  type ProjectReferenceAssetSceneCutUpdateResult,
   type StoryboardCropBulkUploadItem
 } from "@/lib/data/projectReferenceAssets";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
@@ -185,9 +190,24 @@ type ArchiveReorderSession = {
   originalIds: string[];
   currentIds: string[];
   expectedUpdatedAtById: Record<string, string>;
+  visualTargetId: string | null;
   moved: boolean;
   validDrop: boolean;
   handle: HTMLButtonElement;
+  previousTouchAction: string;
+  overlayOffsetX: number;
+  overlayOffsetY: number;
+  pointerX: number;
+  pointerY: number;
+  autoScrollFrame: number | null;
+};
+
+type ArchiveReorderOverlay = {
+  imageUrl: string;
+  width: number;
+  height: number;
+  left: number;
+  top: number;
 };
 
 type PreparedStoryboardCrop = {
@@ -221,11 +241,16 @@ type ArchiveSelectionKey = `${ArchiveSelectionKind}:${string}`;
 
 type ArchivePointerSession = {
   key: ArchiveSelectionKey;
-  kind: ArchiveSelectionKind;
-  id: string;
+  assetId: string;
+  groupKey: string;
+  sceneId: string | null;
+  cutNumber: number | null;
+  orderedAssetIds: string[];
   pointerId: number;
   startX: number;
   startY: number;
+  latestX: number;
+  latestY: number;
   longPressed: boolean;
   timeoutId: number;
   target: HTMLButtonElement;
@@ -280,10 +305,13 @@ export default function ProjectStoryboardOverheadPage() {
   const [pressedSelectionKey, setPressedSelectionKey] = useState<ArchiveSelectionKey | null>(null);
   const [pendingMetadataAssetIds, setPendingMetadataAssetIds] = useState<Set<string>>(new Set());
   const [pendingReorderGroupKeys, setPendingReorderGroupKeys] = useState<Set<string>>(new Set());
+  const [collapsedSceneKeys, setCollapsedSceneKeys] = useState<Set<string>>(new Set());
+  const [reorderModeGroupKey, setReorderModeGroupKey] = useState<string | null>(null);
   const [reorderVisual, setReorderVisual] = useState<{ assetId: string; targetId: string | null } | null>(null);
+  const [reorderOverlay, setReorderOverlay] = useState<ArchiveReorderOverlay | null>(null);
   const preparingRef = useRef(false);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
-  const selectionPointerCleanupRef = useRef<(() => void) | null>(null);
+  const assetPressCleanupRef = useRef<(() => void) | null>(null);
   const suppressArchiveClickRef = useRef<ArchiveSelectionKey | null>(null);
   const selectedKeysRef = useRef<Set<ArchiveSelectionKey>>(new Set());
   const pendingImportRef = useRef<PendingImport | null>(null);
@@ -297,10 +325,26 @@ export default function ProjectStoryboardOverheadPage() {
   const archiveAssetsRef = useRef<ProjectReferenceAsset[]>([]);
   const pendingMetadataAssetIdsRef = useRef(new Set<string>());
   const pendingReorderGroupKeysRef = useRef(new Set<string>());
+  const collapsedSceneKeysRef = useRef(new Set<string>());
+  const reorderModeGroupKeyRef = useRef<string | null>(null);
   const reorderSessionRef = useRef<ArchiveReorderSession | null>(null);
   const reorderPointerCleanupRef = useRef<(() => void) | null>(null);
+  const reorderOverlayRef = useRef<HTMLDivElement | null>(null);
 
   useUnsavedChangesGuard(isActiveArchiveImportProgress(importProgress));
+
+  const enterReorderMode = useCallback((groupKey: string) => {
+    reorderModeGroupKeyRef.current = groupKey;
+    setReorderModeGroupKey(groupKey);
+  }, []);
+
+  const exitReorderMode = useCallback((expectedGroupKey?: string) => {
+    if (expectedGroupKey && reorderModeGroupKeyRef.current !== expectedGroupKey) return;
+    reorderModeGroupKeyRef.current = null;
+    setReorderModeGroupKey(null);
+    setReorderVisual(null);
+    setReorderOverlay(null);
+  }, []);
 
   const flushImportProgress = useCallback(() => {
     if (importProgressTimerRef.current !== null) {
@@ -403,7 +447,39 @@ export default function ProjectStoryboardOverheadPage() {
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
     setSelectionMode(false);
+    cancelArchivePointerSession();
+    cancelActiveReorderDrag();
+    exitReorderMode();
   }, [activeType, query]);
+
+  useEffect(() => {
+    if (!reorderModeGroupKey) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      cancelActiveReorderDrag();
+      exitReorderMode();
+    };
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (reorderSessionRef.current) return;
+      const target = event.target instanceof Element ? event.target : null;
+      const zone = target?.closest<HTMLElement>("[data-archive-reorder-zone]");
+      const control = target?.closest<HTMLElement>("[data-archive-reorder-control]");
+      if (control || zone?.dataset.archiveReorderZone === reorderModeGroupKey) return;
+      exitReorderMode();
+    };
+    const handleOrientationChange = () => {
+      cancelActiveReorderDrag();
+      exitReorderMode();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handleOutsidePointer, true);
+    window.addEventListener("orientationchange", handleOrientationChange);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handleOutsidePointer, true);
+      window.removeEventListener("orientationchange", handleOrientationChange);
+    };
+  }, [exitReorderMode, reorderModeGroupKey]);
 
   useEffect(() => {
     if (!statusMessage) return;
@@ -419,10 +495,27 @@ export default function ProjectStoryboardOverheadPage() {
       importProgressTimerRef.current = null;
     }
     preparedStoryboardCropsRef.current.clear();
-    selectionPointerCleanupRef.current?.();
+    assetPressCleanupRef.current?.();
     reorderPointerCleanupRef.current?.();
     const longPress = longPressRef.current;
-    if (longPress) window.clearTimeout(longPress.timeoutId);
+    if (longPress) {
+      window.clearTimeout(longPress.timeoutId);
+      longPress.target.style.touchAction = longPress.previousTouchAction;
+      longPressRef.current = null;
+    }
+    const reorder = reorderSessionRef.current;
+    if (reorder) {
+      if (reorder.autoScrollFrame !== null) window.cancelAnimationFrame(reorder.autoScrollFrame);
+      reorder.handle.style.touchAction = reorder.previousTouchAction;
+      try {
+        if (reorder.handle.hasPointerCapture(reorder.pointerId)) {
+          reorder.handle.releasePointerCapture(reorder.pointerId);
+        }
+      } catch {
+        // The browser may have already released pointer capture while navigating.
+      }
+      reorderSessionRef.current = null;
+    }
     if (pendingImportRef.current) releaseArchivePages(pendingImportRef.current.pages);
   }, []);
 
@@ -572,6 +665,35 @@ export default function ProjectStoryboardOverheadPage() {
       return update === undefined
         ? asset
         : { ...asset, sortOrder: update.sortOrder, updatedAt: update.updatedAt || asset.updatedAt };
+    }));
+  }
+
+  function applySceneCutUpdate(result: ProjectReferenceAssetSceneCutUpdateResult) {
+    const orderById = new Map(result.orders.map((entry) => [entry.id, entry]));
+    setCombinedArchiveAssets(archiveAssetsRef.current.map((asset) => {
+      const orderUpdate = orderById.get(asset.id);
+      const sortOrder = orderUpdate?.sortOrder ?? asset.sortOrder;
+      if (asset.id !== result.asset.id) {
+        if (!orderUpdate) return asset;
+        return {
+          ...asset,
+          sortOrder,
+          updatedAt: orderUpdate.updatedAt || asset.updatedAt
+        };
+      }
+      return {
+        ...asset,
+        sceneNo: result.asset.sceneNumber || null,
+        cutNo: result.asset.cutNumber === null ? null : String(result.asset.cutNumber),
+        sortOrder: result.asset.sortOrder,
+        updatedAt: result.asset.updatedAt || asset.updatedAt,
+        crop: {
+          ...asset.crop,
+          sceneId: result.asset.sceneId,
+          sceneNumber: result.asset.sceneNumber,
+          cutNumber: result.asset.cutNumber
+        }
+      };
     }));
   }
 
@@ -1431,7 +1553,6 @@ export default function ProjectStoryboardOverheadPage() {
 
   function toggleCurrentAssetScope() {
     if (scopeSelectionKeys.length === 0) return;
-    let nextSize = 0;
     updateSelectedKeys((current) => {
       const next = new Set(current);
       if (scopeSelectionKeys.every((key) => current.has(key))) {
@@ -1439,10 +1560,9 @@ export default function ProjectStoryboardOverheadPage() {
       } else {
         for (const key of scopeSelectionKeys) next.add(key);
       }
-      nextSize = next.size;
       return next;
     });
-    setSelectionMode(nextSize > 0);
+    setSelectionMode(true);
   }
 
   async function deleteSelectedAssets() {
@@ -1500,96 +1620,48 @@ export default function ProjectStoryboardOverheadPage() {
     setRenameError("");
   }
 
-  function beginArchiveSelectionPress(
-    kind: ArchiveSelectionKind,
-    id: string,
-    event: ReactPointerEvent<HTMLButtonElement>
-  ) {
-    if (!canEdit || event.button !== 0) return;
-    if (editingAsset) closeMetadata();
+  function toggleSelectionMode() {
     cancelArchivePointerSession();
-    selectionPointerCleanupRef.current?.();
-
-    const key = archiveSelectionKey(kind, id);
-    const state: ArchivePointerSession = {
-      key,
-      kind,
-      id,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      longPressed: false,
-      timeoutId: 0,
-      target: event.currentTarget,
-      previousTouchAction: event.currentTarget.style.touchAction
-    };
-
-    try {
-      state.target.setPointerCapture(state.pointerId);
-    } catch {
-      // Document listeners keep long press selection active when capture is unavailable.
+    cancelActiveReorderDrag();
+    exitReorderMode();
+    if (selectionMode) {
+      clearSelection();
+      return;
     }
+    setSelectionMode(true);
+  }
 
-    state.timeoutId = window.setTimeout(() => {
-      const current = longPressRef.current;
-      if (!current || current.pointerId !== event.pointerId) return;
-      current.longPressed = true;
-      current.target.style.touchAction = "none";
-      suppressArchiveClickRef.current = current.key;
-      setSelectionMode(true);
-      setPressedSelectionKey(current.key);
-      updateSelectedKeys((selected) => new Set(selected).add(current.key));
-      if (navigator.vibrate) navigator.vibrate(18);
-    }, LONG_PRESS_MS);
-    longPressRef.current = state;
+  function updateCollapsedScenes(
+    update: (current: Set<string>) => Set<string>
+  ) {
+    const next = update(collapsedSceneKeysRef.current);
+    collapsedSceneKeysRef.current = next;
+    setCollapsedSceneKeys(next);
+  }
 
-    const handlePointerMove = (pointerEvent: PointerEvent) => {
-      const current = longPressRef.current;
-      if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      const distance = Math.hypot(
-        pointerEvent.clientX - current.startX,
-        pointerEvent.clientY - current.startY
-      );
-      if (!current.longPressed && distance > LONG_PRESS_MOVE_TOLERANCE) {
-        cancelArchivePointerSession();
-        return;
-      }
-      if (current.longPressed && pointerEvent.cancelable) pointerEvent.preventDefault();
-    };
-    const finishPointerSession = (pointerEvent: PointerEvent) => {
-      const current = longPressRef.current;
-      if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      const wasLongPressed = current.longPressed;
-      const selectedKey = current.key;
-      if (wasLongPressed) suppressArchiveClickRef.current = selectedKey;
-      cancelArchivePointerSession();
-      if (wasLongPressed) {
-        window.setTimeout(() => {
-          if (suppressArchiveClickRef.current === selectedKey) {
-            suppressArchiveClickRef.current = null;
-          }
-        }, 700);
-      }
-    };
-    const handleTouchMove = (touchEvent: TouchEvent) => {
-      if (longPressRef.current?.longPressed && touchEvent.cancelable) {
-        touchEvent.preventDefault();
-      }
-    };
-    const cleanup = () => {
-      document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("pointerup", finishPointerSession);
-      document.removeEventListener("pointercancel", finishPointerSession);
-      document.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("blur", cancelArchivePointerSession);
-      selectionPointerCleanupRef.current = null;
-    };
-    selectionPointerCleanupRef.current = cleanup;
-    document.addEventListener("pointermove", handlePointerMove, { passive: false });
-    document.addEventListener("pointerup", finishPointerSession);
-    document.addEventListener("pointercancel", finishPointerSession);
-    document.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("blur", cancelArchivePointerSession);
+  function toggleSceneCollapsed(sceneKey: string) {
+    if (
+      reorderModeGroupKey
+      && archiveSceneKeyFromOrderGroupKey(reorderModeGroupKey) === sceneKey
+    ) {
+      cancelActiveReorderDrag();
+      exitReorderMode();
+    }
+    updateCollapsedScenes((current) => {
+      const next = new Set(current);
+      if (next.has(sceneKey)) next.delete(sceneKey);
+      else next.add(sceneKey);
+      return next;
+    });
+  }
+
+  function expandScene(sceneKey: string) {
+    if (!collapsedSceneKeysRef.current.has(sceneKey)) return;
+    updateCollapsedScenes((current) => {
+      const next = new Set(current);
+      next.delete(sceneKey);
+      return next;
+    });
   }
 
   function openNewDiagram() {
@@ -1650,10 +1722,44 @@ export default function ProjectStoryboardOverheadPage() {
     }
     longPressRef.current = null;
     setPressedSelectionKey(null);
-    selectionPointerCleanupRef.current?.();
+    assetPressCleanupRef.current?.();
   }
 
-  function beginAssetOrderDrag(
+  function scheduleArchiveClickSuppressionRelease(assetId: string) {
+    const suppressedKey = archiveSelectionKey("asset", assetId);
+    window.setTimeout(() => {
+      if (suppressArchiveClickRef.current === suppressedKey) {
+        suppressArchiveClickRef.current = null;
+      }
+    }, 700);
+  }
+
+  function cancelActiveReorderDrag() {
+    const current = reorderSessionRef.current;
+    if (!current) return;
+    reorderSessionRef.current = null;
+    reorderPointerCleanupRef.current?.();
+    try {
+      if (current.handle.hasPointerCapture(current.pointerId)) {
+        current.handle.releasePointerCapture(current.pointerId);
+      }
+    } catch {
+      // The browser may release capture before pointercancel or orientation changes.
+    }
+    current.handle.style.touchAction = current.previousTouchAction;
+    if (current.autoScrollFrame !== null) window.cancelAnimationFrame(current.autoScrollFrame);
+    if (current.moved) {
+      setCombinedArchiveAssets(reorderArchiveAssetsByIds(
+        archiveAssetsRef.current,
+        current.originalIds
+      ));
+    }
+    setReorderVisual(null);
+    setReorderOverlay(null);
+    scheduleArchiveClickSuppressionRelease(current.assetId);
+  }
+
+  function beginAssetReorderPress(
     assetId: string,
     sceneId: string | null,
     cutNumber: number | null,
@@ -1668,69 +1774,202 @@ export default function ProjectStoryboardOverheadPage() {
       || activeType !== "all"
       || query.trim()
       || selectionMode
+      || selectedKeysRef.current.size > 0
       || orderedAssetIds.length < 2
       || reorderSessionRef.current !== null
     ) return;
     const groupKey = archiveOrderGroupKey(sceneId, cutNumber);
     if (pendingReorderGroupKeysRef.current.has(groupKey)) return;
 
-    event.preventDefault();
-    event.stopPropagation();
     cancelArchivePointerSession();
-    reorderPointerCleanupRef.current?.();
-    const handle = event.currentTarget;
-    const session: ArchiveReorderSession = {
-      pointerId: event.pointerId,
+    assetPressCleanupRef.current?.();
+    if (editingAsset) closeMetadata();
+
+    const key = archiveSelectionKey("asset", assetId);
+    const press: ArchivePointerSession = {
+      key,
       assetId,
       groupKey,
       sceneId,
       cutNumber,
-      originalIds: [...orderedAssetIds],
-      currentIds: [...orderedAssetIds],
+      orderedAssetIds: [...orderedAssetIds],
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      latestX: event.clientX,
+      latestY: event.clientY,
+      longPressed: false,
+      timeoutId: 0,
+      target: event.currentTarget,
+      previousTouchAction: event.currentTarget.style.touchAction
+    };
+
+    if (reorderModeGroupKey === groupKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressArchiveClickRef.current = key;
+      startAssetOrderDrag(press);
+      return;
+    }
+
+    setPressedSelectionKey(key);
+    press.timeoutId = window.setTimeout(() => {
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== press.pointerId) return;
+      current.longPressed = true;
+      suppressArchiveClickRef.current = current.key;
+      enterReorderMode(current.groupKey);
+      if (navigator.vibrate) navigator.vibrate(18);
+      startAssetOrderDrag(current);
+    }, LONG_PRESS_MS);
+    longPressRef.current = press;
+
+    const handlePointerMove = (pointerEvent: PointerEvent) => {
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== pointerEvent.pointerId) return;
+      current.latestX = pointerEvent.clientX;
+      current.latestY = pointerEvent.clientY;
+      const distance = Math.hypot(
+        pointerEvent.clientX - current.startX,
+        pointerEvent.clientY - current.startY
+      );
+      if (distance > LONG_PRESS_MOVE_TOLERANCE) cancelArchivePointerSession();
+    };
+    const finishPointerPress = (pointerEvent: PointerEvent) => {
+      const current = longPressRef.current;
+      if (!current || current.pointerId !== pointerEvent.pointerId) return;
+      cancelArchivePointerSession();
+    };
+    const cleanup = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", finishPointerPress);
+      document.removeEventListener("pointercancel", finishPointerPress);
+      window.removeEventListener("blur", cancelArchivePointerSession);
+      assetPressCleanupRef.current = null;
+    };
+    assetPressCleanupRef.current = cleanup;
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", finishPointerPress);
+    document.addEventListener("pointercancel", finishPointerPress);
+    window.addEventListener("blur", cancelArchivePointerSession);
+  }
+
+  function startAssetOrderDrag(press: ArchivePointerSession) {
+    if (!projectId || reorderSessionRef.current) return;
+    window.clearTimeout(press.timeoutId);
+    assetPressCleanupRef.current?.();
+    longPressRef.current = null;
+    setPressedSelectionKey(null);
+    reorderPointerCleanupRef.current?.();
+    const handle = press.target;
+    const rect = handle.getBoundingClientRect();
+    handle.style.touchAction = "none";
+    const session: ArchiveReorderSession = {
+      pointerId: press.pointerId,
+      assetId: press.assetId,
+      groupKey: press.groupKey,
+      sceneId: press.sceneId,
+      cutNumber: press.cutNumber,
+      originalIds: [...press.orderedAssetIds],
+      currentIds: [...press.orderedAssetIds],
       expectedUpdatedAtById: Object.fromEntries(
         archiveAssetsRef.current
-          .filter((asset) => orderedAssetIds.includes(asset.id))
+          .filter((asset) => press.orderedAssetIds.includes(asset.id))
           .map((asset) => [asset.id, asset.updatedAt])
       ),
+      visualTargetId: press.assetId,
       moved: false,
       validDrop: true,
-      handle
+      handle,
+      previousTouchAction: press.previousTouchAction,
+      overlayOffsetX: Math.max(0, Math.min(rect.width, press.latestX - rect.left)),
+      overlayOffsetY: Math.max(0, Math.min(rect.height, press.latestY - rect.top)),
+      pointerX: press.latestX,
+      pointerY: press.latestY,
+      autoScrollFrame: null
     };
     reorderSessionRef.current = session;
-    setReorderVisual({ assetId, targetId: assetId });
+    enterReorderMode(press.groupKey);
+    setReorderVisual({ assetId: press.assetId, targetId: press.assetId });
+    const movingAsset = archiveAssetsRef.current.find((asset) => asset.id === press.assetId);
+    if (movingAsset) {
+      setReorderOverlay({
+        imageUrl: movingAsset.crop.thumbnailUrl || movingAsset.publicUrl,
+        width: rect.width,
+        height: rect.height,
+        left: press.latestX - session.overlayOffsetX,
+        top: press.latestY - session.overlayOffsetY
+      });
+    }
     try {
-      handle.setPointerCapture(event.pointerId);
+      handle.setPointerCapture(press.pointerId);
     } catch {
       // Document listeners keep the drag active when pointer capture is unavailable.
     }
 
-    const handlePointerMove = (pointerEvent: PointerEvent) => {
-      const current = reorderSessionRef.current;
-      if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      if (pointerEvent.cancelable) pointerEvent.preventDefault();
-      const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY);
-      const targetCard = target instanceof Element
-        ? target.closest<HTMLElement>("[data-archive-reorder-item]")
-        : null;
-      const targetId = targetCard?.dataset.archiveReorderItem ?? "";
-      const targetGroup = targetCard?.dataset.archiveReorderGroup ?? "";
-      if (!targetId || targetGroup !== current.groupKey || !current.currentIds.includes(targetId)) {
+    const updateReorderTarget = (current: ArchiveReorderSession) => {
+      const targetId = findArchiveGridInsertionTarget(
+        current.groupKey,
+        current.currentIds,
+        current.pointerX,
+        current.pointerY
+      );
+      if (!targetId) {
         current.validDrop = false;
-        setReorderVisual({ assetId: current.assetId, targetId: null });
+        if (current.visualTargetId !== null) {
+          current.visualTargetId = null;
+          setReorderVisual({ assetId: current.assetId, targetId: null });
+        }
         return;
       }
       current.validDrop = true;
       const fromIndex = current.currentIds.indexOf(current.assetId);
       const toIndex = current.currentIds.indexOf(targetId);
       if (fromIndex === toIndex) {
-        setReorderVisual({ assetId: current.assetId, targetId });
+        if (current.visualTargetId !== targetId) {
+          current.visualTargetId = targetId;
+          setReorderVisual({ assetId: current.assetId, targetId });
+        }
         return;
       }
       const nextIds = moveArchiveId(current.currentIds, fromIndex, toIndex);
+      const previousRects = captureArchiveCardRects(current.groupKey, current.currentIds);
       current.currentIds = nextIds;
       current.moved = true;
+      current.visualTargetId = targetId;
       setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, nextIds));
+      animateArchiveGridReflow(current.groupKey, previousRects, current.assetId);
       setReorderVisual({ assetId: current.assetId, targetId });
+    };
+
+    const runAutoScroll = () => {
+      const current = reorderSessionRef.current;
+      if (!current) return;
+      const step = archiveViewportScrollStep(current.pointerY);
+      if (step === 0) {
+        current.autoScrollFrame = null;
+        return;
+      }
+      window.scrollBy(0, step);
+      updateReorderTarget(current);
+      current.autoScrollFrame = window.requestAnimationFrame(runAutoScroll);
+    };
+
+    const handlePointerMove = (pointerEvent: PointerEvent) => {
+      const current = reorderSessionRef.current;
+      if (!current || current.pointerId !== pointerEvent.pointerId) return;
+      if (pointerEvent.cancelable) pointerEvent.preventDefault();
+      moveArchiveReorderOverlay(
+        reorderOverlayRef.current,
+        pointerEvent.clientX - current.overlayOffsetX,
+        pointerEvent.clientY - current.overlayOffsetY
+      );
+      current.pointerX = pointerEvent.clientX;
+      current.pointerY = pointerEvent.clientY;
+      if (current.autoScrollFrame === null && archiveViewportScrollStep(current.pointerY) !== 0) {
+        current.autoScrollFrame = window.requestAnimationFrame(runAutoScroll);
+      }
+      updateReorderTarget(current);
     };
 
     const finishPointerDrag = (pointerEvent: PointerEvent) => {
@@ -1747,7 +1986,11 @@ export default function ProjectStoryboardOverheadPage() {
       } catch {
         // The browser may release capture before pointercancel is delivered.
       }
+      if (current.autoScrollFrame !== null) window.cancelAnimationFrame(current.autoScrollFrame);
+      current.handle.style.touchAction = current.previousTouchAction;
       setReorderVisual(null);
+      setReorderOverlay(null);
+      scheduleArchiveClickSuppressionRelease(current.assetId);
       if (!shouldSave) {
         if (snapshot.moved) {
           setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
@@ -1763,25 +2006,59 @@ export default function ProjectStoryboardOverheadPage() {
         expectedUpdatedAtById: snapshot.expectedUpdatedAtById
       }).then((orders) => {
         applyOrderUpdates(orders);
+        exitReorderMode(snapshot.groupKey);
       }).catch((error: unknown) => {
-        setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
-        setErrorMessage(`${error instanceof Error ? error.message : "자료 순서를 저장하지 못했습니다."} 이전 순서로 되돌렸습니다.`);
+        const reconciledServerGroup = error instanceof ProjectReferenceAssetReorderError
+          && error.hasGroupSnapshot;
+        const reconciledServerOrder = error instanceof ProjectReferenceAssetReorderError
+          && error.orders.length > 0;
+        if (reconciledServerGroup) {
+          const serverAssetIds = new Set(error.assets.map((asset) => asset.id));
+          setCombinedArchiveAssets([
+            ...archiveAssetsRef.current.filter((asset) => (
+              !serverAssetIds.has(asset.id)
+              && (
+                !isOrderableArchiveAsset(asset)
+                || archiveAssetOrderGroupKey(asset) !== snapshot.groupKey
+              )
+            )),
+            ...error.assets
+          ]);
+        } else if (reconciledServerOrder) {
+          applyOrderUpdates(error.orders);
+        } else {
+          setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
+        }
+        setErrorMessage(`${error instanceof Error ? error.message : "자료 순서를 저장하지 못했습니다."} ${
+          reconciledServerGroup || reconciledServerOrder
+            ? "서버의 현재 순서로 맞췄습니다."
+            : "이전 순서로 되돌렸습니다."
+        }`);
+        exitReorderMode(snapshot.groupKey);
       }).finally(() => {
         pendingReorderGroupKeysRef.current.delete(snapshot.groupKey);
         setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
       });
     };
 
+    const preventActiveTouchScroll = (touchEvent: TouchEvent) => {
+      if (reorderSessionRef.current && touchEvent.cancelable) touchEvent.preventDefault();
+    };
+
     const cleanup = () => {
       document.removeEventListener("pointermove", handlePointerMove);
       document.removeEventListener("pointerup", finishPointerDrag);
       document.removeEventListener("pointercancel", finishPointerDrag);
+      document.removeEventListener("touchmove", preventActiveTouchScroll);
+      window.removeEventListener("blur", cancelActiveReorderDrag);
       reorderPointerCleanupRef.current = null;
     };
     reorderPointerCleanupRef.current = cleanup;
     document.addEventListener("pointermove", handlePointerMove, { passive: false });
     document.addEventListener("pointerup", finishPointerDrag);
     document.addEventListener("pointercancel", finishPointerDrag);
+    document.addEventListener("touchmove", preventActiveTouchScroll, { passive: false });
+    window.addEventListener("blur", cancelActiveReorderDrag);
   }
 
   async function cropStoredAsset(asset: ProjectReferenceAsset) {
@@ -1889,6 +2166,8 @@ export default function ProjectStoryboardOverheadPage() {
     }
     const previousGroupKey = archiveAssetOrderGroupKey(currentAsset);
     const nextGroupKey = archiveOrderGroupKey(selectedScene?.id || null, cutNumber);
+    const targetSceneKey = archiveSceneCollapseKey(selectedScene?.id || null);
+    const targetWasCollapsed = collapsedSceneKeysRef.current.has(targetSceneKey);
     if (
       pendingReorderGroupKeysRef.current.has(previousGroupKey)
       || pendingReorderGroupKeysRef.current.has(nextGroupKey)
@@ -1916,6 +2195,7 @@ export default function ProjectStoryboardOverheadPage() {
     pendingReorderGroupKeysRef.current.add(previousGroupKey);
     pendingReorderGroupKeysRef.current.add(nextGroupKey);
     setPendingReorderGroupKeys(new Set(pendingReorderGroupKeysRef.current));
+    expandScene(targetSceneKey);
     setCombinedArchiveAssets(optimistic.assets);
     closeMetadata();
     try {
@@ -1924,30 +2204,28 @@ export default function ProjectStoryboardOverheadPage() {
         cutNumber,
         expectedUpdatedAt: currentAsset.updatedAt
       });
-      const orderById = new Map(result.orders.map((entry) => [entry.id, entry.sortOrder]));
-      setCombinedArchiveAssets(archiveAssetsRef.current.map((asset) => {
-        const sortOrder = orderById.get(asset.id) ?? asset.sortOrder;
-        if (asset.id !== result.asset.id) return sortOrder === asset.sortOrder ? asset : { ...asset, sortOrder };
-        return {
-          ...asset,
-          sceneNo: result.asset.sceneNumber || null,
-          cutNo: result.asset.cutNumber === null ? null : String(result.asset.cutNumber),
-          sortOrder: result.asset.sortOrder,
-          updatedAt: result.asset.updatedAt || asset.updatedAt,
-          crop: {
-            ...asset.crop,
-            sceneId: result.asset.sceneId,
-            sceneNumber: result.asset.sceneNumber,
-            cutNumber: result.asset.cutNumber
-          }
-        };
-      }));
+      applySceneCutUpdate(result);
     } catch (error) {
-      setCombinedArchiveAssets(restoreArchiveMetadataSnapshots(
-        archiveAssetsRef.current,
-        optimistic.snapshots
-      ));
-      setErrorMessage(`${error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다."} 변경을 되돌렸습니다.`);
+      if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
+        applySceneCutUpdate({ asset: error.asset, orders: error.orders });
+        if (targetWasCollapsed && error.asset.sceneId !== (selectedScene?.id || null)) {
+          updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
+        }
+        setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
+      } else if (error instanceof ProjectReferenceAssetSceneCutError && error.orders.length > 0) {
+        setCombinedArchiveAssets(archiveAssetsRef.current.filter((asset) => asset.id !== assetId));
+        applyOrderUpdates(error.orders);
+        setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
+      } else {
+        setCombinedArchiveAssets(restoreArchiveMetadataSnapshots(
+          archiveAssetsRef.current,
+          optimistic.snapshots
+        ));
+        if (targetWasCollapsed) {
+          updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
+        }
+        setErrorMessage(`${error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다."} 변경을 되돌렸습니다.`);
+      }
     } finally {
       pendingMetadataAssetIdsRef.current.delete(assetId);
       setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
@@ -1994,6 +2272,8 @@ export default function ProjectStoryboardOverheadPage() {
       return;
     }
     cancelArchivePointerSession();
+    cancelActiveReorderDrag();
+    exitReorderMode();
     openMetadata(asset, event);
   }
 
@@ -2114,15 +2394,28 @@ export default function ProjectStoryboardOverheadPage() {
               자료 {archiveGroups.reduce((count, group) => count + group.items.length, sourceAssets.length)}개
             </span>
             {canEdit ? (
-              <button
-                type="button"
-                disabled={scopeSelectionKeys.length === 0 || isSaving}
-                onClick={toggleCurrentAssetScope}
-                className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
-                aria-pressed={allScopeAssetsSelected}
-              >
-                {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={scopeSelectionKeys.length === 0 || isSaving}
+                  onClick={toggleSelectionMode}
+                  className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
+                  aria-pressed={selectionMode}
+                >
+                  {selectionMode ? "선택 종료" : "선택"}
+                </button>
+                {selectionMode ? (
+                  <button
+                    type="button"
+                    disabled={scopeSelectionKeys.length === 0 || isSaving}
+                    onClick={toggleCurrentAssetScope}
+                    className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
+                    aria-pressed={allScopeAssetsSelected}
+                  >
+                    {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
           {canEdit && selectedCount > 0 ? (
@@ -2177,29 +2470,63 @@ export default function ProjectStoryboardOverheadPage() {
             <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "all" ? "아카이브" : activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
             <div className="grid min-w-0 gap-5">
-              {archiveGroups.map((group) => (
-                <section key={group.key} className="grid min-w-0 gap-2" aria-labelledby={`archive-group-${group.key}`}>
-                  <h3
-                    id={`archive-group-${group.key}`}
-                    className="border-b border-field-border pb-1 text-sm font-black text-field-primary"
-                  >
-                    {group.label}
+              {archiveGroups.map((group) => {
+                const collapsed = collapsedSceneKeys.has(group.key);
+                const scenePanelId = archiveScenePanelId(group.key);
+                return (
+                <section key={group.key} className="grid min-w-0 gap-2" aria-labelledby={`${scenePanelId}-header`}>
+                  <h3 id={`${scenePanelId}-header`} className="border-b border-field-border">
+                    <button
+                      type="button"
+                      onClick={() => toggleSceneCollapsed(group.key)}
+                      className="flex min-h-9 w-full items-center gap-1.5 px-1 text-left text-sm font-black text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/35"
+                      aria-expanded={!collapsed}
+                      aria-controls={scenePanelId}
+                    >
+                      {collapsed
+                        ? <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+                        : <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />}
+                      <span>{group.label}</span>
+                    </button>
                   </h3>
+                  <div id={scenePanelId} hidden={collapsed} className={collapsed ? "hidden" : "grid min-w-0 gap-2"}>
                   {groupArchiveItemsByCut(group.items).map((cutGroup) => {
                     const orderedAssets = cutGroup.items.flatMap((item) => item.kind === "asset" ? [item.asset] : []);
                     const orderedAssetIds = orderedAssets.map((asset) => asset.id);
                     const orderGroupKey = archiveOrderGroupKey(group.sceneId, cutGroup.cutNumber);
+                    const groupInReorderMode = reorderModeGroupKey === orderGroupKey;
                     const reorderEnabled = canEdit
                       && activeType === "all"
                       && !query.trim()
                       && !selectionMode
+                      && selectedKeys.size === 0
                       && !(group.sceneId && !group.scene)
                       && !(group.sceneId === null && cutGroup.cutNumber !== null)
+                      && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
                       && orderedAssetIds.length > 1
                       && !pendingReorderGroupKeys.has(orderGroupKey);
                     return (
-                      <div key={`${group.key}-${cutGroup.key}`} className="grid min-w-0 gap-1.5">
-                        <h4 className="text-xs font-black text-field-muted">{cutGroup.label}</h4>
+                      <div
+                        key={`${group.key}-${cutGroup.key}`}
+                        data-archive-reorder-zone={orderGroupKey}
+                        className="grid min-w-0 gap-1.5"
+                      >
+                        <div className="flex min-h-8 items-center justify-between gap-2">
+                          <h4 className="text-xs font-black text-field-muted">{cutGroup.label}</h4>
+                          {groupInReorderMode ? (
+                            <button
+                              type="button"
+                              data-archive-reorder-control="done"
+                              onClick={() => {
+                                cancelActiveReorderDrag();
+                                exitReorderMode(orderGroupKey);
+                              }}
+                              className="min-h-8 rounded-[3px] border border-field-primary bg-white px-3 text-[11px] font-black text-field-primary"
+                            >
+                              완료
+                            </button>
+                          ) : null}
+                        </div>
                         <div className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
                     {cutGroup.items.map((item) => {
                       const key = archiveSelectionKey(item.kind, item.id);
@@ -2218,15 +2545,7 @@ export default function ProjectStoryboardOverheadPage() {
                           >
                             <button
                               type="button"
-                              onPointerDown={(event) => {
-                                if (!diagram.legacy) beginArchiveSelectionPress("diagram", diagram.id, event);
-                              }}
                               onClick={(event) => {
-                                if (suppressArchiveClickRef.current === key) {
-                                  suppressArchiveClickRef.current = null;
-                                  event.preventDefault();
-                                  return;
-                                }
                                 if (selectionMode && !diagram.legacy) {
                                   event.preventDefault();
                                   toggleArchiveSelection("diagram", diagram.id);
@@ -2254,61 +2573,52 @@ export default function ProjectStoryboardOverheadPage() {
                           key={key}
                           data-archive-reorder-item={asset.id}
                           data-archive-reorder-group={orderGroupKey}
-                          className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
+                          className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition-[transform,border-color,background-color,box-shadow,opacity] ${
                             selected
                               ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
                               : "border-field-border"
-                          } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""} ${
-                            reorderVisual?.assetId === asset.id ? "opacity-65" : ""
+                          } ${pressedSelectionKey === key ? "scale-[0.98] border-[#ef8f39]" : ""} ${
+                            reorderVisual?.assetId === asset.id ? "opacity-25" : ""
                           } ${reorderVisual?.targetId === asset.id ? "ring-2 ring-[#ef8f39]/55" : ""}`}
                         >
-                          {canEdit ? (
-                            <button
-                              type="button"
-                              disabled={!reorderEnabled}
-                              onPointerDown={(event) => beginAssetOrderDrag(
+                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center rounded-[3px] border border-field-border bg-white px-1 text-[11px] font-black text-field-primary shadow-sm">
+                            {orderNumber}
+                          </span>
+                          <button
+                            type="button"
+                            onPointerDown={(event) => {
+                              if (reorderEnabled) beginAssetReorderPress(
                                 asset.id,
                                 group.sceneId,
                                 cutGroup.cutNumber,
                                 orderedAssetIds,
                                 event
-                              )}
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }}
-                              className="absolute right-1 top-1 z-20 grid h-7 min-w-7 touch-none place-items-center rounded-[3px] border border-field-border bg-white px-1 text-[11px] font-black text-field-primary shadow-sm enabled:cursor-grab enabled:active:cursor-grabbing disabled:cursor-default disabled:opacity-75"
-                              aria-label={`${orderNumber}번째 자료 순서 이동`}
-                            >
-                              {orderNumber}
-                            </button>
-                          ) : (
-                            <span className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center rounded-[3px] border border-field-border bg-white px-1 text-[11px] font-black text-field-primary shadow-sm">
-                              {orderNumber}
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onPointerDown={(event) => beginArchiveSelectionPress("asset", asset.id, event)}
+                              );
+                            }}
                             onClick={(event) => {
                               if (suppressArchiveClickRef.current === key) {
                                 suppressArchiveClickRef.current = null;
                                 event.preventDefault();
                                 return;
                               }
-                              if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
+                              if (selectionMode) {
                                 event.preventDefault();
                                 toggleArchiveSelection("asset", asset.id);
                                 return;
                               }
+                              if (groupInReorderMode) {
+                                event.preventDefault();
+                                return;
+                              }
                               setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
                             }}
-                            className="grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1"
+                            onContextMenu={(event) => openAssetContextMenu(asset, event)}
+                            className={`grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1 ${
+                              reorderEnabled ? "cursor-grab active:cursor-grabbing" : ""
+                            } ${groupInReorderMode ? "archive-reorder-jiggle" : ""}`}
+                            style={{ WebkitTouchCallout: "none" }}
                             aria-pressed={selectionMode ? selected : undefined}
+                            aria-label={`${archiveDisplayName(asset)}, ${orderNumber}번째 자료${reorderEnabled ? ", 길게 눌러 순서 이동" : ""}`}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -2317,7 +2627,6 @@ export default function ProjectStoryboardOverheadPage() {
                               loading="lazy"
                               decoding="async"
                               draggable={false}
-                              onContextMenu={(event) => openAssetContextMenu(asset, event)}
                               onDragStart={(event) => event.preventDefault()}
                               className="block h-full w-full rounded-none object-contain"
                             />
@@ -2333,8 +2642,10 @@ export default function ProjectStoryboardOverheadPage() {
                       </div>
                     );
                   })}
+                  </div>
                 </section>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
@@ -2360,14 +2671,8 @@ export default function ProjectStoryboardOverheadPage() {
                   >
                     <button
                       type="button"
-                      onPointerDown={(event) => beginArchiveSelectionPress("asset", asset.id, event)}
                       onClick={(event) => {
-                        if (suppressArchiveClickRef.current === key) {
-                          suppressArchiveClickRef.current = null;
-                          event.preventDefault();
-                          return;
-                        }
-                        if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
+                        if (selectionMode) {
                           event.preventDefault();
                           toggleArchiveSelection("asset", asset.id);
                           return;
@@ -2414,6 +2719,29 @@ export default function ProjectStoryboardOverheadPage() {
           </Card>
         ) : null}
       </div>
+
+      {reorderOverlay && typeof document !== "undefined" ? createPortal(
+        <div
+          ref={reorderOverlayRef}
+          className="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden border-2 border-[#ef8f39] bg-field-soft p-1 shadow-md"
+          style={{
+            width: reorderOverlay.width,
+            height: reorderOverlay.height,
+            left: reorderOverlay.left,
+            top: reorderOverlay.top
+          }}
+          aria-hidden="true"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={reorderOverlay.imageUrl}
+            alt=""
+            draggable={false}
+            className="block h-full w-full object-contain"
+          />
+        </div>,
+        document.body
+      ) : null}
 
       {pendingImport ? (
         <ArchiveImportDialog
@@ -2488,6 +2816,23 @@ export default function ProjectStoryboardOverheadPage() {
         </div>
       ) : null}
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? "자료"} onClose={() => setPreview(null)} />
+      <style jsx global>{`
+        @keyframes archive-reorder-jiggle {
+          0%, 100% { transform: rotate(-1deg); }
+          50% { transform: rotate(1deg); }
+        }
+        .archive-reorder-jiggle {
+          animation: archive-reorder-jiggle 180ms ease-in-out infinite;
+          transform-origin: center;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .archive-reorder-jiggle {
+            animation: none;
+            outline: 2px solid rgba(239, 143, 57, 0.45);
+            outline-offset: -2px;
+          }
+        }
+      `}</style>
     </>
   );
 }
@@ -2794,7 +3139,7 @@ function groupArchiveItemsByScene(
   const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
   const groupsBySceneId = new Map<string, ArchiveSceneGroup>();
   const unassigned: ArchiveSceneGroup = {
-    key: "unassigned",
+    key: archiveSceneCollapseKey(null),
     label: "미지정",
     sceneId: null,
     scene: null,
@@ -2804,16 +3149,16 @@ function groupArchiveItemsByScene(
   for (const asset of dedupeArchiveAssets(assets)) {
     const rawSceneId = asset.crop.sceneId?.trim() || null;
     const scene = rawSceneId ? sceneById.get(rawSceneId) ?? null : null;
-    const group = rawSceneId
+    const group = rawSceneId && scene
       ? groupsBySceneId.get(rawSceneId) ?? {
-          key: scene ? `scene-${scene.id}` : `missing-scene-${rawSceneId}`,
-          label: scene ? `S#${scene.sceneNo}` : "미지정",
+          key: archiveSceneCollapseKey(rawSceneId),
+          label: `S#${scene.sceneNo}`,
           sceneId: rawSceneId,
           scene,
           items: []
         }
       : unassigned;
-    if (rawSceneId && !groupsBySceneId.has(rawSceneId)) groupsBySceneId.set(rawSceneId, group);
+    if (rawSceneId && scene && !groupsBySceneId.has(rawSceneId)) groupsBySceneId.set(rawSceneId, group);
     group.items.push(toArchiveAssetGroupItem(asset, scene));
   }
 
@@ -2866,6 +3211,124 @@ function groupArchiveItemsByCut(items: ArchiveGroupItem[]): ArchiveCutGroup[] {
 
 function archiveOrderGroupKey(sceneId: string | null, cutNumber: number | null) {
   return `${sceneId || "unassigned"}::${cutNumber ?? "unassigned"}`;
+}
+
+function archiveSceneCollapseKey(sceneId: string | null) {
+  return sceneId ? `scene:${sceneId}` : "unassigned";
+}
+
+function archiveSceneKeyFromOrderGroupKey(groupKey: string) {
+  const sceneId = groupKey.split("::", 1)[0] ?? "";
+  return archiveSceneCollapseKey(sceneId === "unassigned" ? null : sceneId);
+}
+
+function archiveScenePanelId(sceneKey: string) {
+  return `archive-scene-${sceneKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function moveArchiveReorderOverlay(element: HTMLDivElement | null, left: number, top: number) {
+  if (!element) return;
+  element.style.left = `${Math.round(left)}px`;
+  element.style.top = `${Math.round(top)}px`;
+}
+
+function archiveViewportScrollStep(pointerY: number) {
+  const edge = 72;
+  const maximumStep = 16;
+  if (pointerY < edge) {
+    const ratio = Math.min(1, Math.max(0, (edge - pointerY) / edge));
+    return -Math.max(4, Math.round(maximumStep * ratio));
+  }
+  if (pointerY > window.innerHeight - edge) {
+    const ratio = Math.min(1, Math.max(0, (pointerY - (window.innerHeight - edge)) / edge));
+    return Math.max(4, Math.round(maximumStep * ratio));
+  }
+  return 0;
+}
+
+function findArchiveGridInsertionTarget(
+  groupKey: string,
+  currentIds: string[],
+  pointerX: number,
+  pointerY: number
+) {
+  const pointedElement = document.elementFromPoint(pointerX, pointerY);
+  const pointedCard = pointedElement instanceof Element
+    ? pointedElement.closest<HTMLElement>("[data-archive-reorder-item]")
+    : null;
+  if (pointedCard && pointedCard.dataset.archiveReorderGroup !== groupKey) return null;
+
+  const zones = Array.from(document.querySelectorAll<HTMLElement>("[data-archive-reorder-zone]"));
+  const zone = zones.find((candidate) => candidate.dataset.archiveReorderZone === groupKey && !candidate.hidden);
+  if (!zone) return null;
+  const zoneRect = zone.getBoundingClientRect();
+  if (
+    pointerX < zoneRect.left
+    || pointerX > zoneRect.right
+    || pointerY < zoneRect.top
+    || pointerY > zoneRect.bottom
+  ) return null;
+
+  const idSet = new Set(currentIds);
+  const cards = Array.from(zone.querySelectorAll<HTMLElement>("[data-archive-reorder-item]"))
+    .filter((card) => (
+      card.dataset.archiveReorderGroup === groupKey
+      && Boolean(card.dataset.archiveReorderItem)
+      && idSet.has(card.dataset.archiveReorderItem ?? "")
+      && card.getClientRects().length > 0
+    ));
+  let closestId = "";
+  let closestDistance = Number.POSITIVE_INFINITY;
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    const distance = Math.hypot(
+      pointerX - (rect.left + rect.width / 2),
+      pointerY - (rect.top + rect.height / 2)
+    );
+    if (distance >= closestDistance) continue;
+    closestDistance = distance;
+    closestId = card.dataset.archiveReorderItem ?? "";
+  }
+  return closestId || null;
+}
+
+function captureArchiveCardRects(groupKey: string, ids: string[]) {
+  const idSet = new Set(ids);
+  const rects = new Map<string, DOMRect>();
+  for (const card of document.querySelectorAll<HTMLElement>("[data-archive-reorder-item]")) {
+    const id = card.dataset.archiveReorderItem ?? "";
+    if (card.dataset.archiveReorderGroup !== groupKey || !idSet.has(id)) continue;
+    rects.set(id, card.getBoundingClientRect());
+  }
+  return rects;
+}
+
+function animateArchiveGridReflow(
+  groupKey: string,
+  previousRects: Map<string, DOMRect>,
+  movingAssetId: string
+) {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  window.requestAnimationFrame(() => {
+    for (const card of document.querySelectorAll<HTMLElement>("[data-archive-reorder-item]")) {
+      const id = card.dataset.archiveReorderItem ?? "";
+      if (card.dataset.archiveReorderGroup !== groupKey || id === movingAssetId) continue;
+      const previous = previousRects.get(id);
+      if (!previous) continue;
+      const next = card.getBoundingClientRect();
+      const deltaX = previous.left - next.left;
+      const deltaY = previous.top - next.top;
+      if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) continue;
+      card.getAnimations().forEach((animation) => animation.cancel());
+      card.animate(
+        [
+          { transform: `translate3d(${deltaX}px, ${deltaY}px, 0)` },
+          { transform: "translate3d(0, 0, 0)" }
+        ],
+        { duration: 150, easing: "ease-out" }
+      );
+    }
+  });
 }
 
 function archiveAssetOrderGroupKey(asset: ProjectReferenceAsset) {

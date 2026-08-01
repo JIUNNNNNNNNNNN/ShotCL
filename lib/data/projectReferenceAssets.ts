@@ -405,6 +405,25 @@ export type ProjectReferenceAssetOrderUpdate = {
   updatedAt?: string;
 };
 
+export class ProjectReferenceAssetReorderError extends Error {
+  readonly orders: ProjectReferenceAssetOrderUpdate[];
+  readonly assets: ProjectReferenceAsset[];
+  readonly hasGroupSnapshot: boolean;
+
+  constructor(
+    message: string,
+    orders: ProjectReferenceAssetOrderUpdate[] = [],
+    assets: ProjectReferenceAsset[] = [],
+    hasGroupSnapshot = false
+  ) {
+    super(message);
+    this.name = "ProjectReferenceAssetReorderError";
+    this.orders = orders;
+    this.assets = assets;
+    this.hasGroupSnapshot = hasGroupSnapshot;
+  }
+}
+
 export type ProjectReferenceAssetSceneCutUpdateResult = {
   asset: {
     id: string;
@@ -416,6 +435,22 @@ export type ProjectReferenceAssetSceneCutUpdateResult = {
   };
   orders: ProjectReferenceAssetOrderUpdate[];
 };
+
+export class ProjectReferenceAssetSceneCutError extends Error {
+  readonly asset: ProjectReferenceAssetSceneCutUpdateResult["asset"] | null;
+  readonly orders: ProjectReferenceAssetOrderUpdate[];
+
+  constructor(
+    message: string,
+    asset: ProjectReferenceAssetSceneCutUpdateResult["asset"] | null,
+    orders: ProjectReferenceAssetOrderUpdate[] = []
+  ) {
+    super(message);
+    this.name = "ProjectReferenceAssetSceneCutError";
+    this.asset = asset;
+    this.orders = orders;
+  }
+}
 
 /**
  * 아카이브 우클릭 정보창 전용 경량 mutation입니다.
@@ -446,7 +481,11 @@ export async function updateProjectReferenceAssetSceneCut(
     orders?: ProjectReferenceAssetOrderUpdate[];
   };
   if (!response.ok || !payload.asset) {
-    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료의 씬·컷을 저장하지 못했습니다.");
+    throw new ProjectReferenceAssetSceneCutError(
+      [payload.error, payload.detail].filter(Boolean).join(" · ") || "자료의 씬·컷을 저장하지 못했습니다.",
+      payload.asset ?? null,
+      payload.orders ?? []
+    );
   }
   return { asset: payload.asset, orders: payload.orders ?? [] };
 }
@@ -468,9 +507,16 @@ export async function reorderProjectReferenceAssets(
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & {
     orders?: ProjectReferenceAssetOrderUpdate[];
+    assets?: ProjectReferenceAsset[];
+    groupSnapshot?: boolean;
   };
   if (!response.ok || !payload.orders) {
-    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 순서를 저장하지 못했습니다.");
+    throw new ProjectReferenceAssetReorderError(
+      [payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 순서를 저장하지 못했습니다.",
+      payload.orders ?? [],
+      payload.assets ?? [],
+      payload.groupSnapshot === true
+    );
   }
   return payload.orders;
 }
