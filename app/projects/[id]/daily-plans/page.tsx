@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
+import {
+  DailyPlanCoverflow,
+  type DailyPlanCarouselItem
+} from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { Card } from "@/components/ui/Card";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -19,21 +22,7 @@ type PlanContextMenu = {
   y: number;
 };
 
-type CarouselPointerState = {
-  pointerId: number;
-  pointerType: string;
-  startX: number;
-  startY: number;
-  clientX: number;
-  clientY: number;
-  scrollLeft: number;
-  plan: DailyPlanListItem | null;
-  moved: boolean;
-  longPressed: boolean;
-};
-
-const LONG_PRESS_MS = 600;
-const DRAG_THRESHOLD_PX = 8;
+const NEW_CARD_ID = "daily-plan:new";
 const CONTEXT_MENU_WIDTH = 232;
 const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
@@ -44,7 +33,7 @@ function useProjectId() {
   return Array.isArray(id) ? id[0] : id;
 }
 
-/** 프로젝트명과 회차 카드만 보여주고 기존 생성·복사·삭제 흐름을 연결합니다. */
+/** 프로젝트명과 회차 portrait 카드만 중앙에 보여주고 기존 생성·복사·삭제 흐름을 연결합니다. */
 export default function DailyPlansPage() {
   const projectId = useProjectId();
   const router = useRouter();
@@ -53,22 +42,26 @@ export default function DailyPlansPage() {
   const [plans, setPlans] = useState<DailyPlanListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
-  const carouselRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
-  const pointerStateRef = useRef<CarouselPointerState | null>(null);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressClickUntilRef = useRef(0);
+  const navigationLockedRef = useRef(false);
+  const navigationUnlockTimerRef = useRef<number | null>(null);
   const canManage = role !== "progress" && project?.accessRole !== "progress";
 
   const sortedPlans = useMemo(
     () => [...plans].sort(compareDailyPlanEpisodes),
     [plans]
   );
-  const totalCardCount = sortedPlans.length + (canManage ? 1 : 0);
-  const carouselActive = totalCardCount >= 4;
+  const carouselItems = useMemo<DailyPlanCarouselItem[]>(() => [
+    ...(canManage ? [{ id: NEW_CARD_ID, kind: "new" as const, label: "+" }] : []),
+    ...sortedPlans.map((plan) => ({
+      id: `daily-plan:${plan.id}`,
+      kind: "plan" as const,
+      label: formatEpisodeLabel(plan.episode),
+      planId: plan.id
+    }))
+  ], [canManage, sortedPlans]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -120,17 +113,45 @@ export default function DailyPlansPage() {
     };
   }, [contextMenu]);
 
-  useEffect(() => () => clearLongPressTimer(), []);
+  useEffect(() => () => {
+    if (navigationUnlockTimerRef.current !== null) {
+      window.clearTimeout(navigationUnlockTimerRef.current);
+    }
+  }, []);
 
-  function clearLongPressTimer() {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
+  function navigateOnce(path: string) {
+    if (navigationLockedRef.current) return;
+    navigationLockedRef.current = true;
+    setErrorMessage("");
+    try {
+      router.push(path);
+      navigationUnlockTimerRef.current = window.setTimeout(() => {
+        navigationLockedRef.current = false;
+        navigationUnlockTimerRef.current = null;
+      }, 1_500);
+    } catch (error) {
+      navigationLockedRef.current = false;
+      setErrorMessage(error instanceof Error ? error.message : "일촬표 화면으로 이동하지 못했습니다.");
     }
   }
 
-  function openPlanContextMenu(plan: DailyPlanListItem, clientX: number, clientY: number) {
-    if (!canManage || isBusy) return;
+  function handleActivateItem(item: DailyPlanCarouselItem) {
+    if (!projectId || isBusy) return;
+    if (item.kind === "new") {
+      navigateOnce(`/projects/${projectId}/daily-plans/new`);
+      return;
+    }
+    if (!item.planId) {
+      setErrorMessage("열 일촬표 ID를 찾을 수 없습니다.");
+      return;
+    }
+    navigateOnce(`/projects/${projectId}/daily-plans/${item.planId}`);
+  }
+
+  function openPlanContextMenu(item: DailyPlanCarouselItem, clientX: number, clientY: number) {
+    if (item.kind !== "plan" || !item.planId || !canManage || isBusy) return;
+    const plan = sortedPlans.find((candidate) => candidate.id === item.planId);
+    if (!plan) return;
     const maxX = Math.max(CONTEXT_MENU_EDGE, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE);
     const maxY = Math.max(CONTEXT_MENU_EDGE, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_EDGE);
     setContextMenu({
@@ -138,104 +159,6 @@ export default function DailyPlansPage() {
       x: Math.min(Math.max(CONTEXT_MENU_EDGE, clientX), maxX),
       y: Math.min(Math.max(CONTEXT_MENU_EDGE, clientY), maxY)
     });
-  }
-
-  function handleCarouselPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    const container = carouselRef.current;
-    if (!container) return;
-
-    clearLongPressTimer();
-    setContextMenu(null);
-    setIsDragging(false);
-    const planId = (event.target as HTMLElement).closest<HTMLElement>("[data-plan-id]")?.dataset.planId;
-    const plan = planId ? sortedPlans.find((item) => item.id === planId) ?? null : null;
-    pointerStateRef.current = {
-      pointerId: event.pointerId,
-      pointerType: event.pointerType,
-      startX: event.clientX,
-      startY: event.clientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      scrollLeft: container.scrollLeft,
-      plan,
-      moved: false,
-      longPressed: false
-    };
-    container.setPointerCapture(event.pointerId);
-
-    if (event.pointerType !== "mouse" && plan && canManage && !isBusy) {
-      longPressTimerRef.current = setTimeout(() => {
-        const current = pointerStateRef.current;
-        if (!current || current.pointerId !== event.pointerId || current.moved) return;
-        current.longPressed = true;
-        suppressClickUntilRef.current = Date.now() + 500;
-        openPlanContextMenu(plan, current.clientX, current.clientY);
-      }, LONG_PRESS_MS);
-    }
-  }
-
-  function handleCarouselPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const current = pointerStateRef.current;
-    const container = carouselRef.current;
-    if (!current || !container || current.pointerId !== event.pointerId) return;
-    current.clientX = event.clientX;
-    current.clientY = event.clientY;
-    const deltaX = event.clientX - current.startX;
-    const deltaY = event.clientY - current.startY;
-
-    if (!current.moved && Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD_PX) {
-      current.moved = true;
-      clearLongPressTimer();
-      setContextMenu(null);
-      if (carouselActive && Math.abs(deltaX) > Math.abs(deltaY)) setIsDragging(true);
-    }
-
-    if (current.moved && carouselActive && Math.abs(deltaX) > Math.abs(deltaY)) {
-      event.preventDefault();
-      container.scrollLeft = current.scrollLeft - deltaX;
-    }
-  }
-
-  function finishCarouselPointer(event: ReactPointerEvent<HTMLDivElement>) {
-    const current = pointerStateRef.current;
-    const container = carouselRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    clearLongPressTimer();
-    if (current.moved || current.longPressed) suppressClickUntilRef.current = Date.now() + 350;
-    if (container?.hasPointerCapture(event.pointerId)) container.releasePointerCapture(event.pointerId);
-    pointerStateRef.current = null;
-    setIsDragging(false);
-  }
-
-  function handlePlanClick(event: ReactMouseEvent<HTMLButtonElement>, plan: DailyPlanListItem) {
-    if (Date.now() < suppressClickUntilRef.current || isDragging || contextMenu) {
-      event.preventDefault();
-      return;
-    }
-    router.push(`/projects/${projectId}/daily-plans/${plan.id}`);
-  }
-
-  function handlePlanContextMenu(event: ReactMouseEvent<HTMLButtonElement>, plan: DailyPlanListItem) {
-    event.preventDefault();
-    if (Date.now() < suppressClickUntilRef.current || pointerStateRef.current?.moved) return;
-    suppressClickUntilRef.current = Date.now() + 350;
-    openPlanContextMenu(plan, event.clientX, event.clientY);
-  }
-
-  function handlePlanKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, plan: DailyPlanListItem) {
-    if (!canManage || (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10"))) return;
-    event.preventDefault();
-    const rect = event.currentTarget.getBoundingClientRect();
-    openPlanContextMenu(plan, rect.right + 6, rect.top);
-  }
-
-  function handleNewPlanClick(event: ReactMouseEvent<HTMLButtonElement>) {
-    if (Date.now() < suppressClickUntilRef.current || isDragging) {
-      event.preventDefault();
-      return;
-    }
-    router.push(`/projects/${projectId}/daily-plans/new`);
   }
 
   async function handleDuplicate(plan: DailyPlanListItem) {
@@ -289,69 +212,32 @@ export default function DailyPlansPage() {
     return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
   }
 
-  const compactCardClass = carouselActive
-    ? "w-[clamp(8.75rem,42vw,13rem)] flex-[0_0_auto]"
-    : "min-w-0 max-w-[13rem] flex-1 basis-0";
-
   return (
-    <section className="min-w-0 select-none" aria-labelledby="daily-plan-project-title">
-      <h1
-        id="daily-plan-project-title"
-        className="max-w-full truncate text-xl font-black leading-[1.35] text-field-primary md:text-2xl"
-        title={project.name}
-      >
-        {project.name}
-      </h1>
+    <section
+      className="flex min-h-[calc(100dvh-8rem)] min-w-0 select-none items-center justify-center overflow-x-clip py-4"
+      aria-labelledby="daily-plan-project-title"
+    >
+      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-center">
+        <h1
+          id="daily-plan-project-title"
+          className="max-w-full truncate px-3 text-center text-xl font-black leading-[1.35] text-field-primary md:text-2xl"
+          title={project.name}
+        >
+          {project.name}
+        </h1>
 
-      {errorMessage ? (
-        <p role="alert" className="mt-2 max-w-xl border border-field-danger bg-white px-3 py-2 text-sm font-bold text-field-danger">
-          {errorMessage}
-        </p>
-      ) : null}
-
-      <div
-        ref={carouselRef}
-        className={`mt-3 flex w-full min-w-0 flex-nowrap gap-2 overflow-y-hidden pb-1 [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden ${
-          carouselActive
-            ? `snap-x snap-proximity overflow-x-auto overscroll-x-contain ${isDragging ? "cursor-grabbing" : "cursor-grab"}`
-            : "overflow-x-hidden"
-        }`}
-        style={{ touchAction: "pan-y" }}
-        aria-label="일촬표 선택 카드"
-        onPointerDown={handleCarouselPointerDown}
-        onPointerMove={handleCarouselPointerMove}
-        onPointerUp={finishCarouselPointer}
-        onPointerCancel={finishCarouselPointer}
-        onDragStart={(event) => event.preventDefault()}
-      >
-        {canManage ? (
-          <button
-            type="button"
-            className={`${compactCardClass} flex h-28 snap-start items-center justify-center rounded-[3px] border border-field-primary bg-white text-4xl font-light leading-none text-field-primary outline-none hover:bg-field-light focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 md:h-32`}
-            aria-label="새 일촬표 만들기"
-            onClick={handleNewPlanClick}
-            disabled={isBusy}
-          >
-            +
-          </button>
+        {errorMessage ? (
+          <p role="alert" className="mx-auto mt-2 w-full max-w-xl border border-field-danger bg-white px-3 py-2 text-center text-sm font-bold text-field-danger">
+            {errorMessage}
+          </p>
         ) : null}
 
-        {sortedPlans.map((plan) => (
-          <button
-            key={plan.id}
-            type="button"
-            data-plan-id={plan.id}
-            className={`${compactCardClass} flex h-28 snap-start items-center justify-center overflow-hidden rounded-[3px] border border-field-border bg-white px-3 text-center text-lg font-black leading-[1.35] text-field-primary outline-none hover:border-field-primary focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 md:h-32 md:text-xl`}
-            aria-label={`${formatEpisodeLabel(plan.episode)} 일촬표 열기`}
-            title={formatEpisodeLabel(plan.episode)}
-            onClick={(event) => handlePlanClick(event, plan)}
-            onContextMenu={(event) => handlePlanContextMenu(event, plan)}
-            onKeyDown={(event) => handlePlanKeyDown(event, plan)}
-            disabled={isBusy}
-          >
-            <span className="block max-w-full truncate">{formatEpisodeLabel(plan.episode)}</span>
-          </button>
-        ))}
+        <DailyPlanCoverflow
+          items={carouselItems}
+          disabled={isBusy}
+          onActivate={handleActivateItem}
+          onOpenContextMenu={openPlanContextMenu}
+        />
       </div>
 
       {contextMenu && typeof document !== "undefined" ? createPortal(
@@ -376,7 +262,7 @@ function DailyPlanContextMenu({
   onDelete
 }: {
   menu: PlanContextMenu;
-  menuRef: React.RefObject<HTMLDivElement | null>;
+  menuRef: RefObject<HTMLDivElement | null>;
   disabled: boolean;
   onDuplicate: () => void;
   onDelete: () => void;
