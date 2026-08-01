@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   forwardRef,
-  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
@@ -33,6 +32,7 @@ type PointerSession = {
   pointerType: string;
   itemId: string;
   captureTarget: HTMLButtonElement;
+  didCapture: boolean;
   startX: number;
   startY: number;
   clientX: number;
@@ -41,7 +41,7 @@ type PointerSession = {
   lastTime: number;
   startPosition: number;
   velocity: number;
-  intent: "pending" | "horizontal" | "vertical" | "cancelled";
+  intent: "pending" | "horizontal" | "vertical";
   longPressed: boolean;
 };
 
@@ -51,26 +51,30 @@ const INERTIA_FRICTION = 0.91;
 const INERTIA_STOP_VELOCITY = 0.00075;
 const MAX_INERTIA_MS = 950;
 const SNAP_DURATION_MS = 280;
+const CENTER_EPSILON = 0.01;
+const SINGLE_CARD_ELASTIC_FACTOR = 0.2;
+const SINGLE_CARD_ELASTIC_LIMIT = 0.22;
 
-/** 4장 이상에서는 실제 item을 복제하지 않고 logical index를 순환시키는 coverflow입니다. */
+/** 카드 수와 무관하게 logical item 하나당 DOM 카드 하나만 사용하는 순환 coverflow입니다. */
 export function DailyPlanCoverflow({
   items,
   disabled = false,
   onActivate,
   onOpenContextMenu
 }: DailyPlanCoverflowProps) {
-  const coverflowActive = items.length >= 4;
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activeItemKey, setActiveItemKey] = useState(items[0]?.id ?? "");
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLButtonElement>());
   const itemsRef = useRef(items);
   const positionRef = useRef(0);
-  const activeItemIdRef = useRef(items[0]?.id ?? "");
+  const activeItemKeyRef = useRef(items[0]?.id ?? "");
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const motionFrameRef = useRef<number | null>(null);
   const renderFrameRef = useRef<number | null>(null);
   const suppressGeneratedClickRef = useRef(false);
+  const selectOnlyClickRef = useRef(false);
   const reducedMotionRef = useRef(false);
   const itemsKey = items.map((item) => item.id).join("|");
   itemsRef.current = items;
@@ -93,18 +97,20 @@ export function DailyPlanCoverflow({
     const currentItems = itemsRef.current;
     const count = currentItems.length;
     const viewport = viewportRef.current;
-    if (!viewport || count === 0 || count < 4) return;
+    if (!viewport || count === 0) return;
     const spacing = getCardSpacing(viewport.clientWidth);
-    const normalizedPosition = positiveModulo(positionRef.current, count);
+    const normalizedPosition = count === 1 ? positionRef.current : positiveModulo(positionRef.current, count);
     const reduceMotion = reducedMotionRef.current;
 
     currentItems.forEach((item, index) => {
       const card = cardRefs.current.get(item.id);
       if (!card) return;
-      const distance = wrappedDistance(index - normalizedPosition, count);
+      const distance = count === 1
+        ? -normalizedPosition
+        : getCircularDistance(index, normalizedPosition, count);
       const absoluteDistance = Math.abs(distance);
       const visible = absoluteDistance <= 3.1;
-      const rotation = reduceMotion ? 0 : Math.sign(distance) * -Math.min(22, 14 + absoluteDistance * 3);
+      const rotation = reduceMotion ? 0 : -Math.sign(distance) * Math.min(22, absoluteDistance * 18);
       const scale = Math.max(0.68, 1 - absoluteDistance * 0.13);
       const translateX = distance * spacing;
       const translateZ = -Math.min(260, absoluteDistance * 86);
@@ -130,8 +136,9 @@ export function DailyPlanCoverflow({
     if (currentItems.length === 0) return;
     const nextIndex = positiveModulo(Math.round(logicalPosition), currentItems.length);
     const nextItem = currentItems[nextIndex];
-    activeItemIdRef.current = nextItem.id;
+    activeItemKeyRef.current = nextItem.id;
     setActiveIndex(nextIndex);
+    setActiveItemKey(nextItem.id);
     if (focusCard) {
       requestAnimationFrame(() => cardRefs.current.get(nextItem.id)?.focus());
     }
@@ -141,9 +148,10 @@ export function DailyPlanCoverflow({
     cancelMotion();
     const start = positionRef.current;
     if (reducedMotionRef.current || Math.abs(target - start) < 0.001) {
-      positionRef.current = target;
+      const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
+      positionRef.current = settledPosition;
       renderCards();
-      commitActiveIndex(target, focusCard);
+      commitActiveIndex(settledPosition, focusCard);
       return;
     }
 
@@ -158,15 +166,20 @@ export function DailyPlanCoverflow({
         return;
       }
       motionFrameRef.current = null;
-      positionRef.current = target;
+      const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
+      positionRef.current = settledPosition;
       renderCards();
-      commitActiveIndex(target, focusCard);
+      commitActiveIndex(settledPosition, focusCard);
     };
     motionFrameRef.current = requestAnimationFrame(step);
   }, [cancelMotion, commitActiveIndex, renderCards]);
 
   const startInertia = useCallback((initialVelocity: number) => {
     cancelMotion();
+    if (itemsRef.current.length <= 1) {
+      snapTo(0);
+      return;
+    }
     if (reducedMotionRef.current || Math.abs(initialVelocity) < INERTIA_STOP_VELOCITY) {
       snapTo(Math.round(positionRef.current));
       return;
@@ -202,29 +215,43 @@ export function DailyPlanCoverflow({
     pointerSessionRef.current = null;
     viewport?.removeAttribute("data-dragging");
     if (!current) return;
-    if (current.captureTarget.hasPointerCapture(current.pointerId)) {
+    if (current.didCapture && current.captureTarget.hasPointerCapture(current.pointerId)) {
       current.captureTarget.releasePointerCapture(current.pointerId);
     }
-    if (current.intent === "horizontal" || current.intent === "cancelled" || current.longPressed) {
+    if (current.intent === "horizontal" || current.intent === "vertical" || current.longPressed) {
       markGeneratedClickForSuppression();
     }
     if (startInertialMotion && current.intent === "horizontal") startInertia(current.velocity);
   }, [clearLongPress, markGeneratedClickForSuppression, startInertia]);
 
+  const finishPointerInteraction = useCallback((pointerId: number, cancelled: boolean) => {
+    const current = pointerSessionRef.current;
+    if (!current || current.pointerId !== pointerId) return;
+    // 마지막 move 뒤 멈춰 있다가 손을 놓은 동작에는 이전 속도를 관성으로 재사용하지 않습니다.
+    if (!cancelled && current.intent === "horizontal" && performance.now() - current.lastTime > 80) {
+      current.velocity = 0;
+    }
+    resetPointerSession(!cancelled);
+    if (cancelled) {
+      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
+    }
+  }, [resetPointerSession, snapTo]);
+
   useLayoutEffect(() => {
     const currentItems = itemsRef.current;
     cancelMotion();
-    const preservedIndex = currentItems.findIndex((item) => item.id === activeItemIdRef.current);
+    const preservedIndex = currentItems.findIndex((item) => item.id === activeItemKeyRef.current);
     const nextIndex = preservedIndex >= 0
       ? preservedIndex
       : Math.min(activeIndex, Math.max(0, currentItems.length - 1));
     positionRef.current = nextIndex;
-    activeItemIdRef.current = currentItems[nextIndex]?.id ?? "";
+    activeItemKeyRef.current = currentItems[nextIndex]?.id ?? "";
     setActiveIndex(nextIndex);
+    setActiveItemKey(currentItems[nextIndex]?.id ?? "");
     renderCards();
   // itemsKey intentionally represents stable logical item identity and ordering.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemsKey, coverflowActive]);
+  }, [itemsKey]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -248,11 +275,26 @@ export function DailyPlanCoverflow({
     const cancelInteraction = () => {
       resetPointerSession(false);
       cancelMotion();
-      if (coverflowActive) snapTo(Math.round(positionRef.current));
+      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
     };
     window.addEventListener("blur", cancelInteraction);
     return () => window.removeEventListener("blur", cancelInteraction);
-  }, [cancelMotion, coverflowActive, resetPointerSession, snapTo]);
+  }, [cancelMotion, resetPointerSession, snapTo]);
+
+  useEffect(() => {
+    const finishOutsideStage = (event: globalThis.PointerEvent) => {
+      finishPointerInteraction(event.pointerId, false);
+    };
+    const cancelOutsideStage = (event: globalThis.PointerEvent) => {
+      finishPointerInteraction(event.pointerId, true);
+    };
+    window.addEventListener("pointerup", finishOutsideStage);
+    window.addEventListener("pointercancel", cancelOutsideStage);
+    return () => {
+      window.removeEventListener("pointerup", finishOutsideStage);
+      window.removeEventListener("pointercancel", cancelOutsideStage);
+    };
+  }, [finishPointerInteraction]);
 
   useEffect(() => () => {
     clearLongPress();
@@ -268,6 +310,7 @@ export function DailyPlanCoverflow({
     const item = items.find((candidate) => candidate.id === itemId);
     if (!item) return;
 
+    selectOnlyClickRef.current = motionFrameRef.current !== null;
     cancelMotion();
     clearLongPress();
     // 앞선 pointer sequence가 합성 click을 만들지 않았더라도 새 정상 탭/클릭은 막지 않습니다.
@@ -277,6 +320,7 @@ export function DailyPlanCoverflow({
       pointerType: event.pointerType,
       itemId,
       captureTarget: target,
+      didCapture: false,
       startX: event.clientX,
       startY: event.clientY,
       clientX: event.clientX,
@@ -288,9 +332,6 @@ export function DailyPlanCoverflow({
       intent: "pending",
       longPressed: false
     };
-    // 부모 stage가 capture하면 일부 브라우저에서 합성 click도 부모로 재지정됩니다.
-    // 실제 카드 button이 capture해야 짧은 click/tap의 target을 그대로 보존할 수 있습니다.
-    target.setPointerCapture(event.pointerId);
 
     if (event.pointerType !== "mouse" && item.kind === "plan") {
       longPressTimerRef.current = window.setTimeout(() => {
@@ -318,18 +359,27 @@ export function DailyPlanCoverflow({
         current.intent = "vertical";
         return;
       }
-      if (!coverflowActive) {
-        current.intent = "cancelled";
-        return;
-      }
       current.intent = "horizontal";
+      // 정상 tap의 click target은 보존하고, 실제 수평 drag가 시작된 뒤에만 capture합니다.
+      try {
+        current.captureTarget.setPointerCapture(event.pointerId);
+        current.didCapture = true;
+      } catch {
+        current.didCapture = false;
+      }
       viewport.setAttribute("data-dragging", "true");
     }
 
     if (current.intent !== "horizontal") return;
     if (event.cancelable) event.preventDefault();
     const spacing = getCardSpacing(viewport.clientWidth);
-    positionRef.current = current.startPosition - deltaX / spacing;
+    positionRef.current = itemsRef.current.length <= 1
+      ? clamp(
+        -(deltaX / spacing) * SINGLE_CARD_ELASTIC_FACTOR,
+        -SINGLE_CARD_ELASTIC_LIMIT,
+        SINGLE_CARD_ELASTIC_LIMIT
+      )
+      : current.startPosition - deltaX / spacing;
     const now = performance.now();
     const elapsed = Math.max(1, now - current.lastTime);
     const instantaneousVelocity = -((event.clientX - current.lastX) / spacing) / elapsed;
@@ -340,20 +390,36 @@ export function DailyPlanCoverflow({
   }
 
   function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
-    const current = pointerSessionRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    // 마지막 move 뒤 멈춰 있다가 손을 놓은 동작에는 이전 속도를 관성으로 재사용하지 않습니다.
-    if (current.intent === "horizontal" && performance.now() - current.lastTime > 80) {
-      current.velocity = 0;
-    }
-    resetPointerSession(true);
+    finishPointerInteraction(event.pointerId, false);
   }
 
   function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
-    const current = pointerSessionRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    resetPointerSession(false);
-    if (coverflowActive) snapTo(Math.round(positionRef.current));
+    finishPointerInteraction(event.pointerId, true);
+  }
+
+  function selectOrActivateItem(item: DailyPlanCarouselItem, forceSelection: boolean, focusCard: boolean) {
+    const currentItems = itemsRef.current;
+    const count = currentItems.length;
+    const itemIndex = currentItems.findIndex((candidate) => candidate.id === item.id);
+    if (itemIndex < 0 || count === 0) return;
+    const motionInProgress = motionFrameRef.current !== null;
+    const distance = count === 1
+      ? -positionRef.current
+      : getCircularDistance(itemIndex, positionRef.current, count);
+    const positionIsExact = count === 1
+      ? Math.abs(positionRef.current) <= CENTER_EPSILON
+      : Math.abs(positionRef.current - Math.round(positionRef.current)) <= CENTER_EPSILON;
+    const isCentered = activeItemKeyRef.current === item.id
+      && Math.abs(distance) <= CENTER_EPSILON
+      && positionIsExact
+      && !motionInProgress
+      && !forceSelection;
+
+    if (!isCentered) {
+      snapTo(getNearestTargetPosition(itemIndex, positionRef.current, count), focusCard);
+      return;
+    }
+    onActivate(item);
   }
 
   function handleCardClick(event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
@@ -368,7 +434,10 @@ export function DailyPlanCoverflow({
       event.preventDefault();
       return;
     }
-    onActivate(item);
+
+    const selectOnly = event.detail > 0 && selectOnlyClickRef.current;
+    selectOnlyClickRef.current = false;
+    selectOrActivateItem(item, selectOnly, true);
   }
 
   function handleContextMenu(event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
@@ -387,10 +456,15 @@ export function DailyPlanCoverflow({
       onOpenContextMenu(item, rect.left + rect.width / 2, rect.top + rect.height / 2);
       return;
     }
-    if (coverflowActive && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!event.repeat) selectOrActivateItem(item, false, true);
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       const direction = event.key === "ArrowRight" ? 1 : -1;
-      snapTo(Math.round(positionRef.current) + direction, true);
+      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current) + direction, true);
     }
   }
 
@@ -402,42 +476,24 @@ export function DailyPlanCoverflow({
     onDragStart: (event: DragEvent<HTMLDivElement>) => event.preventDefault()
   };
 
-  if (!coverflowActive) {
-    return (
-      <div
-        {...interactionProps}
-        ref={viewportRef}
-        className="mt-3 flex w-full min-w-0 flex-nowrap items-center justify-center gap-2 overflow-hidden py-2"
-        style={{ touchAction: "pan-y" }}
-        aria-label="일촬표 선택 카드"
-      >
-        {items.map((item) => (
-          <CarouselCard
-            key={item.id}
-            item={item}
-            disabled={disabled}
-            style={getSimpleCardStyle(items.length)}
-            onClick={handleCardClick}
-            onContextMenu={handleContextMenu}
-            onKeyDown={handleCardKeyDown}
-          />
-        ))}
-      </div>
-    );
-  }
-
   return (
     <div
       {...interactionProps}
       ref={viewportRef}
       className="relative mt-2 h-[clamp(16rem,70vw,20rem)] w-full min-w-0 cursor-grab overflow-hidden [perspective:1200px] data-[dragging=true]:cursor-grabbing"
       style={{ touchAction: "pan-y" }}
+      data-carousel-stage
       role="region"
       aria-roledescription="순환 캐러셀"
       aria-label="일촬표 선택 카드"
     >
-      <div className="absolute inset-0 [transform-style:preserve-3d]">
-        {items.map((item, index) => (
+      <div
+        aria-hidden="true"
+        data-carousel-selection-slot
+        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[calc(clamp(9.25rem,42vw,12.75rem)+8px)] -translate-x-1/2 -translate-y-1/2 rounded-[4px] border-2 border-field-primary/45"
+      />
+      <div className="absolute inset-0 z-[1] [transform-style:preserve-3d]">
+        {items.map((item) => (
           <CarouselCard
             key={item.id}
             ref={(element) => {
@@ -446,15 +502,18 @@ export function DailyPlanCoverflow({
             }}
             item={item}
             disabled={disabled}
-            active={index === activeIndex}
+            active={item.id === activeItemKey}
             className="absolute left-1/2 top-1/2 w-[clamp(9.25rem,42vw,12.75rem)] will-change-transform motion-reduce:transition-none"
-            tabIndex={index === activeIndex ? 0 : -1}
+            tabIndex={item.id === activeItemKey ? 0 : -1}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}
             onKeyDown={handleCardKeyDown}
           />
         ))}
       </div>
+      <span className="sr-only" aria-live="polite">
+        {items.find((item) => item.id === activeItemKey)?.label ?? "선택할 일촬표 없음"} 선택됨
+      </span>
     </div>
   );
 }
@@ -464,7 +523,6 @@ type CarouselCardProps = {
   disabled: boolean;
   active?: boolean;
   className?: string;
-  style?: CSSProperties;
   tabIndex?: number;
   onClick: (event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) => void;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) => void;
@@ -476,7 +534,6 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
   disabled,
   active = false,
   className = "",
-  style,
   tabIndex,
   onClick,
   onContextMenu,
@@ -489,15 +546,19 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       data-carousel-item-id={item.id}
       data-plan-id={item.planId}
       disabled={disabled}
-      aria-label={item.kind === "new" ? "새 일촬표 만들기" : `${item.label} 일촬표 열기`}
+      aria-label={item.kind === "new"
+        ? active ? "새 일촬표 만들기, 현재 선택됨" : "새 일촬표 만들기 선택"
+        : active ? `${item.label} 일촬표 열기, 현재 선택됨` : `${item.label} 일촬표 선택`
+      }
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
-      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden rounded-[3px] border bg-white px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-primary hover:bg-field-light focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
+      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden rounded-[3px] border-2 bg-white px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-primary hover:bg-field-light focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
+        active ? "border-field-primary" : "border-field-border"
+      } ${
         item.kind === "new"
-          ? "border-field-primary text-5xl font-light leading-none text-field-primary"
-          : "border-field-border text-lg font-black leading-[1.35] text-field-primary md:text-xl"
+          ? "text-5xl font-light leading-none text-field-primary"
+          : "text-lg font-black leading-[1.35] text-field-primary md:text-xl"
       }`}
-      style={style}
       title={item.kind === "plan" ? item.label : undefined}
       onClick={(event) => onClick(event, item)}
       onContextMenu={(event) => {
@@ -519,7 +580,23 @@ function getCardSpacing(viewportWidth: number) {
   return Math.min(estimatedCardWidth * 0.76, Math.max(92, viewportWidth * 0.235));
 }
 
+function getCircularDistance(itemIndex: number, position: number, count: number) {
+  if (count <= 1 || !Number.isFinite(position)) return 0;
+  return wrappedDistance(itemIndex - positiveModulo(position, count), count);
+}
+
+function getNearestTargetPosition(itemIndex: number, position: number, count: number) {
+  if (count <= 1 || !Number.isFinite(position)) return 0;
+  return position + getCircularDistance(itemIndex, position, count);
+}
+
+function normalizeSnappedPosition(position: number, count: number) {
+  if (count <= 1 || !Number.isFinite(position)) return 0;
+  return positiveModulo(Math.round(position), count);
+}
+
 function wrappedDistance(value: number, count: number) {
+  if (count <= 1 || !Number.isFinite(value)) return 0;
   let result = value;
   const half = count / 2;
   while (result > half) result -= count;
@@ -528,11 +605,10 @@ function wrappedDistance(value: number, count: number) {
 }
 
 function positiveModulo(value: number, divisor: number) {
+  if (divisor <= 0 || !Number.isFinite(value)) return 0;
   return ((value % divisor) + divisor) % divisor;
 }
 
-function getSimpleCardStyle(count: number): CSSProperties {
-  if (count <= 1) return { width: "min(12.75rem, 58vw)" };
-  if (count === 2) return { width: "min(12.75rem, calc((100% - 0.5rem) / 2))" };
-  return { width: "min(12.75rem, calc((100% - 1rem) / 3))" };
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
