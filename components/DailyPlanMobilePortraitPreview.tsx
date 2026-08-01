@@ -8,38 +8,15 @@ import {
   hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
+import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
-
-export type MobileDailyPlanTimetableRow =
-  | {
-      type: "scene";
-      start: string;
-      end: string;
-      runtime: string;
-      location: string;
-      dayNight: string;
-      sceneNumber: string;
-      totalCut: string;
-      cast: string;
-      description: string;
-      shootingOrder: string;
-      notes: string;
-    }
-  | {
-      type: "break";
-      start: string;
-      end: string;
-      runtime: string;
-      location: string;
-      description: string;
-    };
 
 type DailyPlanMobilePortraitPreviewProps = {
   plan: DailyPlanDraft;
   locations: DailyPlanLocation[];
   meta: DailyPlanPrintMeta;
-  timetableRows: MobileDailyPlanTimetableRow[];
+  timetableRows: DailyPlanPreviewTimetableRow[];
   totalCutCount: number;
 };
 
@@ -54,6 +31,9 @@ const eventRowClass = "daily-plan-preview-event";
 export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanMobilePortraitPreviewProps) {
   const locationRows = locations.filter(isPrintableLocation);
   const sheetTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
+  const sceneDetailRows = sheetTimetableRows.filter(
+    (row): row is Extract<DailyPlanPreviewTimetableRow, { type: "scene" }> => row.type === "scene"
+  );
   const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
   const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
   const mainStaffRows = filterRenderablePreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
@@ -163,13 +143,17 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         </thead>
         <tbody>
           {sheetTimetableRows.length > 0 ? sheetTimetableRows.map((row, index) => (
-            <tr key={`portrait-time-${index}`} className={`${row.type === "break" ? eventRowClass : ""} h-[21px]`}>
-              <FixedCells
-                fields={timetableSummaryFields.map((field) => ({
-                  ...field,
-                  value: getTimetableFieldValue(row, field.key, "summary")
-                }))}
-              />
+            <tr key={`portrait-time-${index}`} className={`${row.type === "additionalSchedule" ? eventRowClass : ""} h-[21px]`}>
+              {row.type === "additionalSchedule" ? (
+                <AdditionalScheduleSummaryCells row={row} />
+              ) : (
+                <FixedCells
+                  fields={timetableSummaryFields.map((field) => ({
+                    ...field,
+                    value: getTimetableFieldValue(row, field.key)
+                  }))}
+                />
+              )}
             </tr>
           )) : (
             <tr><td colSpan={sheetColumnCount} className={cellClass}>등록된 일정이 없습니다.</td></tr>
@@ -187,12 +171,12 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
           </tr>
         </thead>
         <tbody>
-          {sheetTimetableRows.map((row, index) => (
-            <tr key={`portrait-detail-${index}`} className={`${row.type === "break" ? eventRowClass : ""} h-[21px]`}>
+          {sceneDetailRows.map((row, index) => (
+            <tr key={`portrait-detail-${index}`} className="h-[21px]">
               <FixedCells
                 fields={timetableDetailFields.map((field) => ({
                   ...field,
-                  value: getTimetableFieldValue(row, field.key, "detail")
+                  value: getTimetableFieldValue(row, field.key)
                 }))}
               />
             </tr>
@@ -266,6 +250,32 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function AdditionalScheduleSummaryCells({
+  row
+}: {
+  row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
+}) {
+  return (
+    <>
+      {[row.start, row.end, row.runtime].map((value, index) => (
+        <td key={`portrait-additional-time-${index}`} className={cellClass}>
+          {getPreviewCellText(value)}
+        </td>
+      ))}
+      <td colSpan={sheetColumnCount - 3} className="border border-black !p-0 align-middle">
+        <div className="grid min-h-[21px] grid-cols-2">
+          <div className="flex min-w-0 items-center justify-center border-r border-black px-0.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 장소">
+            {getPreviewCellText(row.location)}
+          </div>
+          <div className="flex min-w-0 items-center justify-center px-0.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 메모">
+            {getPreviewCellText(row.memo)}
+          </div>
+        </div>
+      </td>
+    </>
+  );
+}
+
 function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta) {
   if (meta.mainStaff.length > 0) return meta.mainStaff;
   return [
@@ -331,10 +341,6 @@ function CallSheetTable({
 
 function isPrintableLocation(location: DailyPlanLocation) {
   return Boolean(location.name.trim() || location.detail.trim() || getDailyPlanLocationAddress(location).trim());
-}
-
-function formatBreakDescription(row: Extract<MobileDailyPlanTimetableRow, { type: "break" }>) {
-  return [row.description, row.location].filter(Boolean).join(" / ");
 }
 
 function createMainStaffFields(member: { role: string; name: string; contact: string }): PreviewDisplayField[] {
@@ -437,22 +443,16 @@ function createTimetableDetailFields(): PreviewDisplayField[] {
 }
 
 function getTimetableFieldValue(
-  row: MobileDailyPlanTimetableRow,
-  key: string,
-  section: "summary" | "detail"
+  row: Extract<DailyPlanPreviewTimetableRow, { type: "scene" }>,
+  key: string
 ) {
-  if (row.type === "break") {
-    if (key === "start" || key === "end" || key === "runtime" || key === "location") return row[key];
-    if (section === "detail" && key === "description") return formatBreakDescription(row);
-    return "";
-  }
   if (key in row) return row[key as keyof typeof row];
   return "";
 }
 
-function getTimetableRowDisplayValues(row: MobileDailyPlanTimetableRow) {
-  return row.type === "break"
-    ? [row.start, row.end, row.runtime, row.location, row.description]
+function getTimetableRowDisplayValues(row: DailyPlanPreviewTimetableRow) {
+  return row.type === "additionalSchedule"
+    ? [row.start, row.end, row.runtime, row.location, row.memo]
     : [
         row.start,
         row.end,

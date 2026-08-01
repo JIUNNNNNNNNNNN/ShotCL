@@ -91,7 +91,7 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
       <button
         ref={triggerRef}
         type="button"
-        className={`${triggerClassName} block max-w-full overflow-hidden whitespace-nowrap !text-left`}
+        className={`${triggerClassName} block max-w-full overflow-hidden whitespace-nowrap text-center`}
         onClick={() => {
           setDraftValue(value);
           draftValueRef.current = value;
@@ -101,7 +101,7 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
         aria-expanded={isOpen}
         title={value || placeholder}
       >
-        <span className={`block overflow-hidden text-ellipsis whitespace-nowrap ${value ? "text-field-text" : "text-center text-field-muted"}`}>
+        <span className={`block overflow-hidden text-center text-ellipsis whitespace-nowrap ${value ? "text-field-text" : "text-field-muted"}`}>
           {value || placeholder}
         </span>
       </button>
@@ -127,7 +127,7 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
           <textarea
             autoFocus
             rows={4}
-            className="w-full resize-y border-0 bg-white p-1.5 pt-0 text-left text-[13px] font-bold leading-relaxed text-field-text outline-none"
+            className="w-full resize-y border-0 bg-white p-1.5 pt-0 text-center text-[13px] font-bold leading-relaxed text-field-text outline-none"
             value={draftValue}
             onChange={(event) => {
               const nextValue = event.currentTarget.value;

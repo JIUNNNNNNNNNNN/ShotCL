@@ -77,6 +77,7 @@ export type DailyPlanMainStaffRow = {
  */
 export type DailyPlanTimetableSceneSourceSnapshot = {
   sceneNumber: string;
+  subLocation: string;
   sceneContent: string;
   characters: string;
   totalCuts: number | null;
@@ -103,6 +104,7 @@ export type DailyPlanTimetableSceneRowSnapshot = {
   runtime: string;
   locationId: string;
   locationName: string;
+  subLocation: string;
   dayNight: string;
   storyDay: string;
   shootingOrder: string;
@@ -385,6 +387,9 @@ export function resolveDailyPlanTimetableSceneValues(
       : hasCurrentSource
         ? currentSource.characters
         : meta.rowSnapshot.subject,
+    subLocation: hasCurrentSource
+      ? currentSource.subLocation
+      : meta.rowSnapshot.subLocation,
     totalCuts: hasTotalCutsOverride
       ? meta.totalCutsOverride ?? null
       : hasCurrentSource
@@ -450,6 +455,7 @@ function normalizeDailyPlanTimetableSceneSourceSnapshot(
   if (!isUnknownRecord(value)) return null;
   return {
     sceneNumber: normalizeMetaText(value.sceneNumber),
+    subLocation: normalizeMetaText(value.subLocation),
     sceneContent: normalizeMetaText(value.sceneContent),
     characters: normalizeMetaText(value.characters),
     totalCuts: normalizeSceneCutCount(value.totalCuts)
@@ -485,6 +491,7 @@ function normalizeDailyPlanTimetableSceneRowSnapshot(
     runtime: normalizeMetaText(value.runtime),
     locationId: normalizeMetaText(value.locationId),
     locationName: normalizeMetaText(value.locationName),
+    subLocation: normalizeMetaText(value.subLocation),
     dayNight: normalizeMetaText(value.dayNight),
     storyDay: normalizeMetaText(value.storyDay),
     shootingOrder: normalizeMetaText(value.shootingOrder),

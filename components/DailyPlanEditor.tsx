@@ -57,6 +57,11 @@ import {
   hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
+import {
+  DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
+  DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
+  type DailyPlanPreviewTimetableRow
+} from "@/lib/dailyPlan/previewTimetable";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
@@ -74,7 +79,7 @@ import {
   sumSceneCutCounts
 } from "@/lib/sceneCutCount";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
-import { DailyPlanMobilePortraitPreview, type MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
+import { DailyPlanMobilePortraitPreview } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -123,6 +128,7 @@ type SceneBlockInput = {
   runtime: string;
   locationId: string;
   locationName: string;
+  subLocation: string;
   dayNight: string;
   storyDay: string;
   shootingOrder: string;
@@ -163,6 +169,7 @@ type DailyPlanPreviewScene = {
   runtimeMinutes: number | null;
   runtime: string;
   locationName: string;
+  subLocation: string;
   location: DailyPlanLocation | null;
   dayNight: string;
   storyDay: string;
@@ -230,12 +237,13 @@ type OpenMeteoResponse = {
 
 const dayNightOptions = ["D", "N"];
 const inputClass =
-  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
 
 const compactInputClass =
-  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
 
-const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden !text-left text-ellipsis whitespace-nowrap placeholder:!text-center`;
+const centeredSelectClass = `${compactInputClass} [text-align-last:center]`;
+const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden text-center text-ellipsis whitespace-nowrap`;
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
@@ -802,6 +810,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           sceneNumber: "",
           sceneTitle: "",
           description: "",
+          subLocation: "",
           subject: "",
           cutCount: "",
           cuts: []
@@ -1381,7 +1390,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
             </div> : mainStaffSummary ? (
-              <p className="hidden rounded-md border border-field-border bg-field-soft px-3 py-2 text-xs font-bold text-field-muted md:block">
+              <p className="hidden rounded-md border border-field-border bg-field-soft px-3 py-2 text-center text-xs font-bold text-field-muted md:block">
                 {mainStaffSummary}
               </p>
             ) : null}
@@ -1553,7 +1562,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="block min-w-0">
                               <span className="sr-only">촬영장소 {index + 1} 상세 메모</span>
                               <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={location.detail}
                                 onCommit={(value) => updateLocation(index, { detail: value })}
                                 placeholder="상세 위치 / 메모"
@@ -1564,7 +1573,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="block min-w-0">
                               <span className="sr-only">촬영장소 {index + 1} 상세주소</span>
                               <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={getDailyPlanManualAddress(location)}
                                 onCommit={(value) => {
                                   const previousManualAddress = getDailyPlanManualAddress(location).trim();
@@ -1587,7 +1596,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="block min-w-0">
                               <span className="sr-only">촬영장소 {index + 1} 선택 장소 또는 주소</span>
                               <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={locationDisplayValue}
                                 onCommit={(value) => updateLocation(index, { name: value })}
                                 placeholder={(addressSearchLocationId === location.id ? addressSearchMessage : "") || "선택한 장소 또는 주소"}
@@ -1720,13 +1729,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     const meal = row.item;
                     const mealIndex = row.sourceIndex;
                     return (
-                      <tr key={meal.id} className={`bg-[#fff3c4] align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                      <tr key={meal.id} className={`bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                         <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="기타 일정" ariaLabel={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
                         <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                           <span className={mobileTimetableLabelClass}>장소</span>
-                          <select className={compactInputClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
+                          <select className={centeredSelectClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
                             <option value="">빈칸</option>
                             {locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
                           </select>
@@ -1736,7 +1745,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="min-w-0">
                               <span className={mobileTimetableLabelClass}>유형</span>
                               <select
-                                className={compactInputClass}
+                                className={centeredSelectClass}
                                 value={normalizeDailyPlanAdditionalScheduleType(meal.scheduleType ?? meal.memo)}
                                 onChange={(event) => updateMealTime(mealIndex, {
                                   scheduleType: normalizeDailyPlanAdditionalScheduleType(event.target.value)
@@ -1765,12 +1774,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const sceneIndex = row.sourceIndex;
                   const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
                   return (
-                    <tr key={scene.id} className={`align-top max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
-                      <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={compactInputClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={compactInputClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={centeredSelectClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
                         <span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
                         <SceneSourceSelector
@@ -2159,7 +2168,7 @@ function EpisodeField({
         {hasConstrainedOptions ? (
           <select
             aria-label="회차"
-            className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 px-1 py-1.5 text-[11px] leading-[1.35]`}
+            className={`${centeredSelectClass} h-auto min-h-[34px] max-w-full min-w-0 px-1 py-1.5 text-[11px] leading-[1.35]`}
             value={value}
             onChange={(event) => onChange(event.currentTarget.value)}
           >
@@ -2184,7 +2193,7 @@ function EpisodeField({
       {hasConstrainedOptions ? (
         <select
           aria-label="회차"
-          className={compactInputClass}
+          className={centeredSelectClass}
           value={value}
           onChange={(event) => onChange(event.currentTarget.value)}
         >
@@ -2275,7 +2284,7 @@ function MobileTotalCrewField({
         value={value}
         overrideValue={overrideValue}
         onChange={onChange}
-        className={`${compactInputClass} h-auto min-h-[34px] max-w-full px-1 py-1.5 pr-4 text-[11px] leading-[1.35]`}
+        className={`${compactInputClass} h-auto min-h-[34px] max-w-full px-1 py-1.5 text-[11px] leading-[1.35]`}
       />
     </label>
   );
@@ -2305,7 +2314,7 @@ function TotalCrewInput({
     <div className="relative min-w-0">
       <input
         type="text"
-        className={`${className} pr-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        className={`${className} px-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
         value={isFocused ? draft : value}
         inputMode="numeric"
         pattern="[0-9]*"
@@ -2351,7 +2360,7 @@ function TeamCountInput({
     <div className="relative">
       <input
         type="text"
-        className={`${compactInputClass} pr-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        className={`${compactInputClass} px-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
         value={draft}
         inputMode="numeric"
         pattern="[0-9]*"
@@ -2567,7 +2576,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       <div className="relative">
         <input
           ref={inputRef}
-          className={`${compactInputClass} h-auto min-h-[38px] py-1.5 pr-7 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
+          className={`${compactInputClass} h-auto min-h-[38px] px-7 py-1.5 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
           type="text"
           value={draftValue}
           inputMode="numeric"
@@ -2783,7 +2792,7 @@ function ShootingOrderField({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex min-h-[38px] w-full min-w-0 items-center rounded-md border bg-white px-2.5 py-1.5 text-left text-sm font-bold leading-[1.35] transition-colors ${
+        className={`flex min-h-[38px] w-full min-w-0 items-center justify-center rounded-md border bg-white px-2.5 py-1.5 text-center text-sm font-bold leading-[1.35] transition-colors ${
           savedValidation.error
             ? "border-field-danger text-field-danger ring-1 ring-field-danger/20"
             : displayValue
@@ -2805,7 +2814,7 @@ function ShootingOrderField({
         aria-expanded={isOpen}
         title={isInputDisabled ? "총 컷수를 먼저 입력해주세요." : displayValue || "촬영 순서 입력"}
       >
-        <span className="block min-w-0 max-w-full overflow-x-auto whitespace-nowrap">
+        <span className="block min-w-0 max-w-full overflow-x-auto whitespace-nowrap text-center">
           {displayValue || "촬영 순서 입력"}
         </span>
       </button>
@@ -3050,7 +3059,7 @@ function SceneSourceSelector({
   if (items.length === 0 && !value) {
     return (
       <DraftInput
-        className={`${compactInputClass} !text-left`}
+        className={compactInputClass}
         value={legacySceneNumber}
         onCommit={onLegacySceneNumberChange}
         placeholder="SCENE"
@@ -3061,7 +3070,7 @@ function SceneSourceSelector({
 
   return (
     <select
-      className={`${compactInputClass} !text-left`}
+      className={centeredSelectClass}
       value={selectedValue}
       onChange={(event) => {
         if (event.currentTarget.value === "__legacy_scene__") return;
@@ -3612,7 +3621,7 @@ function PrintDailyPlanView({ data }: { data: DailyPlanPreviewData }) {
   );
 }
 
-const PRINT_GRID_COLUMN_COUNT = 16;
+const PRINT_GRID_COLUMN_COUNT = DAILY_PLAN_TIMETABLE_COLUMN_COUNT;
 const printCellClass = "border border-black px-1.5 py-1 text-center align-middle";
 const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-black`;
 
@@ -3710,14 +3719,18 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
           {timetableRows.length > 0 ? timetableRows.map((row, index) => (
             <tr
               key={`time-row-${index}`}
-              className={row.type === "break" ? "daily-plan-preview-event" : undefined}
+              className={`daily-plan-print-scene ${row.type === "additionalSchedule" ? "daily-plan-preview-event" : ""}`}
             >
-              <PrintFixedCells
-                fields={timetableFields.map((field) => ({
-                  ...field,
-                  value: getPrintTimetableFieldValue(row, field.key)
-                }))}
-              />
+              {row.type === "additionalSchedule" ? (
+                <PrintAdditionalScheduleCells row={row} />
+              ) : (
+                <PrintFixedCells
+                  fields={timetableFields.map((field) => ({
+                    ...field,
+                    value: getPrintTimetableFieldValue(row, field.key)
+                  }))}
+                />
+              )}
             </tr>
           )) : (
             <tr className="pdf-section-start">
@@ -3808,6 +3821,35 @@ function PrintFixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function PrintAdditionalScheduleCells({
+  row
+}: {
+  row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
+}) {
+  return (
+    <>
+      {[row.start, row.end, row.runtime].map((value, index) => (
+        <td key={`additional-time-${index}`} className={printCellClass}>
+          {getPreviewCellText(value)}
+        </td>
+      ))}
+      <td
+        colSpan={DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN}
+        className="border border-black !p-0 align-middle"
+      >
+        <div className="grid min-h-7 grid-cols-2">
+          <div className="flex min-w-0 items-center justify-center border-r border-black px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 장소">
+            {getPreviewCellText(row.location)}
+          </div>
+          <div className="flex min-w-0 items-center justify-center px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 메모">
+            {getPreviewCellText(row.memo)}
+          </div>
+        </div>
+      </td>
+    </>
+  );
+}
+
 function PrintCallSheetTable({
   title,
   emptyMessage,
@@ -3877,7 +3919,7 @@ function createPrintLocationFields(location: DailyPlanLocation): PreviewDisplayF
   ];
 }
 
-function createPrintTimetableFields(rows: PrintTimetableRow[]): PreviewDisplayField[] {
+function createPrintTimetableFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDisplayField[] {
   return [
     { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
     { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
@@ -3901,7 +3943,7 @@ function createPrintTimetableFields(rows: PrintTimetableRow[]): PreviewDisplayFi
       span: 1,
       value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
     },
-    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.description) },
+    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.type === "scene" ? row.description : "") },
     {
       key: "cast",
       label: "Actor",
@@ -3923,13 +3965,13 @@ function createPrintTimetableFields(rows: PrintTimetableRow[]): PreviewDisplayFi
   ];
 }
 
-function getPrintTimetableFieldValue(row: PrintTimetableRow, key: string) {
+function getPrintTimetableFieldValue(row: DailyPlanPreviewTimetableRow, key: string) {
   if (key === "start") return row.start;
   if (key === "end") return row.end;
   if (key === "runtime") return row.runtime;
   if (key === "location") return row.location;
+  if (row.type === "additionalSchedule") return key === "notes" ? row.memo : "";
   if (key === "description") return row.description;
-  if (row.type === "break") return "";
   if (key === "dayNight") return row.dayNight;
   if (key === "sceneNumber") return row.sceneNumber;
   if (key === "totalCut") return row.totalCut;
@@ -3939,9 +3981,9 @@ function getPrintTimetableFieldValue(row: PrintTimetableRow, key: string) {
   return "";
 }
 
-function getPrintTimetableRowDisplayValues(row: PrintTimetableRow) {
-  return row.type === "break"
-    ? [row.start, row.end, row.runtime, row.location, row.description]
+function getPrintTimetableRowDisplayValues(row: DailyPlanPreviewTimetableRow) {
+  return row.type === "additionalSchedule"
+    ? [row.start, row.end, row.runtime, row.location, row.memo]
     : [
         row.start,
         row.end,
@@ -3965,19 +4007,17 @@ function getPrintTeamDisplayValues(team: TeamCallSheetRow) {
   return [team.team, team.total, team.callTime, team.callLocation, team.notes];
 }
 
-type PrintTimetableRow = MobileDailyPlanTimetableRow;
-
-function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] {
+function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTimetableRow[] {
   const hasExplicitTimetableOrder = data.meta.timetableRowOrder.length > 0;
   const previewScenes = hasExplicitTimetableOrder
     ? data.scenes
     : sortScenesNaturallyForPreview(data.scenes);
-  const sceneRows: PrintTimetableRow[] = previewScenes.map((scene) => ({
+  const sceneRows: DailyPlanPreviewTimetableRow[] = previewScenes.map((scene) => ({
     type: "scene",
     start: scene.startTime || "",
     end: scene.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
-    location: scene.locationName || "",
+    location: scene.subLocation || "",
     dayNight: normalizeDayNight(scene.dayNight),
     sceneNumber: formatSceneNumber(scene.sceneNumber),
     totalCut: getSceneTotalCutForPreview(scene),
@@ -3987,18 +4027,18 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): PrintTimetableRow[] 
     notes: scene.notes || ""
   }));
 
-  const breakRows: PrintTimetableRow[] = data.mealTimes.map((meal) => ({
-    type: "break",
+  const additionalScheduleRows: DailyPlanPreviewTimetableRow[] = data.mealTimes.map((meal) => ({
+    type: "additionalSchedule",
     start: meal.startTime || "",
     end: meal.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
     location: data.locations.find((location) => location.id === meal.locationId)?.name ?? "",
-    description: getDailyPlanAdditionalScheduleDisplay(meal)
+    memo: meal.memo
   }));
 
   const orderedRows = hasExplicitTimetableOrder
-    ? mergeDailyPlanTimetableRows(sceneRows, breakRows, data.meta.timetableRowOrder)
-    : [...sceneRows, ...breakRows];
+    ? mergeDailyPlanTimetableRows(sceneRows, additionalScheduleRows, data.meta.timetableRowOrder)
+    : [...sceneRows, ...additionalScheduleRows];
   return orderedRows;
 }
 
@@ -4461,6 +4501,7 @@ function normalizeSceneCharacters(value: string) {
 function createSceneSourceSnapshot(item: ProjectSceneItem): DailyPlanTimetableSceneSourceSnapshot {
   return {
     sceneNumber: item.sceneNo,
+    subLocation: item.subLocation,
     sceneContent: item.sceneContent,
     characters: normalizeSceneCharacters(item.characters),
     totalCuts: item.cutCount
@@ -4505,6 +4546,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     sceneNumber: source.sceneNo,
     sceneTitle: "",
     description: sourceSnapshot.sceneContent,
+    subLocation: sourceSnapshot.subLocation,
     subject: sourceSnapshot.characters,
     cuts: []
   };
@@ -4536,6 +4578,7 @@ function serializeTimetableScenes(
           runtime: scene.runtime,
           locationId: scene.locationId,
           locationName: scene.locationName,
+          subLocation: scene.subLocation,
           dayNight: scene.dayNight,
           storyDay: scene.storyDay,
           shootingOrder: scene.shootingOrder,
@@ -4609,6 +4652,7 @@ function restoreTimetableScenes(
       runtime: snapshot.runtime,
       locationId: snapshot.locationId,
       locationName: snapshot.locationName,
+      subLocation: effective.subLocation,
       dayNight: snapshot.dayNight,
       storyDay: snapshot.storyDay,
       shootingOrder: snapshot.shootingOrder,
@@ -4658,6 +4702,7 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
         runtime: calculateRuntime(shot.startTime ?? "", shot.endTime ?? ""),
         locationId: location?.id ?? shot.locationId ?? "",
         locationName: location?.name ?? shot.locationName ?? shot.subLocation ?? "",
+        subLocation: shot.subLocation ?? "",
         dayNight: shot.dayNight ?? "",
         storyDay: shot.storyDay ?? "",
         shootingOrder: sceneMetadata.shootingOrder,
@@ -4706,7 +4751,7 @@ function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
         locationId: scene.locationId,
         locationName: scene.locationName,
         subject: scene.subject,
-        subLocation: "",
+        subLocation: scene.subLocation,
         dayNight: scene.dayNight,
         storyDay: scene.storyDay,
         description: scene.description,
@@ -4737,6 +4782,7 @@ function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlo
     runtime: "",
     locationId: location?.id ?? "",
     locationName: location?.name ?? "",
+    subLocation: "",
     dayNight: "",
     storyDay: "",
     shootingOrder: "",
@@ -4893,6 +4939,17 @@ function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
     || event.memo.trim()
     || event.progressMemo?.trim()
     || event.imageUrl
+  );
+}
+
+function hasRenderableAdditionalScheduleValue(event: DailyPlanMealTime) {
+  return Boolean(
+    event.startTime.trim()
+    || event.endTime.trim()
+    || event.runtimeMinutes != null
+    || event.runtime?.trim()
+    || event.locationId?.trim()
+    || event.memo.trim()
   );
 }
 
@@ -5204,7 +5261,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
   const derivedMeta = deriveDailyPlanHeadcount(meta);
   const locations = (plan.shootingLocations ?? []).filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim());
   const mealTimes = (plan.mealTimes ?? [])
-    .filter(isMeaningfulTimetableEvent)
+    .filter(hasRenderableAdditionalScheduleValue)
     .map((meal) => ({
       ...meal,
       startTime: formatTimeDisplay(meal.startTime),
@@ -5241,6 +5298,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         runtimeMinutes: getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime),
         runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime)),
         locationName: scene.locationName,
+        subLocation: scene.subLocation,
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDayNight(scene.dayNight),
         storyDay: scene.storyDay,

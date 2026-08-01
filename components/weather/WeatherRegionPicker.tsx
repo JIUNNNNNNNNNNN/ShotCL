@@ -211,7 +211,7 @@ export function WeatherRegionPicker({
         aria-label={`날씨 기준 지역 ${selected?.label ?? "지역 선택"}`}
       >
         <span className="text-xs font-black text-field-primary">날씨 기준 지역</span>
-        <span className="truncate text-sm font-black text-field-text">
+        <span className="truncate text-center text-sm font-black text-field-text">
           {selected?.label ?? "지역 선택"}
         </span>
         <ChevronDown

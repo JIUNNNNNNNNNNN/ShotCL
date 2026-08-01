@@ -1,8 +1,12 @@
-import type { MobileDailyPlanTimetableRow } from "@/components/DailyPlanMobilePortraitPreview";
 import {
   formatDailyPlanWeatherSummary,
   type DailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
+import {
+  DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
+  DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
+  type DailyPlanPreviewTimetableRow
+} from "@/lib/dailyPlan/previewTimetable";
 import {
   filterRenderablePreviewRows,
   getPreviewCellText,
@@ -16,7 +20,7 @@ type DailyPlanDesktopLandscapePreviewProps = {
   plan: DailyPlanDraft;
   locations: DailyPlanLocation[];
   meta: DailyPlanPrintMeta;
-  timetableRows: MobileDailyPlanTimetableRow[];
+  timetableRows: DailyPlanPreviewTimetableRow[];
   totalCutCount: number;
 };
 
@@ -27,8 +31,7 @@ const headerCellClass = `${cellClass} daily-plan-preview-header font-black`;
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
 const eventRowClass = "daily-plan-preview-event";
-const timetableColumnSpans = [1, 1, 1, 3, 1, 1, 1, 3, 1, 2, 1] as const;
-const timetableColumnCount = timetableColumnSpans.reduce((total, span) => total + span, 0);
+const timetableColumnCount = DAILY_PLAN_TIMETABLE_COLUMN_COUNT;
 const callSheetColumnCount = 8;
 
 /** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
@@ -132,13 +135,17 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
         </thead>
         <tbody>
           {printableTimetableRows.length > 0 ? printableTimetableRows.map((row, index) => (
-            <tr key={`landscape-row-${index}`} className={row.type === "break" ? eventRowClass : undefined}>
-              <FixedCells
-                fields={timetableFields.map((field) => ({
-                  ...field,
-                  value: getTimetableFieldValue(row, field.key)
-                }))}
-              />
+            <tr key={`landscape-row-${index}`} className={row.type === "additionalSchedule" ? eventRowClass : undefined}>
+              {row.type === "additionalSchedule" ? (
+                <AdditionalScheduleCells row={row} />
+              ) : (
+                <FixedCells
+                  fields={timetableFields.map((field) => ({
+                    ...field,
+                    value: getTimetableFieldValue(row, field.key)
+                  }))}
+                />
+              )}
             </tr>
           )) : (
             <tr><td colSpan={timetableColumnCount} className={cellClass}>등록된 일정이 없습니다.</td></tr>
@@ -223,6 +230,35 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function AdditionalScheduleCells({
+  row
+}: {
+  row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
+}) {
+  return (
+    <>
+      {[row.start, row.end, row.runtime].map((value, index) => (
+        <td key={`additional-time-${index}`} className={cellClass}>
+          {getPreviewCellText(value)}
+        </td>
+      ))}
+      <td
+        colSpan={DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN}
+        className="border border-black !p-0 align-middle"
+      >
+        <div className="grid min-h-7 grid-cols-2">
+          <div className="flex min-w-0 items-center justify-center border-r border-black px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 장소">
+            {getPreviewCellText(row.location)}
+          </div>
+          <div className="flex min-w-0 items-center justify-center px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 메모">
+            {getPreviewCellText(row.memo)}
+          </div>
+        </div>
+      </td>
+    </>
+  );
+}
+
 function FixedCallSheetTable({
   title,
   emptyMessage,
@@ -299,12 +335,12 @@ function createLocationFields(location: DailyPlanLocation): PreviewDisplayField[
   ];
 }
 
-function createTimetableFields(rows: MobileDailyPlanTimetableRow[]): PreviewDisplayField[] {
+function createTimetableFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDisplayField[] {
   return [
     { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
     { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
     { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: 3, value: rows.map((row) => row.location) },
+    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
     {
       key: "dayNight",
       label: "D/N",
@@ -323,7 +359,7 @@ function createTimetableFields(rows: MobileDailyPlanTimetableRow[]): PreviewDisp
       span: 1,
       value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
     },
-    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.description) },
+    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.type === "scene" ? row.description : "") },
     {
       key: "cast",
       label: "Actor",
@@ -339,27 +375,22 @@ function createTimetableFields(rows: MobileDailyPlanTimetableRow[]): PreviewDisp
     {
       key: "notes",
       label: "Notes",
-      span: 1,
+      span: 2,
       value: rows.map((row) => row.type === "scene" ? row.notes : "")
     }
   ];
 }
 
-function getTimetableFieldValue(row: MobileDailyPlanTimetableRow, key: string) {
-  if (row.type === "break") {
-    if (key === "start" || key === "end" || key === "runtime" || key === "location" || key === "description") {
-      return row[key];
-    }
-    return "";
-  }
+function getTimetableFieldValue(row: DailyPlanPreviewTimetableRow, key: string) {
+  if (row.type === "additionalSchedule") return key === "notes" ? row.memo : "";
   if (key === "cast") return row.cast;
   if (key in row) return row[key as keyof typeof row];
   return "";
 }
 
-function getTimetableRowDisplayValues(row: MobileDailyPlanTimetableRow) {
-  return row.type === "break"
-    ? [row.start, row.end, row.runtime, row.location, row.description]
+function getTimetableRowDisplayValues(row: DailyPlanPreviewTimetableRow) {
+  return row.type === "additionalSchedule"
+    ? [row.start, row.end, row.runtime, row.location, row.memo]
     : [
         row.start,
         row.end,
