@@ -100,6 +100,7 @@ export function ArchiveImportDialog({
   sourceLabel,
   pages,
   scenes = [],
+  allowSceneCutMetadata = true,
   initialMetadata,
   isSaving,
   saveReport,
@@ -111,6 +112,7 @@ export function ArchiveImportDialog({
   sourceLabel: string;
   pages: ArchiveImportPage[];
   scenes?: ProjectSceneItem[];
+  allowSceneCutMetadata?: boolean;
   initialMetadata?: ArchiveImportInitialMetadata;
   isSaving: boolean;
   saveReport?: ArchiveImportSaveReport | null;
@@ -415,6 +417,7 @@ export function ArchiveImportDialog({
                   sceneId={sceneId}
                   sceneNo={sceneNo}
                   cutNo={cutNo}
+                  showSceneCut={allowSceneCutMetadata}
                   disabled={isInteractionLocked || Boolean(saveReport)}
                   onTitleChange={setTitle}
                   onMemoChange={setMemo}
@@ -451,6 +454,7 @@ export function ArchiveImportDialog({
                 sceneId={sceneId}
                 sceneNo={sceneNo}
                 cutNo={cutNo}
+                showSceneCut={allowSceneCutMetadata}
                 disabled={isInteractionLocked}
                 onTitleChange={setTitle}
                 onMemoChange={setMemo}
@@ -624,6 +628,7 @@ function ArchiveMetadataFields({
   sceneId,
   sceneNo,
   cutNo,
+  showSceneCut = true,
   disabled = false,
   onTitleChange,
   onMemoChange,
@@ -637,6 +642,7 @@ function ArchiveMetadataFields({
   sceneId: string;
   sceneNo: string;
   cutNo: string;
+  showSceneCut?: boolean;
   disabled?: boolean;
   onTitleChange: (value: string) => void;
   onMemoChange: (value: string) => void;
@@ -651,7 +657,7 @@ function ArchiveMetadataFields({
         제목
         <input disabled={disabled} value={title} onChange={(event) => onTitleChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft disabled:opacity-70" placeholder="선택 사항" />
       </label>
-      <div className="grid grid-cols-2 gap-2">
+      {showSceneCut ? <div className="grid grid-cols-2 gap-2">
         <label className="grid gap-1 text-xs font-black text-field-muted">
           씬
           {scenes.length > 0 || sceneId ? (
@@ -670,7 +676,7 @@ function ArchiveMetadataFields({
               ) : null}
               {scenes.map((scene) => (
                 <option key={scene.id} value={scene.id}>
-                  S#{scene.sceneNo}{scene.sceneContent ? ` · ${scene.sceneContent.slice(0, 24)}` : ""}
+                  S#{scene.sceneNo}
                 </option>
               ))}
             </select>
@@ -684,7 +690,7 @@ function ArchiveMetadataFields({
           )}
         </label>
         <label className="grid gap-1 text-xs font-black text-field-muted">컷<input disabled={disabled} value={cutNo} onChange={(event) => onCutNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft disabled:opacity-70" /></label>
-      </div>
+      </div> : null}
       <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea disabled={disabled} value={memo} onChange={(event) => onMemoChange(event.target.value)} rows={3} className="rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-5 text-field-text disabled:bg-field-soft disabled:opacity-70" /></label>
     </div>
   );

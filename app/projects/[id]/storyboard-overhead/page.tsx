@@ -14,21 +14,13 @@ import {
   useState
 } from "react";
 import {
-  ArrowUp,
-  ChevronRight,
   Clapperboard,
   Crop,
   FileImage,
   FileText,
-  Folder,
-  FolderInput,
-  FolderOpen,
-  FolderPlus,
-  Home,
   ImagePlus,
   Info,
   Map as MapIcon,
-  Move,
   Search,
   Trash2,
   Upload,
@@ -63,21 +55,9 @@ import {
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
 import {
-  scanArchiveDrop,
-  scanArchiveFileList,
-  type ArchiveFolderIssue,
-  type ArchiveFolderScanResult
-} from "@/lib/client/archiveFolderDrop";
-import {
-  createProjectArchiveFolder,
-  deleteProjectArchiveFolders,
   deleteProjectReferenceAssets,
-  inspectProjectArchiveFolders,
   inspectProjectReferenceAssets,
-  listProjectArchiveFolders,
   listProjectReferenceAssets,
-  moveProjectArchiveSelection,
-  renameProjectArchiveFolderTree,
   updateProjectReferenceAsset,
   uploadProjectReferenceAsset,
   uploadStoryboardCropAssetsBulk,
@@ -94,8 +74,6 @@ import {
 import { createEmptyShotOverheadDiagram } from "@/lib/shotOverhead";
 import type {
   OverheadDiagramArchiveItem,
-  ProjectArchiveFolder,
-  ProjectArchiveFolderInspection,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectSceneItem,
@@ -109,13 +87,13 @@ const ShotOverheadEditor = dynamic(
 );
 
 type ArchiveType = Extract<ProjectReferenceAssetType, "overhead" | "storyboard">;
+type ArchiveViewType = "all" | ArchiveType;
 type PendingImport = {
   assetType: ArchiveType;
   sourceKind: "pdf" | "images" | "mixed";
   sourceFiles: File[];
   sourceLabel: string;
   pages: ArchiveImportPage[];
-  folderId: string | null;
   importBatchId: string;
   baseSortOrder: number;
   fileMetadata: Array<{ originalFolderName: string; relativePath: string }>;
@@ -123,28 +101,12 @@ type PendingImport = {
   inheritedAssets?: Array<ProjectReferenceAsset | null>;
 };
 
-type FolderEditor = {
-  mode: "create" | "rename";
-  folderPath?: string;
-  value: string;
+type PendingConfirm = {
+  assetIds: string[];
+  diagrams: OverheadDiagramArchiveItem[];
+  linkedAssetCount: number;
+  label: string;
 };
-
-type PendingConfirm =
-  | {
-    kind: "folder";
-    folderPath: string;
-    folderIds: string[];
-    folderInspection: ProjectArchiveFolderInspection;
-  }
-  | {
-    kind: "selection";
-    assetIds: string[];
-    diagrams: OverheadDiagramArchiveItem[];
-    folderIds: string[];
-    folderInspection: ProjectArchiveFolderInspection | null;
-    linkedAssetCount: number;
-    label: string;
-  };
 
 type DiagramDraft = {
   item: OverheadDiagramArchiveItem | null;
@@ -166,13 +128,31 @@ type MetadataAnchor = {
   clientY: number;
 };
 
-type FolderUploadReport = {
-  discoveredCount: number;
-  supportedCount: number;
-  uploadedCount: number;
-  skipped: ArchiveFolderIssue[];
-  failed: ArchiveFolderIssue[];
-  verified: boolean;
+type ArchiveGroupItem =
+  | {
+    kind: "asset";
+    id: string;
+    asset: ProjectReferenceAsset;
+    cutLabel: string;
+    cutSortValue: number | null;
+    sortOrder: number;
+    createdAt: string;
+  }
+  | {
+    kind: "diagram";
+    id: string;
+    diagram: OverheadDiagramArchiveItem;
+    cutLabel: string;
+    cutSortValue: number | null;
+    sortOrder: number;
+    createdAt: string;
+  };
+
+type ArchiveSceneGroup = {
+  key: string;
+  label: string;
+  scene: ProjectSceneItem | null;
+  items: ArchiveGroupItem[];
 };
 
 type PreparedStoryboardCrop = {
@@ -201,7 +181,7 @@ type StoryboardImportTimings = {
   uploadWindowSize: number;
 };
 
-type ArchiveSelectionKind = "asset" | "diagram" | "folder";
+type ArchiveSelectionKind = "asset" | "diagram";
 type ArchiveSelectionKey = `${ArchiveSelectionKind}:${string}`;
 
 type ArchivePointerSession = {
@@ -212,28 +192,16 @@ type ArchivePointerSession = {
   startX: number;
   startY: number;
   longPressed: boolean;
-  dragging: boolean;
   timeoutId: number;
   target: HTMLButtonElement;
-  clientX: number;
-  clientY: number;
-  dragKeys: ArchiveSelectionKey[];
-  dropFolderId: string | null;
   previousTouchAction: string;
 };
-
-type ArchiveDragPreviewItem = {
-  key: ArchiveSelectionKey;
-  kind: "asset" | "folder";
-  label: string;
-  thumbnailUrl: string;
-};
-
-const PAGE_SIZE = 48;
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_TOLERANCE = 9;
-const DRAG_START_DISTANCE = 8;
-const SELECTION_SCROLL_EDGE = 72;
+const ARCHIVE_NATURAL_COLLATOR = new Intl.Collator("ko-KR", {
+  numeric: true,
+  sensitivity: "base"
+});
 
 export default function ProjectStoryboardOverheadPage() {
   const params = useParams<{ id: string | string[] }>();
@@ -241,19 +209,14 @@ export default function ProjectStoryboardOverheadPage() {
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const [projectName, setProjectName] = useState("");
-  const [activeType, setActiveType] = useState<ArchiveType>("overhead");
+  const [activeType, setActiveType] = useState<ArchiveViewType>("all");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
   const [storyboards, setStoryboards] = useState<ProjectReferenceAsset[]>([]);
-  const [folders, setFolders] = useState<ProjectArchiveFolder[]>([]);
   const [sceneItems, setSceneItems] = useState<ProjectSceneItem[]>([]);
   const [diagramArchives, setDiagramArchives] = useState<OverheadDiagramArchiveItem[]>([]);
   const [query, setQuery] = useState("");
-  const [currentFolderPath, setCurrentFolderPath] = useState("");
-  const [sortMode, setSortMode] = useState<"newest" | "name" | "scene">("newest");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<ArchiveSelectionKey>>(new Set());
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [moveFolderId, setMoveFolderId] = useState("");
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
   const [importProgress, setImportProgress] = useState<ArchiveImportProgressState | null>(null);
@@ -276,24 +239,15 @@ export default function ProjectStoryboardOverheadPage() {
   const [progressMessage, setProgressMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [folderEditor, setFolderEditor] = useState<FolderEditor | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
   const [pressedSelectionKey, setPressedSelectionKey] = useState<ArchiveSelectionKey | null>(null);
-  const [dragPreviewKeys, setDragPreviewKeys] = useState<ArchiveSelectionKey[]>([]);
-  const [dropFolderId, setDropFolderId] = useState<string | null>(null);
-  const [folderUploadReport, setFolderUploadReport] = useState<FolderUploadReport | null>(null);
   const preparingRef = useRef(false);
-  const folderUploadRef = useRef<HTMLInputElement | null>(null);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
   const selectionPointerCleanupRef = useRef<(() => void) | null>(null);
-  const selectionScrollFrameRef = useRef<number | null>(null);
   const suppressArchiveClickRef = useRef<ArchiveSelectionKey | null>(null);
   const selectedKeysRef = useRef<Set<ArchiveSelectionKey>>(new Set());
-  const dragPreviewRef = useRef<HTMLDivElement | null>(null);
-  const dragPositionFrameRef = useRef<number | null>(null);
-  const bodyUserSelectRef = useRef("");
   const pendingImportRef = useRef<PendingImport | null>(null);
   const savedImportResultIdsRef = useRef(new Set<string>());
   const importResultAssetIdsRef = useRef(new Map<string, string>());
@@ -361,17 +315,11 @@ export default function ProjectStoryboardOverheadPage() {
     if (!projectId) return;
     setIsLoading(true);
     try {
-      const [project, overheadAssets, storyboardAssets, diagrams, folderResult, sceneResult] = await Promise.all([
+      const [project, overheadAssets, storyboardAssets, diagrams, sceneResult] = await Promise.all([
         getProject(projectId),
         listProjectReferenceAssets(projectId, "overhead"),
         listProjectReferenceAssets(projectId, "storyboard"),
         listOverheadDiagramArchive(projectId),
-        listProjectArchiveFolders(projectId)
-          .then((value) => ({ value, error: "" }))
-          .catch((error: unknown) => ({
-            value: [] as ProjectArchiveFolder[],
-            error: error instanceof Error ? error.message : "아카이브 폴더를 불러오지 못했습니다."
-          })),
         getProjectSceneList(projectId)
           .then((value) => ({ value: value.items, error: "" }))
           .catch((error: unknown) => ({
@@ -383,9 +331,8 @@ export default function ProjectStoryboardOverheadPage() {
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
       setDiagramArchives(diagrams);
-      setFolders(folderResult.value);
       setSceneItems(sceneResult.value);
-      setErrorMessage(folderResult.error || sceneResult.error);
+      setErrorMessage(sceneResult.error);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "부감도와 콘티 아카이브를 불러오지 못했습니다.");
     } finally {
@@ -406,28 +353,16 @@ export default function ProjectStoryboardOverheadPage() {
   }, []);
 
   useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
     setSelectionMode(false);
-  }, [activeType, currentFolderPath, query, sortMode]);
+  }, [activeType, query]);
 
   useEffect(() => {
     if (!statusMessage) return;
     const timeout = window.setTimeout(() => setStatusMessage(""), 5_000);
     return () => window.clearTimeout(timeout);
   }, [statusMessage]);
-
-  useEffect(() => {
-    if (
-      currentFolderPath
-      && !folders.some((folder) => (
-        isArchivePathWithin(normalizeArchiveFolderPath(folder.name), currentFolderPath)
-      ))
-    ) {
-      setCurrentFolderPath("");
-    }
-  }, [currentFolderPath, folders]);
 
   useEffect(() => () => {
     importAbortControllerRef.current?.abort();
@@ -438,11 +373,8 @@ export default function ProjectStoryboardOverheadPage() {
     }
     preparedStoryboardCropsRef.current.clear();
     selectionPointerCleanupRef.current?.();
-    if (selectionScrollFrameRef.current !== null) cancelAnimationFrame(selectionScrollFrameRef.current);
-    if (dragPositionFrameRef.current !== null) cancelAnimationFrame(dragPositionFrameRef.current);
     const longPress = longPressRef.current;
     if (longPress) window.clearTimeout(longPress.timeoutId);
-    document.body.style.userSelect = bodyUserSelectRef.current;
     if (pendingImportRef.current) releaseArchivePages(pendingImportRef.current.pages);
   }, []);
 
@@ -460,40 +392,28 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }, [canEdit, editingAsset, overheads, storyboards]);
 
-  const activeAssets = activeType === "overhead" ? overheads : storyboards;
-  const folderPathById = useMemo(
-    () => new Map(folders.map((folder) => [folder.id, normalizeArchiveFolderPath(folder.name)])),
-    [folders]
-  );
-  const folderByPath = useMemo(
-    () => new Map(folders.map((folder) => [normalizeArchiveFolderPath(folder.name), folder])),
-    [folders]
-  );
-  const currentFolder = folderByPath.get(currentFolderPath) ?? null;
-  const currentFolderId = currentFolder?.id ?? null;
-  const childFolders = useMemo(
-    () => getArchiveChildFolders(folders, activeAssets, currentFolderPath, folderPathById),
-    [activeAssets, currentFolderPath, folderPathById, folders]
-  );
-  const breadcrumbs = useMemo(
-    () => archiveBreadcrumbs(currentFolderPath),
-    [currentFolderPath]
+  const selectedArchiveType: ArchiveType | null = activeType === "all" ? null : activeType;
+  const activeAssets = useMemo(
+    () => selectedArchiveType === "overhead"
+      ? overheads
+      : selectedArchiveType === "storyboard"
+        ? storyboards
+        : [...overheads, ...storyboards],
+    [overheads, selectedArchiveType, storyboards]
   );
   const sourceAssets = useMemo(
-    () => activeAssets.filter((asset) => {
+    () => dedupeArchiveAssets(activeAssets).filter((asset) => {
       const sourceKind = detectArchiveCropSourceKind({
         mimeType: asset.mimeType,
         filename: asset.filename
       });
       const isSource = sourceKind === "pdf" || asset.groupId?.startsWith("source:");
-      const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
-      const folderMatches = assetPath === currentFolderPath;
-      return isSource && folderMatches && matchesAssetQuery(asset, query);
+      return isSource && matchesAssetQuery(asset, query);
     }),
-    [activeAssets, currentFolderPath, folderPathById, query]
+    [activeAssets, query]
   );
   const imageAssets = useMemo(
-    () => activeAssets.filter((asset) => (
+    () => dedupeArchiveAssets(activeAssets).filter((asset) => (
       detectArchiveCropSourceKind({
         mimeType: asset.mimeType,
         filename: asset.filename
@@ -502,39 +422,33 @@ export default function ProjectStoryboardOverheadPage() {
     )),
     [activeAssets]
   );
-  const filteredAssets = useMemo(() => {
-    const filtered = imageAssets.filter((asset) => {
-      const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
-      const folderMatches = assetPath === currentFolderPath;
-      return folderMatches && matchesAssetQuery(asset, query);
-    });
-    return [...filtered].sort((left, right) => {
-      if (sortMode === "name") {
-        return archiveDisplayName(left).localeCompare(archiveDisplayName(right), "ko-KR");
-      }
-      if (sortMode === "scene") {
-        return `${left.sceneNo || ""}-${left.cutNo || ""}`.localeCompare(
-          `${right.sceneNo || ""}-${right.cutNo || ""}`,
-          "ko-KR",
-          { numeric: true }
-        );
-      }
-      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
-    });
-  }, [currentFolderPath, folderPathById, imageAssets, query, sortMode]);
-  const visibleAssets = filteredAssets.slice(0, visibleCount);
-  const scopeAssetKeys = useMemo(
-    () => filteredAssets.map((asset) => archiveSelectionKey("asset", asset.id)),
-    [filteredAssets]
+  const filteredAssets = useMemo(
+    () => imageAssets.filter((asset) => matchesAssetQuery(asset, query)),
+    [imageAssets, query]
   );
-  const allScopeAssetsSelected = scopeAssetKeys.length > 0
-    && scopeAssetKeys.every((key) => selectedKeys.has(key));
   const filteredDiagrams = useMemo(
-    () => activeType === "overhead" && currentFolderPath === ""
+    () => activeType !== "storyboard"
       ? diagramArchives.filter((item) => matchesDiagramQuery(item, query))
       : [],
-    [activeType, currentFolderPath, diagramArchives, query]
+    [activeType, diagramArchives, query]
   );
+  const archiveGroups = useMemo(
+    () => groupArchiveItemsByScene(filteredAssets, filteredDiagrams, sceneItems),
+    [filteredAssets, filteredDiagrams, sceneItems]
+  );
+  const scopeSelectionKeys = useMemo(
+    () => [...new Set([
+      ...archiveGroups.flatMap((group) => group.items.flatMap((item) => (
+        item.kind === "diagram" && item.diagram.legacy
+          ? []
+          : [archiveSelectionKey(item.kind, item.id)]
+      ))),
+      ...sourceAssets.map((asset) => archiveSelectionKey("asset", asset.id))
+    ])],
+    [archiveGroups, sourceAssets]
+  );
+  const allScopeAssetsSelected = scopeSelectionKeys.length > 0
+    && scopeSelectionKeys.every((key) => selectedKeys.has(key));
   const selectedReferenceAssetIds = useMemo(
     () => [...overheads, ...storyboards]
       .filter((asset) => selectedKeys.has(archiveSelectionKey("asset", asset.id)))
@@ -547,17 +461,7 @@ export default function ProjectStoryboardOverheadPage() {
     )),
     [diagramArchives, selectedKeys]
   );
-  const selectedFolderIds = useMemo(
-    () => folders
-      .filter((folder) => selectedKeys.has(archiveSelectionKey("folder", folder.id)))
-      .map((folder) => folder.id),
-    [folders, selectedKeys]
-  );
-  const selectedCount = (
-    selectedReferenceAssetIds.length
-    + selectedDiagramItems.length
-    + selectedFolderIds.length
-  );
+  const selectedCount = selectedReferenceAssetIds.length + selectedDiagramItems.length;
   const singleSelectedReferenceAsset = selectedCount === 1
     ? [...overheads, ...storyboards].find((asset) => (
       selectedKeys.has(archiveSelectionKey("asset", asset.id))
@@ -565,39 +469,13 @@ export default function ProjectStoryboardOverheadPage() {
     : null;
   const canCropSingleSelection = Boolean(
     canEdit
-    && activeType === "storyboard"
     && singleSelectedReferenceAsset
+    && singleSelectedReferenceAsset.assetType === "storyboard"
     && detectArchiveCropSourceKind({
       mimeType: singleSelectedReferenceAsset.mimeType,
       filename: singleSelectedReferenceAsset.filename
     })
   );
-  const dragPreviewItems = useMemo<ArchiveDragPreviewItem[]>(() => {
-    const allAssets = [...overheads, ...storyboards];
-    return dragPreviewKeys.flatMap<ArchiveDragPreviewItem>((key) => {
-      const parsed = parseArchiveSelectionKey(key);
-      if (!parsed) return [];
-      if (parsed.kind === "asset") {
-        const asset = allAssets.find((entry) => entry.id === parsed.id);
-        return asset ? [{
-          key,
-          kind: "asset" as const,
-          label: archiveDisplayName(asset),
-          thumbnailUrl: asset.crop.thumbnailUrl || asset.publicUrl
-        }] : [];
-      }
-      if (parsed.kind === "folder") {
-        const folder = folders.find((entry) => entry.id === parsed.id);
-        return folder ? [{
-          key,
-          kind: "folder" as const,
-          label: archiveBaseName(folder.name),
-          thumbnailUrl: ""
-        }] : [];
-      }
-      return [];
-    });
-  }, [dragPreviewKeys, folders, overheads, storyboards]);
 
   function mergeUploadedAssets(assetType: ArchiveType, uploaded: ProjectReferenceAsset[]) {
     if (uploaded.length === 0) return;
@@ -621,16 +499,14 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  function updateAssetsInLocalState(
-    assetIds: Iterable<string>,
-    update: (asset: ProjectReferenceAsset) => ProjectReferenceAsset
-  ) {
-    const ids = new Set(assetIds);
-    const apply = (current: ProjectReferenceAsset[]) => (
-      current.map((asset) => ids.has(asset.id) ? update(asset) : asset)
-    );
-    setOverheads(apply);
-    setStoryboards(apply);
+  function removeDiagramsFromLocalState(diagramIds: Iterable<string>) {
+    const ids = new Set(diagramIds);
+    setDiagramArchives((current) => current.filter((item) => !ids.has(item.id)));
+    updateSelectedKeys((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.delete(archiveSelectionKey("diagram", id));
+      return next;
+    });
   }
 
   function replaceAssetInLocalState(updated: ProjectReferenceAsset) {
@@ -656,13 +532,23 @@ export default function ProjectStoryboardOverheadPage() {
     await prepareFiles(assetType, files, "images", assetType === "overhead");
   }
 
+  async function prepareMixedUpload(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    await prepareFiles(
+      assetType,
+      files,
+      undefined,
+      assetType === "overhead" && files.every(isImageFile)
+    );
+  }
+
   async function prepareFiles(
     assetType: ArchiveType,
     rawFiles: File[],
     expectedKind?: PendingImport["sourceKind"],
     directImageUpload = false,
     context?: {
-      folderId?: string | null;
       fileMetadata?: Array<{ originalFolderName: string; relativePath: string }>;
       existingSourceAssetIds?: string[];
       inheritedAssets?: Array<ProjectReferenceAsset | null>;
@@ -708,11 +594,6 @@ export default function ProjectStoryboardOverheadPage() {
       : pdfFiles.length > 0
         ? "pdf"
         : "images";
-    const destinationFolderId = context?.folderId !== undefined
-      ? context.folderId
-      : currentFolderPath
-        ? currentFolderId ?? (await ensureArchiveFolder(currentFolderPath))?.id ?? null
-        : null;
     preparingRef.current = true;
     setIsPreparing(true);
     setErrorMessage("");
@@ -738,7 +619,7 @@ export default function ProjectStoryboardOverheadPage() {
               thumbnailFile: optimized.thumbnailFile,
               sourceType: "upload_image",
               groupId: batchId,
-              folderId: destinationFolderId,
+              folderId: null,
               displayName: stripArchiveExtension(file.name),
               originalFilename: file.name,
               originalFolderName: metadata?.originalFolderName,
@@ -812,7 +693,6 @@ export default function ProjectStoryboardOverheadPage() {
           ? readableFiles[0].name
           : `${readableFiles[0].name} 외 ${readableFiles.length - 1}개`,
         pages,
-        folderId: destinationFolderId,
         importBatchId: createArchiveSessionId(),
         baseSortOrder: imageAssets.length,
         fileMetadata: readableMetadata,
@@ -841,14 +721,12 @@ export default function ProjectStoryboardOverheadPage() {
     event.preventDefault();
     setDragDepth((current) => ({ ...current, [assetType]: 0 }));
     if (!supportsDesktopDrop || !canEdit) return;
-    try {
-      setProgressMessage("폴더 읽는 중");
-      const scan = await scanArchiveDrop(event.dataTransfer);
-      await uploadScannedFiles(assetType, scan);
-    } catch (error) {
-      setProgressMessage("");
-      setErrorMessage(error instanceof Error ? error.message : "폴더를 읽지 못했습니다.");
+    const files = Array.from(event.dataTransfer.files).filter(isAcceptedArchiveFile);
+    if (files.length === 0) {
+      setErrorMessage("PDF, JPG, JPEG, PNG, WebP 파일을 놓아주세요.");
+      return;
     }
+    await prepareFiles(assetType, files, undefined, assetType === "overhead");
   }
 
   function beginImport(nextImport: PendingImport) {
@@ -1091,7 +969,7 @@ export default function ProjectStoryboardOverheadPage() {
                   sourceAssetId: currentImport.existingSourceAssetIds?.[result.page.sourceFileIndex] || undefined,
                   pageIndex: result.page.index,
                   groupId: currentImport.importBatchId,
-                  folderId: currentImport.folderId,
+                  folderId: null,
                   originalFolderName: currentImport.fileMetadata[result.page.sourceFileIndex]?.originalFolderName,
                   relativePath: currentImport.fileMetadata[result.page.sourceFileIndex]?.relativePath,
                   ...cropMetadata(result.crop, result.page, value.cropTemplate),
@@ -1109,10 +987,10 @@ export default function ProjectStoryboardOverheadPage() {
                   title: displayName,
                   memo: value.memo,
                   episodeNumber: inherited.episodeNumber ?? undefined,
-                  sceneId: value.sceneId || inherited.sceneId || undefined,
-                  sceneNumber: value.sceneNo || inherited.sceneNumber,
-                  sceneNo: value.sceneNo || inherited.sceneNumber,
-                  cutNo: value.cutNo,
+                  sceneId: undefined,
+                  sceneNumber: "",
+                  sceneNo: "",
+                  cutNo: "",
                   sortOrder: currentImport.baseSortOrder + result.orderIndex
                 }
               };
@@ -1250,17 +1128,17 @@ export default function ProjectStoryboardOverheadPage() {
           const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_pdf",
             groupId: `source:${batchId}`,
-            folderId: pendingImport.folderId,
+            folderId: null,
             displayName: value.title || stripArchiveExtension(sourceFile.name),
             originalFilename: sourceFile.name,
             originalFolderName: sourceMetadata?.originalFolderName,
             relativePath: sourceMetadata?.relativePath,
             title: value.title,
             memo: value.memo,
-            sceneId: value.sceneId || undefined,
-            sceneNumber: value.sceneNo,
-            sceneNo: value.sceneNo,
-            cutNo: value.cutNo
+            sceneId: undefined,
+            sceneNumber: "",
+            sceneNo: "",
+            cutNo: ""
           });
           sourceAssetsByIndex.set(fileIndex, original.id);
           savedAssets.push(original);
@@ -1281,7 +1159,7 @@ export default function ProjectStoryboardOverheadPage() {
             sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex),
             pageIndex: page.index,
             groupId: batchId,
-            folderId: pendingImport.folderId,
+            folderId: null,
             originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             ...cropMetadata(crop, page, value.cropTemplate),
@@ -1292,10 +1170,10 @@ export default function ProjectStoryboardOverheadPage() {
             title: pageTitle(value.title || inherited.displayName, index, value.results.length),
             memo: value.memo,
             episodeNumber: inherited.episodeNumber ?? undefined,
-            sceneId: value.sceneId || inherited.sceneId || undefined,
-            sceneNumber: value.sceneNo || inherited.sceneNumber,
-            sceneNo: value.sceneNo || inherited.sceneNumber,
-            cutNo: value.cutNo,
+            sceneId: undefined,
+            sceneNumber: "",
+            sceneNo: "",
+            cutNo: "",
             sortOrder: imageAssets.length + index
           });
           savedAssets.push(saved);
@@ -1317,17 +1195,17 @@ export default function ProjectStoryboardOverheadPage() {
           const source = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_image",
             groupId: `source:${batchId}`,
-            folderId: pendingImport.folderId,
+            folderId: null,
             displayName: value.title || stripArchiveExtension(sourceFile.name),
             originalFilename: sourceFile.name,
             originalFolderName: pendingImport.fileMetadata[sourceIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[sourceIndex]?.relativePath,
             title: value.title,
             memo: value.memo,
-            sceneId: value.sceneId || undefined,
-            sceneNumber: value.sceneNo,
-            sceneNo: value.sceneNo,
-            cutNo: value.cutNo
+            sceneId: undefined,
+            sceneNumber: "",
+            sceneNo: "",
+            cutNo: ""
           });
           sourceAssetsByIndex.set(sourceIndex, source.id);
           savedAssets.push(source);
@@ -1347,7 +1225,7 @@ export default function ProjectStoryboardOverheadPage() {
             sourceAssetId: sourceAssetsByIndex.get(page.sourceFileIndex),
             pageIndex: page.index,
             groupId: batchId,
-            folderId: pendingImport.folderId,
+            folderId: null,
             originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             ...cropMetadata(crop, page, value.cropTemplate),
@@ -1358,10 +1236,10 @@ export default function ProjectStoryboardOverheadPage() {
             title: pageTitle(value.title || inherited.displayName, index, cropResults.length),
             memo: value.memo,
             episodeNumber: inherited.episodeNumber ?? undefined,
-            sceneId: value.sceneId || inherited.sceneId || undefined,
-            sceneNumber: value.sceneNo || inherited.sceneNumber,
-            sceneNo: value.sceneNo || inherited.sceneNumber,
-            cutNo: value.cutNo,
+            sceneId: undefined,
+            sceneNumber: "",
+            sceneNo: "",
+            cutNo: "",
             sortOrder: imageAssets.length + index
           });
           savedAssets.push(saved);
@@ -1379,17 +1257,17 @@ export default function ProjectStoryboardOverheadPage() {
             thumbnailFile,
             sourceType: "upload_image",
             groupId: batchId,
-            folderId: pendingImport.folderId,
+            folderId: null,
             originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             displayName: pageTitle(value.title || stripArchiveExtension(page.name), index, value.results.length),
             originalFilename: pendingImport.sourceFiles[page.sourceFileIndex]?.name || page.name,
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
-            sceneId: value.sceneId || undefined,
-            sceneNumber: value.sceneNo,
-            sceneNo: value.sceneNo,
-            cutNo: value.cutNo,
+            sceneId: undefined,
+            sceneNumber: "",
+            sceneNo: "",
+            cutNo: "",
             sortOrder: imageAssets.length + index
           });
           savedAssets.push(saved);
@@ -1433,320 +1311,44 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  async function ensureArchiveFolder(
-    name: string,
-    cache = new Map(
-      folders.map((folder) => [
-        normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
-        folder
-      ])
-    )
-  ) {
-    if (!projectId || !canEdit) return null;
-    const normalizedPath = normalizeArchiveFolderPath(name).slice(0, 80);
-    if (!normalizedPath) return null;
-    const prefixes = archivePathPrefixes(normalizedPath);
-    let finalFolder: ProjectArchiveFolder | null = null;
-
-    for (const path of prefixes) {
-      const key = path.toLocaleLowerCase("ko-KR");
-      const existing = cache.get(key);
-      if (existing) {
-        finalFolder = existing;
-        continue;
-      }
-      try {
-        const folder = await createProjectArchiveFolder(projectId, path, folders.length + cache.size);
-        cache.set(key, folder);
-        finalFolder = folder;
-        setFolders((current) => current.some((entry) => entry.id === folder.id) ? current : [...current, folder]);
-      } catch (error) {
-        if (error instanceof Error && /같은 이름/.test(error.message)) {
-          const refreshed = await listProjectArchiveFolders(projectId);
-          setFolders(refreshed);
-          for (const folder of refreshed) {
-            cache.set(
-              normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
-              folder
-            );
-          }
-          const duplicate = cache.get(key);
-          if (duplicate) {
-            finalFolder = duplicate;
-            continue;
-          }
-        }
-        setErrorMessage(error instanceof Error ? error.message : "폴더를 만들지 못했습니다.");
-        return null;
-      }
-    }
-    return finalFolder;
-  }
-
-  async function submitFolderEditor() {
-    if (!projectId || !canEdit || !folderEditor) return;
-    const parentPath = folderEditor.mode === "create"
-      ? currentFolderPath
-      : archiveParentPath(folderEditor.folderPath || "");
-    const maxSegmentLength = Math.max(1, 80 - parentPath.length - (parentPath ? 1 : 0));
-    const segment = cleanArchiveFolderSegment(folderEditor.value).slice(0, maxSegmentLength);
-    if (!segment) return;
-    try {
-      if (folderEditor.mode === "create") {
-        const path = joinArchiveFolderPath(currentFolderPath, segment);
-        const duplicate = folderByPath.get(path);
-        if (duplicate) {
-          setCurrentFolderPath(path);
-          setFolderEditor(null);
-          return;
-        }
-        await ensureArchiveFolder(path);
-      } else if (folderEditor.folderPath) {
-        const oldPath = normalizeArchiveFolderPath(folderEditor.folderPath);
-        const nextPath = joinArchiveFolderPath(parentPath, segment);
-        const updatedFolders = await renameProjectArchiveFolderTree(
-          projectId,
-          folderByPath.get(oldPath)?.id ?? null,
-          oldPath,
-          nextPath
-        );
-        const updatedById = new Map(updatedFolders.map((folder) => [folder.id, folder]));
-        setFolders((current) => current.map((folder) => updatedById.get(folder.id) ?? folder));
-        if (currentFolderPath && isArchivePathWithin(currentFolderPath, oldPath)) {
-          setCurrentFolderPath(replaceArchivePathPrefix(currentFolderPath, oldPath, nextPath));
-        }
-      }
-      setFolderEditor(null);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "폴더를 저장하지 못했습니다.");
-    }
-  }
-
   async function confirmPendingAction() {
     if (!projectId || !pendingConfirm || !canEdit) return;
     setIsSaving(true);
     setErrorMessage("");
+    let deletedCount = 0;
+    const failures: string[] = [];
     try {
-      if (pendingConfirm.kind === "folder") {
-        const deleted = await deleteProjectArchiveFolders(
-          projectId,
-          pendingConfirm.folderIds,
-          true
-        );
-        removeAssetsFromLocalState(deleted.inspection.assetIds);
-        const removedIds = new Set(deleted.inspection.folderIds);
-        setFolders((current) => current.filter((entry) => !removedIds.has(entry.id)));
-        setCurrentFolderPath(archiveParentPath(pendingConfirm.folderPath));
-        if (deleted.storageCleanupWarning) setStatusMessage(deleted.storageCleanupWarning);
-      } else {
-        if (pendingConfirm.assetIds.length > 0 && pendingConfirm.folderIds.length === 0) {
+      if (pendingConfirm.assetIds.length > 0) {
+        try {
           await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
           removeAssetsFromLocalState(pendingConfirm.assetIds);
+          deletedCount += pendingConfirm.assetIds.length;
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : "선택한 이미지를 삭제하지 못했습니다.");
         }
-        for (const item of pendingConfirm.diagrams) {
+      }
+      for (const item of pendingConfirm.diagrams) {
+        try {
           await deleteOverheadDiagramArchive(projectId, item.id);
-          setDiagramArchives((current) => current.filter((entry) => entry.id !== item.id));
-          updateSelectedKeys((current) => {
-            const next = new Set(current);
-            next.delete(archiveSelectionKey("diagram", item.id));
-            return next;
-          });
+          removeDiagramsFromLocalState([item.id]);
+          deletedCount += 1;
+        } catch (error) {
+          failures.push(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
         }
-        if (pendingConfirm.folderIds.length > 0 && pendingConfirm.folderInspection) {
-          const deleted = await deleteProjectArchiveFolders(
-            projectId,
-            pendingConfirm.folderIds,
-            true,
-            pendingConfirm.assetIds
-          );
-          removeAssetsFromLocalState(deleted.inspection.assetIds);
-          const removedIds = new Set(deleted.inspection.folderIds);
-          setFolders((current) => current.filter((folder) => !removedIds.has(folder.id)));
-          if (deleted.storageCleanupWarning) setStatusMessage(deleted.storageCleanupWarning);
-          const selectedRootPaths = deleted.inspection.selectedRootIds.flatMap((id) => {
-            const path = folderPathById.get(id);
-            return path ? [path] : [];
-          });
-          if (selectedRootPaths.some((path) => isArchivePathWithin(currentFolderPath, path))) {
-            const fallbackPath = selectedRootPaths
-              .map(archiveParentPath)
-              .sort((left, right) => left.length - right.length)[0] ?? "";
-            setCurrentFolderPath(fallbackPath);
-          }
-        }
-        clearSelection();
       }
       setPendingConfirm(null);
-    } catch (error) {
-      if (pendingConfirm.kind === "selection") setPendingConfirm(null);
-      setErrorMessage(error instanceof Error ? error.message : "삭제 작업을 완료하지 못했습니다.");
+      if (failures.length === 0) {
+        clearSelection();
+      } else {
+        setSelectionMode(selectedKeysRef.current.size > 0);
+        setErrorMessage([
+          deletedCount > 0 ? `${deletedCount}개 삭제됨` : "",
+          `${failures.length}개 삭제 실패`,
+          failures[0]
+        ].filter(Boolean).join(" · "));
+      }
     } finally {
       setIsSaving(false);
-    }
-  }
-
-  async function uploadFolder(event: ChangeEvent<HTMLInputElement>) {
-    if (!projectId || !canEdit) return;
-    const scan = scanArchiveFileList(Array.from(event.target.files ?? []));
-    event.target.value = "";
-    await uploadScannedFiles(activeType, scan);
-  }
-
-  async function uploadScannedFiles(
-    assetType: ArchiveType,
-    scan: ArchiveFolderScanResult
-  ) {
-    if (!projectId || !canEdit || preparingRef.current || isSaving) return;
-    const entries = scan.files;
-    setFolderUploadReport(null);
-    if (entries.length === 0) {
-      setProgressMessage("");
-      setFolderUploadReport({
-        discoveredCount: scan.discoveredCount,
-        supportedCount: 0,
-        uploadedCount: 0,
-        skipped: scan.skipped,
-        failed: [],
-        verified: false
-      });
-      setErrorMessage("선택한 폴더에 읽을 수 있는 PDF 또는 이미지가 없습니다.");
-      return;
-    }
-    if (assetType === "storyboard") {
-      // 콘티 폴더 선택도 원본 저장 작업이 아니라 현재 폴더에서 시작하는
-      // 하나의 로컬 crop session으로 취급합니다. 원래 상대 경로는 metadata로만 보존합니다.
-      await prepareFiles(
-        assetType,
-        entries.map((entry) => entry.file),
-        undefined,
-        false,
-        {
-          folderId: currentFolderPath ? currentFolderId ?? undefined : null,
-          fileMetadata: entries.map((entry) => ({
-            originalFolderName: entry.originalFolderName,
-            relativePath: entry.relativePath
-          }))
-        }
-      );
-      if (scan.skipped.length > 0) {
-        setStatusMessage(`${entries.length}개 준비됨 · ${scan.skipped.length}개 제외`);
-      }
-      return;
-    }
-    setIsPreparing(true);
-    preparingRef.current = true;
-    setErrorMessage("");
-    setActiveType(assetType);
-    try {
-      setProgressMessage(`지원 파일 선별 중 · 발견 ${scan.discoveredCount}개 · 지원 ${entries.length}개`);
-      const groups = new Map<string, typeof entries>();
-      for (const entry of entries) {
-        const folderPath = joinArchiveFolderPath(currentFolderPath, entry.folderPath || "");
-        groups.set(folderPath, [...(groups.get(folderPath) ?? []), entry]);
-      }
-
-      const folderCache = new Map(
-        folders.map((folder) => [
-          normalizeArchiveFolderPath(folder.name).toLocaleLowerCase("ko-KR"),
-          folder
-        ])
-      );
-      const uploadedAssets: ProjectReferenceAsset[] = [];
-      const failed: ArchiveFolderIssue[] = [];
-      let firstFolderPath = "";
-      const entryOrder = new Map(entries.map((entry, index) => [
-        `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`,
-        index
-      ]));
-
-      for (const [folderPath, folderEntries] of groups) {
-        const folder = folderPath ? await ensureArchiveFolder(folderPath, folderCache) : null;
-        const folderId = folder?.id ?? currentFolderId;
-        if (folderPath && !folder) {
-          for (const entry of folderEntries) {
-            failed.push({ path: entry.relativePath, reason: "아카이브 폴더 생성 실패" });
-          }
-          continue;
-        }
-        if (!firstFolderPath && folder) firstFolderPath = normalizeArchiveFolderPath(folder.name);
-        await mapWithConcurrency(folderEntries, 3, async (entry) => {
-          try {
-            const sourceOrder = entryOrder.get(
-              `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`
-            ) ?? 0;
-            let uploaded: ProjectReferenceAsset;
-            if (isPdfFile(entry.file)) {
-              setProgressMessage(`PDF 확인 중 · ${entry.file.name}`);
-              if (!await hasPdfSignature(entry.file)) throw new Error("Invalid PDF");
-              uploaded = await uploadProjectReferenceAsset(projectId, assetType, entry.file, {
-                sourceType: "upload_pdf",
-                folderId,
-                groupId: `source:folder:${folderId || "root"}`,
-                displayName: stripArchiveExtension(entry.file.name),
-                originalFilename: entry.file.name,
-                originalFolderName: entry.originalFolderName,
-                relativePath: entry.relativePath,
-                sortOrder: imageAssets.length + sourceOrder
-              });
-            } else {
-              setProgressMessage(`이미지 최적화 중 · ${entry.file.name}`);
-              const optimized = await optimizeArchiveImage(entry.file);
-              setProgressMessage(`업로드 중 ${uploadedAssets.length + 1}/${entries.length}`);
-              uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
-                thumbnailFile: optimized.thumbnailFile,
-                sourceType: "upload_image",
-                folderId,
-                groupId: `folder:${folderId || "root"}`,
-                displayName: stripArchiveExtension(entry.file.name),
-                originalFilename: entry.file.name,
-                originalFolderName: entry.originalFolderName,
-                relativePath: entry.relativePath,
-                sortOrder: imageAssets.length + sourceOrder
-              });
-            }
-            uploadedAssets.push(uploaded);
-            setProgressMessage(`저장 중 ${uploadedAssets.length}/${entries.length}`);
-          } catch (error) {
-            failed.push({
-              path: entry.relativePath,
-              reason: error instanceof Error ? error.message : "업로드 실패"
-            });
-          }
-        });
-      }
-      setProgressMessage("검증 중");
-      const uniqueUploadedIds = new Set(uploadedAssets.map((asset) => asset.id));
-      const expectedUploadedCount = entries.length - failed.length;
-      const verified = uploadedAssets.length === expectedUploadedCount
-        && uniqueUploadedIds.size === uploadedAssets.length;
-      if (!verified) {
-        failed.push({
-          path: "(업로드 검증)",
-          reason: `지원 ${entries.length}개 중 응답 확인 ${uploadedAssets.length}개`
-        });
-      }
-      mergeUploadedAssets(assetType, uploadedAssets);
-      setProgressMessage("");
-      if (firstFolderPath) setCurrentFolderPath(firstFolderPath);
-      setFolderUploadReport({
-        discoveredCount: scan.discoveredCount,
-        supportedCount: entries.length,
-        uploadedCount: uploadedAssets.length,
-        skipped: scan.skipped,
-        failed,
-        verified
-      });
-      if (uploadedAssets.length === 0 || failed.length > 0 || !verified) {
-        setErrorMessage(
-          `폴더 업로드를 완전히 마치지 못했습니다. 성공 ${uploadedAssets.length}개 · 실패 ${failed.length}개 · 스킵 ${scan.skipped.length}개`
-        );
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "폴더를 업로드하지 못했습니다.");
-      setProgressMessage("");
-    } finally {
-      preparingRef.current = false;
-      setIsPreparing(false);
     }
   }
 
@@ -1773,14 +1375,14 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   function toggleCurrentAssetScope() {
-    if (scopeAssetKeys.length === 0) return;
+    if (scopeSelectionKeys.length === 0) return;
     let nextSize = 0;
     updateSelectedKeys((current) => {
       const next = new Set(current);
-      if (scopeAssetKeys.every((key) => current.has(key))) {
-        for (const key of scopeAssetKeys) next.delete(key);
+      if (scopeSelectionKeys.every((key) => current.has(key))) {
+        for (const key of scopeSelectionKeys) next.delete(key);
       } else {
-        for (const key of scopeAssetKeys) next.add(key);
+        for (const key of scopeSelectionKeys) next.add(key);
       }
       nextSize = next.size;
       return next;
@@ -1788,105 +1390,20 @@ export default function ProjectStoryboardOverheadPage() {
     setSelectionMode(nextSize > 0);
   }
 
-  async function moveArchiveSelection(
-    keys: Iterable<ArchiveSelectionKey>,
-    destinationFolderId: string | null
-  ) {
-    if (!projectId || isSaving) return;
-    const movingKeys = [...new Set(keys)];
-    const movingAssetIds = movingKeys.flatMap((key) => {
-      const parsed = parseArchiveSelectionKey(key);
-      return parsed?.kind === "asset" ? [parsed.id] : [];
-    });
-    const movingFolderIds = movingKeys.flatMap((key) => {
-      const parsed = parseArchiveSelectionKey(key);
-      return parsed?.kind === "folder" ? [parsed.id] : [];
-    });
-    if (movingAssetIds.length === 0 && movingFolderIds.length === 0) return;
-    if (!isValidArchiveDropTarget(destinationFolderId, movingFolderIds, folders)) {
-      setErrorMessage("선택한 폴더 자신 또는 하위 폴더로는 이동할 수 없습니다.");
-      return;
-    }
-
-    const movingFolderPaths = movingFolderIds.flatMap((id) => {
-      const path = folderPathById.get(id);
-      return path ? [path] : [];
-    });
-    const nestedFolderIds = new Set(
-      folders
-        .filter((folder) => movingFolderPaths.some((path) => (
-          isArchivePathWithin(normalizeArchiveFolderPath(folder.name), path)
-        )))
-        .map((folder) => folder.id)
-    );
-    const independentAssetIds = movingAssetIds.filter((id) => {
-      const asset = [...overheads, ...storyboards].find((entry) => entry.id === id);
-      return !asset?.crop.folderId || !nestedFolderIds.has(asset.crop.folderId);
-    });
-
-    setIsSaving(true);
-    setErrorMessage("");
-    try {
-      const result = await moveProjectArchiveSelection(
-        projectId,
-        independentAssetIds,
-        movingFolderIds,
-        destinationFolderId
-      );
-      if (result.movedAssetIds.length > 0) {
-        updateAssetsInLocalState(result.movedAssetIds, (asset) => ({
-          ...asset,
-          crop: { ...asset.crop, folderId: destinationFolderId }
-        }));
-      }
-      if (result.folders.length > 0) {
-        const updatedById = new Map(result.folders.map((folder) => [folder.id, folder]));
-        setFolders((current) => current.map((folder) => updatedById.get(folder.id) ?? folder));
-      }
-      clearSelection();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "선택한 자료를 이동하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function moveSelectedAssets() {
-    await moveArchiveSelection(selectedKeysRef.current, moveFolderId || null);
-  }
-
   async function deleteSelectedAssets() {
     if (!projectId || selectedKeys.size === 0) return;
-    if (
-      selectedDiagramItems.length > 0
-      && selectedReferenceAssetIds.length + selectedFolderIds.length > 0
-    ) {
-      setErrorMessage("직접 만든 부감도는 파일·폴더와 분리해서 삭제해주세요.");
-      return;
-    }
     try {
-      const folderOnlyInspection = selectedFolderIds.length > 0
-        ? await inspectProjectArchiveFolders(projectId, selectedFolderIds)
-        : null;
-      const nestedAssetIds = new Set(folderOnlyInspection?.assetIds ?? []);
-      const independentAssetIds = selectedReferenceAssetIds.filter((id) => !nestedAssetIds.has(id));
-      const inspection = selectedFolderIds.length > 0
-        ? await inspectProjectArchiveFolders(projectId, selectedFolderIds, independentAssetIds)
-        : null;
-      const assetInspection = !inspection && independentAssetIds.length > 0
-        ? await inspectProjectReferenceAssets(projectId, independentAssetIds)
+      const assetInspection = selectedReferenceAssetIds.length > 0
+        ? await inspectProjectReferenceAssets(projectId, selectedReferenceAssetIds)
         : null;
       setPendingConfirm({
-        kind: "selection",
-        assetIds: independentAssetIds,
+        assetIds: selectedReferenceAssetIds,
         diagrams: selectedDiagramItems,
-        folderIds: selectedFolderIds,
-        folderInspection: inspection,
-        linkedAssetCount: inspection?.linkedAssetCount ?? assetInspection?.linkedAssetCount ?? 0,
+        linkedAssetCount: assetInspection?.linkedAssetCount ?? 0,
         label: selectedCount ? `선택한 ${selectedCount}개 항목` : "선택한 항목"
       });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "삭제할 폴더 내용을 확인하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "삭제할 자료를 확인하지 못했습니다.");
     }
   }
 
@@ -1894,7 +1411,6 @@ export default function ProjectStoryboardOverheadPage() {
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
     setSelectionMode(false);
-    setMoveFolderId("");
   }
 
   function editSingleSelectedItem() {
@@ -1911,17 +1427,6 @@ export default function ProjectStoryboardOverheadPage() {
     if (selectedDiagram) {
       clearSelection();
       openDiagram(selectedDiagram, true);
-      return;
-    }
-    const selectedFolder = folders.find((folder) => (
-      selectedKeys.has(archiveSelectionKey("folder", folder.id))
-    ));
-    if (selectedFolder) {
-      setFolderEditor({
-        mode: "rename",
-        folderPath: normalizeArchiveFolderPath(selectedFolder.name),
-        value: archiveBaseName(selectedFolder.name)
-      });
     }
   }
 
@@ -1950,24 +1455,19 @@ export default function ProjectStoryboardOverheadPage() {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      clientX: event.clientX,
-      clientY: event.clientY,
       longPressed: false,
-      dragging: false,
-      dragKeys: [],
-      dropFolderId: null,
-      previousTouchAction: event.currentTarget.style.touchAction,
       timeoutId: 0,
-      target: event.currentTarget
+      target: event.currentTarget,
+      previousTouchAction: event.currentTarget.style.touchAction
     };
 
     try {
       state.target.setPointerCapture(state.pointerId);
     } catch {
-      // Document listeners below keep the gesture alive when capture is unavailable.
+      // Document listeners keep long press selection active when capture is unavailable.
     }
 
-    const activateSelection = () => {
+    state.timeoutId = window.setTimeout(() => {
       const current = longPressRef.current;
       if (!current || current.pointerId !== event.pointerId) return;
       current.longPressed = true;
@@ -1977,78 +1477,37 @@ export default function ProjectStoryboardOverheadPage() {
       setPressedSelectionKey(current.key);
       updateSelectedKeys((selected) => new Set(selected).add(current.key));
       if (navigator.vibrate) navigator.vibrate(18);
-    };
-
-    state.timeoutId = window.setTimeout(activateSelection, LONG_PRESS_MS);
+    }, LONG_PRESS_MS);
     longPressRef.current = state;
 
     const handlePointerMove = (pointerEvent: PointerEvent) => {
       const current = longPressRef.current;
       if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      current.clientX = pointerEvent.clientX;
-      current.clientY = pointerEvent.clientY;
       const distance = Math.hypot(
         pointerEvent.clientX - current.startX,
         pointerEvent.clientY - current.startY
       );
-      if (!current.longPressed) {
-        if (distance > LONG_PRESS_MOVE_TOLERANCE) cancelArchivePointerSession();
+      if (!current.longPressed && distance > LONG_PRESS_MOVE_TOLERANCE) {
+        cancelArchivePointerSession();
         return;
       }
-      if (pointerEvent.cancelable) pointerEvent.preventDefault();
-      if (
-        !current.dragging
-        && distance > DRAG_START_DISTANCE
-        && (current.kind === "asset" || current.kind === "folder")
-      ) {
-        current.dragging = true;
-        current.dragKeys = [...selectedKeysRef.current].filter((selectionKey) => {
-          const parsed = parseArchiveSelectionKey(selectionKey);
-          return parsed?.kind === "asset" || parsed?.kind === "folder";
-        });
-        lockArchiveDragSelection();
-        setDragPreviewKeys(current.dragKeys);
-        updateDragPreviewPosition(pointerEvent.clientX, pointerEvent.clientY);
-        updateDropFolderAtPoint(current, pointerEvent.clientX, pointerEvent.clientY);
-        runArchiveDragAutoScroll();
-      } else if (current.dragging) {
-        updateDragPreviewPosition(pointerEvent.clientX, pointerEvent.clientY);
-        updateDropFolderAtPoint(current, pointerEvent.clientX, pointerEvent.clientY);
-      }
+      if (current.longPressed && pointerEvent.cancelable) pointerEvent.preventDefault();
     };
-    const handlePointerEnd = (pointerEvent: PointerEvent) => {
+    const finishPointerSession = (pointerEvent: PointerEvent) => {
       const current = longPressRef.current;
       if (!current || current.pointerId !== pointerEvent.pointerId) return;
       const wasLongPressed = current.longPressed;
-      const wasDragging = current.dragging;
-      const destinationFolderId = current.dropFolderId;
-      const movingKeys = current.dragKeys;
-      if (wasLongPressed) suppressArchiveClickRef.current = current.key;
+      const selectedKey = current.key;
+      if (wasLongPressed) suppressArchiveClickRef.current = selectedKey;
       cancelArchivePointerSession();
-      if (wasDragging && destinationFolderId) {
-        void moveArchiveSelection(movingKeys, destinationFolderId);
-      }
       if (wasLongPressed) {
         window.setTimeout(() => {
-          if (suppressArchiveClickRef.current === key) suppressArchiveClickRef.current = null;
-        }, 700);
-      }
-    };
-    const handlePointerCancel = (pointerEvent: PointerEvent) => {
-      const current = longPressRef.current;
-      if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      const cancelledKey = current.key;
-      if (current.longPressed) {
-        suppressArchiveClickRef.current = cancelledKey;
-        window.setTimeout(() => {
-          if (suppressArchiveClickRef.current === cancelledKey) {
+          if (suppressArchiveClickRef.current === selectedKey) {
             suppressArchiveClickRef.current = null;
           }
         }, 700);
       }
-      cancelArchivePointerSession();
     };
-    const handleWindowBlur = () => cancelArchivePointerSession();
     const handleTouchMove = (touchEvent: TouchEvent) => {
       if (longPressRef.current?.longPressed && touchEvent.cancelable) {
         touchEvent.preventDefault();
@@ -2056,81 +1515,18 @@ export default function ProjectStoryboardOverheadPage() {
     };
     const cleanup = () => {
       document.removeEventListener("pointermove", handlePointerMove);
-      document.removeEventListener("pointerup", handlePointerEnd);
-      document.removeEventListener("pointercancel", handlePointerCancel);
+      document.removeEventListener("pointerup", finishPointerSession);
+      document.removeEventListener("pointercancel", finishPointerSession);
       document.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("blur", handleWindowBlur);
-      if (selectionScrollFrameRef.current !== null) {
-        cancelAnimationFrame(selectionScrollFrameRef.current);
-        selectionScrollFrameRef.current = null;
-      }
+      window.removeEventListener("blur", cancelArchivePointerSession);
       selectionPointerCleanupRef.current = null;
     };
     selectionPointerCleanupRef.current = cleanup;
     document.addEventListener("pointermove", handlePointerMove, { passive: false });
-    document.addEventListener("pointerup", handlePointerEnd);
-    document.addEventListener("pointercancel", handlePointerCancel);
+    document.addEventListener("pointerup", finishPointerSession);
+    document.addEventListener("pointercancel", finishPointerSession);
     document.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("blur", handleWindowBlur);
-  }
-
-  function lockArchiveDragSelection() {
-    bodyUserSelectRef.current = document.body.style.userSelect;
-    document.body.style.userSelect = "none";
-  }
-
-  function restoreArchiveDragSelection() {
-    document.body.style.userSelect = bodyUserSelectRef.current;
-  }
-
-  function updateDragPreviewPosition(clientX: number, clientY: number) {
-    if (dragPositionFrameRef.current !== null) cancelAnimationFrame(dragPositionFrameRef.current);
-    dragPositionFrameRef.current = requestAnimationFrame(() => {
-      if (dragPreviewRef.current) {
-        const { x, y } = archiveDragPreviewPosition(clientX, clientY);
-        dragPreviewRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-      }
-      dragPositionFrameRef.current = null;
-    });
-  }
-
-  function updateDropFolderAtPoint(
-    session: ArchivePointerSession,
-    clientX: number,
-    clientY: number
-  ) {
-    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(
-      "[data-archive-folder-id]"
-    );
-    const candidateId = target?.dataset.archiveFolderId || null;
-    const movingFolderIds = session.dragKeys.flatMap((key) => {
-      const parsed = parseArchiveSelectionKey(key);
-      return parsed?.kind === "folder" ? [parsed.id] : [];
-    });
-    const nextTarget = (
-      candidateId
-      && isValidArchiveDropTarget(candidateId, movingFolderIds, folders)
-    ) ? candidateId : null;
-    session.dropFolderId = nextTarget;
-    setDropFolderId((current) => current === nextTarget ? current : nextTarget);
-  }
-
-  function runArchiveDragAutoScroll() {
-    const current = longPressRef.current;
-    if (!current?.dragging) return;
-    let deltaY = 0;
-    if (current.clientY < SELECTION_SCROLL_EDGE) {
-      deltaY = -Math.ceil((SELECTION_SCROLL_EDGE - current.clientY) / 7);
-    } else if (current.clientY > window.innerHeight - SELECTION_SCROLL_EDGE) {
-      deltaY = Math.ceil(
-        (current.clientY - (window.innerHeight - SELECTION_SCROLL_EDGE)) / 7
-      );
-    }
-    if (deltaY !== 0) {
-      window.scrollBy(0, deltaY);
-      updateDropFolderAtPoint(current, current.clientX, current.clientY);
-    }
-    selectionScrollFrameRef.current = requestAnimationFrame(runArchiveDragAutoScroll);
+    window.addEventListener("blur", cancelArchivePointerSession);
   }
 
   function openNewDiagram() {
@@ -2160,15 +1556,15 @@ export default function ProjectStoryboardOverheadPage() {
     if (!diagramDraft || !projectId) return;
     setIsSaving(true);
     try {
-      await saveOverheadDiagramArchive(projectId, diagram, {
+      const saved = await saveOverheadDiagramArchive(projectId, diagram, {
         id: diagramDraft.item?.legacy ? undefined : diagramDraft.item?.id,
         title: diagramDraft.title,
         memo: diagramDraft.memo,
         sceneNo: diagramDraft.sceneNo,
         cutNo: diagramDraft.cutNo
       });
+      setDiagramArchives((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
       setDiagramDraft(null);
-      await loadArchive();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "부감도를 저장하지 못했습니다.");
     } finally {
@@ -2191,18 +1587,11 @@ export default function ProjectStoryboardOverheadPage() {
     }
     longPressRef.current = null;
     setPressedSelectionKey(null);
-    setDragPreviewKeys([]);
-    setDropFolderId(null);
-    if (dragPositionFrameRef.current !== null) {
-      cancelAnimationFrame(dragPositionFrameRef.current);
-      dragPositionFrameRef.current = null;
-    }
-    restoreArchiveDragSelection();
     selectionPointerCleanupRef.current?.();
   }
 
   async function cropStoredAsset(asset: ProjectReferenceAsset) {
-    if (!canEdit || activeType !== "storyboard") return;
+    if (!canEdit || asset.assetType !== "storyboard") return;
     const sourceKind = detectArchiveCropSourceKind({
       mimeType: asset.mimeType,
       filename: asset.filename
@@ -2233,7 +1622,6 @@ export default function ProjectStoryboardOverheadPage() {
         sourceFiles: [file],
         sourceLabel: archiveDisplayName(asset),
         pages: source.pages,
-        folderId: asset.crop.folderId ?? null,
         importBatchId: createArchiveSessionId(),
         baseSortOrder: imageAssets.length,
         fileMetadata: [{
@@ -2345,7 +1733,6 @@ export default function ProjectStoryboardOverheadPage() {
     event.stopPropagation();
     if (
       !canEdit
-      || longPressRef.current?.dragging
       || !window.matchMedia("(hover: hover) and (pointer: fine)").matches
     ) {
       return;
@@ -2382,8 +1769,6 @@ export default function ProjectStoryboardOverheadPage() {
             <p className="text-xs font-bold text-field-muted">{progressMessage}</p>
           </div>
         ) : null}
-        {folderUploadReport ? <FolderUploadSummary report={folderUploadReport} /> : null}
-
         {canEdit && supportsDesktopDrop ? (
           <div className="hidden grid-cols-2 gap-3 md:grid" aria-label="데스크탑 자료 드롭 영역">
             {(["overhead", "storyboard"] as const).map((type) => {
@@ -2413,8 +1798,8 @@ export default function ProjectStoryboardOverheadPage() {
                 >
                   <div className="pointer-events-none grid justify-items-center gap-1.5">
                     {type === "overhead" ? <MapIcon className="h-6 w-6" aria-hidden /> : <Clapperboard className="h-6 w-6" aria-hidden />}
-                    <p className="text-sm font-black">{label} 파일 또는 폴더 놓기</p>
-                    <p className="text-[11px] font-bold text-field-muted">하위 폴더를 포함해 PDF · JPG · JPEG · PNG · WebP만 선별</p>
+                    <p className="text-sm font-black">{label} 파일 놓기</p>
+                    <p className="text-[11px] font-bold text-field-muted">PDF · JPG · JPEG · PNG · WebP</p>
                   </div>
                 </div>
               );
@@ -2424,10 +1809,10 @@ export default function ProjectStoryboardOverheadPage() {
 
         <Card className="grid gap-3">
           <div className="grid gap-2 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center">
-            <div className="grid grid-cols-2 gap-2">
-              {(["overhead", "storyboard"] as const).map((type) => (
+            <div className="grid grid-cols-3 gap-2">
+              {(["all", "overhead", "storyboard"] as const).map((type) => (
                 <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 rounded-[3px] border px-4 text-sm font-black ${activeType === type ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-primary"}`}>
-                  {type === "overhead" ? "부감도" : "콘티"}
+                  {type === "all" ? "전체" : type === "overhead" ? "부감도" : "콘티"}
                 </button>
               ))}
             </div>
@@ -2437,190 +1822,51 @@ export default function ProjectStoryboardOverheadPage() {
             </label>
             {canEdit ? (
               <div className="flex flex-wrap justify-end gap-2">
-                {activeType === "overhead" ? (
+                {activeType !== "storyboard" ? (
                   <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                     <MapIcon className="h-4 w-4" aria-hidden />
                     직접 만들기
                   </button>
                 ) : null}
-                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
-                  <ImagePlus className="h-4 w-4" aria-hidden />
-                  이미지
-                  <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(activeType, event)} />
-                </label>
-                <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white">
-                  <Upload className="h-4 w-4" aria-hidden />
-                  PDF
-                  <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(activeType, event)} />
-                </label>
+                {selectedArchiveType ? (
+                  <>
+                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                      <ImagePlus className="h-4 w-4" aria-hidden />
+                      이미지
+                      <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(selectedArchiveType, event)} />
+                    </label>
+                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white">
+                      <Upload className="h-4 w-4" aria-hidden />
+                      PDF
+                      <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(selectedArchiveType, event)} />
+                    </label>
+                  </>
+                ) : (
+                  (["overhead", "storyboard"] as const).map((type) => (
+                    <label key={type} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
+                      <Upload className="h-4 w-4" aria-hidden />
+                      {type === "overhead" ? "부감도 업로드" : "콘티 업로드"}
+                      <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareMixedUpload(type, event)} />
+                    </label>
+                  ))
+                )}
               </div>
             ) : null}
           </div>
-          <div className="grid gap-2 border-t border-field-border pt-3" aria-label="아카이브 탐색기">
-            <div className="flex min-w-0 items-center gap-1 overflow-x-auto pb-1" aria-label="현재 폴더 경로">
-              <button
-                type="button"
-                onClick={() => setCurrentFolderPath("")}
-                className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary"
-                aria-label="아카이브 홈으로 이동"
-              >
-                <Home className="h-3.5 w-3.5" aria-hidden />
-                홈
-              </button>
-              {breadcrumbs.map((crumb) => (
-                <div key={crumb.path} className="flex shrink-0 items-center gap-1">
-                  <ChevronRight className="h-3.5 w-3.5 text-field-muted" aria-hidden />
-                  <button
-                    type="button"
-                    onClick={() => setCurrentFolderPath(crumb.path)}
-                    className={`min-h-9 rounded-[3px] px-2.5 text-xs font-black ${
-                      crumb.path === currentFolderPath
-                        ? "bg-field-primary text-white"
-                        : "text-field-primary hover:bg-field-soft"
-                    }`}
-                  >
-                    {crumb.label}
-                  </button>
-                </div>
-              ))}
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={!currentFolderPath}
-                onClick={() => setCurrentFolderPath(archiveParentPath(currentFolderPath))}
-                className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white text-field-primary disabled:opacity-35"
-                aria-label="상위 폴더로 이동"
-              >
-                <ArrowUp className="h-4 w-4" aria-hidden />
-              </button>
-              <span className="inline-flex min-w-0 items-center gap-1 text-xs font-black text-field-primary">
-                <FolderOpen className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">{archiveBaseName(currentFolderPath) || "홈"}</span>
-              </span>
-              <span className="text-[11px] font-bold text-field-muted">
-                폴더 {childFolders.length} · 자료 {filteredAssets.length + filteredDiagrams.length}
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={sortMode}
-              onChange={(event) => setSortMode(event.target.value as typeof sortMode)}
-              className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-text"
-              aria-label="아카이브 정렬"
-            >
-              <option value="newest">최신순</option>
-              <option value="name">이름순</option>
-              <option value="scene">씬/컷순</option>
-            </select>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-field-border pt-3">
+            <span className="text-xs font-bold text-field-muted">
+              자료 {archiveGroups.reduce((count, group) => count + group.items.length, sourceAssets.length)}개
+            </span>
             {canEdit ? (
-              <>
-                <button
-                  type="button"
-                  disabled={scopeAssetKeys.length === 0 || isSaving}
-                  onClick={toggleCurrentAssetScope}
-                  className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
-                  aria-pressed={allScopeAssetsSelected}
-                >
-                  {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
-                </button>
-                <button type="button" onClick={() => setFolderEditor({ mode: "create", folderPath: currentFolderPath, value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
-                  <FolderPlus className="h-3.5 w-3.5" aria-hidden />
-                  새 폴더
-                </button>
-                {currentFolderPath ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFolderEditor({
-                          mode: "rename",
-                          folderPath: currentFolderPath,
-                          value: archiveBaseName(currentFolderPath)
-                        });
-                      }}
-                      className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary"
-                    >
-                      이름 변경
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const affectedFolders = folders
-                          .filter((folder) => (
-                            isArchivePathWithin(
-                              normalizeArchiveFolderPath(folder.name),
-                              currentFolderPath
-                            )
-                          ))
-                          .sort((left, right) => right.name.length - left.name.length);
-                        if (affectedFolders.length === 0) return;
-                        const folderIds = affectedFolders.map((folder) => folder.id);
-                        void inspectProjectArchiveFolders(projectId, folderIds)
-                          .then((folderInspection) => {
-                            setPendingConfirm({
-                              kind: "folder",
-                              folderPath: currentFolderPath,
-                              folderIds,
-                              folderInspection
-                            });
-                          })
-                          .catch((error: unknown) => {
-                            setErrorMessage(
-                              error instanceof Error
-                                ? error.message
-                                : "삭제할 폴더 내용을 확인하지 못했습니다."
-                            );
-                          });
-                      }}
-                      className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-danger"
-                    >
-                      폴더 삭제
-                    </button>
-                  </>
-                ) : null}
-                {supportsDesktopDrop ? (
-                  <>
-                    <button type="button" onClick={() => folderUploadRef.current?.click()} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
-                      <FolderInput className="h-3.5 w-3.5" aria-hidden />
-                      폴더 업로드
-                    </button>
-                    <input
-                      ref={folderUploadRef}
-                      type="file"
-                      accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"
-                      multiple
-                      className="sr-only"
-                      disabled={isPreparing || isSaving}
-                      onChange={(event) => void uploadFolder(event)}
-                      {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
-                    />
-                  </>
-                ) : null}
-              </>
-            ) : null}
-            </div>
-            {folderEditor ? (
-              <form
-                className="flex max-w-md items-center gap-2 rounded-xl border border-field-border bg-field-soft/55 p-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submitFolderEditor();
-                }}
+              <button
+                type="button"
+                disabled={scopeSelectionKeys.length === 0 || isSaving}
+                onClick={toggleCurrentAssetScope}
+                className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
+                aria-pressed={allScopeAssetsSelected}
               >
-                <input
-                  autoFocus
-                  value={folderEditor.value}
-                  onChange={(event) => setFolderEditor({ ...folderEditor, value: event.target.value })}
-                  className="min-h-9 min-w-0 flex-1 rounded-lg border border-field-border bg-white px-3 text-sm"
-                  placeholder={folderEditor.mode === "create" ? "새 폴더 이름" : "폴더 이름"}
-                  maxLength={80}
-                />
-                <button type="submit" className="min-h-9 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white">확인</button>
-                <button type="button" onClick={() => setFolderEditor(null)} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border bg-white" aria-label="폴더 편집 취소">
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              </form>
+                {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
+              </button>
             ) : null}
           </div>
           {canEdit && selectedCount > 0 ? (
@@ -2628,27 +1874,6 @@ export default function ProjectStoryboardOverheadPage() {
               <span className="text-xs font-black text-field-primary">
                 {selectedCount}개 선택
               </span>
-              <select
-                value={moveFolderId}
-                onChange={(event) => setMoveFolderId(event.target.value)}
-                className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold"
-                aria-label="선택 자료 이동 폴더"
-              >
-                <option value="">홈으로 이동</option>
-                {folders.map((folder) => (
-                  <option
-                    key={folder.id}
-                    value={folder.id}
-                    disabled={!isValidArchiveDropTarget(folder.id, selectedFolderIds, folders)}
-                  >
-                    {folder.name}
-                  </option>
-                ))}
-              </select>
-              <button type="button" disabled={isSaving || selectedReferenceAssetIds.length + selectedFolderIds.length === 0 || selectedDiagramItems.length > 0 || !isValidArchiveDropTarget(moveFolderId || null, selectedFolderIds, folders)} onClick={() => void moveSelectedAssets()} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white disabled:opacity-50">
-                <Move className="h-3.5 w-3.5" aria-hidden />
-                이동
-              </button>
               {canCropSingleSelection && singleSelectedReferenceAsset ? (
                 <button
                   type="button"
@@ -2667,11 +1892,7 @@ export default function ProjectStoryboardOverheadPage() {
               {selectedCount === 1 ? (
                 <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <Info className="h-3.5 w-3.5" aria-hidden />
-                  {selectedFolderIds.length === 1
-                    ? "이름 변경"
-                    : singleSelectedReferenceAsset
-                      ? "정보 수정"
-                      : "정보"}
+                  {singleSelectedReferenceAsset ? "정보 수정" : "정보"}
                 </button>
               ) : null}
               {singleSelectedReferenceAsset ? (
@@ -2693,149 +1914,118 @@ export default function ProjectStoryboardOverheadPage() {
 
         <Card className="grid gap-3">
           <div>
-            <h2 className="font-display text-lg font-black text-field-primary">{activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
+            <h2 className="font-display text-lg font-black text-field-primary">{activeType === "all" ? "전체" : activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
             <p className="text-xs font-bold text-field-muted">이미지 원본 비율을 유지하며 모서리를 자르지 않습니다.</p>
           </div>
-          {childFolders.length + filteredDiagrams.length + filteredAssets.length === 0 ? (
-            <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
+          {archiveGroups.length === 0 ? (
+            <p className="py-10 text-center text-sm font-bold text-field-muted">등록된 {activeType === "all" ? "아카이브" : activeType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
-            <div
-              className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
-            >
-              {childFolders.map((folder) => {
-                const key = folder.id ? archiveSelectionKey("folder", folder.id) : null;
-                const selected = key ? selectedKeys.has(key) : false;
-                const pressed = key ? pressedSelectionKey === key : false;
-                const dropTarget = folder.id === dropFolderId;
-                return (
-                  <button
-                    key={folder.path}
-                    type="button"
-                    data-archive-folder-id={folder.id || undefined}
-                    onPointerDown={(event) => {
-                      if (folder.id) beginArchiveSelectionPress("folder", folder.id, event);
-                    }}
-                    onClick={(event) => {
-                      if (key && suppressArchiveClickRef.current === key) {
-                        suppressArchiveClickRef.current = null;
-                        event.preventDefault();
-                        return;
-                      }
-                      if (selectionMode && folder.id) {
-                        event.preventDefault();
-                        toggleArchiveSelection("folder", folder.id);
-                        return;
-                      }
-                      setCurrentFolderPath(folder.path);
-                    }}
-                    className={`grid min-w-0 aspect-[4/3] touch-pan-y place-items-center gap-2 border p-3 text-field-primary transition-[transform,border-color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
-                      selected
-                        ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
-                        : "border-field-border bg-field-soft/45 hover:border-field-primary hover:bg-field-soft"
-                    } ${pressed ? "scale-[0.92]" : ""} ${
-                      dropTarget ? "border-[#ef8f39] bg-[#fff0df] ring-4 ring-[#ef8f39]/55" : ""
-                    }`}
-                    aria-label={`${folder.name} 폴더 ${selectionMode ? selected ? "선택 해제" : "선택" : "열기"}`}
-                    aria-pressed={selectionMode && folder.id ? selected : undefined}
+            <div className="grid min-w-0 gap-5">
+              {archiveGroups.map((group) => (
+                <section key={group.key} className="grid min-w-0 gap-2" aria-labelledby={`archive-group-${group.key}`}>
+                  <h3
+                    id={`archive-group-${group.key}`}
+                    className="border-b border-field-border pb-1 text-sm font-black text-field-primary"
                   >
-                    <Folder className="h-12 w-12 fill-[#e5bd55] text-[#a97813] sm:h-14 sm:w-14" aria-hidden />
-                    <span className="min-w-0 max-w-full truncate text-xs font-black">{folder.name}</span>
-                    <span className="text-[10px] font-bold text-field-muted">{folder.itemCount}개</span>
-                  </button>
-                );
-              })}
-              {filteredDiagrams.map((item) => {
-                const key = archiveSelectionKey("diagram", item.id);
-                const selected = selectedKeys.has(key);
-                return (
-                <article
-                  key={item.id}
-                  onContextMenu={(event) => event.preventDefault()}
-                  className={`relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
-                    selected
-                      ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
-                      : "border-field-border"
-                  } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
-                >
-                  <button
-                    type="button"
-                    onPointerDown={(event) => {
-                      if (!item.legacy) beginArchiveSelectionPress("diagram", item.id, event);
-                    }}
-                    onClick={(event) => {
-                      if (suppressArchiveClickRef.current === key) {
-                        suppressArchiveClickRef.current = null;
-                        event.preventDefault();
-                        return;
+                    {group.label}
+                  </h3>
+                  <div className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                    {group.items.map((item) => {
+                      const key = archiveSelectionKey(item.kind, item.id);
+                      const selected = selectedKeys.has(key);
+                      if (item.kind === "diagram") {
+                        const diagram = item.diagram;
+                        return (
+                          <article
+                            key={key}
+                            onContextMenu={(event) => event.preventDefault()}
+                            className={`relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
+                              selected
+                                ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
+                                : "border-field-border"
+                            } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
+                          >
+                            <button
+                              type="button"
+                              onPointerDown={(event) => {
+                                if (!diagram.legacy) beginArchiveSelectionPress("diagram", diagram.id, event);
+                              }}
+                              onClick={(event) => {
+                                if (suppressArchiveClickRef.current === key) {
+                                  suppressArchiveClickRef.current = null;
+                                  event.preventDefault();
+                                  return;
+                                }
+                                if (selectionMode && !diagram.legacy) {
+                                  event.preventDefault();
+                                  toggleArchiveSelection("diagram", diagram.id);
+                                  return;
+                                }
+                                openDiagram(diagram, false);
+                              }}
+                              className="grid min-w-0 aspect-[4/3] touch-pan-y place-items-center bg-field-soft"
+                              aria-pressed={selectionMode && !diagram.legacy ? selected : undefined}
+                            >
+                              <ShotOverheadPreview diagram={diagram.diagram} label="부감도 미리보기" />
+                            </button>
+                            <ArchiveCutText cutNo={item.cutLabel} typeLabel={activeType === "all" ? "부감도" : undefined} />
+                          </article>
+                        );
                       }
-                      if (selectionMode && !item.legacy) {
-                        event.preventDefault();
-                        toggleArchiveSelection("diagram", item.id);
-                        return;
-                      }
-                      openDiagram(item, false);
-                    }}
-                    className="grid min-w-0 aspect-[4/3] touch-pan-y place-items-center bg-field-soft"
-                    aria-pressed={selectionMode && !item.legacy ? selected : undefined}
-                  >
-                    <ShotOverheadPreview diagram={item.diagram} label={`${item.title} 부감도`} />
-                  </button>
-                  <ArchiveText title={item.title} sceneNo={item.sceneNo} cutNo={item.cutNo} />
-                </article>
-              )})}
-              {visibleAssets.map((asset) => {
-                const key = archiveSelectionKey("asset", asset.id);
-                const selected = selectedKeys.has(key);
-                return (
-                <article
-                  key={asset.id}
-                  className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
-                    selected
-                      ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
-                      : "border-field-border"
-                  } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
-                >
-                  <button
-                    type="button"
-                    onContextMenu={(event) => openAssetContextMenu(asset, event)}
-                    onPointerDown={(event) => beginArchiveSelectionPress("asset", asset.id, event)}
-                    onClick={(event) => {
-                      if (suppressArchiveClickRef.current === key) {
-                        suppressArchiveClickRef.current = null;
-                        event.preventDefault();
-                        return;
-                      }
-                      if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
-                        event.preventDefault();
-                        toggleArchiveSelection("asset", asset.id);
-                        return;
-                      }
-                      setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
-                    }}
-                    className="grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1"
-                    aria-pressed={selectionMode ? selected : undefined}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={asset.crop.thumbnailUrl || asset.publicUrl}
-                      alt={archiveDisplayName(asset)}
-                      loading="lazy"
-                      decoding="async"
-                      draggable={false}
-                      onDragStart={(event) => event.preventDefault()}
-                      className="block h-full w-full rounded-none object-contain"
-                    />
-                  </button>
-                  <ArchiveText title={archiveDisplayName(asset)} sceneNo={asset.crop.sceneNumber || asset.sceneNo || ""} cutNo={asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || ""} />
-                </article>
-              )})}
+
+                      const asset = item.asset;
+                      return (
+                        <article
+                          key={key}
+                          className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-white p-2 transition ${
+                            selected
+                              ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
+                              : "border-field-border"
+                          } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            onPointerDown={(event) => beginArchiveSelectionPress("asset", asset.id, event)}
+                            onClick={(event) => {
+                              if (suppressArchiveClickRef.current === key) {
+                                suppressArchiveClickRef.current = null;
+                                event.preventDefault();
+                                return;
+                              }
+                              if (selectionMode || event.metaKey || event.ctrlKey || event.shiftKey) {
+                                event.preventDefault();
+                                toggleArchiveSelection("asset", asset.id);
+                                return;
+                              }
+                              setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
+                            }}
+                            className="grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1"
+                            aria-pressed={selectionMode ? selected : undefined}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={asset.crop.thumbnailUrl || asset.publicUrl}
+                              alt={archiveDisplayName(asset)}
+                              loading="lazy"
+                              decoding="async"
+                              draggable={false}
+                              onContextMenu={(event) => openAssetContextMenu(asset, event)}
+                              onDragStart={(event) => event.preventDefault()}
+                              className="block h-full w-full rounded-none object-contain"
+                            />
+                          </button>
+                          <ArchiveCutText
+                            cutNo={item.cutLabel}
+                            typeLabel={activeType === "all" ? (asset.assetType === "overhead" ? "부감도" : "콘티") : undefined}
+                          />
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
-          {visibleAssets.length < filteredAssets.length ? (
-            <button type="button" onClick={() => setVisibleCount((current) => current + PAGE_SIZE)} className="mx-auto min-h-9 rounded-[3px] border border-field-border bg-white px-4 text-xs font-black text-field-primary">
-              더 보기 · {visibleAssets.length}/{filteredAssets.length}
-            </button>
-          ) : null}
         </Card>
 
         {sourceAssets.length > 0 ? (
@@ -2891,13 +2081,10 @@ export default function ProjectStoryboardOverheadPage() {
                         : <FileImage className="h-7 w-7 shrink-0 text-field-primary" aria-hidden />}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-black text-field-text">{archiveDisplayName(asset)}</span>
-                        {asset.crop.relativePath ? (
-                          <span className="block truncate text-[10px] font-bold text-field-muted">{asset.crop.relativePath}</span>
-                        ) : null}
                         <span className="block text-[11px] font-bold text-field-primary underline underline-offset-2">원본 보기</span>
                       </span>
                     </button>
-                    {canEdit && activeType === "storyboard" && detectArchiveCropSourceKind({ mimeType: asset.mimeType, filename: asset.filename }) ? (
+                    {canEdit && asset.assetType === "storyboard" && detectArchiveCropSourceKind({ mimeType: asset.mimeType, filename: asset.filename }) ? (
                       <button
                         type="button"
                         onClick={(event) => {
@@ -2917,57 +2104,13 @@ export default function ProjectStoryboardOverheadPage() {
         ) : null}
       </div>
 
-      {dragPreviewItems.length > 0 ? (
-        <div
-          ref={dragPreviewRef}
-          className="pointer-events-none fixed left-0 top-0 z-[120] h-16 w-16 will-change-transform"
-          style={{
-            transform: (() => {
-              const position = archiveDragPreviewPosition(
-                longPressRef.current?.clientX ?? -200,
-                longPressRef.current?.clientY ?? -200
-              );
-              return `translate3d(${position.x}px, ${position.y}px, 0)`;
-            })()
-          }}
-          aria-hidden
-        >
-          {dragPreviewItems.slice(0, 3).map((item, index) => (
-            <div
-              key={item.key}
-              className="absolute grid h-12 w-12 place-items-center overflow-hidden border-2 border-white bg-field-soft shadow-md"
-              style={{
-                left: index * 5,
-                top: index * 5,
-                zIndex: index + 1,
-                transform: `rotate(${(index - 1) * 3}deg)`
-              }}
-            >
-              {item.kind === "asset" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={item.thumbnailUrl}
-                  alt=""
-                  draggable={false}
-                  className="h-full w-full rounded-none object-cover"
-                />
-              ) : (
-                <Folder className="h-8 w-8 fill-[#e5bd55] text-[#a97813]" aria-hidden />
-              )}
-            </div>
-          ))}
-          <span className="absolute right-0 top-0 z-10 grid min-h-6 min-w-6 place-items-center rounded-[3px] bg-[#ef8f39] px-1 text-[10px] font-black text-white shadow">
-            {dragPreviewItems.length}
-          </span>
-        </div>
-      ) : null}
-
       {pendingImport ? (
         <ArchiveImportDialog
           assetType={pendingImport.assetType}
           sourceLabel={pendingImport.sourceLabel}
           pages={pendingImport.pages}
           scenes={sceneItems}
+          allowSceneCutMetadata={false}
           initialMetadata={archiveImportInitialMetadata(pendingImport)}
           isSaving={isSaving}
           saveReport={importSaveReport}
@@ -3018,19 +2161,15 @@ export default function ProjectStoryboardOverheadPage() {
       {pendingConfirm ? (
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
           <CompactConfirm
-            message={pendingConfirm.kind === "folder"
-              ? archiveFolderDeleteMessage(
-                  pendingConfirm.folderInspection,
-                  `"${archiveBaseName(pendingConfirm.folderPath)}" 폴더`
-                )
-              : pendingConfirm.folderInspection
-                ? archiveFolderDeleteMessage(pendingConfirm.folderInspection, pendingConfirm.label)
-                : [
-                    `${pendingConfirm.label}을 삭제할까요?`,
-                    pendingConfirm.linkedAssetCount > 0
-                      ? `진행도에 연결된 파일 ${pendingConfirm.linkedAssetCount}개의 연결도 해제됩니다.`
-                      : ""
-                  ].filter(Boolean).join(" ")}
+            message={[
+              `${pendingConfirm.label}을 삭제할까요?`,
+              pendingConfirm.linkedAssetCount > 0
+                ? `진행도에 연결된 파일 ${pendingConfirm.linkedAssetCount}개의 연결도 해제됩니다.`
+                : "",
+              pendingConfirm.diagrams.length > 0
+                ? "선택한 직접 만든 부감도의 연결 정보도 함께 삭제됩니다."
+                : ""
+            ].filter(Boolean).join(" ")}
             isSaving={isSaving}
             onConfirm={() => void confirmPendingAction()}
             onCancel={() => setPendingConfirm(null)}
@@ -3042,51 +2181,13 @@ export default function ProjectStoryboardOverheadPage() {
   );
 }
 
-function FolderUploadSummary({ report }: { report: FolderUploadReport }) {
-  const issues = [
-    ...report.failed.map((issue) => ({ ...issue, kind: "실패" })),
-    ...report.skipped.map((issue) => ({ ...issue, kind: "스킵" }))
-  ];
+function ArchiveCutText({ cutNo, typeLabel }: { cutNo: string; typeLabel?: string }) {
   return (
-    <section className={`grid gap-2 border px-3 py-2 text-xs ${
-      report.verified && report.failed.length === 0
-        ? "border-field-border bg-field-soft/55 text-field-primary"
-        : "border-field-danger bg-red-50 text-field-danger"
-    }`} aria-label="폴더 업로드 결과">
-      <p className="font-black">
-        발견 {report.discoveredCount} · 지원 {report.supportedCount} · 성공 {report.uploadedCount}
-        {" · "}스킵 {report.skipped.length} · 실패 {report.failed.length}
+    <div className="flex min-w-0 items-center justify-between gap-1 px-1">
+      <p className="truncate text-[11px] font-black text-field-muted">
+        {cutNo ? `C#${cutNo}` : "컷 미지정"}
       </p>
-      <p className="font-bold">
-        {report.verified && report.failed.length === 0
-          ? "지원 파일 수와 저장 응답 수가 일치합니다."
-          : "지원 파일 수와 저장 결과를 확인해주세요."}
-      </p>
-      {issues.length > 0 ? (
-        <details className="select-text">
-          <summary className="cursor-pointer select-none font-black">실패·스킵 파일 보기 ({issues.length})</summary>
-          <ul className="mt-2 grid max-h-44 gap-1 overflow-y-auto text-[11px] leading-5">
-            {issues.map((issue, index) => (
-              <li key={`${issue.kind}-${issue.path}-${index}`}>
-                <strong>{issue.kind}</strong> · {issue.path} · {issue.reason}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-    </section>
-  );
-}
-
-function ArchiveText({ title, sceneNo, cutNo }: { title: string; sceneNo: string; cutNo: string }) {
-  return (
-    <div className="min-w-0 px-1">
-      <p className="truncate text-xs font-black text-field-text">{title}</p>
-      {sceneNo || cutNo ? (
-        <p className="truncate text-[10px] font-bold text-field-muted">
-          {[sceneNo && `S#${sceneNo}`, cutNo && `C#${cutNo}`].filter(Boolean).join(" · ")}
-        </p>
-      ) : null}
+      {typeLabel ? <span className="shrink-0 text-[10px] font-bold text-field-muted">{typeLabel}</span> : null}
     </div>
   );
 }
@@ -3368,6 +2469,124 @@ function createArchiveShot(projectId: string, item: OverheadDiagramArchiveItem |
   };
 }
 
+function dedupeArchiveAssets(assets: ProjectReferenceAsset[]) {
+  const byId = new Map<string, ProjectReferenceAsset>();
+  for (const asset of assets) byId.set(asset.id, asset);
+  return [...byId.values()];
+}
+
+function groupArchiveItemsByScene(
+  assets: ProjectReferenceAsset[],
+  diagrams: OverheadDiagramArchiveItem[],
+  scenes: ProjectSceneItem[]
+): ArchiveSceneGroup[] {
+  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]));
+  const groupsBySceneId = new Map<string, ArchiveSceneGroup>();
+  const unassigned: ArchiveSceneGroup = {
+    key: "unassigned",
+    label: "미지정",
+    scene: null,
+    items: []
+  };
+
+  for (const asset of dedupeArchiveAssets(assets)) {
+    const scene = asset.crop.sceneId ? sceneById.get(asset.crop.sceneId) ?? null : null;
+    const group = scene
+      ? groupsBySceneId.get(scene.id) ?? {
+          key: `scene-${scene.id}`,
+          label: `S#${scene.sceneNo}`,
+          scene,
+          items: []
+        }
+      : unassigned;
+    if (scene && !groupsBySceneId.has(scene.id)) groupsBySceneId.set(scene.id, group);
+    group.items.push(toArchiveAssetGroupItem(asset, scene));
+  }
+
+  const uniqueDiagrams = new Map(diagrams.map((diagram) => [diagram.id, diagram]));
+  for (const diagram of uniqueDiagrams.values()) {
+    // 직접 만든 기존 부감도에는 stable sceneId가 없으므로 sceneNo로 관계를 추측하지 않습니다.
+    unassigned.items.push(toArchiveDiagramGroupItem(diagram));
+  }
+
+  const groups = [...groupsBySceneId.values()].sort((left, right) => {
+    const sceneOrder = ARCHIVE_NATURAL_COLLATOR.compare(
+      left.scene?.sceneNo ?? "",
+      right.scene?.sceneNo ?? ""
+    );
+    if (sceneOrder !== 0) return sceneOrder;
+    const sortOrder = (left.scene?.sortOrder ?? 0) - (right.scene?.sortOrder ?? 0);
+    if (sortOrder !== 0) return sortOrder;
+    return left.key.localeCompare(right.key);
+  });
+
+  for (const group of groups) group.items.sort(compareArchiveGroupItems);
+  if (unassigned.items.length > 0) {
+    unassigned.items.sort(compareArchiveGroupItems);
+    groups.push(unassigned);
+  }
+  return groups;
+}
+
+function toArchiveAssetGroupItem(
+  asset: ProjectReferenceAsset,
+  scene: ProjectSceneItem | null
+): ArchiveGroupItem {
+  const cutLabel = asset.crop.cutNumber !== null && asset.crop.cutNumber !== undefined
+    ? String(asset.crop.cutNumber)
+    : (asset.cutNo ?? "").trim();
+  return {
+    kind: "asset",
+    id: asset.id,
+    asset,
+    cutLabel,
+    cutSortValue: validArchiveCutNumber(cutLabel, scene),
+    sortOrder: Number.isFinite(asset.sortOrder) ? asset.sortOrder : Number.MAX_SAFE_INTEGER,
+    createdAt: asset.createdAt
+  };
+}
+
+function toArchiveDiagramGroupItem(diagram: OverheadDiagramArchiveItem): ArchiveGroupItem {
+  const cutLabel = diagram.cutNo.trim();
+  return {
+    kind: "diagram",
+    id: diagram.id,
+    diagram,
+    cutLabel,
+    cutSortValue: validArchiveCutNumber(cutLabel, null),
+    sortOrder: Number.MAX_SAFE_INTEGER,
+    createdAt: diagram.createdAt
+  };
+}
+
+function validArchiveCutNumber(value: string, scene: ProjectSceneItem | null) {
+  if (!/^\d+$/.test(value)) return null;
+  const cutNumber = Number(value);
+  if (!Number.isSafeInteger(cutNumber) || cutNumber < 1) return null;
+  if (scene && (!scene.cutCount || cutNumber > scene.cutCount)) return null;
+  return cutNumber;
+}
+
+function compareArchiveGroupItems(left: ArchiveGroupItem, right: ArchiveGroupItem) {
+  const leftHasValidCut = left.cutSortValue !== null;
+  const rightHasValidCut = right.cutSortValue !== null;
+  if (leftHasValidCut !== rightHasValidCut) return leftHasValidCut ? -1 : 1;
+  if (left.cutSortValue !== null && right.cutSortValue !== null) {
+    const cutOrder = left.cutSortValue - right.cutSortValue;
+    if (cutOrder !== 0) return cutOrder;
+  }
+  const sortOrder = left.sortOrder - right.sortOrder;
+  if (sortOrder !== 0) return sortOrder;
+  const createdOrder = safeArchiveTimestamp(left.createdAt) - safeArchiveTimestamp(right.createdAt);
+  if (createdOrder !== 0) return createdOrder;
+  return left.id.localeCompare(right.id);
+}
+
+function safeArchiveTimestamp(value: string) {
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function matchesAssetQuery(asset: ProjectReferenceAsset, query: string) {
   const normalized = query.trim().toLocaleLowerCase("ko-KR");
   if (!normalized) return true;
@@ -3432,34 +2651,10 @@ function archiveImportInitialMetadata(pending: PendingImport) {
   return {
     title: pending.sourceFiles.length === 1 ? inherited.displayName : "",
     memo: sourceAsset?.crop.memo || "",
-    sceneId: inherited.sceneId,
-    sceneNo: inherited.sceneNumber,
-    // cropIndex는 컷 제안 토대일 뿐이며 컷 번호를 자동 확정하지 않습니다.
+    sceneId: "",
+    sceneNo: "",
     cutNo: ""
   };
-}
-
-function archiveDragPreviewPosition(clientX: number, clientY: number) {
-  const offset = 14;
-  if (typeof window === "undefined") return { x: clientX + offset, y: clientY + offset };
-  const previewSize = 72;
-  return {
-    x: Math.min(Math.max(8, clientX + offset), Math.max(8, window.innerWidth - previewSize)),
-    y: Math.min(Math.max(8, clientY + offset), Math.max(8, window.innerHeight - previewSize))
-  };
-}
-
-function archiveFolderDeleteMessage(
-  inspection: ProjectArchiveFolderInspection,
-  subject: string
-) {
-  return [
-    `${subject}를 삭제할까요?`,
-    `하위 폴더 ${inspection.descendantFolderCount}개, 파일 ${inspection.assetCount}개가 함께 삭제됩니다.`,
-    inspection.linkedAssetCount > 0
-      ? `진행도에 연결된 파일 ${inspection.linkedAssetCount}개의 연결도 해제됩니다.`
-      : ""
-  ].filter(Boolean).join(" ");
 }
 
 function cropPixelRatio(crop: NonNullable<ArchiveImportCommit["results"][number]["crop"]>, page: ArchiveImportPage) {
@@ -3497,126 +2692,11 @@ function cropMetadata(
   };
 }
 
-function normalizeArchiveFolderPath(value: string) {
-  return value
-    .trim()
-    .replace(/\\/g, "/")
-    .split("/")
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .join("/");
-}
-
-function cleanArchiveFolderSegment(value: string) {
-  return value.trim().replace(/[\\/]+/g, " ").replace(/\s{2,}/g, " ").slice(0, 80);
-}
-
-function joinArchiveFolderPath(parent: string, child: string) {
-  return normalizeArchiveFolderPath([parent, child].filter(Boolean).join("/"));
-}
-
-function archiveParentPath(path: string) {
-  const segments = normalizeArchiveFolderPath(path).split("/").filter(Boolean);
-  return segments.slice(0, -1).join("/");
-}
-
-function archiveBaseName(path: string) {
-  return normalizeArchiveFolderPath(path).split("/").filter(Boolean).at(-1) ?? "";
-}
-
-function archivePathPrefixes(path: string) {
-  const segments = normalizeArchiveFolderPath(path).split("/").filter(Boolean);
-  return segments.map((_, index) => segments.slice(0, index + 1).join("/"));
-}
-
-function archiveBreadcrumbs(path: string) {
-  return archivePathPrefixes(path).map((crumbPath) => ({
-    path: crumbPath,
-    label: archiveBaseName(crumbPath)
-  }));
-}
-
-function isArchivePathWithin(path: string, parent: string) {
-  const normalizedPath = normalizeArchiveFolderPath(path);
-  const normalizedParent = normalizeArchiveFolderPath(parent);
-  return normalizedPath === normalizedParent || normalizedPath.startsWith(`${normalizedParent}/`);
-}
-
-function replaceArchivePathPrefix(path: string, previous: string, next: string) {
-  const normalizedPath = normalizeArchiveFolderPath(path);
-  const normalizedPrevious = normalizeArchiveFolderPath(previous);
-  const suffix = normalizedPath.slice(normalizedPrevious.length).replace(/^\/+/, "");
-  return joinArchiveFolderPath(next, suffix);
-}
-
-function getArchiveChildFolders(
-  folders: ProjectArchiveFolder[],
-  assets: ProjectReferenceAsset[],
-  currentPath: string,
-  folderPathById: Map<string, string>
-) {
-  const childPaths = new Set<string>();
-  const prefix = currentPath ? `${currentPath}/` : "";
-  for (const folder of folders) {
-    const path = normalizeArchiveFolderPath(folder.name);
-    if (currentPath && !path.startsWith(prefix)) continue;
-    if (!currentPath && !path) continue;
-    const remainder = currentPath ? path.slice(prefix.length) : path;
-    const childName = remainder.split("/")[0];
-    if (childName) childPaths.add(joinArchiveFolderPath(currentPath, childName));
-  }
-  return [...childPaths]
-    .sort((left, right) => left.localeCompare(right, "ko-KR", { numeric: true }))
-    .map((path) => {
-      const folder = folders.find((entry) => normalizeArchiveFolderPath(entry.name) === path);
-      return {
-        id: folder?.id ?? "",
-        path,
-        name: archiveBaseName(path),
-        itemCount: assets.filter((asset) => {
-          const assetPath = folderPathById.get(asset.crop.folderId || "") ?? "";
-          return isArchivePathWithin(assetPath, path);
-        }).length
-      };
-    });
-}
-
 function archiveSelectionKey(
   kind: ArchiveSelectionKind,
   id: string
 ): ArchiveSelectionKey {
   return `${kind}:${id}`;
-}
-
-function parseArchiveSelectionKey(key: ArchiveSelectionKey) {
-  const separator = key.indexOf(":");
-  if (separator <= 0) return null;
-  const kind = key.slice(0, separator);
-  const id = key.slice(separator + 1);
-  if (
-    !id
-    || (kind !== "asset" && kind !== "diagram" && kind !== "folder")
-  ) {
-    return null;
-  }
-  return { kind: kind as ArchiveSelectionKind, id };
-}
-
-function isValidArchiveDropTarget(
-  destinationFolderId: string | null,
-  movingFolderIds: string[],
-  folders: ProjectArchiveFolder[]
-) {
-  if (!destinationFolderId || movingFolderIds.length === 0) return true;
-  if (movingFolderIds.includes(destinationFolderId)) return false;
-  const destination = folders.find((folder) => folder.id === destinationFolderId);
-  if (!destination) return false;
-  const destinationPath = normalizeArchiveFolderPath(destination.name);
-  return movingFolderIds.every((folderId) => {
-    const source = folders.find((folder) => folder.id === folderId);
-    if (!source) return false;
-    return !isArchivePathWithin(destinationPath, normalizeArchiveFolderPath(source.name));
-  });
 }
 
 function isPdfFile(file: File) {
