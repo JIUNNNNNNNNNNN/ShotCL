@@ -18,6 +18,8 @@ export type DailyPlanCarouselItem = {
   kind: "new" | "plan";
   label: string;
   dateLabel?: string;
+  metaLabel?: string;
+  progressPercent?: number;
   ariaLabel?: string;
   planId?: string;
 };
@@ -26,7 +28,8 @@ type DailyPlanCoverflowProps = {
   items: DailyPlanCarouselItem[];
   disabled?: boolean;
   onActivate: (item: DailyPlanCarouselItem) => boolean | void;
-  onOpenContextMenu: (item: DailyPlanCarouselItem, clientX: number, clientY: number) => void;
+  onOpenContextMenu?: (item: DailyPlanCarouselItem, clientX: number, clientY: number) => void;
+  ariaLabel?: string;
 };
 
 type PointerSession = {
@@ -76,7 +79,8 @@ export function DailyPlanCoverflow({
   items,
   disabled = false,
   onActivate,
-  onOpenContextMenu
+  onOpenContextMenu,
+  ariaLabel = "일촬표 선택 카드"
 }: DailyPlanCoverflowProps) {
   const [activeItemKey, setActiveItemKey] = useState("");
   const [interactionPhase, setInteractionPhase] = useState<InteractionPhase>("idle");
@@ -502,7 +506,7 @@ export function DailyPlanCoverflow({
       longPressed: false
     };
 
-    if (event.pointerType !== "mouse" && item) {
+    if (event.pointerType !== "mouse" && item?.kind === "plan" && onOpenContextMenu) {
       longPressTimerRef.current = window.setTimeout(() => {
         const current = pointerSessionRef.current;
         if (!current || current.pointerId !== event.pointerId || current.intent !== "pending") return;
@@ -510,7 +514,7 @@ export function DailyPlanCoverflow({
         markGeneratedClickForSuppression();
         cancelMotion();
         clearActivationIntent();
-        if (item.kind === "plan") onOpenContextMenu(item, current.clientX, current.clientY);
+        onOpenContextMenu(item, current.clientX, current.clientY);
       }, LONG_PRESS_MS);
     }
   }
@@ -619,7 +623,7 @@ export function DailyPlanCoverflow({
     event.preventDefault();
     cancelMotion();
     clearActivationIntent();
-    if (item.kind !== "plan" || disabled || pointerSessionRef.current?.intent === "horizontal") return;
+    if (!onOpenContextMenu || item.kind !== "plan" || disabled || pointerSessionRef.current?.intent === "horizontal") return;
     const current = pointerSessionRef.current;
     if (current?.intent === "pending") {
       current.longPressed = true;
@@ -632,6 +636,7 @@ export function DailyPlanCoverflow({
   function handleCardKeyDown(event: KeyboardEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
     if (item.kind === "plan" && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
       event.preventDefault();
+      if (!onOpenContextMenu) return;
       cancelMotion();
       clearActivationIntent();
       const rect = event.currentTarget.getBoundingClientRect();
@@ -675,7 +680,7 @@ export function DailyPlanCoverflow({
       data-interaction-phase={interactionPhase}
       role="region"
       aria-roledescription="순환 캐러셀"
-      aria-label="일촬표 선택 카드"
+      aria-label={ariaLabel}
     >
       <div
         ref={selectionSlotRef}
@@ -733,6 +738,11 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
   onContextMenu,
   onKeyDown
 }, ref) {
+  const progressPercent = clamp(item.progressPercent ?? 0, 0, 100);
+  const titleParts = item.kind === "plan"
+    ? [item.label, item.dateLabel ?? "날짜 미정", item.metaLabel].filter(Boolean)
+    : [];
+
   return (
     <button
       ref={ref}
@@ -753,20 +763,35 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
           ? "text-5xl font-light leading-none text-field-primary"
           : "text-lg font-black leading-[1.35] text-field-primary md:text-xl"
       }`}
-      title={item.kind === "plan" ? `${item.label} · ${item.dateLabel ?? "날짜 미정"}` : undefined}
+      title={titleParts.length > 0 ? titleParts.join(" · ") : undefined}
       onClick={(event) => onClick(event, item)}
       onContextMenu={(event) => onContextMenu(event, item)}
       onKeyDown={(event) => onKeyDown(event, item)}
     >
       {item.kind === "new" ? (
-        <span className="block max-w-full truncate">+</span>
+        <span className="relative z-[1] block max-w-full truncate">+</span>
       ) : (
-        <span className="grid max-w-full gap-2">
-          <span className="block max-w-full truncate">{item.label}</span>
-          <span className="block whitespace-nowrap text-sm font-bold leading-[1.35] tabular-nums text-field-muted md:text-[15px]">
-            {item.dateLabel ?? "날짜 미정"}
+        <>
+          {item.progressPercent !== undefined ? (
+            <span
+              aria-hidden="true"
+              data-progress-fill
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-field-primary/20 transition-[height] duration-300 ease-out motion-reduce:transition-none"
+              style={{ height: `${progressPercent}%` }}
+            />
+          ) : null}
+          <span className="relative z-[1] grid max-w-full gap-2">
+            <span className="block max-w-full truncate">{item.label}</span>
+            <span className="block whitespace-nowrap text-sm font-bold leading-[1.35] tabular-nums text-field-muted md:text-[15px]">
+              {item.dateLabel ?? "날짜 미정"}
+            </span>
+            {item.metaLabel ? (
+              <span className="block whitespace-nowrap text-sm font-black leading-[1.35] tabular-nums text-field-primary md:text-[15px]">
+                {item.metaLabel}
+              </span>
+            ) : null}
           </span>
-        </span>
+        </>
       )}
     </button>
   );

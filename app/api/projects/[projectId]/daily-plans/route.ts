@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     ] = await Promise.all([
       supabase.from("daily_plans").select(dailyPlanListColumns).eq("project_id", projectId).order("updated_at", { ascending: false }),
       supabase.from("daily_plan_shots").select("daily_plan_id,scene_number").eq("project_id", projectId),
-      supabase.from("shots").select("daily_plan_id,status").eq("project_id", projectId)
+      supabase.from("shots").select("id,daily_plan_id,status").eq("project_id", projectId)
     ]);
     if (planError) throw planError;
     if (dailyPlanShotError) throw dailyPlanShotError;

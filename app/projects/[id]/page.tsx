@@ -3,8 +3,9 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarDays, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeft, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
+import { DailyPlanCoverflow, type DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
@@ -25,10 +26,12 @@ import { applyShotMediaLinks, loadShotMediaLinks } from "@/lib/data/shotMediaArc
 import { listDailyPlans, updateDailyPlanScheduleItem, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
+import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
+import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dailyPlan/dateOnly";
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
-import { calculateDailyProgress, isProcessedCutStatus } from "@/lib/progress/dailyProgress";
+import { calculateDailyProgress, calculateProgressPercent, isProcessedCutStatus } from "@/lib/progress/dailyProgress";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
@@ -560,7 +563,7 @@ export default function ProjectDetailPage() {
         </details> : <span className="rounded-[3px] border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도</span>}
       </div>
 
-      <Link href={`/projects/${project.id}`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
         <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
       </Link>
 
@@ -738,77 +741,93 @@ function EpisodeSelection({
   invalidSelection: boolean;
   canEdit: boolean;
 }) {
+  const router = useRouter();
+  const navigationLockedRef = useRef(false);
+  const navigationUnlockTimerRef = useRef<number | null>(null);
+  const sortedPlans = useMemo(() => [...plans].sort(compareDailyPlanEpisodes), [plans]);
+  const carouselItems = useMemo<DailyPlanCarouselItem[]>(() => sortedPlans.map((plan) => {
+    const episodeLabel = formatDailyPlanEpisodeLabel(plan.episode);
+    const dateLabel = formatDailyPlanCardDate(plan.shootingDate);
+    const totalCuts = plan.progressTotal;
+    const progressPercent = calculateProgressPercent(totalCuts, plan.progressCompleted);
+    return {
+      id: `progress-daily-plan:${plan.id}`,
+      kind: "plan",
+      label: episodeLabel,
+      dateLabel,
+      metaLabel: `총 ${totalCuts}컷`,
+      progressPercent,
+      ariaLabel: `${episodeLabel}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}, 총 ${totalCuts}컷, 진행률 ${progressPercent}퍼센트`,
+      planId: plan.id
+    };
+  }), [sortedPlans]);
+
+  useEffect(() => () => {
+    if (navigationUnlockTimerRef.current !== null) {
+      window.clearTimeout(navigationUnlockTimerRef.current);
+    }
+  }, []);
+
+  function handleActivatePlan(item: DailyPlanCarouselItem) {
+    if (!item.planId || navigationLockedRef.current) return false;
+    navigationLockedRef.current = true;
+    try {
+      router.push(`/projects/${project.id}?dailyPlanId=${encodeURIComponent(item.planId)}`);
+      navigationUnlockTimerRef.current = window.setTimeout(() => {
+        navigationLockedRef.current = false;
+        navigationUnlockTimerRef.current = null;
+      }, 1_500);
+      return true;
+    } catch {
+      navigationLockedRef.current = false;
+      return false;
+    }
+  }
+
   return (
-    <main className="mx-auto w-full max-w-3xl pb-12">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <p className="max-w-[45vw] truncate rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-primary">
-            <span className="font-display">{project.name}</span>
-          </p>
-          <p className="truncate text-xs font-bold text-field-muted">진행할 회차 선택</p>
-        </div>
-        {canEdit ? (
-          <details className="group relative shrink-0">
-            <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
-              <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
-            </summary>
-            <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
-              <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
-                <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
-              </Link>
-              <details className="group/settings">
-                <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
-                  <span className="font-display"><span className="inline-flex items-center gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span></span>
-                </summary>
-                <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
-                  <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
-                  <p>현재 권한: admin</p>
-                  <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
-                  <p>실제 삭제는 아직 지원하지 않습니다.</p>
-                </div>
-              </details>
-            </div>
-          </details>
-        ) : null}
-      </div>
-
-      {invalidSelection ? <p className="mb-4 rounded-[3px] border border-field-danger/40 bg-white px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
-
-      {plans.length === 0 ? (
-        <section className="rounded-[2rem] border border-field-border bg-white px-6 py-10 text-center">
-          <CalendarDays className="mx-auto h-9 w-9 text-field-secondary" aria-hidden />
-          <h1 className="mt-3 text-lg font-black text-field-primary">아직 오늘의 진행표가 없습니다</h1>
-          <p className="mt-2 text-sm font-bold leading-6 text-field-muted">일촬표를 작성하면 회차별 진행률이 생성됩니다.</p>
-        </section>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {plans.map((plan, index) => {
-            const total = plan.progressTotal || plan.shotCount;
-            const completed = plan.progressCompleted;
-            const progress = total === 0 ? 0 : Math.round((completed / total) * 100);
-            return (
-              <Link
-                key={plan.id}
-                href={`/projects/${project.id}?dailyPlanId=${encodeURIComponent(plan.id)}`}
-                className="group rounded-[2rem] border border-field-border bg-white p-5 transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-light active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="truncate text-lg font-black text-field-primary">
-                      <span className="font-display">{formatEpisodeLabel(plan, index)}</span>
-                    </h2>
-                    <p className="mt-1 text-xs font-bold text-field-muted">{plan.shootingDate || "촬영일 미정"}</p>
+    <main className="flex min-h-[calc(100dvh-8rem)] min-w-0 items-start justify-center overflow-x-clip pb-12 pt-4 md:pt-7">
+      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
+        <div className="relative flex w-full min-w-0 items-start justify-center px-14">
+          <h1 className="max-w-full truncate text-center text-xl font-black leading-[1.35] text-field-primary md:text-2xl" title={project.name}>
+            {project.name}
+          </h1>
+          {canEdit ? (
+            <details className="group absolute right-1 top-0 shrink-0 md:right-3">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
+                <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
+              </summary>
+              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
+                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
+                  <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
+                </Link>
+                <details className="group/settings">
+                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
+                    <span className="font-display"><span className="inline-flex items-center gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span></span>
+                  </summary>
+                  <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
+                    <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
+                    <p>현재 권한: admin</p>
+                    <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
+                    <p>실제 삭제는 아직 지원하지 않습니다.</p>
                   </div>
-                  <div className="grid h-14 w-14 shrink-0 place-items-center rounded-[3px] border border-field-border bg-field-light text-sm font-black text-field-primary">{progress}%</div>
-                </div>
-                <div className="mt-4 flex items-center justify-between rounded-[3px] border border-field-border bg-field-soft/60 px-4 py-2 text-xs font-black">
-                  {total > 0 ? <><span className="text-field-primary">총 {total}컷</span><span className="text-field-muted">완료 {completed}컷</span></> : <span className="w-full text-center text-field-muted">컷 없음 · 일촬표에서 컷수를 입력하세요</span>}
-                </div>
-              </Link>
-            );
-          })}
+                </details>
+              </div>
+            </details>
+          ) : null}
         </div>
-      )}
+
+        {invalidSelection ? <p className="mt-3 border border-field-danger/40 bg-white px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
+
+        {carouselItems.length === 0 ? (
+          <p className="mt-8 text-center text-sm font-bold text-field-muted">진행 가능한 일촬표가 없습니다.</p>
+        ) : (
+          <DailyPlanCoverflow
+            items={carouselItems}
+            onActivate={handleActivatePlan}
+            ariaLabel="진행도 회차 선택 카드"
+          />
+        )}
+      </div>
     </main>
   );
 }

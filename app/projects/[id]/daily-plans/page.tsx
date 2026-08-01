@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/Card";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { deleteDailyPlan, duplicateDailyPlan, listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
+import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
 import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dailyPlan/dateOnly";
 import type { DailyPlan, Project } from "@/lib/types";
 
@@ -67,9 +68,9 @@ export default function DailyPlansPage() {
     ...sortedPlans.map((plan) => ({
       id: `daily-plan:${plan.id}`,
       kind: "plan" as const,
-      label: formatEpisodeLabel(plan.episode),
+      label: formatDailyPlanEpisodeLabel(plan.episode),
       dateLabel: formatDailyPlanCardDate(plan.shootingDate),
-      ariaLabel: `${formatEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}`,
+      ariaLabel: `${formatDailyPlanEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}`,
       planId: plan.id
     }))
   ], [canManage, sortedPlans]);
@@ -222,7 +223,7 @@ export default function DailyPlansPage() {
     setDeleteErrorMessage("");
     setPendingDeleteItem({
       dailyPlanId: plan.id,
-      episodeLabel: formatEpisodeLabel(plan.episode)
+      episodeLabel: formatDailyPlanEpisodeLabel(plan.episode)
     });
   }
 
@@ -325,7 +326,7 @@ function DailyPlanContextMenu({
     <div
       ref={menuRef}
       role="menu"
-      aria-label={`${formatEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
+      aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
       className="fixed z-[100] grid w-[232px] gap-1 rounded-[3px] border border-field-border bg-white p-1.5 shadow-lg"
       style={{ left: menu.x, top: menu.y }}
     >
@@ -414,22 +415,4 @@ function DailyPlanDeleteDialog({
       </div>
     </div>
   );
-}
-
-function formatEpisodeLabel(value: string) {
-  const normalized = String(value ?? "").trim();
-  if (!normalized) return "회차 미입력";
-  if (/회차$/u.test(normalized)) return normalized;
-  const number = normalized.match(/\d+(?:\.\d+)?/u)?.[0];
-  return number ? `${number}회차` : `${normalized}회차`;
-}
-
-function compareDailyPlanEpisodes(left: DailyPlanListItem, right: DailyPlanListItem) {
-  const leftNumber = Number(left.episode.match(/\d+(?:\.\d+)?/u)?.[0]);
-  const rightNumber = Number(right.episode.match(/\d+(?:\.\d+)?/u)?.[0]);
-  const leftHasNumber = Number.isFinite(leftNumber);
-  const rightHasNumber = Number.isFinite(rightNumber);
-  if (leftHasNumber && rightHasNumber && leftNumber !== rightNumber) return leftNumber - rightNumber;
-  if (leftHasNumber !== rightHasNumber) return leftHasNumber ? -1 : 1;
-  return left.episode.localeCompare(right.episode, "ko-KR", { numeric: true, sensitivity: "base" });
 }

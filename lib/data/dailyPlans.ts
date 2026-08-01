@@ -11,6 +11,7 @@ import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
+import { calculateDailyProgressByPlan } from "@/lib/progress/dailyProgress";
 import type {
   DailyPlan,
   DailyPlanDraft,
@@ -193,7 +194,7 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
         plans: Record<string, unknown>[];
         shotPlanIds: string[];
         dailyPlanShots?: Array<{ daily_plan_id?: unknown; scene_number?: unknown }>;
-        progressShots?: Array<{ daily_plan_id?: unknown; status?: unknown }>;
+        progressShots?: Array<{ id?: unknown; daily_plan_id?: unknown; status?: unknown }>;
       };
       const counts = new Map<string, number>();
       payload.shotPlanIds.forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1));
@@ -228,7 +229,7 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
       { data: progressRows, error: progressError }
     ] = await Promise.all([
       supabase.from("daily_plan_shots").select("daily_plan_id,scene_number").eq("project_id", projectId),
-      supabase.from("shots").select("daily_plan_id,status").eq("project_id", projectId)
+      supabase.from("shots").select("id,daily_plan_id,status").eq("project_id", projectId)
     ]);
     if (shotError) throw shotError;
     if (progressError) throw progressError;
@@ -251,6 +252,7 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
     shots
       .filter((shot) => shot.projectId === projectId)
       .map((shot) => ({
+        id: shot.id,
         daily_plan_id: shot.dailyPlanId,
         status: shot.status
       }))
@@ -287,17 +289,19 @@ function collectSceneNumbersByPlan(
   return new Map([...byPlan].map(([dailyPlanId, values]) => [dailyPlanId, [...values]]));
 }
 
-function summarizeProgressRows(rows: Array<{ daily_plan_id?: unknown; status?: unknown }>) {
-  const summaries = new Map<string, { total: number; completed: number }>();
-  rows.forEach((row) => {
-    const dailyPlanId = String(row.daily_plan_id ?? "");
-    if (!dailyPlanId) return;
-    const current = summaries.get(dailyPlanId) ?? { total: 0, completed: 0 };
-    current.total += 1;
-    if (row.status === "ok" || row.status === "omit") current.completed += 1;
-    summaries.set(dailyPlanId, current);
-  });
-  return summaries;
+function summarizeProgressRows(rows: Array<{ id?: unknown; daily_plan_id?: unknown; status?: unknown }>) {
+  const progressByPlan = calculateDailyProgressByPlan(rows.map((row, index) => {
+    const dailyPlanId = String(row.daily_plan_id ?? "").trim();
+    return {
+      id: String(row.id ?? `${dailyPlanId}:summary-row:${index}`),
+      dailyPlanId,
+      status: row.status
+    };
+  }));
+  return new Map([...progressByPlan].map(([dailyPlanId, summary]) => [dailyPlanId, {
+    total: summary.totalCutCount,
+    completed: summary.processedCutCount
+  }]));
 }
 
 /** 일촬표와 컷 행을 함께 가져옵니다. */
