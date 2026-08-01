@@ -25,8 +25,13 @@ type PickerAsset = {
   sceneNo: string;
   cutNo: string;
   publicUrl: string | null;
+  thumbnailUrl: string | null;
   diagram: OverheadDiagramArchiveItem["diagram"] | null;
+  sortOrder: number;
+  createdAt: string;
 };
+
+const ARCHIVE_PICKER_COLLATOR = new Intl.Collator("ko-KR", { numeric: true, sensitivity: "base" });
 
 export function ShotArchivePicker({
   shot,
@@ -61,7 +66,8 @@ export function ShotArchivePicker({
     ]).then(([references, diagrams]) => {
       if (!active) return;
       const referenceAssets = references
-        .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
+        .filter((asset) => isPickerImage(asset) && !asset.groupId?.startsWith("source:"))
+        .sort(compareReferencePickerAssets)
         .map(referencePickerAsset);
       const diagramAssets = diagrams.map(diagramPickerAsset);
       setAssets([...diagramAssets, ...referenceAssets]);
@@ -168,7 +174,13 @@ export function ShotArchivePicker({
                     <div className="grid aspect-[4/3] w-full place-items-center bg-field-soft">
                       {asset.publicUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={asset.publicUrl} alt={asset.title} className="block h-full w-full rounded-none object-contain" />
+                        <img
+                          src={asset.thumbnailUrl || asset.publicUrl}
+                          alt={asset.title}
+                          loading="lazy"
+                          decoding="async"
+                          className="block h-full w-full rounded-none object-contain"
+                        />
                       ) : asset.diagram ? (
                         <ShotOverheadPreview diagram={asset.diagram} label={`${asset.title} 부감도`} />
                       ) : null}
@@ -198,7 +210,10 @@ function referencePickerAsset(asset: ProjectReferenceAsset): PickerAsset {
     sceneNo: asset.sceneNo || "",
     cutNo: asset.cutNo || "",
     publicUrl: asset.publicUrl,
-    diagram: null
+    thumbnailUrl: asset.crop.thumbnailUrl || null,
+    diagram: null,
+    sortOrder: Number.isSafeInteger(asset.sortOrder) && asset.sortOrder > 0 ? asset.sortOrder : 0,
+    createdAt: asset.createdAt
   };
 }
 
@@ -211,6 +226,32 @@ function diagramPickerAsset(asset: OverheadDiagramArchiveItem): PickerAsset {
     sceneNo: asset.sceneNo,
     cutNo: asset.cutNo,
     publicUrl: null,
-    diagram: asset.diagram
+    thumbnailUrl: null,
+    diagram: asset.diagram,
+    sortOrder: Number.MAX_SAFE_INTEGER,
+    createdAt: asset.createdAt
   };
+}
+
+function compareReferencePickerAssets(left: ProjectReferenceAsset, right: ProjectReferenceAsset) {
+  const sceneOrder = ARCHIVE_PICKER_COLLATOR.compare(
+    left.crop.sceneNumber || left.sceneNo || "",
+    right.crop.sceneNumber || right.sceneNo || ""
+  );
+  if (sceneOrder !== 0) return sceneOrder;
+  const leftCut = Number(left.crop.cutNumber ?? left.cutNo);
+  const rightCut = Number(right.crop.cutNumber ?? right.cutNo);
+  const safeLeftCut = Number.isSafeInteger(leftCut) && leftCut > 0 ? leftCut : Number.MAX_SAFE_INTEGER;
+  const safeRightCut = Number.isSafeInteger(rightCut) && rightCut > 0 ? rightCut : Number.MAX_SAFE_INTEGER;
+  if (safeLeftCut !== safeRightCut) return safeLeftCut - safeRightCut;
+  const leftOrder = Number.isSafeInteger(left.sortOrder) && left.sortOrder > 0 ? left.sortOrder : 0;
+  const rightOrder = Number.isSafeInteger(right.sortOrder) && right.sortOrder > 0 ? right.sortOrder : 0;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  const createdOrder = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+  if (Number.isFinite(createdOrder) && createdOrder !== 0) return createdOrder;
+  return left.id.localeCompare(right.id);
+}
+
+function isPickerImage(asset: ProjectReferenceAsset) {
+  return asset.mimeType.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(asset.filename);
 }

@@ -399,6 +399,82 @@ export async function updateProjectReferenceAsset(
   return payload.asset;
 }
 
+export type ProjectReferenceAssetOrderUpdate = {
+  id: string;
+  sortOrder: number;
+  updatedAt?: string;
+};
+
+export type ProjectReferenceAssetSceneCutUpdateResult = {
+  asset: {
+    id: string;
+    sceneId: string | null;
+    sceneNumber: string;
+    cutNumber: number | null;
+    sortOrder: number;
+    updatedAt: string;
+  };
+  orders: ProjectReferenceAssetOrderUpdate[];
+};
+
+/**
+ * 아카이브 우클릭 정보창 전용 경량 mutation입니다.
+ * 이미지나 Storage 메타데이터는 보내지 않고 scene/cut 식별값만 변경합니다.
+ */
+export async function updateProjectReferenceAssetSceneCut(
+  projectId: string,
+  id: string,
+  input: {
+    sceneId: string | null;
+    cutNumber: number | null;
+    expectedUpdatedAt?: string;
+  }
+): Promise<ProjectReferenceAssetSceneCutUpdateResult> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "update_scene_cut",
+      id,
+      sceneId: input.sceneId,
+      cutNumber: input.cutNumber,
+      expectedUpdatedAt: input.expectedUpdatedAt
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    asset?: ProjectReferenceAssetSceneCutUpdateResult["asset"];
+    orders?: ProjectReferenceAssetOrderUpdate[];
+  };
+  if (!response.ok || !payload.asset) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료의 씬·컷을 저장하지 못했습니다.");
+  }
+  return { asset: payload.asset, orders: payload.orders ?? [] };
+}
+
+/** 같은 씬·컷에 속한 모든 이미지의 순서를 한 요청으로 저장합니다. */
+export async function reorderProjectReferenceAssets(
+  projectId: string,
+  input: {
+    sceneId: string | null;
+    cutNumber: number | null;
+    orderedAssetIds: string[];
+    expectedUpdatedAtById?: Record<string, string>;
+  }
+): Promise<ProjectReferenceAssetOrderUpdate[]> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "reorder_cut_assets", ...input })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    orders?: ProjectReferenceAssetOrderUpdate[];
+  };
+  if (!response.ok || !payload.orders) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 순서를 저장하지 못했습니다.");
+  }
+  return payload.orders;
+}
+
 export async function deleteProjectReferenceAsset(projectId: string, id: string) {
   const response = await fetchArchiveApi(
     `/api/projects/${encodeURIComponent(projectId)}/reference-assets?id=${encodeURIComponent(id)}`,

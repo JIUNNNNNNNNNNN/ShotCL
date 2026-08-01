@@ -45,6 +45,32 @@ type ReferenceMediaLinkTypeUpdate = {
   nextShotRef: string;
   nextData: Record<string, unknown>;
 };
+type ReferenceAssetPatchBody = {
+  id?: unknown;
+  ids?: unknown;
+  orderedAssetIds?: unknown;
+  operation?: unknown;
+  folderId?: unknown;
+  groupId?: unknown;
+  crop?: unknown;
+  title?: unknown;
+  memo?: unknown;
+  sceneNo?: unknown;
+  cutNo?: unknown;
+  displayName?: unknown;
+  episodeNumber?: unknown;
+  sceneId?: unknown;
+  sceneNumber?: unknown;
+  cutNumber?: unknown;
+  cropIndex?: unknown;
+  assetType?: unknown;
+  sortOrder?: unknown;
+  scenarioScenes?: unknown;
+  scenarioParseError?: unknown;
+  reanalyzeScenario?: unknown;
+  expectedUpdatedAt?: unknown;
+  expectedUpdatedAtById?: unknown;
+};
 
 const STORAGE_BUCKET = "storyboards";
 const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,scenario_scenes,scenario_parse_error,sort_order,created_at,updated_at";
@@ -726,29 +752,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if ((await getMaterialRole(request, projectId)) !== "admin") {
       return NextResponse.json({ error: "자료 수정은 Key staff만 할 수 있습니다." }, { status: 403 });
     }
-    const body = (await request.json()) as {
-      id?: unknown;
-      ids?: unknown;
-      operation?: unknown;
-      folderId?: unknown;
-      groupId?: unknown;
-      crop?: unknown;
-      title?: unknown;
-      memo?: unknown;
-      sceneNo?: unknown;
-      cutNo?: unknown;
-      displayName?: unknown;
-      episodeNumber?: unknown;
-      sceneId?: unknown;
-      sceneNumber?: unknown;
-      cutNumber?: unknown;
-      cropIndex?: unknown;
-      assetType?: unknown;
-      sortOrder?: unknown;
-      scenarioScenes?: unknown;
-      scenarioParseError?: unknown;
-      reanalyzeScenario?: unknown;
-    };
+    const body = (await request.json()) as ReferenceAssetPatchBody;
     const supabase = requireProjectAccessDb();
     if (body.operation === "move_many") {
       const ids = normalizeIds(body.ids);
@@ -809,6 +813,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ].filter(Boolean).join(" · "));
       }
       return NextResponse.json({ ok: true, moved: ids.length, folderId });
+    }
+
+    if (body.operation === "update_scene_cut") {
+      return updateReferenceAssetSceneCut(supabase, projectId, body);
+    }
+
+    if (body.operation === "reorder_cut_assets") {
+      return reorderReferenceAssetsInCut(supabase, projectId, body);
     }
 
     const id = cleanText(body.id, 100);
@@ -1039,6 +1051,308 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (error) {
     return materialError(error, "자료 설정을 저장하지 못했습니다.");
   }
+}
+
+async function updateReferenceAssetSceneCut(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: ReferenceAssetPatchBody
+) {
+  const id = cleanText(body.id, 100);
+  if (!id) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
+
+  const sceneId = cleanText(body.sceneId, 100) || null;
+  const parsedCut = parseArchiveCutNumber(body.cutNumber);
+  if (parsedCut.error) return NextResponse.json({ error: parsedCut.error }, { status: 400 });
+  if (parsedCut.value !== null && !sceneId) {
+    return NextResponse.json({ error: "컷을 설정하려면 씬을 먼저 선택해주세요." }, { status: 400 });
+  }
+
+  const resolvedScene = await resolveProjectScene(supabase, projectId, sceneId ?? "");
+  if (sceneId && !resolvedScene) {
+    return NextResponse.json({ error: "선택한 씬을 찾을 수 없습니다." }, { status: 400 });
+  }
+  if (resolvedScene && parsedCut.value !== null && !resolvedScene.cutCount) {
+    return NextResponse.json({ error: "선택한 씬의 총 컷수를 먼저 입력해주세요." }, { status: 400 });
+  }
+  if (
+    resolvedScene?.cutCount
+    && parsedCut.value !== null
+    && parsedCut.value > resolvedScene.cutCount
+  ) {
+    return NextResponse.json(
+      { error: `선택한 씬의 총 컷수 ${resolvedScene.cutCount}를 초과했습니다.` },
+      { status: 400 }
+    );
+  }
+
+  const rows = await listOrderableArchiveRows(supabase, projectId);
+  const existing = rows.find((row) => String(row.id ?? "") === id);
+  if (!existing) {
+    return NextResponse.json({ error: "수정할 이미지 자료를 찾을 수 없습니다." }, { status: 404 });
+  }
+  const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 100);
+  if (expectedUpdatedAt && expectedUpdatedAt !== String(existing.updated_at ?? "")) {
+    return NextResponse.json(
+      { error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요." },
+      { status: 409 }
+    );
+  }
+
+  const previousGroup = archiveOrderGroupFromRow(existing);
+  const nextGroup: ArchiveOrderGroup = { sceneId, cutNumber: parsedCut.value };
+  const sameGroup = sameArchiveOrderGroup(previousGroup, nextGroup);
+  const nextRows = rows
+    .filter((row) => String(row.id ?? "") !== id && rowMatchesArchiveOrderGroup(row, nextGroup))
+    .sort(compareArchiveOrderRows);
+  const nextCrop = normalizeCrop({
+    ...normalizeCrop(existing.crop_data),
+    sceneId,
+    sceneNumber: resolvedScene?.sceneNo || "",
+    cutNumber: parsedCut.value
+  });
+  const targetMaxOrder = nextRows.reduce(
+    (maximum, row) => Math.max(maximum, positiveArchiveOrder(row.sort_order) ?? 0),
+    0
+  );
+  const storedOrder = Number(existing.sort_order ?? 0);
+  const movedOrder = sameGroup
+    ? Number.isSafeInteger(storedOrder) ? storedOrder : 0
+    : targetMaxOrder + 1;
+  let updateQuery = supabase
+    .from("project_reference_assets")
+    .update({
+      crop_data: nextCrop,
+      scene_no: resolvedScene?.sceneNo || null,
+      cut_no: parsedCut.value === null ? null : String(parsedCut.value),
+      sort_order: movedOrder
+    })
+    .eq("id", id)
+    .eq("project_id", projectId);
+  if (expectedUpdatedAt) updateQuery = updateQuery.eq("updated_at", expectedUpdatedAt);
+  const { data: moved, error } = await updateQuery
+    .select("id,crop_data,scene_no,cut_no,sort_order,updated_at")
+    .maybeSingle();
+  if (error) throw error;
+  if (!moved && expectedUpdatedAt) {
+    return NextResponse.json(
+      { error: "다른 화면에서 자료가 먼저 수정되었습니다. 다시 열어 확인해주세요." },
+      { status: 409 }
+    );
+  }
+  if (!moved) throw new Error("수정한 자료의 저장 결과를 확인하지 못했습니다.");
+  const movedRow = moved as Record<string, unknown>;
+  const movedCrop = normalizeCrop(movedRow.crop_data);
+  return NextResponse.json({
+    ok: true,
+    asset: {
+      id,
+      sceneId: cleanText(movedCrop.sceneId, 100) || null,
+      sceneNumber: cleanText(movedCrop.sceneNumber, 100),
+      cutNumber: nullablePositiveInteger(movedCrop.cutNumber),
+      sortOrder: positiveArchiveOrder(movedRow.sort_order) ?? movedOrder,
+      updatedAt: String(movedRow.updated_at ?? "")
+    },
+    orders: [{ id, sortOrder: positiveArchiveOrder(movedRow.sort_order) ?? movedOrder }]
+  });
+}
+
+async function reorderReferenceAssetsInCut(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: ReferenceAssetPatchBody
+) {
+  const sceneId = cleanText(body.sceneId, 100) || null;
+  const parsedCut = parseArchiveCutNumber(body.cutNumber);
+  if (parsedCut.error) return NextResponse.json({ error: parsedCut.error }, { status: 400 });
+  if (parsedCut.value !== null && !sceneId) {
+    return NextResponse.json({ error: "컷 순서 범위가 올바르지 않습니다." }, { status: 400 });
+  }
+  const orderedAssetIds = normalizeOrderedAssetIds(body.orderedAssetIds);
+  if (orderedAssetIds.error) {
+    return NextResponse.json({ error: orderedAssetIds.error }, { status: 400 });
+  }
+
+  const resolvedScene = await resolveProjectScene(supabase, projectId, sceneId ?? "");
+  if (sceneId && !resolvedScene) {
+    return NextResponse.json({ error: "순서를 바꿀 씬을 찾을 수 없습니다." }, { status: 400 });
+  }
+  if (
+    resolvedScene?.cutCount
+    && parsedCut.value !== null
+    && parsedCut.value > resolvedScene.cutCount
+  ) {
+    return NextResponse.json({ error: "순서를 바꿀 컷 범위가 올바르지 않습니다." }, { status: 400 });
+  }
+
+  const rows = await listOrderableArchiveRows(supabase, projectId);
+  const group: ArchiveOrderGroup = { sceneId, cutNumber: parsedCut.value };
+  const scopedRows = rows.filter((row) => rowMatchesArchiveOrderGroup(row, group));
+  const scopedIds = scopedRows.map((row) => String(row.id ?? ""));
+  if (!sameStringSet(scopedIds, orderedAssetIds.value)) {
+    return NextResponse.json(
+      { error: "같은 씬·컷의 전체 이미지 순서가 일치하지 않습니다. 화면을 다시 확인해주세요." },
+      { status: 409 }
+    );
+  }
+  const expectedUpdatedAtById = objectValue(body.expectedUpdatedAtById);
+  if (Object.keys(expectedUpdatedAtById).length > 0) {
+    const expectedIds = Object.keys(expectedUpdatedAtById);
+    const stale = !sameStringSet(scopedIds, expectedIds) || scopedRows.some((row) => (
+      String(expectedUpdatedAtById[String(row.id ?? "")] ?? "") !== String(row.updated_at ?? "")
+    ));
+    if (stale) {
+      return NextResponse.json(
+        { error: "다른 화면에서 이 씬·컷 순서가 먼저 변경되었습니다. 다시 시도해주세요." },
+        { status: 409 }
+      );
+    }
+  }
+
+  const rowById = new Map(scopedRows.map((row) => [String(row.id ?? ""), row]));
+  const updates = orderedAssetIds.value.map((id, index) => (
+    toReferenceAssetUpsertRow(rowById.get(id)!, { sort_order: index + 1 })
+  ));
+  const { data, error } = await supabase
+    .from("project_reference_assets")
+    .upsert(updates, { onConflict: "id" })
+    .select("id,sort_order,updated_at");
+  if (error) throw error;
+  if ((data ?? []).length !== updates.length) {
+    throw new Error("자료 순서 저장 결과 일부를 확인하지 못했습니다.");
+  }
+  const savedOrder = new Map(
+    ((data ?? []) as Array<Record<string, unknown>>).map((row) => [
+      String(row.id ?? ""),
+      {
+        sortOrder: positiveArchiveOrder(row.sort_order) ?? 1,
+        updatedAt: String(row.updated_at ?? "")
+      }
+    ])
+  );
+  return NextResponse.json({
+    ok: true,
+    orders: orderedAssetIds.value.map((id, index) => ({
+      id,
+      sortOrder: savedOrder.get(id)?.sortOrder ?? index + 1,
+      updatedAt: savedOrder.get(id)?.updatedAt ?? ""
+    }))
+  });
+}
+
+type ArchiveOrderGroup = {
+  sceneId: string | null;
+  cutNumber: number | null;
+};
+
+async function listOrderableArchiveRows(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string
+) {
+  const { data, error } = await supabase
+    .from("project_reference_assets")
+    .select(SELECT_COLUMNS)
+    .eq("project_id", projectId)
+    .in("asset_type", ["overhead", "storyboard"]);
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).filter(isOrderableArchiveRow);
+}
+
+function isOrderableArchiveRow(row: Record<string, unknown>) {
+  const assetType = String(row.asset_type ?? "");
+  const mimeType = String(row.mime_type ?? "").toLowerCase();
+  const filename = String(row.filename ?? "").toLowerCase();
+  const isImage = mimeType.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(filename);
+  return (assetType === "overhead" || assetType === "storyboard")
+    && isImage
+    && !String(row.group_id ?? "").startsWith("source:");
+}
+
+function archiveOrderGroupFromRow(row: Record<string, unknown>): ArchiveOrderGroup {
+  const crop = normalizeCrop(row.crop_data);
+  return {
+    sceneId: cleanText(crop.sceneId, 100) || null,
+    cutNumber: nullablePositiveInteger(crop.cutNumber ?? row.cut_no)
+  };
+}
+
+function rowMatchesArchiveOrderGroup(row: Record<string, unknown>, group: ArchiveOrderGroup) {
+  return sameArchiveOrderGroup(archiveOrderGroupFromRow(row), group);
+}
+
+function sameArchiveOrderGroup(left: ArchiveOrderGroup, right: ArchiveOrderGroup) {
+  return left.sceneId === right.sceneId && left.cutNumber === right.cutNumber;
+}
+
+function compareArchiveOrderRows(left: Record<string, unknown>, right: Record<string, unknown>) {
+  const leftOrder = positiveArchiveOrder(left.sort_order) ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = positiveArchiveOrder(right.sort_order) ?? Number.MAX_SAFE_INTEGER;
+  if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+  const createdOrder = Date.parse(String(left.created_at ?? "")) - Date.parse(String(right.created_at ?? ""));
+  if (Number.isFinite(createdOrder) && createdOrder !== 0) return createdOrder;
+  return String(left.id ?? "").localeCompare(String(right.id ?? ""));
+}
+
+function positiveArchiveOrder(value: unknown) {
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function parseArchiveCutNumber(value: unknown): { value: number | null; error: string } {
+  if (value === null || value === undefined || value === "") return { value: null, error: "" };
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 1) {
+    return { value: null, error: "컷은 1 이상의 정수로 입력해주세요." };
+  }
+  return { value: numeric, error: "" };
+}
+
+function normalizeOrderedAssetIds(value: unknown): { value: string[]; error: string } {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 500) {
+    return { value: [], error: "순서를 저장할 이미지 목록이 올바르지 않습니다." };
+  }
+  const ids = value.map((entry) => cleanText(entry, 100));
+  if (ids.some((id) => !UUID_PATTERN.test(id))) {
+    return { value: [], error: "순서를 저장할 이미지 ID가 올바르지 않습니다." };
+  }
+  if (new Set(ids).size !== ids.length) {
+    return { value: [], error: "같은 이미지 ID가 순서 목록에 중복되어 있습니다." };
+  }
+  return { value: ids, error: "" };
+}
+
+function sameStringSet(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  const expected = new Set(left);
+  return right.every((value) => expected.has(value));
+}
+
+function toReferenceAssetUpsertRow(
+  row: Record<string, unknown>,
+  patch: Record<string, unknown>
+) {
+  return {
+    id: row.id,
+    project_id: row.project_id,
+    asset_type: row.asset_type,
+    filename: row.filename,
+    storage_path: row.storage_path,
+    public_url: row.public_url,
+    mime_type: row.mime_type,
+    size_bytes: row.size_bytes,
+    daily_plan_id: row.daily_plan_id,
+    scene_no: row.scene_no,
+    cut_no: row.cut_no,
+    shot_ref: row.shot_ref,
+    group_id: row.group_id,
+    crop_data: row.crop_data,
+    scenario_scenes: row.scenario_scenes,
+    scenario_parse_error: row.scenario_parse_error,
+    sort_order: row.sort_order,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    ...patch
+  };
 }
 
 export async function DELETE(request: NextRequest, context: RouteContext) {
