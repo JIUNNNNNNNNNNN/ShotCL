@@ -1,12 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { createPortal } from "react-dom";
 import {
   ChangeEvent,
   DragEvent,
   PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState
@@ -160,8 +162,8 @@ type MetadataDraft = {
 };
 
 type MetadataAnchor = {
-  left: number;
-  top: number;
+  clientX: number;
+  clientY: number;
 };
 
 type FolderUploadReport = {
@@ -521,6 +523,12 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }, [currentFolderPath, folderPathById, imageAssets, query, sortMode]);
   const visibleAssets = filteredAssets.slice(0, visibleCount);
+  const scopeAssetKeys = useMemo(
+    () => filteredAssets.map((asset) => archiveSelectionKey("asset", asset.id)),
+    [filteredAssets]
+  );
+  const allScopeAssetsSelected = scopeAssetKeys.length > 0
+    && scopeAssetKeys.every((key) => selectedKeys.has(key));
   const filteredDiagrams = useMemo(
     () => activeType === "overhead" && currentFolderPath === ""
       ? diagramArchives.filter((item) => matchesDiagramQuery(item, query))
@@ -1764,6 +1772,22 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
+  function toggleCurrentAssetScope() {
+    if (scopeAssetKeys.length === 0) return;
+    let nextSize = 0;
+    updateSelectedKeys((current) => {
+      const next = new Set(current);
+      if (scopeAssetKeys.every((key) => current.has(key))) {
+        for (const key of scopeAssetKeys) next.delete(key);
+      } else {
+        for (const key of scopeAssetKeys) next.add(key);
+      }
+      nextSize = next.size;
+      return next;
+    });
+    setSelectionMode(nextSize > 0);
+  }
+
   async function moveArchiveSelection(
     keys: Iterable<ArchiveSelectionKey>,
     destinationFolderId: string | null
@@ -2238,12 +2262,7 @@ export default function ProjectStoryboardOverheadPage() {
     if (!canEdit) return;
     const currentSceneId = asset.crop.sceneId || "";
     setEditingAsset(asset);
-    setMetadataAnchor(anchor
-      ? {
-          left: Math.max(8, Math.min(anchor.clientX + 8, window.innerWidth - 312)),
-          top: Math.max(8, Math.min(anchor.clientY + 8, window.innerHeight - 284))
-        }
-      : null);
+    setMetadataAnchor(anchor ? { clientX: anchor.clientX, clientY: anchor.clientY } : null);
     setMetadataError("");
     setMetadataDraft({
       sceneId: currentSceneId,
@@ -2339,7 +2358,10 @@ export default function ProjectStoryboardOverheadPage() {
 
   return (
     <>
-      <div className="mx-auto grid w-full max-w-6xl select-none gap-4 [&_input]:select-text [&_textarea]:select-text">
+      <div
+        className="mx-auto grid w-full max-w-6xl select-none gap-4 [&_input]:select-text [&_textarea]:select-text"
+        onContextMenu={(event) => event.preventDefault()}
+      >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="font-display truncate text-xl font-black text-field-primary">부감도&콘티 아카이브</h1>
@@ -2493,6 +2515,15 @@ export default function ProjectStoryboardOverheadPage() {
             </select>
             {canEdit ? (
               <>
+                <button
+                  type="button"
+                  disabled={scopeAssetKeys.length === 0 || isSaving}
+                  onClick={toggleCurrentAssetScope}
+                  className="min-h-9 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary disabled:opacity-40"
+                  aria-pressed={allScopeAssetsSelected}
+                >
+                  {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
+                </button>
                 <button type="button" onClick={() => setFolderEditor({ mode: "create", folderPath: currentFolderPath, value: "" })} className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary">
                   <FolderPlus className="h-3.5 w-3.5" aria-hidden />
                   새 폴더
@@ -2763,10 +2794,10 @@ export default function ProjectStoryboardOverheadPage() {
                       ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
                       : "border-field-border"
                   } ${pressedSelectionKey === key ? "scale-[0.92] border-[#ef8f39]" : ""}`}
-                  onContextMenu={(event) => openAssetContextMenu(asset, event)}
                 >
                   <button
                     type="button"
+                    onContextMenu={(event) => openAssetContextMenu(asset, event)}
                     onPointerDown={(event) => beginArchiveSelectionPress("asset", asset.id, event)}
                     onClick={(event) => {
                       if (suppressArchiveClickRef.current === key) {
@@ -2825,7 +2856,6 @@ export default function ProjectStoryboardOverheadPage() {
                         ? "border-[#ef8f39] bg-[#fff8f0] ring-2 ring-[#ef8f39]/45"
                         : "border-field-border"
                     } ${pressedSelectionKey === key ? "scale-[0.92]" : ""}`}
-                    onContextMenu={(event) => openAssetContextMenu(asset, event)}
                   >
                     <button
                       type="button"
@@ -3105,6 +3135,7 @@ function MetadataPopover({
   onSave: () => void;
 }) {
   const popoverRef = useRef<HTMLElement | null>(null);
+  const [anchoredPosition, setAnchoredPosition] = useState<{ left: number; top: number } | null>(null);
   const selectedScene = scenes.find((scene) => scene.id === value.sceneId);
   const selectedCut = value.cutNo ? Number(value.cutNo) : null;
   const maxCut = selectedScene?.cutCount ?? 0;
@@ -3114,6 +3145,34 @@ function MetadataPopover({
     && (!Number.isInteger(selectedCut) || selectedCut < 1 || !maxCut || selectedCut > maxCut)
   );
 
+  useLayoutEffect(() => {
+    if (!anchor || !popoverRef.current) {
+      setAnchoredPosition(null);
+      return;
+    }
+    const collisionPadding = 12;
+    const pointerGap = 8;
+    const rect = popoverRef.current.getBoundingClientRect();
+    const preferredLeft = anchor.clientX + pointerGap;
+    const preferredTop = anchor.clientY + pointerGap;
+    const left = preferredLeft + rect.width <= window.innerWidth - collisionPadding
+      ? preferredLeft
+      : anchor.clientX - rect.width - pointerGap;
+    const top = preferredTop + rect.height <= window.innerHeight - collisionPadding
+      ? preferredTop
+      : anchor.clientY - rect.height - pointerGap;
+    setAnchoredPosition({
+      left: Math.max(
+        collisionPadding,
+        Math.min(left, window.innerWidth - rect.width - collisionPadding)
+      ),
+      top: Math.max(
+        collisionPadding,
+        Math.min(top, window.innerHeight - rect.height - collisionPadding)
+      )
+    });
+  }, [anchor, errorMessage, invalidCut, maxCut, missingScene]);
+
   useEffect(() => {
     function onPointerDown(event: PointerEvent) {
       if (!popoverRef.current?.contains(event.target as Node)) onClose();
@@ -3121,23 +3180,40 @@ function MetadataPopover({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
+    function onViewportChange(event: Event) {
+      if (event.type === "scroll") {
+        const target = event.target;
+        if (target instanceof Node && popoverRef.current?.contains(target)) return;
+      }
+      onClose();
+    }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", onViewportChange);
+    window.addEventListener("scroll", onViewportChange, true);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", onViewportChange);
+      window.removeEventListener("scroll", onViewportChange, true);
     };
   }, [onClose]);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <section
       ref={popoverRef}
-      className={`fixed z-[85] grid max-h-[min(70dvh,22rem)] w-auto gap-3 overflow-y-auto border border-field-border bg-white p-3 shadow-lg ${
+      className={`fixed z-[140] grid max-h-[min(70dvh,22rem)] gap-3 overflow-y-auto rounded-[3px] border border-field-border bg-white p-3 shadow-lg ${
         anchor
-          ? "max-w-[19rem]"
+          ? "w-64 max-w-[calc(100vw-24px)]"
           : "inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] mx-auto max-w-sm sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
       }`}
-      style={anchor ? { left: anchor.left, top: anchor.top, width: 304 } : undefined}
+      style={anchor
+        ? anchoredPosition
+          ? { left: anchoredPosition.left, top: anchoredPosition.top }
+          : { left: 12, top: 12, visibility: "hidden" }
+        : undefined}
       role="dialog"
       aria-label="자료 정보 수정"
     >
@@ -3163,11 +3239,11 @@ function MetadataPopover({
         >
           <option value="">미지정</option>
           {missingScene ? (
-            <option value={value.sceneId}>삭제된 씬 · S#{value.sceneNo || "알 수 없음"}</option>
+            <option value={value.sceneId}>{value.sceneNo}</option>
           ) : null}
           {scenes.map((scene) => (
             <option key={scene.id} value={scene.id}>
-              S#{scene.sceneNo}{scene.sceneContent ? ` · ${scene.sceneContent.slice(0, 28)}` : ""}
+              {scene.sceneNo}
             </option>
           ))}
         </select>
@@ -3182,10 +3258,10 @@ function MetadataPopover({
         >
           <option value="">미지정</option>
           {invalidCut && value.cutNo ? (
-            <option value={value.cutNo}>C#{value.cutNo} · 범위 초과</option>
+            <option value={value.cutNo}>{value.cutNo}</option>
           ) : null}
           {Array.from({ length: maxCut }, (_, index) => index + 1).map((cutNumber) => (
-            <option key={cutNumber} value={String(cutNumber)}>C#{cutNumber}</option>
+            <option key={cutNumber} value={String(cutNumber)}>{cutNumber}</option>
           ))}
         </select>
       </label>
@@ -3203,7 +3279,8 @@ function MetadataPopover({
         <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-border px-3 text-sm font-black text-field-muted disabled:opacity-50">취소</button>
         <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 bg-field-primary px-3 text-sm font-black text-white disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
       </div>
-    </section>
+    </section>,
+    document.body
   );
 }
 
