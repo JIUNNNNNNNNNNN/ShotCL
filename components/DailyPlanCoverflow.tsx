@@ -17,13 +17,15 @@ export type DailyPlanCarouselItem = {
   id: string;
   kind: "new" | "plan";
   label: string;
+  dateLabel?: string;
+  ariaLabel?: string;
   planId?: string;
 };
 
 type DailyPlanCoverflowProps = {
   items: DailyPlanCarouselItem[];
   disabled?: boolean;
-  onActivate: (item: DailyPlanCarouselItem) => void;
+  onActivate: (item: DailyPlanCarouselItem) => boolean | void;
   onOpenContextMenu: (item: DailyPlanCarouselItem, clientX: number, clientY: number) => void;
 };
 
@@ -40,9 +42,19 @@ type PointerSession = {
   lastX: number;
   lastTime: number;
   startPosition: number;
+  cardStep: number;
   velocity: number;
   intent: "pending" | "horizontal" | "vertical";
   longPressed: boolean;
+};
+
+type InteractionPhase = "idle" | "dragging" | "snapping" | "activating";
+type ActivationSource = "click" | "drag" | "keyboard";
+
+type SnapOptions = {
+  focusCard?: boolean;
+  activationItemKey?: string;
+  activationSource?: ActivationSource;
 };
 
 const DRAG_THRESHOLD_PX = 8;
@@ -51,10 +63,13 @@ const INERTIA_FRICTION = 0.91;
 const INERTIA_STOP_VELOCITY = 0.00075;
 const MAX_INERTIA_MS = 950;
 const SNAP_DURATION_MS = 280;
-const CENTER_EPSILON = 0.01;
+const REDUCED_MOTION_SNAP_DURATION_MS = 80;
 const DRAG_SENSITIVITY = 1.15;
 const SINGLE_CARD_ELASTIC_FACTOR = 0.2;
-const SINGLE_CARD_ELASTIC_LIMIT = 0.22;
+const SINGLE_CARD_ELASTIC_LIMIT = 0.55;
+const INITIAL_EMPTY_POSITION = 0.5;
+const INITIAL_EMPTY_SPREAD = 1.8;
+const ACTIVATION_LOCK_MS = 1_500;
 
 /** 카드 수와 무관하게 logical item 하나당 DOM 카드 하나만 사용하는 순환 coverflow입니다. */
 export function DailyPlanCoverflow({
@@ -63,28 +78,44 @@ export function DailyPlanCoverflow({
   onActivate,
   onOpenContextMenu
 }: DailyPlanCoverflowProps) {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [activeItemKey, setActiveItemKey] = useState(items[0]?.id ?? "");
+  const [activeItemKey, setActiveItemKey] = useState("");
+  const [interactionPhase, setInteractionPhase] = useState<InteractionPhase>("idle");
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const selectionSlotRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLButtonElement>());
   const itemsRef = useRef(items);
-  const positionRef = useRef(0);
-  const activeItemKeyRef = useRef(items[0]?.id ?? "");
+  const onActivateRef = useRef(onActivate);
+  const positionRef = useRef(INITIAL_EMPTY_POSITION);
+  const activeItemKeyRef = useRef("");
+  const pendingActivationItemKeyRef = useRef<string | null>(null);
+  const activationSourceRef = useRef<ActivationSource | null>(null);
+  const hasExplicitUserIntentRef = useRef(false);
+  const activationLockedRef = useRef(false);
+  const activationUnlockTimerRef = useRef<number | null>(null);
+  const didInitializeRef = useRef(false);
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const motionFrameRef = useRef<number | null>(null);
+  const activationFrameRef = useRef<number | null>(null);
   const renderFrameRef = useRef<number | null>(null);
   const suppressGeneratedClickRef = useRef(false);
-  const selectOnlyClickRef = useRef(false);
   const reducedMotionRef = useRef(false);
   const itemsKey = items.map((item) => item.id).join("|");
   itemsRef.current = items;
+  onActivateRef.current = onActivate;
+
+  const updateInteractionPhase = useCallback((phase: InteractionPhase) => {
+    setInteractionPhase(phase);
+  }, []);
 
   const cancelMotion = useCallback(() => {
     if (motionFrameRef.current !== null) {
       cancelAnimationFrame(motionFrameRef.current);
       motionFrameRef.current = null;
+    }
+    if (activationFrameRef.current !== null) {
+      cancelAnimationFrame(activationFrameRef.current);
+      activationFrameRef.current = null;
     }
   }, []);
 
@@ -94,6 +125,13 @@ export function DailyPlanCoverflow({
       longPressTimerRef.current = null;
     }
   }, []);
+
+  const clearActivationIntent = useCallback((nextPhase: InteractionPhase = "idle") => {
+    pendingActivationItemKeyRef.current = null;
+    activationSourceRef.current = null;
+    hasExplicitUserIntentRef.current = false;
+    if (!activationLockedRef.current) updateInteractionPhase(nextPhase);
+  }, [updateInteractionPhase]);
 
   const renderCards = useCallback(() => {
     const currentItems = itemsRef.current;
@@ -113,9 +151,12 @@ export function DailyPlanCoverflow({
         : getCircularDistance(index, normalizedPosition, count);
       const absoluteDistance = Math.abs(distance);
       const visible = absoluteDistance <= 3.1;
-      const spreadDistance = absoluteDistance <= 1
+      const baseSpreadDistance = absoluteDistance <= 1
         ? absoluteDistance
         : 1 + (absoluteDistance - 1) * 0.85;
+      const spreadDistance = activeItemKeyRef.current
+        ? baseSpreadDistance
+        : baseSpreadDistance * INITIAL_EMPTY_SPREAD;
       const rotation = reduceMotion ? 0 : -Math.sign(distance) * Math.min(24, absoluteDistance * 16);
       const scale = absoluteDistance <= 1
         ? 1 - absoluteDistance * 0.09
@@ -140,33 +181,109 @@ export function DailyPlanCoverflow({
     });
   }, [renderCards]);
 
-  const commitActiveIndex = useCallback((logicalPosition: number, focusCard = false) => {
+  const commitCenteredItem = useCallback((logicalPosition: number, focusCard = false) => {
     const currentItems = itemsRef.current;
-    if (currentItems.length === 0) return;
+    if (currentItems.length === 0) {
+      activeItemKeyRef.current = "";
+      setActiveItemKey("");
+      return null;
+    }
     const nextIndex = positiveModulo(Math.round(logicalPosition), currentItems.length);
     const nextItem = currentItems[nextIndex];
     activeItemKeyRef.current = nextItem.id;
-    setActiveIndex(nextIndex);
     setActiveItemKey(nextItem.id);
     if (focusCard) {
       requestAnimationFrame(() => cardRefs.current.get(nextItem.id)?.focus());
     }
+    return nextItem;
   }, []);
 
-  const snapTo = useCallback((target: number, focusCard = false) => {
+  const finishActivation = useCallback((centeredItem: DailyPlanCarouselItem | null) => {
+    const pendingItemKey = pendingActivationItemKeyRef.current;
+    const hasExplicitIntent = hasExplicitUserIntentRef.current;
+    const source = activationSourceRef.current;
+    pendingActivationItemKeyRef.current = null;
+    activationSourceRef.current = null;
+    hasExplicitUserIntentRef.current = false;
+
+    if (
+      !centeredItem
+      || !hasExplicitIntent
+      || !source
+      || pendingItemKey !== centeredItem.id
+      || activationLockedRef.current
+    ) {
+      updateInteractionPhase("idle");
+      return;
+    }
+
+    activationLockedRef.current = true;
+    updateInteractionPhase("activating");
+    if (renderFrameRef.current !== null) {
+      cancelAnimationFrame(renderFrameRef.current);
+      renderFrameRef.current = null;
+    }
+
+    let accepted = true;
+    try {
+      accepted = onActivateRef.current(centeredItem) !== false;
+    } catch {
+      accepted = false;
+    }
+
+    if (!accepted) {
+      activationLockedRef.current = false;
+      updateInteractionPhase("idle");
+      return;
+    }
+
+    if (activationUnlockTimerRef.current !== null) {
+      window.clearTimeout(activationUnlockTimerRef.current);
+    }
+    activationUnlockTimerRef.current = window.setTimeout(() => {
+      activationLockedRef.current = false;
+      activationUnlockTimerRef.current = null;
+      updateInteractionPhase("idle");
+    }, ACTIVATION_LOCK_MS);
+  }, [updateInteractionPhase]);
+
+  const settleSnap = useCallback((target: number, focusCard: boolean) => {
+    const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
+    positionRef.current = settledPosition;
+    const centeredItem = commitCenteredItem(settledPosition, focusCard);
+    renderCards();
+    activationFrameRef.current = requestAnimationFrame(() => {
+      activationFrameRef.current = null;
+      finishActivation(centeredItem);
+    });
+  }, [commitCenteredItem, finishActivation, renderCards]);
+
+  const snapTo = useCallback((target: number, options: SnapOptions = {}) => {
     cancelMotion();
+    const { focusCard = false, activationItemKey, activationSource } = options;
+    if (activationItemKey && activationSource) {
+      pendingActivationItemKeyRef.current = activationItemKey;
+      activationSourceRef.current = activationSource;
+      hasExplicitUserIntentRef.current = true;
+    } else {
+      pendingActivationItemKeyRef.current = null;
+      activationSourceRef.current = null;
+      hasExplicitUserIntentRef.current = false;
+    }
+    updateInteractionPhase("snapping");
     const start = positionRef.current;
-    if (reducedMotionRef.current || Math.abs(target - start) < 0.001) {
-      const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
-      positionRef.current = settledPosition;
-      renderCards();
-      commitActiveIndex(settledPosition, focusCard);
+    if (Math.abs(target - start) < 0.001) {
+      motionFrameRef.current = requestAnimationFrame(() => {
+        motionFrameRef.current = null;
+        settleSnap(target, focusCard);
+      });
       return;
     }
 
     const startedAt = performance.now();
+    const duration = reducedMotionRef.current ? REDUCED_MOTION_SNAP_DURATION_MS : SNAP_DURATION_MS;
     const step = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / SNAP_DURATION_MS);
+      const progress = Math.min(1, (now - startedAt) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
       positionRef.current = start + (target - start) * eased;
       renderCards();
@@ -175,22 +292,39 @@ export function DailyPlanCoverflow({
         return;
       }
       motionFrameRef.current = null;
-      const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
-      positionRef.current = settledPosition;
-      renderCards();
-      commitActiveIndex(settledPosition, focusCard);
+      settleSnap(target, focusCard);
     };
     motionFrameRef.current = requestAnimationFrame(step);
-  }, [cancelMotion, commitActiveIndex, renderCards]);
+  }, [cancelMotion, renderCards, settleSnap, updateInteractionPhase]);
+
+  const snapAfterDrag = useCallback((target: number) => {
+    const targetItem = getItemAtTargetPosition(target, itemsRef.current);
+    if (!targetItem) {
+      clearActivationIntent();
+      return;
+    }
+    snapTo(target, {
+      activationItemKey: targetItem.id,
+      activationSource: "drag"
+    });
+  }, [clearActivationIntent, snapTo]);
 
   const startInertia = useCallback((initialVelocity: number) => {
     cancelMotion();
-    if (itemsRef.current.length <= 1) {
-      snapTo(0);
+    hasExplicitUserIntentRef.current = true;
+    activationSourceRef.current = "drag";
+    pendingActivationItemKeyRef.current = null;
+    updateInteractionPhase("snapping");
+    if (itemsRef.current.length === 0) {
+      clearActivationIntent();
+      return;
+    }
+    if (itemsRef.current.length === 1) {
+      snapAfterDrag(0);
       return;
     }
     if (reducedMotionRef.current || Math.abs(initialVelocity) < INERTIA_STOP_VELOCITY) {
-      snapTo(Math.round(positionRef.current));
+      snapAfterDrag(Math.round(positionRef.current));
       return;
     }
 
@@ -208,10 +342,10 @@ export function DailyPlanCoverflow({
         return;
       }
       motionFrameRef.current = null;
-      snapTo(Math.round(positionRef.current));
+      snapAfterDrag(Math.round(positionRef.current));
     };
     motionFrameRef.current = requestAnimationFrame(step);
-  }, [cancelMotion, renderCards, snapTo]);
+  }, [cancelMotion, clearActivationIntent, renderCards, snapAfterDrag, updateInteractionPhase]);
 
   const markGeneratedClickForSuppression = useCallback(() => {
     suppressGeneratedClickRef.current = true;
@@ -223,7 +357,7 @@ export function DailyPlanCoverflow({
     clearLongPress();
     pointerSessionRef.current = null;
     viewport?.removeAttribute("data-dragging");
-    if (!current) return;
+    if (!current) return null;
     if (current.didCapture) {
       try {
         if (current.captureTarget.hasPointerCapture(current.pointerId)) {
@@ -237,6 +371,7 @@ export function DailyPlanCoverflow({
       markGeneratedClickForSuppression();
     }
     if (startInertialMotion && current.intent === "horizontal") startInertia(current.velocity);
+    return current;
   }, [clearLongPress, markGeneratedClickForSuppression, startInertia]);
 
   const finishPointerInteraction = useCallback((pointerId: number, cancelled: boolean) => {
@@ -246,23 +381,33 @@ export function DailyPlanCoverflow({
     if (!cancelled && current.intent === "horizontal" && performance.now() - current.lastTime > 80) {
       current.velocity = 0;
     }
-    resetPointerSession(!cancelled);
+    const finishedSession = resetPointerSession(!cancelled);
     if (cancelled) {
-      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
+      clearActivationIntent();
+      if (finishedSession?.intent === "horizontal") {
+        snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
+      }
+    } else if (finishedSession?.intent !== "horizontal") {
+      updateInteractionPhase("idle");
     }
-  }, [resetPointerSession, snapTo]);
+  }, [clearActivationIntent, resetPointerSession, snapTo, updateInteractionPhase]);
 
   useLayoutEffect(() => {
     const currentItems = itemsRef.current;
+    resetPointerSession(false);
     cancelMotion();
+    clearActivationIntent();
     const preservedIndex = currentItems.findIndex((item) => item.id === activeItemKeyRef.current);
-    const nextIndex = preservedIndex >= 0
-      ? preservedIndex
-      : Math.min(activeIndex, Math.max(0, currentItems.length - 1));
-    positionRef.current = nextIndex;
-    activeItemKeyRef.current = currentItems[nextIndex]?.id ?? "";
-    setActiveIndex(nextIndex);
-    setActiveItemKey(currentItems[nextIndex]?.id ?? "");
+    if (!didInitializeRef.current || preservedIndex < 0) {
+      positionRef.current = INITIAL_EMPTY_POSITION;
+      activeItemKeyRef.current = "";
+      setActiveItemKey("");
+      didInitializeRef.current = true;
+    } else {
+      positionRef.current = preservedIndex;
+      activeItemKeyRef.current = currentItems[preservedIndex]?.id ?? "";
+      setActiveItemKey(currentItems[preservedIndex]?.id ?? "");
+    }
     renderCards();
   // itemsKey intentionally represents stable logical item identity and ordering.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -288,13 +433,16 @@ export function DailyPlanCoverflow({
 
   useEffect(() => {
     const cancelInteraction = () => {
-      resetPointerSession(false);
+      const current = resetPointerSession(false);
       cancelMotion();
-      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
+      clearActivationIntent();
+      if (current?.intent === "horizontal") {
+        snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current));
+      }
     };
     window.addEventListener("blur", cancelInteraction);
     return () => window.removeEventListener("blur", cancelInteraction);
-  }, [cancelMotion, resetPointerSession, snapTo]);
+  }, [cancelMotion, clearActivationIntent, resetPointerSession, snapTo]);
 
   useEffect(() => {
     const finishOutsideStage = (event: globalThis.PointerEvent) => {
@@ -315,11 +463,13 @@ export function DailyPlanCoverflow({
     clearLongPress();
     cancelMotion();
     if (renderFrameRef.current !== null) cancelAnimationFrame(renderFrameRef.current);
+    if (activationUnlockTimerRef.current !== null) window.clearTimeout(activationUnlockTimerRef.current);
   }, [cancelMotion, clearLongPress]);
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (
       disabled
+      || activationLockedRef.current
       || !event.isPrimary
       || pointerSessionRef.current
       || (event.pointerType === "mouse" && event.button !== 0)
@@ -328,8 +478,8 @@ export function DailyPlanCoverflow({
     const itemId = target?.dataset.carouselItemId;
     const item = itemId ? items.find((candidate) => candidate.id === itemId) : undefined;
 
-    selectOnlyClickRef.current = motionFrameRef.current !== null;
     cancelMotion();
+    clearActivationIntent();
     clearLongPress();
     // 앞선 pointer sequence가 합성 click을 만들지 않았더라도 새 정상 탭/클릭은 막지 않습니다.
     suppressGeneratedClickRef.current = false;
@@ -346,19 +496,21 @@ export function DailyPlanCoverflow({
       lastX: event.clientX,
       lastTime: performance.now(),
       startPosition: positionRef.current,
+      cardStep: getCardMetrics(event.currentTarget.clientWidth).cardStep,
       velocity: 0,
       intent: "pending",
       longPressed: false
     };
 
-    if (event.pointerType !== "mouse" && item?.kind === "plan") {
+    if (event.pointerType !== "mouse" && item) {
       longPressTimerRef.current = window.setTimeout(() => {
         const current = pointerSessionRef.current;
         if (!current || current.pointerId !== event.pointerId || current.intent !== "pending") return;
         current.longPressed = true;
         markGeneratedClickForSuppression();
         cancelMotion();
-        onOpenContextMenu(item, current.clientX, current.clientY);
+        clearActivationIntent();
+        if (item.kind === "plan") onOpenContextMenu(item, current.clientX, current.clientY);
       }, LONG_PRESS_MS);
     }
   }
@@ -393,15 +545,16 @@ export function DailyPlanCoverflow({
         current.didCapture = false;
       }
       viewport.setAttribute("data-dragging", "true");
+      updateInteractionPhase("dragging");
     }
 
     if (current.intent !== "horizontal") return;
     if (event.cancelable) event.preventDefault();
-    const { cardStep } = getCardMetrics(viewport.clientWidth);
+    const cardStep = current.cardStep;
     const logicalDelta = (deltaX / cardStep) * DRAG_SENSITIVITY;
     positionRef.current = itemsRef.current.length <= 1
       ? clamp(
-        -logicalDelta * SINGLE_CARD_ELASTIC_FACTOR,
+        current.startPosition - logicalDelta * SINGLE_CARD_ELASTIC_FACTOR,
         -SINGLE_CARD_ELASTIC_LIMIT,
         SINGLE_CARD_ELASTIC_LIMIT
       )
@@ -434,29 +587,16 @@ export function DailyPlanCoverflow({
     finishPointerInteraction(event.pointerId, true);
   }
 
-  function selectOrActivateItem(item: DailyPlanCarouselItem, forceSelection: boolean, focusCard: boolean) {
+  function requestItemActivation(item: DailyPlanCarouselItem, source: ActivationSource, focusCard: boolean) {
     const currentItems = itemsRef.current;
     const count = currentItems.length;
     const itemIndex = currentItems.findIndex((candidate) => candidate.id === item.id);
-    if (itemIndex < 0 || count === 0) return;
-    const motionInProgress = motionFrameRef.current !== null;
-    const distance = count === 1
-      ? -positionRef.current
-      : getCircularDistance(itemIndex, positionRef.current, count);
-    const positionIsExact = count === 1
-      ? Math.abs(positionRef.current) <= CENTER_EPSILON
-      : Math.abs(positionRef.current - Math.round(positionRef.current)) <= CENTER_EPSILON;
-    const isCentered = activeItemKeyRef.current === item.id
-      && Math.abs(distance) <= CENTER_EPSILON
-      && positionIsExact
-      && !motionInProgress
-      && !forceSelection;
-
-    if (!isCentered) {
-      snapTo(getNearestTargetPosition(itemIndex, positionRef.current, count), focusCard);
-      return;
-    }
-    onActivate(item);
+    if (itemIndex < 0 || count === 0 || activationLockedRef.current) return;
+    snapTo(getNearestTargetPosition(itemIndex, positionRef.current, count), {
+      focusCard,
+      activationItemKey: item.id,
+      activationSource: source
+    });
   }
 
   function handleCardClick(event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
@@ -472,13 +612,13 @@ export function DailyPlanCoverflow({
       return;
     }
 
-    const selectOnly = event.detail > 0 && selectOnlyClickRef.current;
-    selectOnlyClickRef.current = false;
-    selectOrActivateItem(item, selectOnly, true);
+    requestItemActivation(item, "click", true);
   }
 
   function handleContextMenu(event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
     event.preventDefault();
+    cancelMotion();
+    clearActivationIntent();
     if (item.kind !== "plan" || disabled || pointerSessionRef.current?.intent === "horizontal") return;
     const current = pointerSessionRef.current;
     if (current?.intent === "pending") {
@@ -486,7 +626,6 @@ export function DailyPlanCoverflow({
       markGeneratedClickForSuppression();
     }
     clearLongPress();
-    cancelMotion();
     onOpenContextMenu(item, event.clientX, event.clientY);
   }
 
@@ -494,19 +633,26 @@ export function DailyPlanCoverflow({
     if (item.kind === "plan" && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
       event.preventDefault();
       cancelMotion();
+      clearActivationIntent();
       const rect = event.currentTarget.getBoundingClientRect();
       onOpenContextMenu(item, rect.left + rect.width / 2, rect.top + rect.height / 2);
       return;
     }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      if (!event.repeat) selectOrActivateItem(item, false, true);
+      if (!event.repeat) requestItemActivation(item, "keyboard", true);
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       const direction = event.key === "ArrowRight" ? 1 : -1;
-      snapTo(itemsRef.current.length <= 1 ? 0 : Math.round(positionRef.current) + direction, true);
+      clearActivationIntent();
+      snapTo(getDirectionalTargetPosition(
+        positionRef.current,
+        itemsRef.current.length,
+        direction,
+        Boolean(activeItemKeyRef.current)
+      ), { focusCard: true });
     }
   }
 
@@ -523,9 +669,10 @@ export function DailyPlanCoverflow({
     <div
       {...interactionProps}
       ref={viewportRef}
-      className="relative mt-2 h-[clamp(14.5rem,62vw,18rem)] w-full min-w-0 cursor-grab overflow-hidden [perspective:1200px] data-[dragging=true]:cursor-grabbing"
+      className="relative mt-5 h-[clamp(14.5rem,62vw,18rem)] w-full min-w-0 cursor-grab overflow-hidden [perspective:1200px] data-[dragging=true]:cursor-grabbing md:mt-6"
       style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
       data-carousel-stage
+      data-interaction-phase={interactionPhase}
       role="region"
       aria-roledescription="순환 캐러셀"
       aria-label="일촬표 선택 카드"
@@ -536,7 +683,7 @@ export function DailyPlanCoverflow({
         data-carousel-selection-slot
         className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 rounded-[4px] border-2 border-field-primary/45"
       />
-      <div className="absolute inset-0 z-[1] [transform-style:preserve-3d]">
+      <div className="pointer-events-none absolute inset-0 z-[1] [transform-style:preserve-3d]">
         {items.map((item) => (
           <CarouselCard
             key={item.id}
@@ -548,16 +695,19 @@ export function DailyPlanCoverflow({
             disabled={disabled}
             active={item.id === activeItemKey}
             className="absolute left-1/2 top-1/2 w-[132px] will-change-transform motion-reduce:transition-none"
-            tabIndex={item.id === activeItemKey ? 0 : -1}
+            tabIndex={0}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}
             onKeyDown={handleCardKeyDown}
           />
         ))}
       </div>
-      <span className="sr-only" aria-live="polite">
-        {items.find((item) => item.id === activeItemKey)?.label ?? "선택할 일촬표 없음"} 선택됨
-      </span>
+      {activeItemKey ? (
+        <span className="sr-only" aria-live="polite">
+          {items.find((item) => item.id === activeItemKey)?.ariaLabel
+            ?? items.find((item) => item.id === activeItemKey)?.label} 선택됨
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -592,7 +742,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       disabled={disabled}
       aria-label={item.kind === "new"
         ? active ? "새 일촬표 만들기, 현재 선택됨" : "새 일촬표 만들기 선택"
-        : active ? `${item.label} 일촬표 열기, 현재 선택됨` : `${item.label} 일촬표 선택`
+        : active ? `${item.ariaLabel ?? item.label}, 현재 선택됨` : `${item.ariaLabel ?? item.label} 선택`
       }
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
@@ -603,18 +753,21 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
           ? "text-5xl font-light leading-none text-field-primary"
           : "text-lg font-black leading-[1.35] text-field-primary md:text-xl"
       }`}
-      title={item.kind === "plan" ? item.label : undefined}
+      title={item.kind === "plan" ? `${item.label} · ${item.dateLabel ?? "날짜 미정"}` : undefined}
       onClick={(event) => onClick(event, item)}
-      onContextMenu={(event) => {
-        if (item.kind === "new") {
-          event.preventDefault();
-          return;
-        }
-        onContextMenu(event, item);
-      }}
+      onContextMenu={(event) => onContextMenu(event, item)}
       onKeyDown={(event) => onKeyDown(event, item)}
     >
-      <span className="block max-w-full truncate">{item.kind === "new" ? "+" : item.label}</span>
+      {item.kind === "new" ? (
+        <span className="block max-w-full truncate">+</span>
+      ) : (
+        <span className="grid max-w-full gap-2">
+          <span className="block max-w-full truncate">{item.label}</span>
+          <span className="block whitespace-nowrap text-sm font-bold leading-[1.35] tabular-nums text-field-muted md:text-[15px]">
+            {item.dateLabel ?? "날짜 미정"}
+          </span>
+        </span>
+      )}
     </button>
   );
 });
@@ -637,6 +790,17 @@ function getCircularDistance(itemIndex: number, position: number, count: number)
 function getNearestTargetPosition(itemIndex: number, position: number, count: number) {
   if (count <= 1 || !Number.isFinite(position)) return 0;
   return position + getCircularDistance(itemIndex, position, count);
+}
+
+function getItemAtTargetPosition(target: number, items: DailyPlanCarouselItem[]) {
+  if (items.length === 0) return null;
+  return items[positiveModulo(Math.round(target), items.length)] ?? null;
+}
+
+function getDirectionalTargetPosition(position: number, count: number, direction: -1 | 1, hasCenteredItem: boolean) {
+  if (count <= 1 || !Number.isFinite(position)) return 0;
+  if (!hasCenteredItem) return direction > 0 ? Math.ceil(position) : Math.floor(position);
+  return Math.round(position) + direction;
 }
 
 function normalizeSnappedPosition(position: number, count: number) {

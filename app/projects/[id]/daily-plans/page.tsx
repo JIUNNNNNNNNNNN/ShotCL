@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/Card";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { deleteDailyPlan, duplicateDailyPlan, listDailyPlans } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
+import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dailyPlan/dateOnly";
 import type { DailyPlan, Project } from "@/lib/types";
 
 type DailyPlanListItem = DailyPlan & { shotCount: number };
@@ -27,7 +28,7 @@ type PendingDeleteItem = {
   episodeLabel: string;
 };
 
-const NEW_CARD_ID = "daily-plan:new";
+const NEW_CARD_ID = "new-daily-plan";
 const CONTEXT_MENU_WIDTH = 232;
 const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
@@ -67,6 +68,8 @@ export default function DailyPlansPage() {
       id: `daily-plan:${plan.id}`,
       kind: "plan" as const,
       label: formatEpisodeLabel(plan.episode),
+      dateLabel: formatDailyPlanCardDate(plan.shootingDate),
+      ariaLabel: `${formatEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}`,
       planId: plan.id
     }))
   ], [canManage, sortedPlans]);
@@ -157,16 +160,17 @@ export default function DailyPlansPage() {
   }
 
   function handleActivateItem(item: DailyPlanCarouselItem) {
-    if (!projectId || isDuplicating || pendingDeleteItem) return;
+    if (!projectId || isDuplicating || pendingDeleteItem) return false;
     if (item.kind === "new") {
       navigateOnce(`/projects/${projectId}/daily-plans/new`);
-      return;
+      return true;
     }
     if (!item.planId) {
       setErrorMessage("열 일촬표 ID를 찾을 수 없습니다.");
-      return;
+      return false;
     }
     navigateOnce(`/projects/${projectId}/daily-plans/${item.planId}`);
+    return true;
   }
 
   function openPlanContextMenu(item: DailyPlanCarouselItem, clientX: number, clientY: number) {
@@ -253,10 +257,10 @@ export default function DailyPlansPage() {
 
   return (
     <section
-      className="flex min-h-[calc(100dvh-8rem)] min-w-0 select-none items-center justify-center overflow-x-clip py-4"
+      className="flex min-h-[calc(100dvh-8rem)] min-w-0 select-none items-start justify-center overflow-x-clip px-0 py-4 md:py-7"
       aria-labelledby="daily-plan-project-title"
     >
-      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-center">
+      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
         <h1
           id="daily-plan-project-title"
           className="max-w-full truncate px-3 text-center text-xl font-black leading-[1.35] text-field-primary md:text-2xl"
