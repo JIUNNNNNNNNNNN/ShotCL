@@ -22,6 +22,11 @@ type PlanContextMenu = {
   y: number;
 };
 
+type PendingDeleteItem = {
+  dailyPlanId: string;
+  episodeLabel: string;
+};
+
 const NEW_CARD_ID = "daily-plan:new";
 const CONTEXT_MENU_WIDTH = 232;
 const CONTEXT_MENU_HEIGHT = 92;
@@ -41,9 +46,12 @@ export default function DailyPlansPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [plans, setPlans] = useState<DailyPlanListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isBusy, setIsBusy] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
   const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
+  const [pendingDeleteItem, setPendingDeleteItem] = useState<PendingDeleteItem | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const navigationLockedRef = useRef(false);
   const navigationUnlockTimerRef = useRef<number | null>(null);
@@ -113,6 +121,19 @@ export default function DailyPlansPage() {
     };
   }, [contextMenu]);
 
+  useEffect(() => {
+    if (!pendingDeleteItem) return;
+
+    function closeDeleteDialogOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape" || isDeleting) return;
+      setPendingDeleteItem(null);
+      setDeleteErrorMessage("");
+    }
+
+    window.addEventListener("keydown", closeDeleteDialogOnEscape);
+    return () => window.removeEventListener("keydown", closeDeleteDialogOnEscape);
+  }, [isDeleting, pendingDeleteItem]);
+
   useEffect(() => () => {
     if (navigationUnlockTimerRef.current !== null) {
       window.clearTimeout(navigationUnlockTimerRef.current);
@@ -136,7 +157,7 @@ export default function DailyPlansPage() {
   }
 
   function handleActivateItem(item: DailyPlanCarouselItem) {
-    if (!projectId || isBusy) return;
+    if (!projectId || isDuplicating || pendingDeleteItem) return;
     if (item.kind === "new") {
       navigateOnce(`/projects/${projectId}/daily-plans/new`);
       return;
@@ -149,7 +170,14 @@ export default function DailyPlansPage() {
   }
 
   function openPlanContextMenu(item: DailyPlanCarouselItem, clientX: number, clientY: number) {
-    if (item.kind !== "plan" || !item.planId || !canManage || isBusy) return;
+    if (
+      item.kind !== "plan"
+      || !item.planId
+      || !canManage
+      || isDuplicating
+      || isDeleting
+      || pendingDeleteItem
+    ) return;
     const plan = sortedPlans.find((candidate) => candidate.id === item.planId);
     if (!plan) return;
     const maxX = Math.max(CONTEXT_MENU_EDGE, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE);
@@ -162,9 +190,9 @@ export default function DailyPlansPage() {
   }
 
   async function handleDuplicate(plan: DailyPlanListItem) {
-    if (!projectId || isBusy || !canManage) return;
+    if (!projectId || isDuplicating || isDeleting || pendingDeleteItem || !canManage) return;
     setContextMenu(null);
-    setIsBusy(true);
+    setIsDuplicating(true);
     setErrorMessage("");
 
     try {
@@ -180,29 +208,40 @@ export default function DailyPlansPage() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "일촬표를 복사하지 못했습니다.");
     } finally {
-      setIsBusy(false);
+      setIsDuplicating(false);
     }
   }
 
-  async function handleDelete(plan: DailyPlanListItem) {
-    if (!projectId || isBusy || !canManage) return;
+  function requestDelete(plan: DailyPlanListItem) {
+    if (!projectId || isDuplicating || isDeleting || !canManage) return;
     setContextMenu(null);
-    const episodeLabel = formatEpisodeLabel(plan.episode);
-    const shouldDelete = window.confirm(`“${episodeLabel}” 일촬표를 삭제할까요? 컷 진행표(shots)는 자동으로 삭제하지 않습니다.`);
-    if (!shouldDelete) return;
+    setDeleteErrorMessage("");
+    setPendingDeleteItem({
+      dailyPlanId: plan.id,
+      episodeLabel: formatEpisodeLabel(plan.episode)
+    });
+  }
 
-    setIsBusy(true);
-    setErrorMessage("");
-    const previousPlans = plans;
-    setPlans((current) => current.filter((item) => item.id !== plan.id));
+  function cancelDelete() {
+    if (isDeleting) return;
+    setPendingDeleteItem(null);
+    setDeleteErrorMessage("");
+  }
+
+  async function confirmDelete() {
+    const target = pendingDeleteItem;
+    if (!projectId || !target || isDeleting || !canManage) return;
+    setIsDeleting(true);
+    setDeleteErrorMessage("");
 
     try {
-      await deleteDailyPlan(projectId, plan.id);
+      await deleteDailyPlan(projectId, target.dailyPlanId);
+      setPlans((current) => current.filter((item) => item.id !== target.dailyPlanId));
+      setPendingDeleteItem(null);
     } catch (error) {
-      setPlans(previousPlans);
-      setErrorMessage(error instanceof Error ? error.message : "일촬표를 삭제하지 못했습니다.");
+      setDeleteErrorMessage(error instanceof Error ? error.message : "일촬표를 삭제하지 못했습니다.");
     } finally {
-      setIsBusy(false);
+      setIsDeleting(false);
     }
   }
 
@@ -234,7 +273,7 @@ export default function DailyPlansPage() {
 
         <DailyPlanCoverflow
           items={carouselItems}
-          disabled={isBusy}
+          disabled={isDuplicating || Boolean(pendingDeleteItem)}
           onActivate={handleActivateItem}
           onOpenContextMenu={openPlanContextMenu}
         />
@@ -244,9 +283,20 @@ export default function DailyPlansPage() {
         <DailyPlanContextMenu
           menu={contextMenu}
           menuRef={contextMenuRef}
-          disabled={isBusy}
+          disabled={isDuplicating || isDeleting}
           onDuplicate={() => handleDuplicate(contextMenu.plan)}
-          onDelete={() => handleDelete(contextMenu.plan)}
+          onDelete={() => requestDelete(contextMenu.plan)}
+        />,
+        document.body
+      ) : null}
+
+      {pendingDeleteItem && typeof document !== "undefined" ? createPortal(
+        <DailyPlanDeleteDialog
+          item={pendingDeleteItem}
+          errorMessage={deleteErrorMessage}
+          isDeleting={isDeleting}
+          onCancel={cancelDelete}
+          onConfirm={confirmDelete}
         />,
         document.body
       ) : null}
@@ -293,6 +343,71 @@ function DailyPlanContextMenu({
       >
         삭제
       </button>
+    </div>
+  );
+}
+
+function DailyPlanDeleteDialog({
+  item,
+  errorMessage,
+  isDeleting,
+  onCancel,
+  onConfirm
+}: {
+  item: PendingDeleteItem;
+  errorMessage: string;
+  isDeleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[110] grid place-items-center bg-black/20 p-4"
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="daily-plan-delete-title"
+        aria-describedby="daily-plan-delete-description"
+        aria-busy={isDeleting}
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-[4px] border border-field-border bg-white p-4 shadow-lg"
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="daily-plan-delete-title" className="text-base font-black leading-[1.4] text-field-primary">
+          일촬표 삭제
+        </h2>
+        <div id="daily-plan-delete-description" className="mt-2 space-y-1 text-sm leading-[1.5] text-field-text">
+          <p><strong>{item.episodeLabel}</strong> 일촬표를 삭제하시겠습니까?</p>
+          <p className="text-field-muted">삭제한 일촬표는 복구할 수 없습니다.</p>
+        </div>
+
+        {errorMessage ? (
+          <p role="alert" className="mt-3 rounded-[2px] border border-field-danger bg-red-50 px-3 py-2 text-sm font-bold leading-[1.45] text-field-danger">
+            {errorMessage}
+          </p>
+        ) : null}
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            autoFocus
+            className="min-h-10 rounded-[3px] border border-field-border bg-white px-3 py-2 text-sm font-bold text-field-text hover:bg-field-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onCancel}
+            disabled={isDeleting}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            className="min-h-10 rounded-[3px] border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-white hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onConfirm}
+            disabled={isDeleting}
+          >
+            {isDeleting ? "삭제 중" : "삭제"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

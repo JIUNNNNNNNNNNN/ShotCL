@@ -609,10 +609,14 @@ export async function duplicateDailyPlan(projectId: string, dailyPlanId: string)
 export async function deleteDailyPlan(projectId: string, dailyPlanId: string): Promise<void> {
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, { method: "DELETE" });
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
     if (response.ok) return;
-    if (response.status === 403) throw new Error("Key staff 권한이 필요합니다.");
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || (response.status === 403 ? "Key staff 권한이 필요합니다." : "일촬표를 삭제하지 못했습니다."));
+    }
   } catch (error) {
-    if (error instanceof Error && error.message === "Key staff 권한이 필요합니다.") throw error;
+    // 실제 DB 프로젝트의 API 실패는 브라우저 fallback으로 성공처럼 처리하지 않습니다.
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
   const supabase = getSupabaseBrowserClient();
 

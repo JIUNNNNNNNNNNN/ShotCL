@@ -30,8 +30,8 @@ type DailyPlanCoverflowProps = {
 type PointerSession = {
   pointerId: number;
   pointerType: string;
-  itemId: string;
-  captureTarget: HTMLButtonElement;
+  itemId: string | null;
+  captureTarget: HTMLDivElement;
   didCapture: boolean;
   startX: number;
   startY: number;
@@ -52,6 +52,7 @@ const INERTIA_STOP_VELOCITY = 0.00075;
 const MAX_INERTIA_MS = 950;
 const SNAP_DURATION_MS = 280;
 const CENTER_EPSILON = 0.01;
+const DRAG_SENSITIVITY = 1.15;
 const SINGLE_CARD_ELASTIC_FACTOR = 0.2;
 const SINGLE_CARD_ELASTIC_LIMIT = 0.22;
 
@@ -65,6 +66,7 @@ export function DailyPlanCoverflow({
   const [activeIndex, setActiveIndex] = useState(0);
   const [activeItemKey, setActiveItemKey] = useState(items[0]?.id ?? "");
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const selectionSlotRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLButtonElement>());
   const itemsRef = useRef(items);
   const positionRef = useRef(0);
@@ -98,7 +100,8 @@ export function DailyPlanCoverflow({
     const count = currentItems.length;
     const viewport = viewportRef.current;
     if (!viewport || count === 0) return;
-    const spacing = getCardSpacing(viewport.clientWidth);
+    const { cardWidth, cardStep } = getCardMetrics(viewport.clientWidth);
+    if (selectionSlotRef.current) selectionSlotRef.current.style.width = `${cardWidth + 8}px`;
     const normalizedPosition = count === 1 ? positionRef.current : positiveModulo(positionRef.current, count);
     const reduceMotion = reducedMotionRef.current;
 
@@ -110,13 +113,19 @@ export function DailyPlanCoverflow({
         : getCircularDistance(index, normalizedPosition, count);
       const absoluteDistance = Math.abs(distance);
       const visible = absoluteDistance <= 3.1;
-      const rotation = reduceMotion ? 0 : -Math.sign(distance) * Math.min(22, absoluteDistance * 18);
-      const scale = Math.max(0.68, 1 - absoluteDistance * 0.13);
-      const translateX = distance * spacing;
+      const spreadDistance = absoluteDistance <= 1
+        ? absoluteDistance
+        : 1 + (absoluteDistance - 1) * 0.85;
+      const rotation = reduceMotion ? 0 : -Math.sign(distance) * Math.min(24, absoluteDistance * 16);
+      const scale = absoluteDistance <= 1
+        ? 1 - absoluteDistance * 0.09
+        : Math.max(0.72, 0.91 - (absoluteDistance - 1) * 0.1);
+      const translateX = Math.sign(distance) * spreadDistance * cardStep;
       const translateZ = -Math.min(260, absoluteDistance * 86);
 
+      card.style.width = `${cardWidth}px`;
       card.style.transform = `translate(-50%, -50%) translate3d(${translateX}px, 0, ${translateZ}px) rotateY(${rotation}deg) scale(${scale})`;
-      card.style.opacity = visible ? String(Math.max(0.22, 1 - absoluteDistance * 0.19)) : "0";
+      card.style.opacity = visible ? String(Math.max(0.24, 1 - absoluteDistance * 0.18)) : "0";
       card.style.zIndex = String(Math.max(1, 100 - Math.round(absoluteDistance * 20)));
       card.style.pointerEvents = visible ? "auto" : "none";
       card.style.visibility = visible ? "visible" : "hidden";
@@ -215,8 +224,14 @@ export function DailyPlanCoverflow({
     pointerSessionRef.current = null;
     viewport?.removeAttribute("data-dragging");
     if (!current) return;
-    if (current.didCapture && current.captureTarget.hasPointerCapture(current.pointerId)) {
-      current.captureTarget.releasePointerCapture(current.pointerId);
+    if (current.didCapture) {
+      try {
+        if (current.captureTarget.hasPointerCapture(current.pointerId)) {
+          current.captureTarget.releasePointerCapture(current.pointerId);
+        }
+      } catch {
+        // pointercancel/lostpointercapture 뒤에는 브라우저가 capture를 먼저 해제할 수 있습니다.
+      }
     }
     if (current.intent === "horizontal" || current.intent === "vertical" || current.longPressed) {
       markGeneratedClickForSuppression();
@@ -303,12 +318,15 @@ export function DailyPlanCoverflow({
   }, [cancelMotion, clearLongPress]);
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
+    if (
+      disabled
+      || !event.isPrimary
+      || pointerSessionRef.current
+      || (event.pointerType === "mouse" && event.button !== 0)
+    ) return;
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-carousel-item-id]");
     const itemId = target?.dataset.carouselItemId;
-    if (!itemId) return;
-    const item = items.find((candidate) => candidate.id === itemId);
-    if (!item) return;
+    const item = itemId ? items.find((candidate) => candidate.id === itemId) : undefined;
 
     selectOnlyClickRef.current = motionFrameRef.current !== null;
     cancelMotion();
@@ -318,8 +336,8 @@ export function DailyPlanCoverflow({
     pointerSessionRef.current = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
-      itemId,
-      captureTarget: target,
+      itemId: item?.id ?? null,
+      captureTarget: event.currentTarget,
       didCapture: false,
       startX: event.clientX,
       startY: event.clientY,
@@ -333,11 +351,12 @@ export function DailyPlanCoverflow({
       longPressed: false
     };
 
-    if (event.pointerType !== "mouse" && item.kind === "plan") {
+    if (event.pointerType !== "mouse" && item?.kind === "plan") {
       longPressTimerRef.current = window.setTimeout(() => {
         const current = pointerSessionRef.current;
         if (!current || current.pointerId !== event.pointerId || current.intent !== "pending") return;
         current.longPressed = true;
+        markGeneratedClickForSuppression();
         cancelMotion();
         onOpenContextMenu(item, current.clientX, current.clientY);
       }, LONG_PRESS_MS);
@@ -350,17 +369,23 @@ export function DailyPlanCoverflow({
     if (!current || !viewport || current.pointerId !== event.pointerId) return;
     current.clientX = event.clientX;
     current.clientY = event.clientY;
+    // long press 메뉴가 열린 뒤에는 같은 pointer가 캐러셀 drag로 재진입하지 않습니다.
+    if (current.longPressed) return;
     const deltaX = event.clientX - current.startX;
     const deltaY = event.clientY - current.startY;
 
-    if (current.intent === "pending" && Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD_PX) {
-      clearLongPress();
-      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+    if (current.intent === "pending") {
+      const absoluteX = Math.abs(deltaX);
+      const absoluteY = Math.abs(deltaY);
+      if (absoluteY >= DRAG_THRESHOLD_PX && absoluteY > absoluteX) {
+        clearLongPress();
         current.intent = "vertical";
         return;
       }
+      if (absoluteX < DRAG_THRESHOLD_PX || absoluteX <= absoluteY) return;
+      clearLongPress();
       current.intent = "horizontal";
-      // 정상 tap의 click target은 보존하고, 실제 수평 drag가 시작된 뒤에만 capture합니다.
+      // stage가 gesture를 소유하므로 카드 밖으로 나가도 같은 pointer를 계속 추적합니다.
       try {
         current.captureTarget.setPointerCapture(event.pointerId);
         current.didCapture = true;
@@ -372,17 +397,20 @@ export function DailyPlanCoverflow({
 
     if (current.intent !== "horizontal") return;
     if (event.cancelable) event.preventDefault();
-    const spacing = getCardSpacing(viewport.clientWidth);
+    const { cardStep } = getCardMetrics(viewport.clientWidth);
+    const logicalDelta = (deltaX / cardStep) * DRAG_SENSITIVITY;
     positionRef.current = itemsRef.current.length <= 1
       ? clamp(
-        -(deltaX / spacing) * SINGLE_CARD_ELASTIC_FACTOR,
+        -logicalDelta * SINGLE_CARD_ELASTIC_FACTOR,
         -SINGLE_CARD_ELASTIC_LIMIT,
         SINGLE_CARD_ELASTIC_LIMIT
       )
-      : current.startPosition - deltaX / spacing;
+      : current.startPosition - logicalDelta;
     const now = performance.now();
     const elapsed = Math.max(1, now - current.lastTime);
-    const instantaneousVelocity = -((event.clientX - current.lastX) / spacing) / elapsed;
+    const instantaneousVelocity = -(
+      ((event.clientX - current.lastX) / cardStep) * DRAG_SENSITIVITY
+    ) / elapsed;
     current.velocity = current.velocity * 0.62 + instantaneousVelocity * 0.38;
     current.lastX = event.clientX;
     current.lastTime = now;
@@ -394,6 +422,15 @@ export function DailyPlanCoverflow({
   }
 
   function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
+    finishPointerInteraction(event.pointerId, true);
+  }
+
+  function handleLostPointerCapture(event: PointerEvent<HTMLDivElement>) {
+    const current = pointerSessionRef.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    // 모바일의 원래 카드 implicit capture가 stage capture로 넘어가며 발생한
+    // bubbling lostpointercapture는 현재 stage drag 종료 신호가 아닙니다.
+    if (event.target !== current.captureTarget) return;
     finishPointerInteraction(event.pointerId, true);
   }
 
@@ -443,6 +480,11 @@ export function DailyPlanCoverflow({
   function handleContextMenu(event: MouseEvent<HTMLButtonElement>, item: DailyPlanCarouselItem) {
     event.preventDefault();
     if (item.kind !== "plan" || disabled || pointerSessionRef.current?.intent === "horizontal") return;
+    const current = pointerSessionRef.current;
+    if (current?.intent === "pending") {
+      current.longPressed = true;
+      markGeneratedClickForSuppression();
+    }
     clearLongPress();
     cancelMotion();
     onOpenContextMenu(item, event.clientX, event.clientY);
@@ -473,6 +515,7 @@ export function DailyPlanCoverflow({
     onPointerMove: handlePointerMove,
     onPointerUp: handlePointerUp,
     onPointerCancel: handlePointerCancel,
+    onLostPointerCapture: handleLostPointerCapture,
     onDragStart: (event: DragEvent<HTMLDivElement>) => event.preventDefault()
   };
 
@@ -480,17 +523,18 @@ export function DailyPlanCoverflow({
     <div
       {...interactionProps}
       ref={viewportRef}
-      className="relative mt-2 h-[clamp(16rem,70vw,20rem)] w-full min-w-0 cursor-grab overflow-hidden [perspective:1200px] data-[dragging=true]:cursor-grabbing"
-      style={{ touchAction: "pan-y" }}
+      className="relative mt-2 h-[clamp(14.5rem,62vw,18rem)] w-full min-w-0 cursor-grab overflow-hidden [perspective:1200px] data-[dragging=true]:cursor-grabbing"
+      style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
       data-carousel-stage
       role="region"
       aria-roledescription="순환 캐러셀"
       aria-label="일촬표 선택 카드"
     >
       <div
+        ref={selectionSlotRef}
         aria-hidden="true"
         data-carousel-selection-slot
-        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[calc(clamp(9.25rem,42vw,12.75rem)+8px)] -translate-x-1/2 -translate-y-1/2 rounded-[4px] border-2 border-field-primary/45"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 rounded-[4px] border-2 border-field-primary/45"
       />
       <div className="absolute inset-0 z-[1] [transform-style:preserve-3d]">
         {items.map((item) => (
@@ -503,7 +547,7 @@ export function DailyPlanCoverflow({
             item={item}
             disabled={disabled}
             active={item.id === activeItemKey}
-            className="absolute left-1/2 top-1/2 w-[clamp(9.25rem,42vw,12.75rem)] will-change-transform motion-reduce:transition-none"
+            className="absolute left-1/2 top-1/2 w-[132px] will-change-transform motion-reduce:transition-none"
             tabIndex={item.id === activeItemKey ? 0 : -1}
             onClick={handleCardClick}
             onContextMenu={handleContextMenu}
@@ -575,9 +619,14 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
   );
 });
 
-function getCardSpacing(viewportWidth: number) {
-  const estimatedCardWidth = Math.min(204, Math.max(148, viewportWidth * 0.42));
-  return Math.min(estimatedCardWidth * 0.76, Math.max(92, viewportWidth * 0.235));
+function getCardMetrics(viewportWidth: number) {
+  const cardWidth = clamp(viewportWidth * 0.34, 124, 168);
+  const cardGap = clamp(viewportWidth * 0.055, 24, 52);
+  return {
+    cardWidth,
+    cardGap,
+    cardStep: cardWidth + cardGap
+  };
 }
 
 function getCircularDistance(itemIndex: number, position: number, count: number) {
