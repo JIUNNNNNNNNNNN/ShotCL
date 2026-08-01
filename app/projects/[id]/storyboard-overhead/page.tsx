@@ -36,6 +36,7 @@ import {
   type ArchiveImportSaveFailure,
   type ArchiveImportSaveReport
 } from "@/components/ArchiveImportDialog";
+import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -114,6 +115,12 @@ type PendingConfirm = {
   diagrams: OverheadDiagramArchiveItem[];
   linkedAssetCount: number;
   label: string;
+  message?: string;
+};
+
+type PendingDeleteAsset = {
+  id: string;
+  label: string;
 };
 
 type DiagramDraft = {
@@ -187,6 +194,7 @@ type ArchiveReorderSession = {
   groupKey: string;
   sceneId: string | null;
   cutNumber: number | null;
+  allowReorder: boolean;
   originalIds: string[];
   currentIds: string[];
   expectedUpdatedAtById: Record<string, string>;
@@ -199,6 +207,10 @@ type ArchiveReorderSession = {
   overlayOffsetY: number;
   pointerX: number;
   pointerY: number;
+  activationX: number;
+  activationY: number;
+  hasDraggedAfterActivation: boolean;
+  isOverDeleteZone: boolean;
   autoScrollFrame: number | null;
 };
 
@@ -246,6 +258,7 @@ type ArchivePointerSession = {
   sceneId: string | null;
   cutNumber: number | null;
   orderedAssetIds: string[];
+  allowReorder: boolean;
   pointerId: number;
   startX: number;
   startY: number;
@@ -258,6 +271,7 @@ type ArchivePointerSession = {
 };
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_TOLERANCE = 9;
+const ARCHIVE_DELETE_DRAG_THRESHOLD = 10;
 const ARCHIVE_NATURAL_COLLATOR = new Intl.Collator("ko-KR", {
   numeric: true,
   sensitivity: "base"
@@ -292,7 +306,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [renamingAsset, setRenamingAsset] = useState<ProjectReferenceAsset | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
-  const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; title: string; assetId?: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -309,6 +323,8 @@ export default function ProjectStoryboardOverheadPage() {
   const [reorderModeGroupKey, setReorderModeGroupKey] = useState<string | null>(null);
   const [reorderVisual, setReorderVisual] = useState<{ assetId: string; targetId: string | null } | null>(null);
   const [reorderOverlay, setReorderOverlay] = useState<ArchiveReorderOverlay | null>(null);
+  const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
+  const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
   const preparingRef = useRef(false);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
   const assetPressCleanupRef = useRef<(() => void) | null>(null);
@@ -330,6 +346,10 @@ export default function ProjectStoryboardOverheadPage() {
   const reorderSessionRef = useRef<ArchiveReorderSession | null>(null);
   const reorderPointerCleanupRef = useRef<(() => void) | null>(null);
   const reorderOverlayRef = useRef<HTMLDivElement | null>(null);
+  const deleteDropZoneRef = useRef<HTMLDivElement | null>(null);
+  const pendingDeleteAssetRef = useRef<PendingDeleteAsset | null>(null);
+  const deleteInspectionInFlightRef = useRef(false);
+  const deleteActionInFlightRef = useRef(false);
 
   useUnsavedChangesGuard(isActiveArchiveImportProgress(importProgress));
 
@@ -344,6 +364,7 @@ export default function ProjectStoryboardOverheadPage() {
     setReorderModeGroupKey(null);
     setReorderVisual(null);
     setReorderOverlay(null);
+    setIsOverDeleteZone(false);
   }, []);
 
   const flushImportProgress = useCallback(() => {
@@ -482,6 +503,17 @@ export default function ProjectStoryboardOverheadPage() {
   }, [exitReorderMode, reorderModeGroupKey]);
 
   useEffect(() => {
+    if (!pendingConfirm || isSaving) return;
+    const handleConfirmEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPendingConfirm(null);
+      setErrorMessage("");
+    };
+    document.addEventListener("keydown", handleConfirmEscape);
+    return () => document.removeEventListener("keydown", handleConfirmEscape);
+  }, [isSaving, pendingConfirm]);
+
+  useEffect(() => {
     if (!statusMessage) return;
     const timeout = window.setTimeout(() => setStatusMessage(""), 5_000);
     return () => window.clearTimeout(timeout);
@@ -516,6 +548,7 @@ export default function ProjectStoryboardOverheadPage() {
       }
       reorderSessionRef.current = null;
     }
+    pendingDeleteAssetRef.current = null;
     if (pendingImportRef.current) releaseArchivePages(pendingImportRef.current.pages);
   }, []);
 
@@ -633,6 +666,9 @@ export default function ProjectStoryboardOverheadPage() {
       for (const id of ids) next.delete(archiveSelectionKey("asset", id));
       return next;
     });
+    setPreview((current) => current?.assetId && ids.has(current.assetId) ? null : current);
+    setEditingAsset((current) => current && ids.has(current.id) ? null : current);
+    setRenamingAsset((current) => current && ids.has(current.id) ? null : current);
   }
 
   function removeDiagramsFromLocalState(diagramIds: Iterable<string>) {
@@ -1489,34 +1525,55 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   async function confirmPendingAction() {
-    if (!projectId || !pendingConfirm || !canEdit) return;
+    if (!projectId || !pendingConfirm || !canEdit || deleteActionInFlightRef.current) return;
+    const action = pendingConfirm;
+    deleteActionInFlightRef.current = true;
     setIsSaving(true);
     setErrorMessage("");
     let deletedCount = 0;
     const failures: string[] = [];
+    let remainingAssetIds: string[] = [];
+    const remainingDiagrams: OverheadDiagramArchiveItem[] = [];
+    const warnings: string[] = [];
     try {
-      if (pendingConfirm.assetIds.length > 0) {
+      if (action.assetIds.length > 0) {
         try {
-          await deleteProjectReferenceAssets(projectId, pendingConfirm.assetIds);
-          removeAssetsFromLocalState(pendingConfirm.assetIds);
-          deletedCount += pendingConfirm.assetIds.length;
+          const result = await deleteProjectReferenceAssets(projectId, action.assetIds);
+          removeAssetsFromLocalState(action.assetIds);
+          applyOrderUpdates(result.orders);
+          deletedCount += action.assetIds.length;
+          if (result.storageCleanupWarning) warnings.push(result.storageCleanupWarning);
+          if (result.orderNormalizationWarning) warnings.push(result.orderNormalizationWarning);
         } catch (error) {
+          remainingAssetIds = [...action.assetIds];
           failures.push(error instanceof Error ? error.message : "선택한 이미지를 삭제하지 못했습니다.");
         }
       }
-      for (const item of pendingConfirm.diagrams) {
+      for (const item of action.diagrams) {
         try {
           await deleteOverheadDiagramArchive(projectId, item.id);
           removeDiagramsFromLocalState([item.id]);
           deletedCount += 1;
         } catch (error) {
+          remainingDiagrams.push(item);
           failures.push(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
         }
       }
-      setPendingConfirm(null);
       if (failures.length === 0) {
+        setPendingConfirm(null);
         clearSelection();
+        setStatusMessage(`${deletedCount}개 항목을 삭제했습니다.`);
+        if (warnings.length > 0) setErrorMessage(warnings.join(" · "));
       } else {
+        setPendingConfirm({
+          ...action,
+          assetIds: remainingAssetIds,
+          diagrams: remainingDiagrams,
+          linkedAssetCount: remainingAssetIds.length > 0 ? action.linkedAssetCount : 0,
+          label: remainingAssetIds.length + remainingDiagrams.length === 1
+            ? action.label
+            : `삭제하지 못한 ${remainingAssetIds.length + remainingDiagrams.length}개 항목`
+        });
         setSelectionMode(selectedKeysRef.current.size > 0);
         setErrorMessage([
           deletedCount > 0 ? `${deletedCount}개 삭제됨` : "",
@@ -1525,7 +1582,46 @@ export default function ProjectStoryboardOverheadPage() {
         ].filter(Boolean).join(" · "));
       }
     } finally {
+      deleteActionInFlightRef.current = false;
       setIsSaving(false);
+    }
+  }
+
+  async function requestDraggedAssetDelete(assetId: string) {
+    if (!projectId || !canEdit || pendingDeleteAssetRef.current || pendingConfirm) return;
+    const asset = archiveAssetsRef.current.find((entry) => entry.id === assetId);
+    if (!asset) {
+      setErrorMessage("삭제할 이미지를 찾을 수 없습니다.");
+      return;
+    }
+    const pending = { id: asset.id, label: archiveDisplayName(asset) };
+    pendingDeleteAssetRef.current = pending;
+    setPendingDeleteAsset(pending);
+    setErrorMessage("");
+    try {
+      const inspection = await inspectProjectReferenceAssets(projectId, [pending.id]);
+      if (pendingDeleteAssetRef.current?.id !== pending.id) return;
+      setPendingConfirm({
+        assetIds: [pending.id],
+        diagrams: [],
+        linkedAssetCount: inspection.linkedAssetCount,
+        label: pending.label,
+        message: [
+          "이 이미지를 삭제하시겠습니까? 삭제한 이미지는 복구할 수 없습니다.",
+          inspection.linkedAssetCount > 0
+            ? "진행도에 연결된 파일의 연결도 함께 해제됩니다."
+            : ""
+        ].filter(Boolean).join(" ")
+      });
+    } catch (error) {
+      if (pendingDeleteAssetRef.current?.id === pending.id) {
+        setErrorMessage(error instanceof Error ? error.message : "삭제할 이미지를 확인하지 못했습니다.");
+      }
+    } finally {
+      if (pendingDeleteAssetRef.current?.id === pending.id) {
+        pendingDeleteAssetRef.current = null;
+        setPendingDeleteAsset(null);
+      }
     }
   }
 
@@ -1566,11 +1662,13 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   async function deleteSelectedAssets() {
-    if (!projectId || selectedKeys.size === 0) return;
+    if (!projectId || selectedKeys.size === 0 || deleteInspectionInFlightRef.current) return;
     if (selectedReferenceAssetIds.some((id) => pendingMetadataAssetIdsRef.current.has(id))) {
       setErrorMessage("씬·컷 저장 중인 자료는 완료된 뒤 삭제해주세요.");
       return;
     }
+    setErrorMessage("");
+    deleteInspectionInFlightRef.current = true;
     try {
       const assetInspection = selectedReferenceAssetIds.length > 0
         ? await inspectProjectReferenceAssets(projectId, selectedReferenceAssetIds)
@@ -1583,6 +1681,8 @@ export default function ProjectStoryboardOverheadPage() {
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "삭제할 자료를 확인하지 못했습니다.");
+    } finally {
+      deleteInspectionInFlightRef.current = false;
     }
   }
 
@@ -1736,7 +1836,10 @@ export default function ProjectStoryboardOverheadPage() {
 
   function cancelActiveReorderDrag() {
     const current = reorderSessionRef.current;
-    if (!current) return;
+    if (!current) {
+      setIsOverDeleteZone(false);
+      return;
+    }
     reorderSessionRef.current = null;
     reorderPointerCleanupRef.current?.();
     try {
@@ -1756,6 +1859,7 @@ export default function ProjectStoryboardOverheadPage() {
     }
     setReorderVisual(null);
     setReorderOverlay(null);
+    setIsOverDeleteZone(false);
     scheduleArchiveClickSuppressionRelease(current.assetId);
   }
 
@@ -1764,6 +1868,7 @@ export default function ProjectStoryboardOverheadPage() {
     sceneId: string | null,
     cutNumber: number | null,
     orderedAssetIds: string[],
+    allowReorder: boolean,
     event: ReactPointerEvent<HTMLButtonElement>
   ) {
     if (
@@ -1771,11 +1876,10 @@ export default function ProjectStoryboardOverheadPage() {
       || !projectId
       || !event.isPrimary
       || event.button !== 0
-      || activeType !== "all"
-      || query.trim()
       || selectionMode
       || selectedKeysRef.current.size > 0
-      || orderedAssetIds.length < 2
+      || orderedAssetIds.length < 1
+      || pendingDeleteAssetRef.current !== null
       || reorderSessionRef.current !== null
     ) return;
     const groupKey = archiveOrderGroupKey(sceneId, cutNumber);
@@ -1793,6 +1897,7 @@ export default function ProjectStoryboardOverheadPage() {
       sceneId,
       cutNumber,
       orderedAssetIds: [...orderedAssetIds],
+      allowReorder,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -1870,6 +1975,7 @@ export default function ProjectStoryboardOverheadPage() {
       groupKey: press.groupKey,
       sceneId: press.sceneId,
       cutNumber: press.cutNumber,
+      allowReorder: press.allowReorder,
       originalIds: [...press.orderedAssetIds],
       currentIds: [...press.orderedAssetIds],
       expectedUpdatedAtById: Object.fromEntries(
@@ -1886,10 +1992,15 @@ export default function ProjectStoryboardOverheadPage() {
       overlayOffsetY: Math.max(0, Math.min(rect.height, press.latestY - rect.top)),
       pointerX: press.latestX,
       pointerY: press.latestY,
+      activationX: press.latestX,
+      activationY: press.latestY,
+      hasDraggedAfterActivation: false,
+      isOverDeleteZone: false,
       autoScrollFrame: null
     };
     reorderSessionRef.current = session;
     enterReorderMode(press.groupKey);
+    setIsOverDeleteZone(false);
     setReorderVisual({ assetId: press.assetId, targetId: press.assetId });
     const movingAsset = archiveAssetsRef.current.find((asset) => asset.id === press.assetId);
     if (movingAsset) {
@@ -1908,6 +2019,14 @@ export default function ProjectStoryboardOverheadPage() {
     }
 
     const updateReorderTarget = (current: ArchiveReorderSession) => {
+      if (!current.allowReorder) {
+        current.validDrop = false;
+        if (current.visualTargetId !== null) {
+          current.visualTargetId = null;
+          setReorderVisual({ assetId: current.assetId, targetId: null });
+        }
+        return;
+      }
       const targetId = findArchiveGridInsertionTarget(
         current.groupKey,
         current.currentIds,
@@ -1945,6 +2064,10 @@ export default function ProjectStoryboardOverheadPage() {
     const runAutoScroll = () => {
       const current = reorderSessionRef.current;
       if (!current) return;
+      if (current.isOverDeleteZone) {
+        current.autoScrollFrame = null;
+        return;
+      }
       const step = archiveViewportScrollStep(current.pointerY);
       if (step === 0) {
         current.autoScrollFrame = null;
@@ -1966,6 +2089,33 @@ export default function ProjectStoryboardOverheadPage() {
       );
       current.pointerX = pointerEvent.clientX;
       current.pointerY = pointerEvent.clientY;
+      if (!current.hasDraggedAfterActivation) {
+        current.hasDraggedAfterActivation = Math.hypot(
+          current.pointerX - current.activationX,
+          current.pointerY - current.activationY
+        ) >= ARCHIVE_DELETE_DRAG_THRESHOLD;
+      }
+      const nextOverDeleteZone = current.hasDraggedAfterActivation
+        && isPointInsideArchiveDeleteDropZone(
+          deleteDropZoneRef.current,
+          current.pointerX,
+          current.pointerY
+        );
+      if (current.isOverDeleteZone !== nextOverDeleteZone) {
+        current.isOverDeleteZone = nextOverDeleteZone;
+        setIsOverDeleteZone(nextOverDeleteZone);
+      }
+      if (nextOverDeleteZone) {
+        if (current.autoScrollFrame !== null) {
+          window.cancelAnimationFrame(current.autoScrollFrame);
+          current.autoScrollFrame = null;
+        }
+        if (current.visualTargetId !== null) {
+          current.visualTargetId = null;
+          setReorderVisual({ assetId: current.assetId, targetId: null });
+        }
+        return;
+      }
       if (current.autoScrollFrame === null && archiveViewportScrollStep(current.pointerY) !== 0) {
         current.autoScrollFrame = window.requestAnimationFrame(runAutoScroll);
       }
@@ -1975,7 +2125,17 @@ export default function ProjectStoryboardOverheadPage() {
     const finishPointerDrag = (pointerEvent: PointerEvent) => {
       const current = reorderSessionRef.current;
       if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      const shouldSave = pointerEvent.type === "pointerup" && current.validDrop && current.moved;
+      const droppedOnDeleteZone = pointerEvent.type === "pointerup"
+        && current.hasDraggedAfterActivation
+        && isPointInsideArchiveDeleteDropZone(
+          deleteDropZoneRef.current,
+          pointerEvent.clientX,
+          pointerEvent.clientY
+        );
+      const shouldSave = !droppedOnDeleteZone
+        && pointerEvent.type === "pointerup"
+        && current.validDrop
+        && current.moved;
       const snapshot = { ...current, originalIds: [...current.originalIds], currentIds: [...current.currentIds] };
       reorderSessionRef.current = null;
       reorderPointerCleanupRef.current?.();
@@ -1990,11 +2150,21 @@ export default function ProjectStoryboardOverheadPage() {
       current.handle.style.touchAction = current.previousTouchAction;
       setReorderVisual(null);
       setReorderOverlay(null);
+      setIsOverDeleteZone(false);
       scheduleArchiveClickSuppressionRelease(current.assetId);
+      if (droppedOnDeleteZone) {
+        if (snapshot.moved) {
+          setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
+        }
+        exitReorderMode(snapshot.groupKey);
+        void requestDraggedAssetDelete(snapshot.assetId);
+        return;
+      }
       if (!shouldSave) {
         if (snapshot.moved) {
           setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
         }
+        if (!snapshot.allowReorder) exitReorderMode(snapshot.groupKey);
         return;
       }
       pendingReorderGroupKeysRef.current.add(snapshot.groupKey);
@@ -2051,6 +2221,7 @@ export default function ProjectStoryboardOverheadPage() {
       document.removeEventListener("pointercancel", finishPointerDrag);
       document.removeEventListener("touchmove", preventActiveTouchScroll);
       window.removeEventListener("blur", cancelActiveReorderDrag);
+      handle.removeEventListener("lostpointercapture", cancelActiveReorderDrag);
       reorderPointerCleanupRef.current = null;
     };
     reorderPointerCleanupRef.current = cleanup;
@@ -2059,6 +2230,7 @@ export default function ProjectStoryboardOverheadPage() {
     document.addEventListener("pointercancel", finishPointerDrag);
     document.addEventListener("touchmove", preventActiveTouchScroll, { passive: false });
     window.addEventListener("blur", cancelActiveReorderDrag);
+    handle.addEventListener("lostpointercapture", cancelActiveReorderDrag);
   }
 
   async function cropStoredAsset(asset: ProjectReferenceAsset) {
@@ -2495,11 +2667,14 @@ export default function ProjectStoryboardOverheadPage() {
                     const orderedAssetIds = orderedAssets.map((asset) => asset.id);
                     const orderGroupKey = archiveOrderGroupKey(group.sceneId, cutGroup.cutNumber);
                     const groupInReorderMode = reorderModeGroupKey === orderGroupKey;
-                    const reorderEnabled = canEdit
+                    const groupReorderEnabled = canEdit
                       && activeType === "all"
                       && !query.trim()
                       && !selectionMode
                       && selectedKeys.size === 0
+                      && !isSaving
+                      && !pendingConfirm
+                      && !pendingDeleteAsset
                       && !(group.sceneId && !group.scene)
                       && !(group.sceneId === null && cutGroup.cutNumber !== null)
                       && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
@@ -2564,6 +2739,15 @@ export default function ProjectStoryboardOverheadPage() {
                       }
 
                       const asset = item.asset;
+                      const dragDeleteEnabled = canEdit
+                        && !selectionMode
+                        && selectedKeys.size === 0
+                        && !isSaving
+                        && !pendingConfirm
+                        && !pendingDeleteAsset
+                        && !pendingMetadataAssetIds.has(asset.id)
+                        && !pendingReorderGroupKeys.has(orderGroupKey);
+                      const assetReorderEnabled = dragDeleteEnabled && groupReorderEnabled;
                       const visibleOrderNumber = orderedAssetIds.indexOf(asset.id) + 1;
                       const orderNumber = activeType === "all" && !query.trim()
                         ? visibleOrderNumber
@@ -2587,11 +2771,12 @@ export default function ProjectStoryboardOverheadPage() {
                           <button
                             type="button"
                             onPointerDown={(event) => {
-                              if (reorderEnabled) beginAssetReorderPress(
+                              if (dragDeleteEnabled) beginAssetReorderPress(
                                 asset.id,
                                 group.sceneId,
                                 cutGroup.cutNumber,
                                 orderedAssetIds,
+                                assetReorderEnabled,
                                 event
                               );
                             }}
@@ -2610,15 +2795,25 @@ export default function ProjectStoryboardOverheadPage() {
                                 event.preventDefault();
                                 return;
                               }
-                              setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
+                              setPreview({
+                                url: asset.publicUrl,
+                                title: archiveDisplayName(asset),
+                                assetId: asset.id
+                              });
                             }}
                             onContextMenu={(event) => openAssetContextMenu(asset, event)}
                             className={`grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1 ${
-                              reorderEnabled ? "cursor-grab active:cursor-grabbing" : ""
+                              dragDeleteEnabled ? "cursor-grab active:cursor-grabbing" : ""
                             } ${groupInReorderMode ? "archive-reorder-jiggle" : ""}`}
                             style={{ WebkitTouchCallout: "none" }}
                             aria-pressed={selectionMode ? selected : undefined}
-                            aria-label={`${archiveDisplayName(asset)}, ${orderNumber}번째 자료${reorderEnabled ? ", 길게 눌러 순서 이동" : ""}`}
+                            aria-label={`${archiveDisplayName(asset)}, ${orderNumber}번째 자료${
+                              dragDeleteEnabled
+                                ? assetReorderEnabled
+                                  ? ", 길게 눌러 순서 이동 또는 삭제"
+                                  : ", 길게 눌러 삭제"
+                                : ""
+                            }`}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -2681,7 +2876,11 @@ export default function ProjectStoryboardOverheadPage() {
                           mimeType: asset.mimeType,
                           filename: asset.filename
                         }) === "image") {
-                          setPreview({ url: asset.publicUrl, title: archiveDisplayName(asset) });
+                          setPreview({
+                            url: asset.publicUrl,
+                            title: archiveDisplayName(asset),
+                            assetId: asset.id
+                          });
                         } else {
                           window.open(asset.publicUrl, "_blank", "noopener,noreferrer");
                         }
@@ -2743,6 +2942,21 @@ export default function ProjectStoryboardOverheadPage() {
         document.body
       ) : null}
 
+      {reorderOverlay
+        && canEdit
+        && !selectionMode
+        && !pendingConfirm
+        && !pendingDeleteAsset
+        && typeof document !== "undefined"
+        ? createPortal(
+          <ArchiveDeleteDropZone
+            ref={deleteDropZoneRef}
+            isActive={isOverDeleteZone}
+          />,
+          document.body
+        )
+        : null}
+
       {pendingImport ? (
         <ArchiveImportDialog
           assetType={pendingImport.assetType}
@@ -2800,7 +3014,7 @@ export default function ProjectStoryboardOverheadPage() {
       {pendingConfirm ? (
         <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
           <CompactConfirm
-            message={[
+            message={pendingConfirm.message ?? [
               `${pendingConfirm.label}을 삭제할까요?`,
               pendingConfirm.linkedAssetCount > 0
                 ? `진행도에 연결된 파일 ${pendingConfirm.linkedAssetCount}개의 연결도 해제됩니다.`
@@ -2809,9 +3023,13 @@ export default function ProjectStoryboardOverheadPage() {
                 ? "선택한 직접 만든 부감도의 연결 정보도 함께 삭제됩니다."
                 : ""
             ].filter(Boolean).join(" ")}
+            errorMessage={errorMessage}
             isSaving={isSaving}
             onConfirm={() => void confirmPendingAction()}
-            onCancel={() => setPendingConfirm(null)}
+            onCancel={() => {
+              setPendingConfirm(null);
+              setErrorMessage("");
+            }}
           />
         </div>
       ) : null}
@@ -2850,11 +3068,13 @@ function ArchiveCutText({ cutNo, typeLabel }: { cutNo: string; typeLabel?: strin
 
 function CompactConfirm({
   message,
+  errorMessage,
   isSaving,
   onConfirm,
   onCancel
 }: {
   message: string;
+  errorMessage: string;
   isSaving: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -2862,6 +3082,11 @@ function CompactConfirm({
   return (
     <section className="flex flex-wrap items-center gap-2 rounded-[3px] border border-field-border bg-white p-3 shadow-lg" role="alertdialog" aria-label="삭제 확인">
       <p className="min-w-0 flex-1 text-xs font-bold leading-5 text-field-text">{message}</p>
+      {errorMessage ? (
+        <p className="basis-full text-xs font-bold leading-5 text-field-danger" role="alert">
+          {errorMessage}
+        </p>
+      ) : null}
       <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-muted disabled:opacity-50">
         취소
       </button>
@@ -3230,6 +3455,19 @@ function moveArchiveReorderOverlay(element: HTMLDivElement | null, left: number,
   if (!element) return;
   element.style.left = `${Math.round(left)}px`;
   element.style.top = `${Math.round(top)}px`;
+}
+
+function isPointInsideArchiveDeleteDropZone(
+  element: HTMLDivElement | null,
+  clientX: number,
+  clientY: number
+) {
+  if (!element) return false;
+  const rect = element.getBoundingClientRect();
+  return clientX >= rect.left
+    && clientX <= rect.right
+    && clientY >= rect.top
+    && clientY <= rect.bottom;
 }
 
 function archiveViewportScrollStep(pointerY: number) {

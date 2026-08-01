@@ -563,13 +563,17 @@ export async function deleteProjectReferenceAssets(projectId: string, ids: strin
   const payload = (await response.json().catch(() => ({}))) as ApiError & {
     deleted?: number;
     storageCleanupWarning?: string;
+    orderNormalizationWarning?: string;
+    orders?: ProjectReferenceAssetOrderUpdate[];
   };
   if (!response.ok) {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "선택한 자료를 삭제하지 못했습니다.");
   }
   return {
     deleted: payload.deleted ?? 0,
-    storageCleanupWarning: payload.storageCleanupWarning ?? ""
+    storageCleanupWarning: payload.storageCleanupWarning ?? "",
+    orderNormalizationWarning: payload.orderNormalizationWarning ?? "",
+    orders: payload.orders ?? []
   };
 }
 

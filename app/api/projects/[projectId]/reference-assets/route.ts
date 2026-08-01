@@ -1609,6 +1609,77 @@ function sameStringSet(left: string[], right: string[]) {
   return right.every((value) => expected.has(value));
 }
 
+async function normalizeReferenceAssetOrdersAfterDelete(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  affectedGroups: ArchiveOrderGroup[]
+) {
+  const groups = affectedGroups.filter((group, index) => (
+    affectedGroups.findIndex((candidate) => sameArchiveOrderGroup(candidate, group)) === index
+  ));
+  if (groups.length === 0) {
+    return { orders: [] as Array<{ id: string; sortOrder: number; updatedAt: string }>, warning: "" };
+  }
+
+  const currentRows = await listOrderableArchiveRows(supabase, projectId);
+  const updates = groups.flatMap((group) => currentRows
+    .filter((row) => rowMatchesArchiveOrderGroup(row, group))
+    .sort(compareArchiveOrderRows)
+    .map((row, index) => ({
+      id: String(row.id ?? ""),
+      nextOrder: index + 1,
+      currentOrder: positiveArchiveOrder(row.sort_order),
+      expectedUpdatedAt: String(row.updated_at ?? "")
+    })))
+    .filter((update) => update.id && update.currentOrder !== update.nextOrder);
+
+  const attempts = await mapSettledWithConcurrency(updates, 6, async (update) => {
+    const { data, error } = await supabase
+      .from("project_reference_assets")
+      .update({ sort_order: update.nextOrder })
+      .eq("id", update.id)
+      .eq("project_id", projectId)
+      .eq("updated_at", update.expectedUpdatedAt)
+      .select("id,sort_order,updated_at")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("삭제 후 순서 정리 중 다른 요청에서 자료가 변경되었습니다.");
+    return data;
+  });
+  const failedCount = attempts.filter((attempt) => attempt.status === "rejected").length;
+  if (failedCount > 0) {
+    console.error("[reference-assets:delete-order-normalization]", {
+      projectId,
+      affectedGroupCount: groups.length,
+      failedCount
+    });
+  }
+
+  const savedRows = await listOrderableArchiveRows(supabase, projectId);
+  const savedScopedRows = savedRows
+    .filter((row) => groups.some((group) => rowMatchesArchiveOrderGroup(row, group)));
+  const fullyNormalized = groups.every((group) => savedScopedRows
+    .filter((row) => rowMatchesArchiveOrderGroup(row, group))
+    .sort(compareArchiveOrderRows)
+    .every((row, index) => positiveArchiveOrder(row.sort_order) === index + 1));
+  if (!fullyNormalized) {
+    console.error("[reference-assets:delete-order-verification]", {
+      projectId,
+      affectedGroupCount: groups.length
+    });
+  }
+  return {
+    orders: savedScopedRows.map((row) => ({
+        id: String(row.id ?? ""),
+        sortOrder: Number.isSafeInteger(Number(row.sort_order)) ? Number(row.sort_order) : 0,
+        updatedAt: String(row.updated_at ?? "")
+      })),
+    warning: failedCount > 0 || !fullyNormalized
+      ? "이미지는 삭제됐지만 일부 순서 번호를 정리하지 못했습니다."
+      : ""
+  };
+}
+
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
     const projectId = await getProjectId(context);
@@ -1622,16 +1693,22 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (queryId) ids.unshift(queryId);
     const uniqueIds = [...new Set(ids)].slice(0, 500);
     if (uniqueIds.length === 0) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
+    if (uniqueIds.some((id) => !UUID_PATTERN.test(id))) {
+      return NextResponse.json({ error: "자료 ID가 올바르지 않습니다." }, { status: 400 });
+    }
     const supabase = requireProjectAccessDb();
     const { data: existing, error: readError } = await supabase
       .from("project_reference_assets")
-      .select("id,storage_path,crop_data")
+      .select(SELECT_COLUMNS)
       .eq("project_id", projectId)
       .in("id", uniqueIds);
     if (readError) throw readError;
     if ((existing ?? []).length !== uniqueIds.length) {
       return NextResponse.json({ error: "삭제할 자료 중 일부를 찾을 수 없습니다." }, { status: 404 });
     }
+    const affectedOrderGroups = ((existing ?? []) as Array<Record<string, unknown>>)
+      .filter(isOrderableArchiveRow)
+      .map(archiveOrderGroupFromRow);
     const assetIdSet = new Set((existing ?? []).map((asset) => String(asset.id)));
     const { data: linkRows, error: linkReadError } = await supabase
       .from("shot_diagrams")
@@ -1686,6 +1763,21 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       ].filter(Boolean).join(" · "));
     }
 
+    let normalizedOrders: Array<{ id: string; sortOrder: number; updatedAt: string }> = [];
+    let orderNormalizationWarning = "";
+    try {
+      const normalized = await normalizeReferenceAssetOrdersAfterDelete(
+        supabase,
+        projectId,
+        affectedOrderGroups
+      );
+      normalizedOrders = normalized.orders;
+      orderNormalizationWarning = normalized.warning;
+    } catch (normalizationError) {
+      orderNormalizationWarning = "이미지는 삭제됐지만 순서 번호를 정리하지 못했습니다.";
+      console.error("[reference-assets:delete-order-normalization]", safeError(normalizationError));
+    }
+
     const storagePaths = [...new Set((existing ?? []).flatMap((asset) => [
       cleanText(asset.storage_path, 1_000),
       cleanText(normalizeCrop(asset.crop_data).thumbnailPath, 1_000)
@@ -1701,7 +1793,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       ok: true,
       deleted: uniqueIds.length,
-      storageCleanupWarning
+      storageCleanupWarning,
+      orderNormalizationWarning,
+      orders: normalizedOrders
     });
   } catch (error) {
     return materialError(error, "자료를 삭제하지 못했습니다.");
