@@ -32,6 +32,7 @@ type PointerSession = {
   pointerId: number;
   pointerType: string;
   itemId: string;
+  captureTarget: HTMLButtonElement;
   startX: number;
   startY: number;
   clientX: number;
@@ -201,8 +202,8 @@ export function DailyPlanCoverflow({
     pointerSessionRef.current = null;
     viewport?.removeAttribute("data-dragging");
     if (!current) return;
-    if (viewport?.hasPointerCapture(current.pointerId)) {
-      viewport.releasePointerCapture(current.pointerId);
+    if (current.captureTarget.hasPointerCapture(current.pointerId)) {
+      current.captureTarget.releasePointerCapture(current.pointerId);
     }
     if (current.intent === "horizontal" || current.intent === "cancelled" || current.longPressed) {
       markGeneratedClickForSuppression();
@@ -261,7 +262,7 @@ export function DailyPlanCoverflow({
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (disabled || (event.pointerType === "mouse" && event.button !== 0)) return;
-    const target = (event.target as HTMLElement).closest<HTMLElement>("[data-carousel-item-id]");
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-carousel-item-id]");
     const itemId = target?.dataset.carouselItemId;
     if (!itemId) return;
     const item = items.find((candidate) => candidate.id === itemId);
@@ -275,6 +276,7 @@ export function DailyPlanCoverflow({
       pointerId: event.pointerId,
       pointerType: event.pointerType,
       itemId,
+      captureTarget: target,
       startX: event.clientX,
       startY: event.clientY,
       clientX: event.clientX,
@@ -286,7 +288,9 @@ export function DailyPlanCoverflow({
       intent: "pending",
       longPressed: false
     };
-    event.currentTarget.setPointerCapture(event.pointerId);
+    // 부모 stage가 capture하면 일부 브라우저에서 합성 click도 부모로 재지정됩니다.
+    // 실제 카드 button이 capture해야 짧은 click/tap의 target을 그대로 보존할 수 있습니다.
+    target.setPointerCapture(event.pointerId);
 
     if (event.pointerType !== "mouse" && item.kind === "plan") {
       longPressTimerRef.current = window.setTimeout(() => {
