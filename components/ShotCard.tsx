@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { ChevronDown, ChevronUp, Images, Map } from "lucide-react";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
+import { formatProgressCutLabel } from "@/lib/progress/cutLabel";
 import { type Shot, type ShotMediaType, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,7 @@ export const ShotCard = memo(function ShotCard({
   const hasOverhead = Boolean(shot.overheadImageUrl || hasOverheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "OMIT" : "대기";
   const hasMedia = Boolean(shot.storyboardImageUrl || hasOverhead);
-  const displayText = getShotDisplayText(shot);
+  const cutLabel = formatProgressCutLabel(shot.sceneNumber, shot.cutNumber);
 
   function shouldIgnoreCardOpen(target: EventTarget | null) {
     return target instanceof HTMLElement && Boolean(target.closest("button, a, input, textarea, select, [data-no-drag]"));
@@ -57,7 +58,7 @@ export const ShotCard = memo(function ShotCard({
   function handleImageClick(event: React.MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
     if (shot.storyboardImageUrl) {
-      onImagePreview(shot.storyboardImageUrl, shot.title);
+      onImagePreview(shot.storyboardImageUrl, `${cutLabel} 콘티`);
     }
   }
 
@@ -77,7 +78,7 @@ export const ShotCard = memo(function ShotCard({
         >
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <strong className="truncate text-sm font-black text-field-primary">
-              S#{shot.sceneNumber || "-"} · CUT {shot.cutNumber || "-"}
+              {cutLabel}
             </strong>
             <span className={cn(
               "text-[11px] font-black",
@@ -98,7 +99,7 @@ export const ShotCard = memo(function ShotCard({
   return (
     <article
       onClick={handleCardOpen}
-      aria-label={progressOnly ? `${shot.title} 컷 상세 보기` : `${shot.title} 컷 수정`}
+      aria-label={progressOnly ? `${cutLabel} 상세 보기` : `${cutLabel} 수정`}
       className={cn(
         "relative grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[1.5rem] border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
         isOk
@@ -122,7 +123,7 @@ export const ShotCard = memo(function ShotCard({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={shot.storyboardImageUrl}
-                  alt={`${displayText} 콘티`}
+                  alt={`${cutLabel} 콘티`}
                   draggable={false}
                   className="block h-full max-h-full w-full max-w-full select-none rounded-none object-contain [-webkit-user-drag:none]"
                 />
@@ -133,7 +134,7 @@ export const ShotCard = memo(function ShotCard({
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onImagePreview(shot.overheadImageUrl as string, `${displayText || shot.title} 부감도`);
+                  onImagePreview(shot.overheadImageUrl as string, `${cutLabel} 부감도`);
                 }}
                 data-no-drag="true"
                 className="h-full w-full max-w-full min-w-0 overflow-visible !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
@@ -142,7 +143,7 @@ export const ShotCard = memo(function ShotCard({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={shot.overheadImageUrl}
-                  alt={`${displayText || shot.title} 부감도`}
+                  alt={`${cutLabel} 부감도`}
                   draggable={false}
                   className="block h-full max-h-full w-full max-w-full select-none rounded-none object-contain [-webkit-user-drag:none]"
                 />
@@ -158,7 +159,7 @@ export const ShotCard = memo(function ShotCard({
                 className="h-full w-full max-w-full min-w-0 overflow-visible !rounded-none !border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#d7b95f]"
                 title="부감도&콘티 페이지로 이동"
               >
-                <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${displayText} 부감도 미리보기`} />
+                <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${cutLabel} 부감도 미리보기`} />
               </button>
             ) : null}
           </div>
@@ -166,6 +167,9 @@ export const ShotCard = memo(function ShotCard({
 
         <div className="min-w-0 px-0.5">
         <div className="flex min-w-0 items-center gap-1.5">
+          <h2 className="min-w-0 truncate text-sm font-black leading-5 text-field-text">
+            {cutLabel}
+          </h2>
           <p className={cn("rounded-[3px] px-2 py-1 text-[10px] font-black leading-[1.35]", isOk ? "bg-field-primary text-white" : isOmit ? "bg-field-danger text-white" : "bg-field-soft text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
@@ -220,14 +224,6 @@ export const ShotCard = memo(function ShotCard({
           </div>
         </div>
 
-        {displayText ? (
-          <h2 className={cn(
-            "mt-1 truncate text-sm font-black leading-5 text-field-text",
-            isOmit && "underline decoration-2 underline-offset-4"
-          )}>
-            {displayText}
-          </h2>
-        ) : null}
         <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-bold text-field-muted">
           {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
           {shot.location ? <p className="min-w-0 flex-1 truncate text-field-secondary">장소 {shot.location}</p> : null}
@@ -265,23 +261,3 @@ export const ShotCard = memo(function ShotCard({
     </article>
   );
 });
-
-function getShotDisplayText(shot: Shot) {
-  const description = shot.description.trim();
-  if (description) return description;
-  const title = shot.title.trim();
-  if (!title || isAutomaticSceneCutLabel(title, shot.sceneNumber, shot.cutNumber)) return "";
-  return title;
-}
-
-function isAutomaticSceneCutLabel(value: string, sceneNumber: string, cutNumber: string) {
-  const compact = value.replace(/\s+/g, "").toLowerCase();
-  const scene = sceneNumber.trim().toLowerCase();
-  const cut = cutNumber.trim().toLowerCase();
-  return new Set([
-    `씬${scene}컷${cut}`,
-    `scene${scene}cut${cut}`,
-    `s#${scene}/c#${cut}`,
-    `s#${scene}c#${cut}`
-  ]).has(compact);
-}

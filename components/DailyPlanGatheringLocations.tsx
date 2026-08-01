@@ -6,11 +6,11 @@ import { optimizeArchiveImage } from "@/lib/client/archiveMedia";
 import { saveDailyPlanGatheringPhotoDraft } from "@/lib/data/dailyPlanGatheringPhotos";
 import {
   createGatheringPhotoId,
-  selectDailyPlanGatheringPoints,
-  type DerivedDailyPlanGatheringPoint
+  normalizeGatheringLocationName
 } from "@/lib/dailyPlan/gatheringPoints";
-import type { DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
-import type { DailyPlan } from "@/lib/types";
+import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import { decodeDailyPlanMemo, type DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
+import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 
 export type GatheringPhotoPreview = {
   url: string;
@@ -45,6 +45,14 @@ type PendingDraftPhoto = {
 
 type DraftPhoto = ExistingDraftPhoto | PendingDraftPhoto;
 
+type ProgressGatheringPlace = {
+  id: string;
+  persistedId: string | null;
+  locationName: string;
+  departmentIds: string[];
+  photos: DailyPlanGatheringPhoto[];
+};
+
 export function DailyPlanGatheringLocations({
   projectId,
   plan,
@@ -52,13 +60,15 @@ export function DailyPlanGatheringLocations({
   onPlanMetadataChange,
   onPreview
 }: DailyPlanGatheringLocationsProps) {
-  const points = useMemo(
-    () => selectDailyPlanGatheringPoints(plan),
-    [plan.memo, plan.shootingLocations]
+  const place = useMemo(
+    () => selectProgressGatheringPlace(plan),
+    [plan.meetingLocation, plan.memo, plan.shootingLocations]
   );
-  const [editingPointId, setEditingPointId] = useState<string | null>(null);
+  const [isEditingPhotos, setIsEditingPhotos] = useState(false);
   const [message, setMessage] = useState("");
-  const editingPoint = points.find((point) => point.id === editingPointId) ?? null;
+  const callTime = plan.callTime.trim();
+  const hasContent = Boolean(callTime || place?.locationName || place?.photos.length);
+  const canManagePhotos = Boolean(canEdit && place && (place.persistedId || place.departmentIds.length > 0));
 
   return (
     <section className="mb-3 rounded-[3px] border border-field-border bg-white px-3 py-2.5" aria-labelledby="gathering-locations-title">
@@ -67,38 +77,31 @@ export function DailyPlanGatheringLocations({
         {message ? <p className="min-w-0 truncate text-[11px] font-bold text-field-muted">{message}</p> : null}
       </div>
 
-      {points.length === 0 ? (
-        <div className="py-2 text-xs font-bold leading-5 text-field-muted">
-          <p>등록된 집합장소가 없습니다.</p>
-          {canEdit ? <p>일촬표에서 부서별 집합장소를 입력하세요.</p> : null}
-        </div>
+      {!hasContent ? (
+        <p className="py-2 text-xs font-bold leading-5 text-field-muted">일촬표에 집합장소가 없습니다.</p>
       ) : (
-        <div className="divide-y divide-field-border">
-          {points.map((point) => (
-            <GatheringPointRow
-              key={point.id}
-              point={point}
-              canEdit={canEdit}
-              onManage={() => {
-                setMessage("");
-                setEditingPointId(point.id);
-              }}
-              onPreview={onPreview}
-            />
-          ))}
-        </div>
+        <GatheringPlaceRow
+          callTime={callTime}
+          place={place}
+          canManagePhotos={canManagePhotos}
+          onManage={() => {
+            setMessage("");
+            setIsEditingPhotos(true);
+          }}
+          onPreview={onPreview}
+        />
       )}
 
-      {canEdit && editingPoint ? (
+      {canEdit && isEditingPhotos && place ? (
         <GatheringPhotoEditor
           projectId={projectId}
           plan={plan}
-          point={editingPoint}
-          onClose={() => setEditingPointId(null)}
+          point={place}
+          onClose={() => setIsEditingPhotos(false)}
           onSaved={(patch, nextMessage) => {
             onPlanMetadataChange(patch);
             setMessage(nextMessage);
-            setEditingPointId(null);
+            setIsEditingPhotos(false);
           }}
         />
       ) : null}
@@ -106,27 +109,32 @@ export function DailyPlanGatheringLocations({
   );
 }
 
-function GatheringPointRow({
-  point,
-  canEdit,
+function GatheringPlaceRow({
+  callTime,
+  place,
+  canManagePhotos,
   onManage,
   onPreview
 }: {
-  point: DerivedDailyPlanGatheringPoint;
-  canEdit: boolean;
+  callTime: string;
+  place: ProgressGatheringPlace | null;
+  canManagePhotos: boolean;
   onManage: () => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
 }) {
-  const photoPreviews = point.photos.map((photo) => ({
+  const photoPreviews = (place?.photos ?? []).map((photo) => ({
     url: photo.url,
-    title: `${point.locationName} · ${photo.originalFilename || "위치 사진"}`
+    title: `${place?.locationName || "집합장소"} · ${photo.originalFilename || "위치 사진"}`
   }));
   return (
-    <article className="grid gap-1.5 py-2.5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
+    <article className="grid gap-2 py-2.5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center md:gap-3">
       <div className="min-w-0">
         <div className="flex min-w-0 items-start justify-between gap-2">
-          <h3 className="min-w-0 break-words text-[14px] font-black leading-5 text-field-text">{point.locationName}</h3>
-          {canEdit ? (
+          <div className="min-w-0">
+            {callTime ? <p className="text-[15px] font-black leading-5 text-field-primary">{callTime}</p> : null}
+            {place?.locationName ? <h3 className="mt-0.5 min-w-0 break-words text-[14px] font-bold leading-5 text-field-text">{place.locationName}</h3> : null}
+          </div>
+          {canManagePhotos ? (
             <button
               type="button"
               onClick={onManage}
@@ -136,47 +144,15 @@ function GatheringPointRow({
             </button>
           ) : null}
         </div>
-        <GatheringDepartmentTimes point={point} />
-        {point.address ? (
-          <p className="mt-0.5 truncate text-[11px] font-medium text-field-muted" title={point.address}>
-            {point.mapUrl ? (
-              <a href={point.mapUrl} target="_blank" rel="noreferrer" className="underline decoration-field-border underline-offset-2">
-                {point.address}
-              </a>
-            ) : point.address}
-          </p>
-        ) : null}
-        {point.note ? (
-          <p className="mt-0.5 truncate text-[11px] font-medium text-field-muted" title={point.note}>{point.note}</p>
-        ) : null}
       </div>
-      {point.photos.length > 0 ? (
+      {place && place.photos.length > 0 ? (
         <GatheringPhotoStrip
-          photos={point.photos}
-          locationName={point.locationName}
+          photos={place.photos}
+          locationName={place.locationName || "집합장소"}
           onPreview={(index) => onPreview(photoPreviews, index)}
         />
       ) : null}
     </article>
-  );
-}
-
-function GatheringDepartmentTimes({ point }: { point: DerivedDailyPlanGatheringPoint }) {
-  const timeValues = [...new Set(point.departments.map((department) => department.time).filter(Boolean))];
-  const departmentNames = point.departments.map((department) => department.name).join(", ");
-  if (timeValues.length <= 1) {
-    return (
-      <p className="mt-0.5 text-[12px] font-bold leading-5 text-field-muted">
-        {[timeValues[0] || "시간 미정", departmentNames].filter(Boolean).join(" · ")}
-      </p>
-    );
-  }
-  return (
-    <p className="mt-0.5 text-[12px] font-bold leading-5 text-field-muted">
-      {point.departments.map((department) => (
-        `${department.time || "시간 미정"} ${department.name}`
-      )).join(" · ")}
-    </p>
   );
 }
 
@@ -221,7 +197,7 @@ function GatheringPhotoEditor({
 }: {
   projectId: string;
   plan: DailyPlan;
-  point: DerivedDailyPlanGatheringPoint;
+  point: ProgressGatheringPlace;
   onClose: () => void;
   onSaved: (patch: Pick<DailyPlan, "memo" | "updatedAt">, message: string) => void;
 }) {
@@ -311,7 +287,7 @@ function GatheringPhotoEditor({
         projectId,
         dailyPlanId: plan.id,
         gatheringPointId: point.persistedId,
-        departmentIds: point.departments.map((department) => department.id),
+        departmentIds: point.departmentIds,
         deletedPhotoIds,
         orderedPhotoIds: finalOrder,
         pendingPhotos: pending.map((photo) => ({
@@ -423,4 +399,37 @@ function toExistingDraftPhoto(photo: DailyPlanGatheringPhoto): ExistingDraftPhot
     previewUrl: photo.thumbnailUrl || photo.url,
     originalFilename: photo.originalFilename
   };
+}
+
+function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace | null {
+  const primaryLocation = plan.shootingLocations.find((location) => location.isPrimary) ?? null;
+  const fallbackLocationName = primaryLocation
+    ? getPrimaryLocationName(primaryLocation)
+    : normalizeGatheringLocationName(plan.meetingLocation);
+  const meta = decodeDailyPlanMemo(plan.memo);
+  const pointByLocationId = primaryLocation?.id
+    ? meta.gatheringPoints.find((point) => point.locationId === primaryLocation.id)
+    : null;
+  const pointByName = fallbackLocationName
+    ? meta.gatheringPoints.find((point) => (
+        normalizeGatheringLocationName(point.locationName).toLocaleLowerCase("ko-KR")
+        === fallbackLocationName.toLocaleLowerCase("ko-KR")
+      ))
+    : null;
+  const point = pointByLocationId ?? pointByName ?? null;
+  const locationName = fallbackLocationName || normalizeGatheringLocationName(point?.locationName);
+  if (!primaryLocation && !locationName && !point?.photos.length) return null;
+
+  return {
+    id: point?.id ?? `primary:${primaryLocation?.id || "legacy"}`,
+    persistedId: point?.id ?? null,
+    locationName,
+    departmentIds: point?.departmentIds ?? [],
+    photos: point?.photos ?? []
+  };
+}
+
+function getPrimaryLocationName(location: DailyPlanLocation) {
+  return normalizeGatheringLocationName(location.name)
+    || normalizeGatheringLocationName(getDailyPlanLocationAddress(location));
 }
