@@ -5,6 +5,7 @@ import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/l
 import { getLocalProjectIdCandidates, isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { emptyProjectBasicInfo, normalizeProjectBasicInfo, validateProjectBasicInfo } from "@/lib/projectBasicInfo";
 import type { Project, ProjectBasicInfo, ProjectInput } from "@/lib/types";
+import type { ProjectAccessGrant } from "@/lib/projectAccess/core";
 
 type ProjectApiErrorPayload = {
   error?: string;
@@ -46,6 +47,51 @@ export async function listProjects(): Promise<Project[]> {
   const sharedProjects = await sharedProjectsRequest;
   const { projects } = readLocalBuckets();
   return mergeProjects(sharedProjects, projects);
+}
+
+/** 비밀번호 인증으로 생성된 현재 브라우저의 유효한 프로젝트 권한만 조회합니다. */
+export async function listAccessibleProjects(): Promise<Project[]> {
+  const response = await fetch("/api/projects/access-list", {
+    cache: "no-store",
+    credentials: "same-origin"
+  });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & {
+    projects?: Record<string, unknown>[];
+  };
+  if (!response.ok) {
+    throw new Error(payload.error || "참여한 프로젝트를 불러오지 못했습니다.");
+  }
+  return (payload.projects ?? []).map(projectFromRow);
+}
+
+/** 저장된 project ID만 믿지 않고 현재 서버 access grant를 다시 확인합니다. */
+export async function verifyProjectAccess(projectId: string): Promise<ProjectAccessGrant | null> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  if (!isValidDatabaseProjectId(databaseProjectId)) return null;
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/access`, {
+    cache: "no-store",
+    credentials: "same-origin"
+  });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & {
+    shared?: boolean;
+    projectId?: string;
+    projectName?: string;
+    role?: "admin" | "progress" | null;
+    joinedAt?: string;
+  };
+  if (response.status === 401 || response.status === 403 || response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(payload.error || "프로젝트 접근 권한을 확인하지 못했습니다.");
+  }
+  if (!payload.shared || !payload.projectId || !payload.projectName || !payload.role) return null;
+  const verifiedProjectId = normalizeProjectId(payload.projectId);
+  if (!isValidDatabaseProjectId(verifiedProjectId) || verifiedProjectId !== databaseProjectId) return null;
+  return {
+    projectId: verifiedProjectId,
+    projectName: payload.projectName,
+    role: payload.role,
+    joinedAt: payload.joinedAt ?? ""
+  };
 }
 
 async function loadSharedProjects(): Promise<Project[]> {

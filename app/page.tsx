@@ -4,8 +4,13 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
-import { listProjects } from "@/lib/data/projects";
+import { listAccessibleProjects, verifyProjectAccess } from "@/lib/data/projects";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
+import {
+  forgetProjectSelection,
+  readRememberedProjectSelection,
+  rememberProjectSelection
+} from "@/lib/projectAccess/recentProject";
 import { projectFromRow } from "@/lib/data/mappers";
 import { getLocalProjectIdCandidates } from "@/lib/projectId";
 import type { Project } from "@/lib/types";
@@ -21,7 +26,7 @@ type WheelItemId = (typeof wheelItems)[number]["id"];
 
 const HIDDEN_PROJECT_IDS_KEY = "shotcl:hiddenProjectIds";
 const MAIN_SELECTION_FEEDBACK_MS = 90;
-const PROJECT_SELECTION_FEEDBACK_MS = 100;
+const NAVIGATION_LOCK_RELEASE_MS = 1500;
 
 function readHiddenProjectIds() {
   if (typeof window === "undefined") return new Set<string>();
@@ -88,6 +93,7 @@ export default function HomePage() {
   const [joinPassword, setJoinPassword] = useState("");
   const [newProjectError, setNewProjectError] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isResolvingGo, setIsResolvingGo] = useState(false);
   const [feedback, setFeedback] = useState<{ target: WheelItemId; message: string } | null>(null);
   const [selectedMainId, setSelectedMainId] = useState<WheelItemId | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -109,8 +115,11 @@ export default function HomePage() {
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mainSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const projectsLoadPromiseRef = useRef<Promise<void> | null>(null);
+  const projectsLoadPromiseRef = useRef<Promise<Project[]> | null>(null);
   const projectNavigationRef = useRef(false);
+  const navigationAttemptRef = useRef(0);
+  const joinSubmissionRef = useRef(false);
+  const isMountedRef = useRef(true);
   const measureMainTarget = useCallback(
     (index: number) => getBubbleTargetMeasurement(mainBubbleRefs.current[index], mainTargetRef.current),
     []
@@ -172,11 +181,14 @@ export default function HomePage() {
     function resetHomeInteractions() {
       mainSpinner.resetInteraction();
       projectSpinner.resetInteraction();
+      navigationAttemptRef.current += 1;
       projectNavigationRef.current = false;
+      joinSubmissionRef.current = false;
       setSelectedMainId(null);
       setSelectedProjectId(null);
       setPickerMode(null);
       setFeedback(null);
+      setIsResolvingGo(false);
 
       [document.body, document.documentElement].forEach((element) => {
         if (element.style.cursor === "grabbing" || element.style.cursor === "grab") {
@@ -197,10 +209,14 @@ export default function HomePage() {
     };
   }, [mainSpinner.resetInteraction, projectSpinner.resetInteraction]);
 
-  useEffect(() => () => {
-    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
-    if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);
-    if (projectSelectionTimerRef.current) clearTimeout(projectSelectionTimerRef.current);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+      if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);
+      if (projectSelectionTimerRef.current) clearTimeout(projectSelectionTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -231,7 +247,6 @@ export default function HomePage() {
   }, [mainSpinner.cancelPending, pickerMode, projectSpinner.cancelPending]);
 
   useEffect(() => {
-    projectNavigationRef.current = false;
     if (pickerMode !== "progress") {
       projectSpinner.cancelPending();
       setSelectedProjectId(null);
@@ -259,34 +274,166 @@ export default function HomePage() {
   function showFeedback(target: WheelItemId, message: string) {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     setFeedback({ target, message });
-    feedbackTimerRef.current = setTimeout(() => setFeedback(null), 1500);
+    feedbackTimerRef.current = setTimeout(() => {
+      if (isMountedRef.current) setFeedback(null);
+    }, 1500);
   }
 
-  function loadProjectsForSpinner() {
-    if (hasLoadedProjects || projectsLoadPromiseRef.current) return;
+  function loadAccessibleProjectList(force = false): Promise<Project[]> {
+    if (!force && hasLoadedProjects) return Promise.resolve(projects);
+    if (projectsLoadPromiseRef.current) return projectsLoadPromiseRef.current;
     setIsLoading(true);
     setErrorMessage("");
-    const request = listProjects()
+    const request = listAccessibleProjects()
       .then((data) => {
-        const hiddenProjectIds = readHiddenProjectIds();
-        setProjects(data.filter((project) => (
-          !getLocalProjectIdCandidates(project.id).some((candidate) => hiddenProjectIds.has(candidate))
-        )));
-        setHasLoadedProjects(true);
+        if (isMountedRef.current) {
+          setProjects(data);
+          setHasLoadedProjects(true);
+        }
+        return data;
       })
       .catch((error) => {
-        setErrorMessage(error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다.");
-        showFeedback("progress", "프로젝트를 불러오지 못했습니다");
+        if (isMountedRef.current) {
+          setErrorMessage(error instanceof Error ? error.message : "참여한 프로젝트를 불러오지 못했습니다.");
+        }
+        throw error;
       })
       .finally(() => {
         projectsLoadPromiseRef.current = null;
-        setIsLoading(false);
+        if (isMountedRef.current) setIsLoading(false);
       });
     projectsLoadPromiseRef.current = request;
+    return request;
+  }
+
+  function showJoinPicker(message = "", refreshProjects = true) {
+    const joinIndex = wheelItems.findIndex((item) => item.id === "join");
+    if (joinIndex >= 0) {
+      mainSpinner.snapToIndex(joinIndex, { commit: false });
+      mainSelectionTimerRef.current = setTimeout(() => {
+        mainSelectionTimerRef.current = null;
+        if (isMountedRef.current) mainSpinner.snapToIndex(joinIndex, { commit: false });
+      }, 300);
+    }
+    navigationAttemptRef.current += 1;
+    projectNavigationRef.current = false;
+    setIsResolvingGo(false);
+    setSelectedMainId("join");
+    setPickerMode("join");
+    setNewProjectError(message);
+    if (refreshProjects) {
+      void loadAccessibleProjectList(true).catch(() => undefined);
+    }
+  }
+
+  function releaseProjectNavigation(attemptId?: number) {
+    if (attemptId !== undefined && navigationAttemptRef.current !== attemptId) return;
+    projectNavigationRef.current = false;
+    if (!isMountedRef.current) return;
+    setSelectedProjectId(null);
+    setIsResolvingGo(false);
+    setIsCreatingProject(false);
+  }
+
+  function pushProjectRoute(
+    projectId: string,
+    projectPath: string,
+    feedbackTarget: WheelItemId,
+    attemptId = navigationAttemptRef.current
+  ) {
+    if (navigationAttemptRef.current !== attemptId) return;
+    setSelectedProjectId(projectId);
+    try {
+      router.prefetch(projectPath);
+      router.push(projectPath);
+    } catch {
+      releaseProjectNavigation(attemptId);
+      showFeedback(feedbackTarget, "프로젝트를 열지 못했습니다");
+      return;
+    }
+
+    if (projectSelectionTimerRef.current) clearTimeout(projectSelectionTimerRef.current);
+    projectSelectionTimerRef.current = setTimeout(() => {
+      projectSelectionTimerRef.current = null;
+      releaseProjectNavigation(attemptId);
+    }, NAVIGATION_LOCK_RELEASE_MS);
+  }
+
+  async function resolveGoProject() {
+    if (projectNavigationRef.current) return;
+    const attemptId = navigationAttemptRef.current + 1;
+    navigationAttemptRef.current = attemptId;
+    projectNavigationRef.current = true;
+    setIsResolvingGo(true);
+    setErrorMessage("");
+
+    try {
+      const accessibleProjects = await loadAccessibleProjectList(true);
+      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+      const accessibleById = new Map(accessibleProjects.map((project) => [project.id, project]));
+      const { activeProjectId, lastProjectId } = readRememberedProjectSelection();
+
+      let revokedProjectFound = false;
+      [activeProjectId, lastProjectId].forEach((projectId) => {
+        if (projectId && !accessibleById.has(projectId)) {
+          revokedProjectFound = true;
+          forgetProjectSelection(projectId);
+        }
+      });
+
+      const candidateIds: string[] = [];
+      if (activeProjectId && accessibleById.has(activeProjectId)) candidateIds.push(activeProjectId);
+      if (
+        lastProjectId
+        && lastProjectId !== activeProjectId
+        && accessibleById.has(lastProjectId)
+      ) {
+        candidateIds.push(lastProjectId);
+      }
+      if (accessibleProjects.length === 1 && !candidateIds.includes(accessibleProjects[0].id)) {
+        candidateIds.push(accessibleProjects[0].id);
+      }
+
+      for (const projectId of candidateIds) {
+        const grant = await verifyProjectAccess(projectId);
+        if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+        if (!grant) {
+          revokedProjectFound = true;
+          forgetProjectSelection(projectId);
+          if (isMountedRef.current) {
+            setProjects((current) => current.filter((project) => project.id !== projectId));
+          }
+          continue;
+        }
+
+        rememberProjectSelection(grant.projectId);
+        pushProjectRoute(
+          grant.projectId,
+          `/projects/${encodeURIComponent(grant.projectId)}?view=progress`,
+          "progress",
+          attemptId
+        );
+        return;
+      }
+
+      showJoinPicker(
+        revokedProjectFound ? "접근 권한이 만료되었습니다. 비밀번호로 다시 참여해주세요." : "",
+        false
+      );
+    } catch (error) {
+      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+      setErrorMessage(error instanceof Error ? error.message : "프로젝트 접근 권한을 확인하지 못했습니다.");
+      showJoinPicker("", false);
+    }
   }
 
   function commitWheelItem(id: WheelItemId) {
-    if (pickerMode === id || mainSelectionTimerRef.current) return;
+    if (
+      pickerMode === id
+      || mainSelectionTimerRef.current
+      || projectNavigationRef.current
+      || joinSubmissionRef.current
+    ) return;
     setSelectedMainId(id);
     setFeedback(null);
     setNewProjectError("");
@@ -294,17 +441,22 @@ export default function HomePage() {
 
     mainSelectionTimerRef.current = setTimeout(() => {
       mainSelectionTimerRef.current = null;
-      if (id === "new" || id === "join") {
-        setPickerMode(id);
+      if (id === "new") {
+        setPickerMode("new");
         return;
       }
-
-      setPickerMode(id);
-      loadProjectsForSpinner();
+      if (id === "join") {
+        showJoinPicker();
+        return;
+      }
+      setPickerMode(null);
+      setJoinPassword("");
+      void resolveGoProject();
     }, MAIN_SELECTION_FEEDBACK_MS);
   }
 
   function closeInputSubmenu(mode: "new" | "join") {
+    if (projectNavigationRef.current || joinSubmissionRef.current) return;
     if (mode === "new") {
       setNewProjectName("");
       setAdminPassword("");
@@ -332,6 +484,7 @@ export default function HomePage() {
   }
 
   function handleWheelKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       if (mainSpinner.activationIndex === null) {
@@ -351,6 +504,7 @@ export default function HomePage() {
   }
 
   function handleProjectSpinnerKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.target !== event.currentTarget) return;
     if (projects.length === 0) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -369,25 +523,57 @@ export default function HomePage() {
     projectSpinner.snapToIndex(nextIndex);
   }
 
-  function openProject(project: Project | undefined) {
-    if (!project || pickerMode !== "progress" || projectNavigationRef.current) return;
+  async function openPreviouslyJoinedProject(
+    project: Project | undefined,
+    destination: "home" | "progress" = "home"
+  ) {
+    if (!project || projectNavigationRef.current) return;
+    const attemptId = navigationAttemptRef.current + 1;
+    navigationAttemptRef.current = attemptId;
     projectNavigationRef.current = true;
     setSelectedProjectId(project.id);
-    const projectPath = `/projects/${project.id}`;
-    router.prefetch(projectPath);
-    projectSelectionTimerRef.current = setTimeout(() => {
-      projectSelectionTimerRef.current = null;
-      try {
-        router.push(projectPath);
-      } catch {
-        projectNavigationRef.current = false;
-        setSelectedProjectId(null);
-        showFeedback("progress", "프로젝트를 열지 못했습니다");
+    setNewProjectError("");
+
+    try {
+      const grant = await verifyProjectAccess(project.id);
+      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+      if (!grant) {
+        forgetProjectSelection(project.id);
+        if (isMountedRef.current) {
+          setProjects((current) => current.filter((item) => item.id !== project.id));
+          setNewProjectError("접근 권한이 만료되었습니다. 비밀번호로 다시 참여해주세요.");
+        }
+        releaseProjectNavigation(attemptId);
+        return;
       }
-    }, PROJECT_SELECTION_FEEDBACK_MS);
+
+      rememberProjectSelection(grant.projectId);
+      const projectPath = destination === "progress"
+        ? `/projects/${encodeURIComponent(grant.projectId)}?view=progress`
+        : `/projects/${encodeURIComponent(grant.projectId)}`;
+      pushProjectRoute(
+        grant.projectId,
+        projectPath,
+        destination === "progress" ? "progress" : "join",
+        attemptId
+      );
+    } catch (error) {
+      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+      if (isMountedRef.current) {
+        setNewProjectError(error instanceof Error ? error.message : "프로젝트 접근 권한을 확인하지 못했습니다.");
+      }
+      releaseProjectNavigation(attemptId);
+    }
+  }
+
+  function openProject(project: Project | undefined) {
+    if (pickerMode !== "progress") return;
+    void openPreviouslyJoinedProject(project, "progress");
   }
 
   function closeProjectRing() {
+    if (projectNavigationRef.current || joinSubmissionRef.current) return;
+    navigationAttemptRef.current += 1;
     mainSpinner.cancelPending();
     projectSpinner.cancelPending();
     if (mainSelectionTimerRef.current) clearTimeout(mainSelectionTimerRef.current);
@@ -399,6 +585,7 @@ export default function HomePage() {
     setSelectedProjectId(null);
     setPickerMode(null);
     setFeedback(null);
+    setIsResolvingGo(false);
   }
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
@@ -431,6 +618,7 @@ export default function HomePage() {
       if (!response.ok || !payload.project) throw new Error(payload.error || "프로젝트를 만들지 못했습니다.");
       const project = projectFromRow(payload.project);
       unhideProject(project.id);
+      rememberProjectSelection(project.id);
       router.push(`/projects/${project.id}/basic-info`);
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트를 만들지 못했습니다.");
@@ -440,11 +628,13 @@ export default function HomePage() {
 
   async function handleJoinProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (joinSubmissionRef.current || projectNavigationRef.current) return;
     const projectName = cleanProjectName(joinProjectName);
     if (!projectName || !/^\d{4}$/.test(joinPassword)) {
       setNewProjectError("프로젝트 이름과 4자리 비밀번호를 입력하세요");
       return;
     }
+    joinSubmissionRef.current = true;
     setNewProjectError("");
     setIsCreatingProject(true);
     try {
@@ -457,10 +647,22 @@ export default function HomePage() {
       const payload = (await response.json()) as { projectId?: string; role?: "admin" | "progress"; error?: string };
       if (!response.ok || !payload.projectId || !payload.role) throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       unhideProject(payload.projectId);
-      router.push(payload.role === "admin" ? `/projects/${payload.projectId}/daily-plans` : `/projects/${payload.projectId}`);
+      setJoinPassword("");
+      rememberProjectSelection(payload.projectId);
+      const attemptId = navigationAttemptRef.current + 1;
+      navigationAttemptRef.current = attemptId;
+      projectNavigationRef.current = true;
+      pushProjectRoute(
+        payload.projectId,
+        `/projects/${encodeURIComponent(payload.projectId)}`,
+        "join",
+        attemptId
+      );
     } catch (error) {
       setNewProjectError(error instanceof Error ? error.message : "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       setIsCreatingProject(false);
+    } finally {
+      joinSubmissionRef.current = false;
     }
   }
 
@@ -618,6 +820,7 @@ export default function HomePage() {
               role="group"
               tabIndex={0}
               aria-label="원형 기능 메뉴. 좌우 방향키 또는 드래그로 회전"
+              aria-busy={isResolvingGo}
               className={`functional-circle relative z-20 aspect-square shrink-0 touch-none select-none outline-none cursor-grab active:cursor-grabbing transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-4 ${
                 isProjectRingOpen
                   ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
@@ -725,7 +928,7 @@ export default function HomePage() {
               })}
             </div>
           </div>
-          {isProgressMode && isLoading ? (
+          {isResolvingGo || (isProgressMode && isLoading) ? (
             <div className="pointer-events-none rounded-[3px] border border-field-border bg-white/95 px-4 py-2 shadow-sm">
               <PixelDogLoader size="xs" compact />
             </div>
@@ -743,7 +946,9 @@ export default function HomePage() {
             ref={clusterRef}
             role="region"
             aria-label={pickerTitle}
-            className="relative z-10 w-full max-w-[20rem] shrink-0 motion-safe:animate-[branch-reveal_220ms_ease-out] md:w-[14rem]"
+            className={`relative z-10 w-full shrink-0 motion-safe:animate-[branch-reveal_220ms_ease-out] ${
+              pickerMode === "join" ? "max-w-[22rem] md:w-[20rem]" : "max-w-[20rem] md:w-[14rem]"
+            }`}
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
               <h1 className="rounded-[3px] border border-field-border bg-field-bg/95 px-3 py-1 text-[11px] font-black text-field-primary shadow-sm">
@@ -757,11 +962,12 @@ export default function HomePage() {
               >
                 <button
                   type="button"
+                  disabled={isCreatingProject}
                   onClick={(event) => {
                     event.stopPropagation();
                     closeInputSubmenu("new");
                   }}
-                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label="새 프로젝트 입력 닫기"
                 >
                   <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[3px] border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
@@ -810,49 +1016,97 @@ export default function HomePage() {
             ) : pickerMode === "join" ? (
               <form
                 onSubmit={handleJoinProject}
-                className="relative grid w-full gap-2 rounded-[2rem] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
+                className="relative grid w-full gap-3 rounded-[10px] border border-field-secondary/50 bg-white p-3 shadow-[0_6px_18px_rgba(15,61,46,0.12)]"
               >
                 <button
                   type="button"
+                  disabled={isCreatingProject || Boolean(selectedProjectId)}
                   onClick={(event) => {
                     event.stopPropagation();
                     closeInputSubmenu("join");
                   }}
-                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                  className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center rounded-[3px] text-field-muted transition-transform hover:scale-105 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
                   aria-label="프로젝트 참여 입력 닫기"
                 >
                   <span className="flex h-[22px] w-[22px] items-center justify-center rounded-[3px] border border-field-border bg-white shadow-sm transition-colors hover:border-field-secondary hover:bg-field-soft">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
-                <input
-                  value={joinProjectName}
-                  onChange={(event) => {
-                    setJoinProjectName(event.target.value);
-                    if (newProjectError) setNewProjectError("");
-                  }}
-                  placeholder="프로젝트 이름"
-                  aria-label="참여할 프로젝트 이름"
-                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
-                />
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={joinPassword}
-                  onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
-                  placeholder="비밀번호 4자리"
-                  aria-label="프로젝트 참여 비밀번호"
-                  className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
-                />
-                {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
-                <button
-                  type="submit"
-                  disabled={isCreatingProject}
-                  className="h-10 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
-                >
-                  <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
-                </button>
+                <section className="grid gap-2" aria-labelledby="join-existing-project-title">
+                  <p id="join-existing-project-title" className="px-1 text-[11px] font-black text-field-primary">
+                    기존 프로젝트 참여
+                  </p>
+                  <input
+                    value={joinProjectName}
+                    onChange={(event) => {
+                      setJoinProjectName(event.target.value);
+                      if (newProjectError) setNewProjectError("");
+                    }}
+                    placeholder="프로젝트 이름"
+                    aria-label="참여할 프로젝트 이름"
+                    className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={joinPassword}
+                    onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
+                    placeholder="비밀번호 4자리"
+                    aria-label="프로젝트 참여 비밀번호"
+                    className="h-10 min-w-0 rounded-[3px] border border-field-border bg-field-bg px-3 text-center text-xs font-bold tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                  />
+                  {newProjectError ? <p role="alert" className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
+                  <button
+                    type="submit"
+                    disabled={isCreatingProject || Boolean(selectedProjectId)}
+                    className="h-10 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2"
+                  >
+                    <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
+                  </button>
+                </section>
+
+                <section className="grid gap-2 border-t border-field-border pt-3" aria-labelledby="joined-projects-title">
+                  <p id="joined-projects-title" className="px-1 text-[11px] font-black text-field-primary">
+                    이전에 참여한 프로젝트
+                  </p>
+                  {isLoading ? (
+                    <div className="flex min-h-10 items-center justify-center">
+                      <PixelDogLoader size="xs" compact />
+                    </div>
+                  ) : errorMessage ? (
+                    <p role="alert" className="px-1 text-center text-[10px] font-bold leading-4 text-field-danger">{errorMessage}</p>
+                  ) : hasLoadedProjects && projects.length === 0 ? (
+                    <p className="px-1 py-1 text-center text-[10px] font-bold text-field-muted">참여한 프로젝트가 없습니다.</p>
+                  ) : (
+                    <div className="grid max-h-44 gap-1.5 overflow-y-auto pr-0.5">
+                      {projects.map((project) => {
+                        const isOpening = selectedProjectId === project.id;
+                        return (
+                          <button
+                            key={project.id}
+                            type="button"
+                            disabled={isCreatingProject || Boolean(selectedProjectId)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void openPreviouslyJoinedProject(project);
+                            }}
+                            className="flex min-h-10 items-center justify-between gap-3 rounded-[3px] border border-field-border bg-field-bg px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-primary hover:bg-field-light active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+                            aria-label={`${project.name} 프로젝트 홈 열기`}
+                            aria-busy={isOpening}
+                          >
+                            <span className="min-w-0 truncate text-xs font-black text-field-primary">
+                              <span className="font-display">{project.name}</span>
+                            </span>
+                            <span className="shrink-0 text-[9px] font-bold text-field-muted">
+                              {isOpening ? "확인 중" : project.accessRole === "admin" ? "Key staff" : "Staff"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
               </form>
             ) : null}
           </div>

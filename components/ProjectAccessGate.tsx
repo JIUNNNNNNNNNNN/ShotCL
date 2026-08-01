@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
+import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
 
 const ProjectAccessContext = createContext<{ role: SharedProjectRole | null; isShared: boolean }>({
   role: null,
@@ -33,6 +34,10 @@ export function ProjectAccessGate({
     `${progressPath}/storyboard-overhead`
   ]);
   const denied = role === "progress" && !progressReadablePaths.has(pathname);
+
+  useEffect(() => {
+    if (role) rememberProjectSelection(projectId);
+  }, [projectId, role]);
 
   useEffect(() => {
     if (denied) router.replace(progressPath);

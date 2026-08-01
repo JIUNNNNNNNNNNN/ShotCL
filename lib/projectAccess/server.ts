@@ -86,8 +86,7 @@ export function getSessionToken(request: NextRequest) {
 
 export function ensureSessionToken(request: NextRequest, response: NextResponse) {
   const existing = getSessionToken(request);
-  if (existing) return existing;
-  const token = randomBytes(32).toString("base64url");
+  const token = existing || randomBytes(32).toString("base64url");
   response.cookies.set(PROJECT_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -126,15 +125,25 @@ export async function getAccessGrantByToken(token: string | null, projectId: str
   const databaseProjectId = normalizeProjectId(projectId);
   const { data, error } = await supabase
     .from("project_access_sessions")
-    .select("project_id,role,joined_at,expires_at,projects!inner(name)")
+    .select("project_id,role,joined_at,expires_at,projects!inner(name,share_enabled)")
     .eq("browser_token_hash", hashSessionToken(token))
     .eq("project_id", databaseProjectId)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
   if (error) throw error;
   if (!data || (data.role !== "admin" && data.role !== "progress")) return null;
-  const projectRelation = data.projects as unknown as { name: string } | Array<{ name: string }>;
+  const projectRelation = data.projects as unknown as {
+    name: string;
+    share_enabled: boolean;
+  } | Array<{
+    name: string;
+    share_enabled: boolean;
+  }>;
   const projectName = Array.isArray(projectRelation) ? projectRelation[0]?.name : projectRelation?.name;
+  const shareEnabled = Array.isArray(projectRelation)
+    ? projectRelation[0]?.share_enabled
+    : projectRelation?.share_enabled;
+  if (!shareEnabled) return null;
   return {
     projectId: data.project_id,
     projectName: projectName ?? "프로젝트",
@@ -152,6 +161,7 @@ export async function listAccessGrants(request: NextRequest) {
     .select("project_id,role,joined_at,expires_at,projects!inner(id,name,created_at,share_enabled)")
     .eq("browser_token_hash", hashSessionToken(token))
     .gt("expires_at", new Date().toISOString())
+    .eq("projects.share_enabled", true)
     .order("joined_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
