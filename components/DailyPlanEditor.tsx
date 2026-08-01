@@ -557,6 +557,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   function toggleManualLocationInput(index: number) {
     const target = locations[index];
     if (!target) return;
+    setExpandedLocationDetailId(null);
     const nextMode = locationInputModes[target.id] === "manual" ? undefined : "manual";
     setLocationInputModes((current) => {
       if (nextMode === "manual") return { ...current, [target.id]: "manual" };
@@ -608,8 +609,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
   function deleteLocation(index: number) {
     const target = locations[index];
-    setLocations((current) => current.filter((_, locationIndex) => locationIndex !== index));
+    setLocations((current) => current.length > 1
+      ? current.filter((_, locationIndex) => locationIndex !== index)
+      : [createBlankLocation()]
+    );
     if (target) {
+      setExpandedLocationDetailId((current) => current === target.id ? null : current);
       setLocationInputModes((current) => {
         const next = { ...current };
         delete next[target.id];
@@ -624,6 +629,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const target = locations[index];
     if (!target) return;
 
+    setExpandedLocationDetailId(null);
     setLocationInputModes((current) => ({ ...current, [target.id]: "search" }));
 
     if (typeof window === "undefined") {
@@ -649,8 +655,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           addressSelected = true;
           const selectedAddress = data.userSelectedType === "J" ? data.jibunAddress : data.roadAddress;
           const address = selectedAddress || data.roadAddress || data.jibunAddress || data.address;
+          const previousAddress = getLocationAddress(target).trim();
+          const shouldSyncName = !target.name.trim() || target.name.trim() === previousAddress;
 
           updateLocation(index, {
+            name: shouldSyncName ? address : target.name,
             roadAddress: address,
             address: data.jibunAddress || data.address || address,
             inputMode: "search",
@@ -1482,152 +1491,172 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           </section>
 
           <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
-            <section className="field-subsection p-2 md:p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-                <div>
-                  <h3 className="text-base font-black text-field-primary">촬영 장소</h3>
-                </div>
-                <Button variant="secondary" onClick={addLocation}>
-                  <Plus className="h-4 w-4" aria-hidden />
-                  LOCATION 추가
-                </Button>
-              </div>
+            <section className="field-subsection overflow-visible p-1.5 md:p-2">
+              <div className="grid gap-1.5">
+                {locations.map((location, index) => {
+                  const isManualMode = locationInputModes[location.id] === "manual";
+                  const isSearching = addressSearchLocationId === location.id && addressSearchMessage === ADDRESS_SEARCH_LOADING;
+                  const locationAddress = getLocationAddress(location);
+                  const locationDisplayValue = location.name.trim() || locationAddress;
+                  const locationTitle = [location.name.trim(), locationAddress.trim()].filter(Boolean).join(" · ");
 
-              <div className="mt-3 grid gap-2">
-                {locations.map((location, index) => (
-                  <div
-                    key={location.id}
-                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[3px] border border-field-border bg-white p-2 md:p-2.5"
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => finishReorder(event, "locations", index)}
-                  >
-                    <div className="col-start-1 row-start-1 flex min-w-0 items-center gap-1 whitespace-nowrap md:gap-2.5">
-                      <DragHandle label={`LOCATION ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
-                      <h4 className="min-w-0 whitespace-nowrap text-center text-xs font-black text-field-primary">
-                        <span className="md:hidden">L{index + 1}</span>
-                        <span className="hidden md:inline">LOCATION {index + 1}</span>
-                      </h4>
-                    </div>
-
-                    <div className="col-start-2 row-start-1 flex items-center justify-end gap-1.5 md:gap-2">
-                      <button
-                        type="button"
-                        aria-pressed={Boolean(location.isPrimary)}
-                        onClick={() => setMeetingLocation(index)}
-                        className={`inline-flex min-h-9 items-center justify-center whitespace-nowrap rounded-[3px] border px-2 py-1.5 text-[11px] font-black leading-[1.35] ${
-                          location.isPrimary ? "border-field-primary bg-field-primary text-white" : "border-field-border bg-white text-field-muted"
-                        }`}
-                      >
-                        {location.isPrimary ? "집합장소" : "집합장소 지정"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setExpandedLocationDetailId((current) => (current === location.id ? null : location.id))}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
-                        aria-expanded={expandedLocationDetailId === location.id}
-                        aria-label={`LOCATION ${index + 1} 상세 메모 ${expandedLocationDetailId === location.id ? "닫기" : "열기"}`}
-                        title="상세 메모"
-                      >
-                        <MoreHorizontal className="h-4 w-4" aria-hidden />
-                      </button>
-                      <CircularDeleteButton label={`LOCATION ${index + 1} 삭제`} onClick={() => deleteLocation(index)} />
-                    </div>
-
+                  return (
                     <div
-                      className="col-span-2 row-start-2 grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1.5 border-t border-field-border pt-2"
-                      role="group"
-                      aria-label={`LOCATION ${index + 1} 입력 방식과 주소`}
+                      key={location.id}
+                      className="relative min-w-0 rounded-[3px] border border-field-border bg-white"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => finishReorder(event, "locations", index)}
                     >
-                      <button
-                        type="button"
-                        aria-pressed={locationInputModes[location.id] === "search"}
-                        onClick={() => openDaumAddressSearch(index)}
-                        className={`inline-flex min-h-[38px] w-[4.25rem] shrink-0 items-center justify-center gap-1 rounded-[3px] border px-1.5 py-1.5 text-xs font-black md:w-[5.25rem] md:gap-1.5 ${
-                          locationInputModes[location.id] === "search"
-                            ? "border-field-primary bg-field-light text-field-primary"
-                            : "border-field-border bg-white text-field-primary"
-                        }`}
-                      >
-                        <Search className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        검색
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={locationInputModes[location.id] === "manual"}
-                        onClick={() => toggleManualLocationInput(index)}
-                        className={`min-h-[38px] w-[4.5rem] shrink-0 rounded-[3px] border px-1.5 py-1.5 text-xs font-black md:w-[5.5rem] ${
-                          locationInputModes[location.id] === "manual"
-                            ? "border-field-primary bg-field-light text-field-primary"
-                            : "border-field-border bg-white text-field-primary"
-                        }`}
-                      >
-                        직접입력
-                      </button>
-
                       <div
-                        className="grid min-w-0 grid-cols-[minmax(4.75rem,0.38fr)_minmax(0,1fr)] gap-1"
+                        className="grid min-h-[42px] min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-1 py-0.5 pl-1 pr-10 md:min-h-12 md:gap-1.5 md:pl-1.5 md:pr-11"
                         role="group"
-                        aria-label={`LOCATION ${index + 1} 장소명과 주소`}
+                        aria-label={`촬영장소 ${index + 1} 입력`}
                       >
-                        <label className="min-w-0">
-                          <span className="sr-only">LOCATION {index + 1} 장소명</span>
-                          <DraftInput
-                            className={`${inputClass} truncate whitespace-nowrap`}
-                            value={location.name}
-                            onCommit={(value) => updateLocation(index, { name: value })}
-                            placeholder="장소명"
-                            title={location.name}
-                          />
-                        </label>
+                        <div className="flex min-w-0 shrink-0 items-center whitespace-nowrap">
+                          <span className="hidden md:inline-flex">
+                            <DragHandle label={`촬영장소 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
+                          </span>
+                          <h3 className="px-0.5 text-[9px] font-black leading-[1.35] text-field-primary sm:text-[10px] md:px-1 md:text-xs">
+                            촬영장소{locations.length > 1 ? ` ${index + 1}` : ""}
+                          </h3>
+                        </div>
 
-                        {locationInputModes[location.id] === "manual" ? (
-                          <label className="min-w-0">
-                            <span className="sr-only">LOCATION {index + 1} 상세주소</span>
-                            <DraftInput
-                              className={`${inputClass} truncate whitespace-nowrap !text-left`}
-                              value={getDailyPlanManualAddress(location)}
-                              onCommit={(value) => updateLocation(index, {
-                                manualAddress: value,
-                                inputMode: "manual"
-                              })}
-                              placeholder="상세주소 직접입력"
-                              title={getDailyPlanManualAddress(location)}
-                            />
-                          </label>
-                        ) : (
-                          <div
-                            className="flex min-h-[38px] min-w-0 items-center overflow-hidden rounded-[3px] border border-field-border bg-field-soft px-2 text-left"
-                            title={getLocationAddress(location) || undefined}
-                            aria-live="polite"
-                          >
-                            {addressSearchLocationId === location.id && addressSearchMessage === ADDRESS_SEARCH_LOADING ? (
-                              <span className="flex w-full justify-center"><PixelDogLoader size="xs" compact /></span>
-                            ) : (
-                              <span className="block min-w-0 truncate text-xs font-bold text-field-text">
-                                {getLocationAddress(location)
-                                  || (addressSearchLocationId === location.id ? addressSearchMessage : "")
-                                  || "선택한 장소 또는 주소"}
-                              </span>
-                            )}
-                          </div>
-                        )}
+                        <button
+                          type="button"
+                          aria-pressed={locationInputModes[location.id] === "search"}
+                          onClick={() => openDaumAddressSearch(index)}
+                          className={`inline-flex min-h-9 w-[2.55rem] shrink-0 items-center justify-center rounded-[3px] border px-1 text-[10px] font-black md:w-[4.75rem] md:gap-1.5 md:text-xs ${
+                            locationInputModes[location.id] === "search"
+                              ? "border-field-primary bg-field-light text-field-primary"
+                              : "border-field-border bg-white text-field-primary"
+                          }`}
+                        >
+                          <Search className="hidden h-3.5 w-3.5 shrink-0 md:block" aria-hidden />
+                          검색
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={isManualMode}
+                          onClick={() => toggleManualLocationInput(index)}
+                          className={`min-h-9 w-[2.7rem] shrink-0 rounded-[3px] border px-1 text-[10px] font-black md:w-[5.25rem] md:text-xs ${
+                            isManualMode
+                              ? "border-field-primary bg-field-light text-field-primary"
+                              : "border-field-border bg-white text-field-primary"
+                          }`}
+                        >
+                          <span className="md:hidden">직접</span>
+                          <span className="hidden md:inline">직접입력</span>
+                        </button>
+
+                        <div className="min-w-0" aria-live="polite">
+                          {expandedLocationDetailId === location.id ? (
+                            <label className="block min-w-0">
+                              <span className="sr-only">촬영장소 {index + 1} 상세 메모</span>
+                              <DraftInput
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                value={location.detail}
+                                onCommit={(value) => updateLocation(index, { detail: value })}
+                                placeholder="상세 위치 / 메모"
+                                title={location.detail}
+                              />
+                            </label>
+                          ) : isManualMode ? (
+                            <label className="block min-w-0">
+                              <span className="sr-only">촬영장소 {index + 1} 상세주소</span>
+                              <DraftInput
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                value={getDailyPlanManualAddress(location)}
+                                onCommit={(value) => {
+                                  const previousManualAddress = getDailyPlanManualAddress(location).trim();
+                                  const shouldSyncName = !location.name.trim() || location.name.trim() === previousManualAddress;
+                                  updateLocation(index, {
+                                    name: shouldSyncName ? value : location.name,
+                                    manualAddress: value,
+                                    inputMode: "manual"
+                                  });
+                                }}
+                                placeholder="상세주소 직접입력"
+                                title={getDailyPlanManualAddress(location)}
+                              />
+                            </label>
+                          ) : isSearching ? (
+                            <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden rounded-[3px] border border-field-border bg-field-soft">
+                              <PixelDogLoader size="xs" compact />
+                            </div>
+                          ) : (
+                            <label className="block min-w-0">
+                              <span className="sr-only">촬영장소 {index + 1} 선택 장소 또는 주소</span>
+                              <DraftInput
+                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-left !text-[10px] md:!px-2 md:!text-[13px]`}
+                                value={locationDisplayValue}
+                                onCommit={(value) => updateLocation(index, { name: value })}
+                                placeholder={(addressSearchLocationId === location.id ? addressSearchMessage : "") || "선택한 장소 또는 주소"}
+                                title={locationTitle || undefined}
+                              />
+                            </label>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    {expandedLocationDetailId === location.id ? (
-                      <label className="col-span-2 grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2 border-t border-field-border pt-2">
-                        <span className="text-xs font-black text-field-primary">상세 메모</span>
-                        <DraftInput
-                          className={`${inputClass} truncate whitespace-nowrap`}
-                          value={location.detail}
-                          onCommit={(value) => updateLocation(index, { detail: value })}
-                          placeholder="상세 위치 / 메모"
-                          title={location.detail}
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                ))}
+                      <details className="group absolute right-1 top-1/2 z-30 -translate-y-1/2 md:right-1.5">
+                        <summary
+                          className={`inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[3px] border text-field-muted hover:border-field-primary hover:text-field-primary [&::-webkit-details-marker]:hidden ${
+                            location.isPrimary ? "border-field-primary bg-field-light text-field-primary" : "border-field-border bg-white"
+                          }`}
+                          aria-label={`촬영장소 ${index + 1} 관리 메뉴`}
+                          title={location.isPrimary ? "집합장소 · 관리 메뉴" : "촬영장소 관리 메뉴"}
+                        >
+                          <MoreHorizontal className="h-4 w-4" aria-hidden />
+                        </summary>
+                        <div className="absolute right-0 top-full z-40 mt-1 grid w-36 gap-1 rounded-[3px] border border-field-border bg-white p-1.5 shadow-lg">
+                          <button
+                            type="button"
+                            aria-pressed={Boolean(location.isPrimary)}
+                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
+                            onClick={(event) => {
+                              setMeetingLocation(index);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                          >
+                            {location.isPrimary ? "집합장소" : "집합장소 지정"}
+                          </button>
+                          <button
+                            type="button"
+                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
+                            onClick={(event) => {
+                              setExpandedLocationDetailId((current) => current === location.id ? null : location.id);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                          >
+                            {expandedLocationDetailId === location.id ? "장소/주소 보기" : "상세 메모 입력"}
+                          </button>
+                          {index === locations.length - 1 ? (
+                            <button
+                              type="button"
+                              className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
+                              onClick={(event) => {
+                                addLocation();
+                                event.currentTarget.closest("details")?.removeAttribute("open");
+                              }}
+                            >
+                              촬영장소 추가
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-danger hover:bg-red-50"
+                            onClick={(event) => {
+                              deleteLocation(index);
+                              event.currentTarget.closest("details")?.removeAttribute("open");
+                            }}
+                          >
+                            촬영장소 삭제
+                          </button>
+                        </div>
+                      </details>
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
