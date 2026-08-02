@@ -30,6 +30,7 @@ type DailyPlanDesktopLandscapePreviewProps = {
 const sectionTableClass = "daily-plan-section-table mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
 const halfTableClass = "daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center";
 const cellClass = "border border-black px-1.5 py-1 text-center align-middle";
+const compactStaffCellClass = "min-w-0 border border-black px-1 py-0.5 text-center align-middle text-[10px] leading-[1.25] [word-break:keep-all] [overflow-wrap:anywhere]";
 const headerCellClass = `${cellClass} daily-plan-preview-header font-black`;
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
@@ -48,6 +49,9 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
     member.name,
     member.contact
   ]);
+  const compactMainStaffRows = Array.from({ length: 3 }, (_, index) => (
+    printableMainStaffRows[index] ?? { id: `empty-main-staff-${index}`, role: "", name: "", contact: "" }
+  ));
   const weatherFields = filterRenderablePreviewRows(createWeatherFields(meta), (field) => field.value);
   const timetableFields = createTimetableFields(printableTimetableRows);
   const memoFields: PreviewDisplayField[] = [
@@ -62,39 +66,44 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
           <EqualColumns count={12} />
           <tbody>
             <tr>
-              <td className={`${cellClass} font-black`}>
+              <td rowSpan={3} className={`${cellClass} font-black`}>
                 <span className="text-[9px]">DAY</span>
                 <span className="ml-1 text-2xl leading-none">{getPreviewCellText(meta.day)}</span>
               </td>
-              <td colSpan={9} className={cellClass}>
+              <td rowSpan={3} colSpan={9} className={cellClass}>
                 <span className="text-2xl font-black">
                   {getPreviewCellText(plan.title).trim() ? `〈${plan.title}〉` : "기본정보가 없습니다."}
                 </span>
                 <span className="ml-2 text-lg font-normal">TIME TABLE</span>
               </td>
-              <td colSpan={2} className={`${cellClass} ${crewCellClass}`}>
+              <td rowSpan={3} colSpan={2} className={`${cellClass} ${crewCellClass}`}>
                 <span className="block text-[9px] font-bold">Total Crew</span>
                 <span className="text-lg font-black">{getPreviewCellText(meta.totalCrew)}</span>
               </td>
             </tr>
-            {hasMeaningfulRowValue([plan.shootingDate, plan.callTime]) ? (
-              <tr>
-                <td colSpan={2} className={`${cellClass} font-black`}>CALL TIME</td>
-                <td colSpan={10} className={`${cellClass} ${accentCellClass}`}>
-                  <span className="mr-1 text-[9px] font-bold">Day</span>
-                  <span className="text-lg font-black">{formatDate(plan.shootingDate)}</span>
-                  <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
-                  <span className="text-lg font-black">{getPreviewCellText(plan.callTime)}</span>
-                </td>
-              </tr>
-            ) : null}
-            {printableMainStaffRows.length > 0 ? printableMainStaffRows.map((member) => (
-              <tr key={member.id}>
-                <FixedCells fields={createMainStaffFields(member)} />
-              </tr>
-            )) : (
-              <tr><td colSpan={12} className={cellClass}>등록된 메인 스태프가 없습니다.</td></tr>
-            )}
+            <tr aria-hidden="true" />
+            <tr aria-hidden="true" />
+            <tr>
+              <td rowSpan={3} className={`${cellClass} font-black`}>CALL TIME</td>
+              <td rowSpan={3} colSpan={8} className={`${cellClass} ${accentCellClass}`}>
+                {hasMeaningfulRowValue(plan.shootingDate) ? (
+                  <>
+                    <span className="mr-1 text-[9px] font-bold">Day</span>
+                    <span className="text-lg font-black">{formatDate(plan.shootingDate)}</span>
+                  </>
+                ) : null}
+                {hasMeaningfulRowValue(plan.callTime) ? (
+                  <>
+                    <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
+                    <span className="text-lg font-black">{getPreviewCellText(plan.callTime)}</span>
+                  </>
+                ) : null}
+              </td>
+              <CompactMainStaffCells member={compactMainStaffRows[0]} />
+            </tr>
+            {compactMainStaffRows.slice(1).map((member) => (
+              <tr key={member.id}><CompactMainStaffCells member={member} /></tr>
+            ))}
           </tbody>
         </table>
 
@@ -233,6 +242,16 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function CompactMainStaffCells({ member }: { member: { role: string; name: string; contact: string } }) {
+  return (
+    <>
+      <td className={`${compactStaffCellClass} font-bold`}>{getPreviewCellText(member.role)}</td>
+      <td className={compactStaffCellClass}>{getPreviewCellText(member.name)}</td>
+      <td className={compactStaffCellClass}>{getPreviewCellText(member.contact)}</td>
+    </>
+  );
+}
+
 function AdditionalScheduleCells({
   row
 }: {
@@ -305,14 +324,6 @@ function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta)
     { id: "legacy-assistant-director", role: "A.D", name: plan.assistantDirector, contact: meta.assistantDirectorContact },
     { id: "legacy-producer", role: "Producer", name: plan.production, contact: meta.producerContact }
   ].filter((member) => member.name.trim() || member.contact.trim());
-}
-
-function createMainStaffFields(member: { role: string; name: string; contact: string }): PreviewDisplayField[] {
-  return [
-    { key: "role", label: "역할", span: 2, value: member.role },
-    { key: "name", label: "이름", span: 4, value: member.name },
-    { key: "contact", label: "연락처", span: 6, value: member.contact }
-  ];
 }
 
 function createWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {

@@ -26,6 +26,7 @@ type DailyPlanMobilePortraitPreviewProps = {
 const sheetColumnCount = 10;
 const cellClass = "border border-black px-0.5 py-1 align-middle break-words [overflow-wrap:anywhere]";
 const headerCellClass = "daily-plan-preview-header border border-black px-0.5 py-1 align-middle font-bold break-words [overflow-wrap:anywhere]";
+const compactTopCellClass = "box-border min-w-0 border border-black px-0.5 py-0.5 align-middle leading-[1.25] [word-break:keep-all] [overflow-wrap:anywhere]";
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
 const eventRowClass = "daily-plan-preview-event";
@@ -44,6 +45,8 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
     member.name,
     member.contact
   ]);
+  const compactMainStaffRows = chunkRows(mainStaffRows, 2);
+  const hasTotalCrew = hasMeaningfulRowValue(meta.totalCrew);
   const weatherRows = filterRenderablePreviewRows(
     chunkRows(createWeatherFields(meta), 3),
     (row) => row.map((field) => field.value)
@@ -54,9 +57,9 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
   return (
     <article
       data-testid="daily-plan-mobile-portrait-preview"
-      className="daily-plan-preview-surface mt-4 w-full overflow-hidden bg-white [font-family:inherit] text-[10px] leading-[1.4] text-black md:hidden"
+      className="daily-plan-preview-surface mt-4 box-border w-full min-w-0 max-w-full bg-white [font-family:inherit] text-[10px] leading-[1.4] text-black md:hidden"
     >
-      <table className="w-full table-fixed border-collapse border-2 border-black text-center">
+      <table className="box-border w-full min-w-0 max-w-full table-fixed border-collapse border-2 border-black text-center">
         <SheetColumns />
         <tbody>
           <tr className="h-[54px]">
@@ -87,17 +90,31 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               </td>
             </tr>
           ) : null}
-          {mainStaffRows.length > 0 ? mainStaffRows.map((member) => (
-            <tr key={`portrait-main-staff-${member.id}`}>
-              <FixedCells fields={createMainStaffFields(member)} />
-            </tr>
-          )) : (
-            <tr><td colSpan={sheetColumnCount} className={cellClass}>등록된 메인 스태프가 없습니다.</td></tr>
-          )}
-          {hasMeaningfulRowValue(meta.totalCrew) ? (
+          {compactMainStaffRows.length > 0 ? compactMainStaffRows.map((row, rowIndex) => {
+            const isLastRow = rowIndex === compactMainStaffRows.length - 1;
+            const placeCrewInEmptyHalf = isLastRow && row.length === 1 && hasTotalCrew;
+            return (
+              <tr key={`portrait-main-staff-${rowIndex}`}>
+                <CompactMainStaffCells member={row[0]} />
+                {row[1] ? (
+                  <CompactMainStaffCells member={row[1]} />
+                ) : placeCrewInEmptyHalf ? (
+                  <CompactCrewCells value={meta.totalCrew} />
+                ) : (
+                  <td colSpan={5} className={compactTopCellClass} />
+                )}
+              </tr>
+            );
+          }) : (
             <tr>
-              <td colSpan={5} className={cellClass}>Total Crew</td>
-              <td colSpan={5} className={`${cellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
+              <td colSpan={hasTotalCrew ? 5 : sheetColumnCount} className={compactTopCellClass}>등록된 메인 스태프가 없습니다.</td>
+              {hasTotalCrew ? <CompactCrewCells value={meta.totalCrew} /> : null}
+            </tr>
+          )}
+          {hasTotalCrew && mainStaffRows.length > 0 && mainStaffRows.length % 2 === 0 ? (
+            <tr>
+              <td colSpan={5} className={compactTopCellClass}>Total Crew</td>
+              <td colSpan={5} className={`${compactTopCellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
             </tr>
           ) : null}
         </tbody>
@@ -253,6 +270,29 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function CompactMainStaffCells({ member }: { member: { role: string; name: string; contact: string } }) {
+  return (
+    <>
+      <td colSpan={2} className={`${compactTopCellClass} text-[9px] font-bold`}>
+        {getPreviewCellText(member.role)}
+      </td>
+      <td colSpan={3} className={`${compactTopCellClass} text-[9px]`}>
+        <span className="block min-w-0">{getPreviewCellText(member.name)}</span>
+        {member.contact ? <span className="block min-w-0 text-[8px]">{member.contact}</span> : null}
+      </td>
+    </>
+  );
+}
+
+function CompactCrewCells({ value }: { value: string }) {
+  return (
+    <>
+      <td colSpan={2} className={compactTopCellClass}>Total Crew</td>
+      <td colSpan={3} className={`${compactTopCellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(value)}</td>
+    </>
+  );
+}
+
 function AdditionalScheduleSummaryCells({
   row
 }: {
@@ -340,14 +380,6 @@ function CallSheetTable({
       </table>
     </section>
   );
-}
-
-function createMainStaffFields(member: { role: string; name: string; contact: string }): PreviewDisplayField[] {
-  return [
-    { key: "role", label: "역할", span: 2, value: member.role },
-    { key: "name", label: "이름", span: 3, value: member.name },
-    { key: "contact", label: "연락처", span: 5, value: member.contact }
-  ];
 }
 
 function createWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
