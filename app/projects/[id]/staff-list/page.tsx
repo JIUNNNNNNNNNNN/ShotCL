@@ -36,9 +36,9 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const inputClassName =
-  "h-8 w-full min-w-0 border border-field-divider bg-field-input px-2 text-center text-xs text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "workspace-control h-8 w-full min-w-0 border px-2 text-center text-xs outline-none transition placeholder:text-center";
 const notesTextareaClassName =
-  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border border-field-divider bg-field-input px-2 py-1 text-center text-xs leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "workspace-control h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border px-2 py-1 text-center text-xs leading-5 outline-none transition [overflow-wrap:anywhere] placeholder:text-center";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
 const desktopEditableGridClassName =
@@ -465,7 +465,7 @@ export default function StaffListPage() {
                 type="button"
                 onClick={() => void save(members, departments, true)}
                 disabled={isSaving || !isDirty}
-                className="inline-flex h-9 items-center gap-1.5 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 border border-field-primary/70 bg-field-primary/10 px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-secondary/80 hover:bg-field-primary/15 hover:text-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
@@ -490,13 +490,13 @@ export default function StaffListPage() {
         <p className="mt-3 border border-field-divider bg-field-elevated px-3 py-2 text-xs font-bold text-field-subtle">{message}</p>
       ) : null}
 
-      <section className="mt-3 border border-field-border bg-field-panel px-2.5 py-2">
+      <section className="light-workspace staff-workspace workspace-surface workspace-border mt-3 border px-2.5 py-2">
         <div className={`grid h-8 items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
           {canEdit ? (
             <button
               type="button"
               onClick={() => setIsDepartmentsOpen((current) => !current)}
-              className="flex h-8 min-w-0 items-center justify-between gap-2 border border-field-divider bg-field-panel px-2 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="workspace-button flex h-8 min-w-0 items-center justify-between gap-2 border px-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-expanded={isDepartmentsOpen}
               aria-controls="staff-departments-panel"
             >
@@ -515,14 +515,14 @@ export default function StaffListPage() {
                   setIsNotesSummaryOpen((current) => !current);
                 }
               }}
-              className="group flex h-8 w-full min-w-0 items-center gap-1.5 border border-field-divider bg-field-panel px-2 text-left text-[11px] text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="workspace-button group flex h-8 w-full min-w-0 items-center gap-1.5 border px-2 text-left text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
               aria-expanded={notesSummary.items.length > 0 ? isNotesSummaryOpen : undefined}
               aria-controls={notesSummary.items.length > 0 ? "staff-notes-summary-popover" : undefined}
             >
               {notesSummary.displayText ? (
                 <>
-                  <span className="shrink-0 text-field-subtle">특이사항</span>
+                  <span className="workspace-text-secondary shrink-0">특이사항</span>
                   <span className="truncate">{notesSummary.displayText}</span>
                   <ChevronDown
                     className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${isNotesSummaryOpen ? "rotate-180" : ""}`}
@@ -534,7 +534,7 @@ export default function StaffListPage() {
             {isNotesSummaryOpen ? (
               <div
                 id="staff-notes-summary-popover"
-                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border border-field-divider bg-field-elevated p-2.5 text-left"
+                className="workspace-popup absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border p-2.5 text-left"
                 role="dialog"
                 aria-label="특이사항 전체보기"
               >
@@ -542,9 +542,9 @@ export default function StaffListPage() {
                   {notesSummary.items.map((item) => (
                     <li
                       key={item.id}
-                      className="border border-field-border bg-field-soft px-2.5 py-2 text-xs leading-relaxed text-field-text [overflow-wrap:anywhere]"
+                      className="workspace-popup-row border px-2.5 py-2 text-xs leading-relaxed [overflow-wrap:anywhere]"
                     >
-                      {item.owner ? <span className="text-field-subtle">{item.owner}:</span> : null}
+                      {item.owner ? <span className="workspace-text-secondary">{item.owner}:</span> : null}
                       <span className="whitespace-pre-wrap">{item.owner ? " " : ""}{item.notes}</span>
                     </li>
                   ))}
@@ -556,7 +556,7 @@ export default function StaffListPage() {
         {canEdit && isDepartmentsOpen ? (
           <div
             id="staff-departments-panel"
-            className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-divider px-1 pt-2"
+            className="workspace-divider mt-1.5 flex flex-wrap items-center gap-1.5 border-t px-1 pt-2"
           >
             {departments.map((department, index) => (
               <DepartmentChip
@@ -567,7 +567,7 @@ export default function StaffListPage() {
                 onDelete={() => deleteDepartment(department.id)}
               />
             ))}
-            <div className="flex h-8 items-center border border-dashed border-field-divider bg-field-soft/50 pl-2">
+            <div className="workspace-control flex h-8 items-center border border-dashed pl-2">
               <input
                 type="text"
                 value={newDepartmentName}
@@ -599,7 +599,7 @@ export default function StaffListPage() {
                 onBlur={() => {
                   pendingDepartmentSubmitRef.current = false;
                 }}
-                className="w-24 min-w-0 bg-transparent text-center text-xs text-field-text outline-none placeholder:text-center focus-visible:ring-2 focus-visible:ring-field-primary/25"
+                className="workspace-text w-24 min-w-0 bg-transparent text-center text-xs outline-none placeholder:text-center focus-visible:ring-2 focus-visible:ring-field-primary/25"
                 placeholder="+ 부서 추가"
                 aria-label="새 부서 이름"
                 maxLength={100}
@@ -607,7 +607,7 @@ export default function StaffListPage() {
               <button
                 type="button"
                 onClick={() => addDepartment()}
-                className="grid h-8 w-8 shrink-0 place-items-center text-field-text transition-colors hover:bg-field-hover active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="workspace-text grid h-8 w-8 shrink-0 place-items-center transition-colors hover:bg-[var(--workspace-hover)] active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                 aria-label="부서 추가"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -617,7 +617,7 @@ export default function StaffListPage() {
         ) : null}
       </section>
 
-      <section className="mt-3 border border-field-border bg-field-panel p-2">
+      <section className="light-workspace staff-workspace workspace-canvas workspace-border mt-3 border p-2">
         {staffGroups.length > 0 ? (
           <div className="grid gap-2">
             {staffGroups.map((group) => {
@@ -646,7 +646,7 @@ export default function StaffListPage() {
                           <button
                             type="button"
                             onClick={() => addMember(group.name)}
-                            className="grid h-5 w-5 shrink-0 place-items-center border border-black/25 bg-black text-field-text transition-colors hover:bg-field-hover active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                            className="workspace-button grid h-5 w-5 shrink-0 place-items-center border p-0 transition-colors active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)]"
                             aria-label={`${group.name} 부서에 인원 추가`}
                           >
                             <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
@@ -694,7 +694,7 @@ export default function StaffListPage() {
           </div>
         ) : null}
         {departments.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs font-bold text-field-muted">
+          <p className="workspace-text-muted px-2 py-3 text-center text-xs font-bold">
             부서를 먼저 추가하면 해당 부서 제목의 + 버튼으로 인원을 추가할 수 있습니다.
           </p>
         ) : null}
@@ -751,7 +751,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
         canEdit
           ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
           : `grid-cols-6 ${desktopGridClassName}`
-      } ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
+      } workspace-row ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
       style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
@@ -836,7 +836,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
         }}
       />
       {canEdit ? (
-        <div className="col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l border-field-border p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
+        <div className="workspace-border col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
@@ -844,7 +844,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/25 bg-field-panel text-field-danger/60 transition-colors hover:border-field-danger hover:bg-field-danger hover:text-field-text active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-white text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -895,7 +895,7 @@ function EpisodeParticipationCells({
 
   return (
     <div className="col-span-2 flex h-8 min-w-0 items-center gap-1 overflow-hidden md:col-auto">
-      <span className="w-7 shrink-0 whitespace-nowrap text-center text-[9px] font-black leading-normal text-field-muted xl:w-auto">
+      <span className="workspace-text-muted w-7 shrink-0 whitespace-nowrap text-center text-[9px] font-black leading-normal xl:w-auto">
         <span className="xl:hidden">회차</span>
         <span className="hidden xl:inline">참여 회차</span>
       </span>
@@ -927,16 +927,16 @@ function EpisodeParticipationCells({
                   aria-pressed={participating}
                   aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
                   disabled={!canEdit}
-                  className={`h-7 min-w-0 select-none whitespace-nowrap border-y border-r border-field-border p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:border-l focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
+                  className={`workspace-border h-7 min-w-0 select-none whitespace-nowrap border-y border-r p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:border-l focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
                     canEdit ? "cursor-pointer active:brightness-95" : "cursor-default"
                   } ${
                     participating
                       ? "opacity-100"
-                      : "bg-field-panel/80 text-field-muted"
+                      : "workspace-inactive-cell"
                   }`}
                   style={participating ? {
                     backgroundColor: departmentColor.border,
-                    color: "#ffffff"
+                    color: "#151515"
                   } : undefined}
                   onPointerDown={(event) => {
                     if (!event.isPrimary) return;
@@ -990,7 +990,7 @@ function EpisodeParticipationCells({
           </div>
         </div>
       ) : (
-        <span className="grid h-7 min-w-0 flex-1 place-items-center border border-field-border bg-field-panel/70 text-[10px] font-black text-field-muted">
+        <span className="workspace-inactive-cell grid h-7 min-w-0 flex-1 place-items-center border text-[10px] font-black">
           -
         </span>
       )}
@@ -1064,7 +1064,7 @@ function DepartmentChip({
           event.stopPropagation();
           onDelete();
         }}
-        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger hover:text-field-text active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger/10 hover:text-field-danger active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
         aria-label={`${department.name} 부서 삭제`}
       >
         <X className="h-3 w-3" aria-hidden />

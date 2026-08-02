@@ -39,7 +39,7 @@ import type {
 } from "@/lib/types";
 
 const inputClassName =
-  "h-full min-h-8 w-full min-w-0 select-text border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none [-webkit-touch-callout:default] focus:bg-field-input focus:ring-1 focus:ring-inset focus:ring-field-primary";
+  "workspace-cell-control h-full min-h-8 w-full min-w-0 select-text border-0 px-1.5 py-1 text-center text-[12px] font-semibold leading-5 outline-none [-webkit-touch-callout:default]";
 const selectClassName = `${inputClassName} appearance-none`;
 
 type SceneValueColumn =
@@ -1069,7 +1069,7 @@ export default function ProjectSceneListPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={isSaving || !isDirty}
-                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-40"
+                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 border border-field-primary/70 bg-field-primary/10 px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-secondary/80 hover:bg-field-primary/15 hover:text-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving
                   ? <PixelDogLoader size="xs" compact />
@@ -1086,23 +1086,24 @@ export default function ProjectSceneListPage() {
           </p>
         ) : null}
 
-        <MobileSceneList
-          items={items}
-          actorRoles={actorRoles}
-          locationStyles={locationStyles}
-          canEdit={canEdit}
-          onHeaderLongPress={startHeaderHelpLongPress}
-          onUpdate={updateItem}
-          onCutValidationChange={updateCutInputError}
-        />
+        <div className="light-workspace scene-workspace workspace-canvas">
+          <MobileSceneList
+            items={items}
+            actorRoles={actorRoles}
+            locationStyles={locationStyles}
+            canEdit={canEdit}
+            onHeaderLongPress={startHeaderHelpLongPress}
+            onUpdate={updateItem}
+            onCutValidationChange={updateCutInputError}
+          />
 
-        <div
+          <div
           ref={sceneGridRef}
           role="grid"
           aria-label={`${project.name} 씬리스트`}
           onContextMenu={(event) => event.preventDefault()}
           onKeyDownCapture={handleGridKeyDown}
-          className="scene-list-landscape min-w-0 select-none [&_input]:select-text [&_textarea]:select-text"
+          className="scene-list-landscape workspace-surface min-w-0 select-none [&_input]:select-text [&_textarea]:select-text"
           style={{
             WebkitUserSelect: "none",
             WebkitTouchCallout: "none"
@@ -1110,30 +1111,30 @@ export default function ProjectSceneListPage() {
         >
           <div
             role="row"
-            className="sticky top-0 z-[60] grid border-b border-field-border bg-field-soft text-center text-[11px] font-black leading-4 text-field-text print:static"
+            className="workspace-header workspace-divider sticky top-0 z-[60] grid border-b text-center text-[11px] font-black leading-4 print:static"
             style={{ gridTemplateColumns }}
           >
             <SceneHeaderCell
               label="Scene"
               description="씬"
-              className="border-r border-[#bfc5bf]"
+              className="workspace-divider border-r"
               onLongPress={startHeaderHelpLongPress}
             />
             <SceneHeaderCell
               label="Location"
               description="대장소"
-              className="border-r border-[#bfc5bf]"
+              className="workspace-divider border-r"
               onLongPress={startHeaderHelpLongPress}
             />
             <SceneHeaderCell
               label="Sub-Location"
               description="세부장소"
-              className="border-r border-[#bfc5bf]"
+              className="workspace-divider border-r"
               onLongPress={startHeaderHelpLongPress}
             />
             <SceneHeaderCell
               label="Day"
-              className="border-r border-[#bfc5bf]"
+              className="workspace-divider border-r"
               onLongPress={startHeaderHelpLongPress}
             />
             {([
@@ -1145,7 +1146,7 @@ export default function ProjectSceneListPage() {
                 key={label}
                 label={label}
                 description={description}
-                className="border-r border-[#bfc5bf]"
+                className="workspace-divider border-r"
                 onLongPress={startHeaderHelpLongPress}
               />
             ))}
@@ -1158,7 +1159,7 @@ export default function ProjectSceneListPage() {
                   title={role}
                   ariaLabel={`Characters: ${role}`}
                   description="등장인물"
-                  className="border-r border-[#bfc5bf] px-0.5"
+                  className="workspace-divider border-r px-0.5"
                   style={{
                     backgroundColor: actorStyle.headerBackground,
                     color: actorStyle.color
@@ -1171,7 +1172,7 @@ export default function ProjectSceneListPage() {
               label="Cut"
               description="총 컷수"
               helpId="scene-list-cut-help-landscape"
-              className="border-r border-[#bfc5bf]"
+              className="workspace-divider border-r"
               onLongPress={startHeaderHelpLongPress}
             />
             <SceneHeaderCell
@@ -1211,17 +1212,18 @@ export default function ProjectSceneListPage() {
           />
 
           {canEdit ? (
-            <div className="border-t border-field-border bg-field-soft/40 p-2">
+            <div className="workspace-surface-subtle workspace-border border-t p-2">
               <button
                 type="button"
                 onClick={addItem}
-                className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="workspace-button inline-flex min-h-9 items-center gap-1 border px-3 text-xs font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
                 씬 추가
               </button>
             </div>
           ) : null}
+          </div>
         </div>
       </section>
 
@@ -1230,13 +1232,13 @@ export default function ProjectSceneListPage() {
           ref={deletePopoverRef}
           role="dialog"
           aria-label={`${deletePopover.label} 삭제 메뉴`}
-          className="fixed z-[80] min-w-24 overflow-hidden border border-field-danger/50 bg-field-elevated p-1"
+          className="light-workspace scene-workspace workspace-popup workspace-popup-danger fixed z-[80] min-w-24 overflow-hidden border p-1"
           style={{ left: deletePopover.left, top: deletePopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
-            className="flex min-h-9 w-full items-center justify-center px-3 text-xs font-bold text-field-danger transition-colors hover:bg-field-danger hover:text-field-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+            className="flex min-h-9 w-full items-center justify-center px-3 text-xs font-bold text-field-danger transition-colors hover:bg-field-danger/10 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
             onClick={() => {
               const item = items.find((candidate) => candidate.id === deletePopover.itemId);
               setDeletePopover(null);
@@ -1252,7 +1254,7 @@ export default function ProjectSceneListPage() {
         <div
           ref={headerHelpPopoverRef}
           role="tooltip"
-          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center border border-field-primary bg-field-elevated px-3 py-2 text-center text-xs font-bold text-field-primary print:hidden"
+          className="light-workspace scene-workspace workspace-primary-action fixed z-[90] flex min-h-9 w-[150px] items-center justify-center border px-3 py-2 text-center text-xs font-bold print:hidden"
           style={{ left: headerHelpPopover.left, top: headerHelpPopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -1287,11 +1289,11 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {(canEdit || scenarioReference) ? (
-        <details className="scene-list-landscape mt-3 overflow-hidden border border-field-divider bg-field-panel">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
+        <details className="light-workspace scene-workspace workspace-surface workspace-border scene-list-landscape mt-3 overflow-hidden border">
+          <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
-          <div className="border-t border-field-border p-3">
+          <div className="workspace-border border-t p-3">
             {canEdit ? (
               <textarea
                 value={scenarioReference}
@@ -1309,10 +1311,10 @@ export default function ProjectSceneListPage() {
                 )}
                 rows={7}
                 aria-label="시나리오 참고"
-                className="w-full resize-y border border-field-divider bg-field-input px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
+                className="workspace-control w-full resize-y border px-3 py-2 text-sm font-medium leading-6 outline-none"
               />
             ) : (
-              <p className="whitespace-pre-wrap text-sm font-medium leading-6 text-field-text">
+              <p className="workspace-text whitespace-pre-wrap text-sm font-medium leading-6">
                 {scenarioReference}
               </p>
             )}
@@ -1321,11 +1323,11 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {scenarioReference ? (
-        <details className="scene-list-mobile mt-3 overflow-hidden border border-field-divider bg-field-panel">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
+        <details className="light-workspace scene-workspace workspace-surface workspace-border scene-list-mobile mt-3 overflow-hidden border">
+          <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
-          <p className="whitespace-pre-wrap border-t border-field-border p-3 text-sm font-medium leading-6 text-field-text">
+          <p className="workspace-border workspace-text whitespace-pre-wrap border-t p-3 text-sm font-medium leading-6">
             {scenarioReference}
           </p>
         </details>
@@ -1355,7 +1357,7 @@ function MobileSceneList({
 }) {
   return (
     <div
-      className="scene-list-mobile min-w-0 touch-pan-y select-none"
+      className="scene-list-mobile workspace-surface min-w-0 touch-pan-y select-none"
       aria-label="모바일 씬리스트"
       draggable={false}
       style={{
@@ -1364,7 +1366,7 @@ function MobileSceneList({
         WebkitTouchCallout: "none"
       }}
     >
-      <div className="sticky top-0 z-[60] grid border-l border-t border-field-border bg-field-soft text-center text-[9px] font-black leading-[1.25] text-field-text print:static"
+      <div className="workspace-header workspace-divider sticky top-0 z-[60] grid border-l border-t text-center text-[9px] font-black leading-[1.25] print:static"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
@@ -1403,7 +1405,7 @@ function MobileSceneList({
           onCutValidationChange={onCutValidationChange}
         />
       )) : (
-        <p className="border-x border-b border-field-border px-3 py-8 text-center text-xs font-semibold text-field-muted">
+        <p className="workspace-border workspace-text-muted border-x border-b px-3 py-8 text-center text-xs font-semibold">
           등록된 씬이 없습니다.
         </p>
       )}
@@ -1439,7 +1441,7 @@ function MobileSceneRow({
   return (
     <div
       role="row"
-      className="grid min-w-0 touch-pan-y select-none border-l text-[9px] font-semibold leading-[1.35] text-field-text"
+      className="workspace-row workspace-grid-line grid min-w-0 touch-pan-y select-none border-l text-[9px] font-semibold leading-[1.35]"
       draggable={false}
       style={{
         gridTemplateColumns: mobileSceneGridTemplate,
@@ -1481,7 +1483,7 @@ function MobileSceneRow({
                 className="max-w-full px-0.5 py-px font-bold [overflow-wrap:anywhere]"
                 style={isColored
                   ? { backgroundColor: actorStyle.background, color: actorStyle.color }
-                  : { color: "#ffffff" }}
+                  : { color: "var(--workspace-text)" }}
               >
                 {state.mode === "text" ? `${role}: ${state.text}` : role}
               </span>
@@ -1491,7 +1493,7 @@ function MobileSceneRow({
           {item.characterNotes ? (
             <span
               data-scene-character-note-row-id={item.id}
-              className="block max-h-10 w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap text-[8px] font-medium leading-3 text-field-muted [overflow-wrap:anywhere]"
+              className="workspace-text-muted block max-h-10 w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap text-[8px] font-medium leading-3 [overflow-wrap:anywhere]"
             >
               {item.characterNotes}
             </span>
@@ -1535,7 +1537,7 @@ function MobileSceneHeader({
   return (
     <div
       role="columnheader"
-      className="flex min-w-0 flex-col items-stretch justify-center border-b border-r border-[#bfc5bf] text-center [overflow-wrap:anywhere]"
+      className="workspace-grid-cell workspace-grid-cell-standard flex min-w-0 flex-col items-stretch justify-center border-b border-r text-center [overflow-wrap:anywhere]"
     >
       {entries.map(([label, description]) => {
         const isSubLocation = label === "Sub-Location";
@@ -1598,7 +1600,7 @@ function MobileSceneCell({
   return (
     <div
       role="gridcell"
-      className={`flex min-w-0 touch-pan-y select-none items-center overflow-hidden border-b border-r border-[#cbd0cb] px-0.5 py-1 [overflow-wrap:anywhere] ${
+      className={`workspace-grid-cell workspace-grid-cell-standard flex min-w-0 touch-pan-y select-none items-center overflow-hidden border-b border-r px-0.5 py-1 [overflow-wrap:anywhere] ${
         align === "center" ? "justify-center text-center" : "justify-start whitespace-pre-wrap text-left"
       } ${className}`}
       draggable={false}
@@ -1700,11 +1702,11 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
       ref={ref}
       role="dialog"
       aria-label={`${item.sceneNo || "현재"} Scene ${role} 메모`}
-      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden border border-field-divider bg-field-elevated"
+      className="light-workspace scene-workspace workspace-popup fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden border"
       style={{ left, top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <p className="border-b border-field-border bg-field-soft px-3 py-2 text-xs font-black text-field-text">
+      <p className="workspace-header workspace-border border-b px-3 py-2 text-xs font-black">
         {role} · Scene {item.sceneNo || "—"}
       </p>
       {canEdit ? (
@@ -1715,10 +1717,10 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
           maxLength={120}
           aria-label={`${role} 배우칸 메모`}
           placeholder="V.O. / 실루엣 / 대역"
-          className="block min-h-11 w-full bg-field-input px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
+          className="workspace-control block min-h-11 w-full border-0 px-3 py-2 text-sm font-medium leading-5 outline-none"
         />
       ) : (
-        <p className="min-h-11 px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
+        <p className="workspace-text min-h-11 px-3 py-2 text-sm font-medium leading-5 [overflow-wrap:anywhere]">
           {text || "등록된 메모가 없습니다."}
         </p>
       )}
@@ -1865,7 +1867,7 @@ const SceneTableRow = memo(function SceneTableRow({
     <div
       role="row"
       data-scene-row-handle={canEdit ? "" : undefined}
-      className="grid min-h-9 bg-field-panel text-[12px]"
+      className="workspace-row grid min-h-9 text-[12px]"
       style={{ gridTemplateColumns }}
     >
       <SceneCell
@@ -2090,7 +2092,7 @@ const SceneTableRow = memo(function SceneTableRow({
             <div
               data-scene-character-note-row-id={item.id}
               aria-label={`Characters 세부 메모: ${item.characterNotes}`}
-              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-t border-[#cbd0cb] bg-field-panel/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
+              className="workspace-surface workspace-grid-line workspace-text-muted col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-t px-1 py-0.5 text-[8px] font-semibold leading-3 [overflow-wrap:anywhere]"
             >
               {item.characterNotes}
             </div>
@@ -2185,10 +2187,10 @@ function ActorSceneCell({
         onSelect(rowId, column, rowIndex);
         onLongPress(event);
       }}
-      className={`relative grid min-h-9 min-w-0 place-items-center border-r outline-none ${
+      className={`workspace-grid-cell relative grid min-h-9 min-w-0 place-items-center border-r outline-none ${
         mergesWithNext
-          ? "border-b border-b-transparent"
-          : "border-b border-b-[#cbd0cb]"
+          ? "workspace-grid-cell-merged border-b"
+          : "workspace-grid-cell-standard border-b"
       } ${canEdit ? "cursor-pointer" : "cursor-default"}`}
       style={{
         backgroundColor: isColored ? actorStyle.background : "#ffffff",
@@ -2421,7 +2423,7 @@ function AutoGrowSceneTextarea({
       onFocus={onFocus}
       onBlur={onBlur}
       aria-label={ariaLabel}
-      className="block min-h-9 w-full min-w-0 resize-none overflow-hidden whitespace-pre-wrap border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-semibold leading-5 text-field-text outline-none [overflow-wrap:anywhere] focus:bg-field-input focus:ring-1 focus:ring-inset focus:ring-field-primary"
+      className="workspace-cell-control block min-h-9 w-full min-w-0 resize-none overflow-hidden whitespace-pre-wrap border-0 px-1.5 py-2 text-left text-[12px] font-semibold leading-5 outline-none [overflow-wrap:anywhere]"
     />
   );
 }
@@ -2558,8 +2560,8 @@ function SceneCellFrame({
             interaction.onEditStart(interaction.rowId, interaction.column);
           }
         : undefined}
-      className={`relative min-w-0 border-r border-[#cbd0cb] ${
-        mergesWithNext ? "border-b border-b-transparent" : "border-b border-b-[#cbd0cb]"
+      className={`workspace-grid-cell relative min-w-0 border-r ${
+        mergesWithNext ? "workspace-grid-cell-merged border-b" : "workspace-grid-cell-standard border-b"
       } ${interaction ? "cursor-cell outline-none" : ""} ${
         interaction?.isInRange ? "z-10" : ""
       } ${
@@ -2605,14 +2607,14 @@ function getMergePosition(rowIndex: number, range: SceneCellRange): MergePositio
 }
 
 function getSelectionBoxShadow(position: MergePosition) {
-  const left = "inset 2px 0 0 #f4d35e";
-  const right = "inset -2px 0 0 #f4d35e";
-  const top = "inset 0 2px 0 #f4d35e";
-  const bottom = "inset 0 -2px 0 #f4d35e";
+  const left = "inset 2px 0 0 var(--workspace-accent-border)";
+  const right = "inset -2px 0 0 var(--workspace-accent-border)";
+  const top = "inset 0 2px 0 var(--workspace-accent-border)";
+  const bottom = "inset 0 -2px 0 var(--workspace-accent-border)";
   if (position === "start") return `${left}, ${right}, ${top}`;
   if (position === "middle") return `${left}, ${right}`;
   if (position === "end") return `${left}, ${right}, ${bottom}`;
-  return "inset 0 0 0 2px #f4d35e";
+  return "inset 0 0 0 2px var(--workspace-accent-border)";
 }
 
 function getVisualMergeRange(

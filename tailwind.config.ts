@@ -37,8 +37,9 @@ const config: Config = {
           floating: "#333333",
           overlay: "#353535",
           dialog: "#383838",
-          primary: "#C8A951",
-          secondary: "#D0B45A",
+          primary: "#9A8956",
+          secondary: "#AA9964",
+          strong: "#B6A570",
           light: "#272727",
           border: "rgba(255, 255, 255, 0.12)",
           divider: "rgba(255, 255, 255, 0.20)",
@@ -55,12 +56,12 @@ const config: Config = {
           line: "rgba(255, 255, 255, 0.12)",
           ink: "rgba(255, 255, 255, 0.87)",
           muted: "rgba(255, 255, 255, 0.60)",
-          amber: "#C8A951",
+          amber: "#9A8956",
           red: "#E25555"
         }
       },
       boxShadow: {
-        shooting: "0 0 0 1px rgba(200, 169, 81, 0.45)",
+        shooting: "0 0 0 1px rgba(182, 165, 112, 0.42)",
         floating: "0 8px 24px rgba(0, 0, 0, 0.24)",
         dialog: "0 12px 32px rgba(0, 0, 0, 0.32)"
       }

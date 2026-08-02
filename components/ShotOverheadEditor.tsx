@@ -157,7 +157,7 @@ function RotationHandle({
         y1={pivot.y}
         x2={handle.x}
         y2={handle.y}
-        stroke="#c8a951"
+        stroke="var(--field-accent)"
         strokeWidth="4"
         strokeDasharray="8 6"
         pointerEvents="none"
@@ -167,7 +167,7 @@ function RotationHandle({
         cx={handle.x}
         cy={handle.y}
         r="14"
-        fill="#c8a951"
+        fill="var(--field-accent)"
         stroke="#111111"
         strokeWidth="5"
         className="cursor-grab active:cursor-grabbing"
@@ -770,7 +770,7 @@ export function ShotOverheadEditor({
                         width={shape.width}
                         height={shape.height}
                         fill="rgba(255,255,255,0.65)"
-                        stroke={isSelected ? "#c8a951" : "#111111"}
+                        stroke={isSelected ? "var(--field-accent)" : "#111111"}
                         strokeWidth={isSelected ? 6 : 4}
                         strokeDasharray={isSelected ? "14 8" : undefined}
                       />
@@ -789,7 +789,7 @@ export function ShotOverheadEditor({
                           cy={resizeHandle.y}
                           r="14"
                           fill="#fff"
-                          stroke="#c8a951"
+                          stroke="var(--field-accent)"
                           strokeWidth="6"
                           className="cursor-nwse-resize"
                           onPointerDown={(event) => handleShapeResizePointerDown(event, shape.id)}
@@ -834,7 +834,7 @@ export function ShotOverheadEditor({
                           cy={line.y1}
                           r="13"
                           fill="#fff"
-                          stroke="#c8a951"
+                          stroke="var(--field-accent)"
                           strokeWidth="5"
                           className="cursor-move"
                           onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "start")}
@@ -844,7 +844,7 @@ export function ShotOverheadEditor({
                           cy={line.y2}
                           r="13"
                           fill="#fff"
-                          stroke="#c8a951"
+                          stroke="var(--field-accent)"
                           strokeWidth="5"
                           className="cursor-move"
                           onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "end")}
@@ -857,7 +857,7 @@ export function ShotOverheadEditor({
 
               {lineStart ? (
                 <g pointerEvents="none">
-                  <circle cx={lineStart.x} cy={lineStart.y} r="13" fill="#fff" stroke="#c8a951" strokeWidth="5" />
+                  <circle cx={lineStart.x} cy={lineStart.y} r="13" fill="#fff" stroke="var(--field-accent)" strokeWidth="5" />
                   <text x={lineStart.x + 20} y={lineStart.y - 16} fill="#111111" fontSize="22" fontWeight="700">끝점을 선택하세요</text>
                 </g>
               ) : null}
@@ -874,7 +874,7 @@ export function ShotOverheadEditor({
                 );
                 return (
                   <g key={person.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "person", id: person.id })}>
-                    {isSelected ? <circle cx={person.x} cy={person.y} r={selectionRadius} fill="none" stroke="#c8a951" strokeWidth="6" strokeDasharray="10 7" /> : null}
+                    {isSelected ? <circle cx={person.x} cy={person.y} r={selectionRadius} fill="none" stroke="var(--field-accent)" strokeWidth="6" strokeDasharray="10 7" /> : null}
                     <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`}>
                       <circle cx="0" cy="0" r={PERSON_RADIUS} fill="#fff" stroke="#111111" strokeWidth="7" />
                       <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#111111" />
@@ -893,7 +893,7 @@ export function ShotOverheadEditor({
                           cy={person.y + handleOffset}
                           r="13"
                           fill="#fff"
-                          stroke="#c8a951"
+                          stroke="var(--field-accent)"
                           strokeWidth="5"
                           className="cursor-nwse-resize"
                           onPointerDown={(event) => handlePersonScalePointerDown(event, person.id)}
@@ -910,7 +910,7 @@ export function ShotOverheadEditor({
                 const rotateHandle = pointAtAngle(pivot, 112, camera.rotation - 90);
                 return (
                   <g key={camera.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "camera", id: camera.id })}>
-                    {isSelected ? <circle cx={camera.x} cy={camera.y} r="60" fill="none" stroke="#c8a951" strokeWidth="6" strokeDasharray="10 7" /> : null}
+                    {isSelected ? <circle cx={camera.x} cy={camera.y} r="60" fill="none" stroke="var(--field-accent)" strokeWidth="6" strokeDasharray="10 7" /> : null}
                     <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
                       <rect x={camera.x - 35} y={camera.y - 27} width="58" height="54" fill="#111111" />
                       <path d={`M ${camera.x + 20} ${camera.y - 22} L ${camera.x + 62} ${camera.y - 38} L ${camera.x + 62} ${camera.y + 38} L ${camera.x + 20} ${camera.y + 22} Z`} fill="#111111" />

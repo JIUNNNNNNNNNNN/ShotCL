@@ -1853,7 +1853,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </Button>
             <Button
               variant="secondary"
-              className="w-full !border-field-primary !bg-field-primary px-2 text-xs !text-field-accent-foreground hover:!bg-field-secondary active:!bg-field-secondary disabled:!border-field-disabled disabled:!bg-field-disabled disabled:!text-field-panel sm:text-sm"
+              className="w-full !border-field-primary/70 !bg-field-primary/10 px-2 text-xs !text-field-primary hover:!border-field-secondary/80 hover:!bg-field-primary/15 hover:!text-field-secondary active:!bg-field-primary/15 disabled:!border-field-disabled disabled:!bg-field-disabled disabled:!text-field-panel sm:text-sm"
               onClick={addMealTime}
             >
               <Plus className="h-4 w-4" aria-hidden />

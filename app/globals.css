@@ -189,10 +189,11 @@
   --field-secondary-text: var(--text-secondary);
   --field-muted: var(--text-secondary);
   --field-disabled: var(--text-disabled);
-  --field-accent: #c8a951;
-  --field-accent-hover: #d0b45a;
-  --field-accent-soft: rgba(200, 169, 81, 0.12);
-  --field-accent-border: rgba(200, 169, 81, 0.55);
+  --field-accent: #9a8956;
+  --field-accent-hover: #aa9964;
+  --field-accent-strong: #b6a570;
+  --field-accent-soft: rgba(154, 137, 86, 0.1);
+  --field-accent-border: rgba(182, 165, 112, 0.52);
   --field-accent-foreground: #15130d;
   --field-danger: #e25555;
 }
@@ -344,7 +345,7 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 ::selection {
-  background: rgba(200, 169, 81, 0.32);
+  background: rgba(154, 137, 86, 0.24);
   color: var(--field-text);
 }
 
@@ -382,6 +383,225 @@ a[class*="min-h-"][class*="items-center"] {
     border: 1px solid var(--field-line);
     border-radius: 0;
     background: var(--field-toast);
+  }
+}
+
+/*
+ * 문서형 목록만 밝게 쓰는 semantic surface입니다. 앱 shell과 navigation의
+ * dark elevation token은 그대로 두고, 이 wrapper를 명시한 영역만 전환합니다.
+ */
+.light-workspace {
+  color-scheme: light;
+  --workspace-bg: #f2f2f2;
+  --workspace-surface: #ffffff;
+  --workspace-surface-subtle: #f7f7f7;
+  --workspace-header: #eeeeee;
+  --workspace-control: #fafafa;
+  --workspace-hover: #f1f1f1;
+  --workspace-text: #151515;
+  --workspace-text-secondary: #555555;
+  --workspace-text-muted: #7a7a7a;
+  --workspace-border: #d5d5d5;
+  --workspace-grid: #d6d6d6;
+  --workspace-divider: #bfbfbf;
+  --workspace-accent: #7a693c;
+  --workspace-accent-soft: rgba(154, 137, 86, 0.09);
+  --workspace-accent-border: rgba(122, 105, 60, 0.48);
+  color: var(--workspace-text);
+}
+
+.staff-workspace {
+  --workspace-bg: #f2f2f2;
+  --workspace-surface-subtle: #f7f7f7;
+  --workspace-border: #d5d5d5;
+  --workspace-grid: #d5d5d5;
+  --workspace-divider: #bfbfbf;
+}
+
+.scene-workspace {
+  --workspace-bg: #f5f5f5;
+  --workspace-header: #eeeeee;
+  --workspace-border: #d0d0d0;
+  --workspace-grid: #d6d6d6;
+  --workspace-divider: #bebebe;
+}
+
+.light-workspace.workspace-canvas,
+.light-workspace .workspace-canvas {
+  background-color: var(--workspace-bg);
+  color: var(--workspace-text);
+}
+
+.light-workspace.workspace-surface,
+.light-workspace .workspace-surface {
+  background-color: var(--workspace-surface);
+  color: var(--workspace-text);
+}
+
+.light-workspace.workspace-surface-subtle,
+.light-workspace .workspace-surface-subtle {
+  background-color: var(--workspace-surface-subtle);
+  color: var(--workspace-text);
+}
+
+.light-workspace.workspace-header,
+.light-workspace .workspace-header {
+  background-color: var(--workspace-header);
+  color: var(--workspace-text);
+}
+
+.light-workspace.workspace-row,
+.light-workspace .workspace-row {
+  background-color: var(--workspace-surface);
+  color: var(--workspace-text);
+}
+
+.staff-workspace .workspace-row:nth-child(even) {
+  background-color: #f4f4f4;
+}
+
+@media (hover: hover) {
+  .light-workspace .workspace-row:hover,
+  .light-workspace .workspace-row:nth-child(even):hover {
+    background-color: #f3f3f3;
+  }
+}
+
+.light-workspace.workspace-border,
+.light-workspace .workspace-border {
+  border-color: var(--workspace-border);
+}
+
+.light-workspace.workspace-divider,
+.light-workspace .workspace-divider {
+  border-color: var(--workspace-divider);
+}
+
+.light-workspace .workspace-grid-cell {
+  border-right-color: var(--workspace-grid);
+}
+
+.light-workspace .workspace-grid-cell-standard {
+  border-bottom-color: var(--workspace-grid);
+}
+
+.light-workspace .workspace-grid-cell-merged {
+  border-bottom-color: transparent;
+}
+
+.light-workspace .workspace-grid-line {
+  border-color: var(--workspace-grid);
+}
+
+.light-workspace .workspace-text {
+  color: var(--workspace-text);
+}
+
+.light-workspace .workspace-text-secondary {
+  color: var(--workspace-text-secondary);
+}
+
+.light-workspace .workspace-text-muted {
+  color: var(--workspace-text-muted);
+}
+
+.light-workspace .workspace-accent-text {
+  color: #695b36;
+}
+
+.light-workspace .workspace-control,
+.light-workspace.workspace-control {
+  border-color: var(--workspace-border);
+  border-radius: 0;
+  background-color: var(--workspace-control);
+  color: var(--workspace-text);
+}
+
+.light-workspace .workspace-cell-control {
+  border-radius: 0;
+  background-color: transparent;
+  color: var(--workspace-text);
+}
+
+.light-workspace :where(.workspace-control, .workspace-cell-control)::placeholder {
+  color: #777777;
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .light-workspace .workspace-control:not(:disabled):hover {
+    background-color: var(--workspace-hover);
+  }
+}
+
+.light-workspace :where(.workspace-control, .workspace-cell-control):focus {
+  border-color: var(--workspace-accent-border);
+  background-color: var(--workspace-control);
+  box-shadow: inset 0 0 0 1px var(--workspace-accent-border);
+}
+
+.light-workspace.workspace-button,
+.light-workspace .workspace-button {
+  border-color: #cccccc;
+  border-radius: 0;
+  background-color: #f4f4f4;
+  color: #1a1a1a;
+}
+
+@media (hover: hover) {
+  .light-workspace.workspace-button:hover,
+  .light-workspace .workspace-button:hover {
+    border-color: var(--workspace-divider);
+    background-color: #eaeaea;
+    color: #1a1a1a;
+  }
+}
+
+.light-workspace.workspace-primary-action,
+.light-workspace .workspace-primary-action {
+  border-color: var(--workspace-accent-border);
+  border-radius: 0;
+  background-color: var(--workspace-accent-soft);
+  color: #695b36;
+}
+
+@media (hover: hover) {
+  .light-workspace.workspace-primary-action:hover,
+  .light-workspace .workspace-primary-action:hover {
+    border-color: var(--workspace-accent);
+    background-color: rgba(154, 137, 86, 0.14);
+    color: #594d2e;
+  }
+}
+
+.light-workspace .workspace-inactive-cell {
+  border-color: var(--workspace-border);
+  background-color: var(--workspace-control);
+  color: var(--workspace-text-muted);
+}
+
+.light-workspace.workspace-popup,
+.light-workspace .workspace-popup {
+  border-color: #cfcfcf;
+  border-radius: 0;
+  background-color: var(--workspace-surface);
+  color: var(--workspace-text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+}
+
+.light-workspace.workspace-popup.workspace-popup-danger {
+  border-color: rgba(226, 85, 85, 0.55);
+}
+
+.light-workspace .workspace-popup-row {
+  border-color: var(--workspace-border);
+  background-color: #f5f5f5;
+  color: var(--workspace-text);
+}
+
+@media (hover: hover) {
+  .light-workspace .workspace-popup-row:hover {
+    background-color: #eeeeee;
   }
 }
 
