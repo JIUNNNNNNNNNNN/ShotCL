@@ -440,8 +440,8 @@ export default function StaffListPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl pb-20">
-      <section className="border border-field-border bg-field-panel px-4 py-3">
+    <main className="staff-workspace mx-auto w-full max-w-6xl pb-20">
+      <section className="border border-field-border bg-field-section px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
             <div className="grid h-10 w-10 shrink-0 place-items-center border border-field-divider bg-field-soft text-field-text">
@@ -490,7 +490,7 @@ export default function StaffListPage() {
         <p className="mt-3 border border-field-divider bg-field-elevated px-3 py-2 text-xs font-bold text-field-subtle">{message}</p>
       ) : null}
 
-      <section className="light-workspace staff-workspace workspace-surface workspace-border mt-3 border px-2.5 py-2">
+      <section className="workspace-surface workspace-border mt-3 border px-2.5 py-2">
         <div className={`grid h-8 items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
           {canEdit ? (
             <button
@@ -617,7 +617,7 @@ export default function StaffListPage() {
         ) : null}
       </section>
 
-      <section className="light-workspace staff-workspace workspace-canvas workspace-border mt-3 border p-2">
+      <section className="workspace-canvas workspace-border mt-3 border p-2">
         {staffGroups.length > 0 ? (
           <div className="grid gap-2">
             {staffGroups.map((group) => {
@@ -625,18 +625,15 @@ export default function StaffListPage() {
               return (
                 <section
                   key={group.key}
-                  className="overflow-visible border border-l-[3px]"
+                  className="staff-department-section overflow-visible border border-l-[3px]"
                   data-staff-department={group.name}
-                  style={{
-                    backgroundColor: departmentColor.background,
-                    borderColor: departmentColor.border
-                  }}
+                  style={{ borderColor: departmentColor.border }}
                 >
                   <div className="overflow-hidden">
                     <header
                       className="flex h-7 items-center border-b px-2.5 text-xs font-black text-[#1c1c1a]"
                       style={{
-                        backgroundColor: `${departmentColor.border}33`,
+                        backgroundColor: departmentColor.background,
                         borderColor: departmentColor.border
                       }}
                     >
@@ -844,7 +841,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-white text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-field-input text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -1050,7 +1047,7 @@ function DepartmentChip({
             event.currentTarget.blur();
           }
         }}
-        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-[#1c1c1a] outline-none focus-visible:ring-2 focus-visible:ring-black/30"
+        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-[#1c1c1a] outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)]"
         aria-label={`${department.name} 부서명 수정`}
         maxLength={100}
       />
