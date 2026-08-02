@@ -308,6 +308,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [renameError, setRenameError] = useState("");
   const [preview, setPreview] = useState<{ url: string; title: string; assetId?: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadedArchiveProjectId, setLoadedArchiveProjectId] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [progressMessage, setProgressMessage] = useState("");
@@ -353,6 +354,9 @@ export default function ProjectStoryboardOverheadPage() {
   const activeProjectIdRef = useRef(projectId);
   activeProjectIdRef.current = projectId;
   const collapsedSceneKeysRef = useRef(new Set<string>());
+  const hasInitializedCollapseRef = useRef(false);
+  const knownArchiveSceneKeysRef = useRef(new Set<string>());
+  const metadataSceneRevealKeysRef = useRef(new Set<string>());
   const reorderModeGroupKeyRef = useRef<string | null>(null);
   const reorderSessionRef = useRef<ArchiveReorderSession | null>(null);
   const reorderPointerCleanupRef = useRef<(() => void) | null>(null);
@@ -433,6 +437,7 @@ export default function ProjectStoryboardOverheadPage() {
   const loadArchive = useCallback(async () => {
     if (!projectId) return;
     const requestedProjectId = projectId;
+    setLoadedArchiveProjectId("");
     setIsLoading(true);
     try {
       const [project, overheadAssets, storyboardAssets, diagrams, sceneResult] = await Promise.all([
@@ -455,6 +460,7 @@ export default function ProjectStoryboardOverheadPage() {
       setDiagramArchives(diagrams);
       setSceneItems(sceneResult.value);
       setErrorMessage(sceneResult.error);
+      setLoadedArchiveProjectId(requestedProjectId);
     } catch (error) {
       if (activeProjectIdRef.current !== requestedProjectId) return;
       setErrorMessage(error instanceof Error ? error.message : "부감도와 콘티 아카이브를 불러오지 못했습니다.");
@@ -491,6 +497,11 @@ export default function ProjectStoryboardOverheadPage() {
     setEditingAsset(null);
     setMetadataAnchor(null);
     setRenamingAsset(null);
+    hasInitializedCollapseRef.current = false;
+    knownArchiveSceneKeysRef.current = new Set();
+    metadataSceneRevealKeysRef.current = new Set();
+    collapsedSceneKeysRef.current = new Set();
+    setCollapsedSceneKeys(new Set());
   }, [projectId]);
 
   useEffect(() => {
@@ -651,6 +662,58 @@ export default function ProjectStoryboardOverheadPage() {
     () => groupArchiveItemsByScene(filteredAssets, filteredDiagrams, sceneItems),
     [filteredAssets, filteredDiagrams, sceneItems]
   );
+  const archiveGroupsForCollapse = useMemo(
+    () => groupArchiveItemsByScene(
+      dedupeArchiveAssets([...overheads, ...storyboards]).filter((asset) => (
+        detectArchiveCropSourceKind({
+          mimeType: asset.mimeType,
+          filename: asset.filename
+        }) === "image"
+        && !asset.groupId?.startsWith("source:")
+      )),
+      diagramArchives,
+      sceneItems
+    ),
+    [diagramArchives, overheads, sceneItems, storyboards]
+  );
+
+  useLayoutEffect(() => {
+    if (!projectId || loadedArchiveProjectId !== projectId) return;
+
+    const currentSceneKeys = new Set(archiveGroupsForCollapse.map((group) => group.key));
+    if (!hasInitializedCollapseRef.current) {
+      hasInitializedCollapseRef.current = true;
+      knownArchiveSceneKeysRef.current = currentSceneKeys;
+      metadataSceneRevealKeysRef.current.clear();
+      collapsedSceneKeysRef.current = new Set(currentSceneKeys);
+      setCollapsedSceneKeys(new Set(currentSceneKeys));
+      return;
+    }
+
+    const previousSceneKeys = knownArchiveSceneKeysRef.current;
+    const metadataSceneRevealKeys = metadataSceneRevealKeysRef.current;
+    knownArchiveSceneKeysRef.current = currentSceneKeys;
+
+    updateCollapsedScenes((current) => {
+      const next = new Set(
+        [...current].filter((sceneKey) => currentSceneKeys.has(sceneKey))
+      );
+      for (const sceneKey of currentSceneKeys) {
+        if (!previousSceneKeys.has(sceneKey) && !metadataSceneRevealKeys.has(sceneKey)) {
+          next.add(sceneKey);
+        }
+        if (metadataSceneRevealKeys.has(sceneKey)) next.delete(sceneKey);
+      }
+      const unchanged = next.size === current.size
+        && [...next].every((sceneKey) => current.has(sceneKey));
+      return unchanged ? current : next;
+    });
+
+    metadataSceneRevealKeysRef.current = new Set(
+      [...metadataSceneRevealKeys].filter((sceneKey) => !currentSceneKeys.has(sceneKey))
+    );
+  }, [archiveGroupsForCollapse, loadedArchiveProjectId, projectId]);
+
   const scopeSelectionKeys = useMemo(
     () => [...new Set([
       ...archiveGroups.flatMap((group) => group.items.flatMap((item) => (
@@ -2624,6 +2687,8 @@ export default function ProjectStoryboardOverheadPage() {
       return;
     }
     const previousGroupKey = archiveAssetOrderGroupKey(currentAsset);
+    const previousSceneKey = archiveSceneKeyFromOrderGroupKey(previousGroupKey);
+    const previousSceneWasCollapsed = collapsedSceneKeysRef.current.has(previousSceneKey);
     const nextGroupKey = archiveOrderGroupKey(selectedScene?.id || null, cutNumber);
     const targetSceneKey = archiveSceneCollapseKey(selectedScene?.id || null);
     const targetWasCollapsed = collapsedSceneKeysRef.current.has(targetSceneKey);
@@ -2646,6 +2711,7 @@ export default function ProjectStoryboardOverheadPage() {
     const groupVersions = nextGroupOperationVersions([previousGroupKey, nextGroupKey]);
     const operationProjectId = projectId;
     markMetadataPending(assetId, assetVersion);
+    metadataSceneRevealKeysRef.current.add(targetSceneKey);
     expandScene(targetSceneKey);
     setCombinedArchiveAssets(optimistic.assets);
     closeMetadata();
@@ -2704,6 +2770,12 @@ export default function ProjectStoryboardOverheadPage() {
           if (!operationIsCurrent || !groupsAreCurrent) return;
 
           if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
+            if (
+              !previousSceneWasCollapsed
+              && archiveSceneCollapseKey(error.asset.sceneId) === previousSceneKey
+            ) {
+              metadataSceneRevealKeysRef.current.add(previousSceneKey);
+            }
             applySceneCutUpdate({ asset: error.asset, orders: error.orders });
             if (targetWasCollapsed && error.asset.sceneId !== (selectedScene?.id || null)) {
               updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
@@ -2714,6 +2786,9 @@ export default function ProjectStoryboardOverheadPage() {
             applyOrderUpdates(error.orders);
             setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
           } else {
+            if (!previousSceneWasCollapsed) {
+              metadataSceneRevealKeysRef.current.add(previousSceneKey);
+            }
             setCombinedArchiveAssets(restoreCommittedArchivePlacements(
               archiveAssetsRef.current,
               new Set([previousGroupKey, nextGroupKey]),
