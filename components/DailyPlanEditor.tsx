@@ -1789,12 +1789,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                         <span className={mobileTimetableLabelClass}>장소</span>
                         <div className="grid min-w-0 gap-1">
-                          <span
-                            className="block min-w-0 truncate text-center text-[10px] font-bold leading-[1.35] text-field-muted"
-                            title={scene.mainLocation || undefined}
-                          >
-                            {scene.mainLocation || "대장소"}
-                          </span>
+                          {scene.mainLocation ? (
+                            <span
+                              className="block min-w-0 truncate text-center text-[10px] font-bold leading-[1.35] text-field-muted"
+                              title={scene.mainLocation}
+                            >
+                              {scene.mainLocation}
+                            </span>
+                          ) : null}
                           <DraftInput
                             className={timetableInputClass}
                             value={scene.subLocation}
@@ -1874,7 +1876,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               <Plus className="h-4 w-4" aria-hidden />
               촬영 행 추가
             </Button>
-            <Button variant="secondary" className="w-full px-2 text-xs sm:text-sm" onClick={addMealTime}>
+            <Button
+              variant="secondary"
+              className="w-full !border-[#d9bd59] !bg-[#fff3c4] px-2 text-xs !text-[#4f3b00] hover:!bg-[#ffe9a3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d9bd59] focus-visible:ring-offset-2 active:!bg-[#f4d66c] disabled:!border-[#ead99a] disabled:!bg-[#fff8dd] disabled:!text-[#8a7a46] sm:text-sm"
+              onClick={addMealTime}
+            >
               <Plus className="h-4 w-4" aria-hidden />
               기타 일정 행 추가
             </Button>
