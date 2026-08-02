@@ -57,7 +57,8 @@ type SceneActorColumn = `actor:${string}`;
 type SceneCellColumn = SceneValueColumn | SceneActorColumn;
 type SceneFillColumn =
   Exclude<SceneValueColumn, "sceneNo" | "sceneContent">;
-type SceneVisualMergeColumn = SceneFillColumn | SceneActorColumn;
+type SceneLocationColumn = "mainLocation" | "subLocation";
+type SceneVisualMergeColumn = SceneLocationColumn | SceneActorColumn;
 type ActorCellState =
   | { mode: "empty"; text: "" }
   | { mode: "color"; text: "" }
@@ -79,10 +80,7 @@ type SceneCellRange = {
 
 type VisualSceneCell = {
   representative: SceneCellColumn;
-  logicalColumns: SceneCellColumn[];
 };
-
-type CellDragMode = "pending" | "vertical-fill" | "horizontal-location";
 
 type CellDragState = SceneCellRange & {
   initialStartIndex: number;
@@ -93,8 +91,6 @@ type CellDragState = SceneCellRange & {
   startY: number;
   sourceValue: string;
   didDrag: boolean;
-  mode: CellDragMode;
-  horizontalTargetReached: boolean;
 };
 
 type MergePosition = "single" | "start" | "middle" | "end";
@@ -321,35 +317,26 @@ export default function ProjectSceneListPage() {
     [actorRoles]
   );
 
-  const compactLocationLayout = useMemo(() => {
-    const locationRows = items.filter((item) => (
-      item.mainLocation.trim() || item.subLocation.trim()
-    ));
-    if (locationRows.length === 0) return false;
-    const mergedRows = locationRows.filter(isSameHorizontalLocation);
-    return mergedRows.length / locationRows.length >= 0.7;
-  }, [items]);
-
   const gridTemplateColumns = useMemo(
     () => [
       "minmax(0,.5fr)",
-      compactLocationLayout ? "minmax(0,.54fr)" : "minmax(0,.75fr)",
-      compactLocationLayout ? "minmax(0,.54fr)" : "minmax(0,.9fr)",
+      "minmax(0,.75fr)",
+      "minmax(0,.9fr)",
       "minmax(0,.48fr)",
       "minmax(0,.36fr)",
       "minmax(0,.36fr)",
-      compactLocationLayout ? "minmax(0,3.37fr)" : "minmax(0,2.8fr)",
+      "minmax(0,2.8fr)",
       ...actorRoles.map(() => "minmax(0,.42fr)"),
       "minmax(3.75rem,.5fr)",
       "minmax(0,1.05fr)"
     ].join(" "),
-    [actorRoles, compactLocationLayout]
+    [actorRoles]
   );
 
   const locationStyles = useMemo(() => {
     const locations = Array.from(new Set(
       items
-        .map((item) => item.mainLocation.trim())
+        .map((item) => getLocationPaletteKey(item))
         .filter(Boolean)
     )).sort((first, second) => first.localeCompare(second, "ko"));
     const usedPaletteIndexes = new Set<number>();
@@ -589,13 +576,7 @@ export default function ProjectSceneListPage() {
     if (event.key === "Enter") {
       event.preventDefault();
       if (canEdit) {
-        const cell = findCellElement(activeCell.rowId, activeCell.column);
-        const editor = cell?.querySelector("input, textarea, select");
-        if (editor) {
-          setEditingCell(activeCell);
-        } else {
-          cell?.querySelector<HTMLButtonElement>("button")?.click();
-        }
+        setEditingCell(activeCell);
       }
       return;
     }
@@ -701,9 +682,7 @@ export default function ProjectSceneListPage() {
       startX: event.clientX,
       startY: event.clientY,
       sourceValue: value,
-      didDrag: false,
-      mode: "pending",
-      horizontalTargetReached: false
+      didDrag: false
     };
     cellDragRef.current = drag;
 
@@ -727,17 +706,6 @@ export default function ProjectSceneListPage() {
       return targetIndex >= 0 ? { targetColumn, targetIndex, targetRowId } : null;
     };
 
-    const reachesOtherLocationCell = (clientX: number, clientY: number) => {
-      if (!isLocationColumn(column)) return false;
-      const target = findTargetCell(clientX, clientY);
-      return Boolean(
-        target &&
-        target.targetRowId === rowId &&
-        isLocationColumn(target.targetColumn) &&
-        target.targetColumn !== column
-      );
-    };
-
     const handleMove = (moveEvent: PointerEvent) => {
       const current = cellDragRef.current;
       if (!current || moveEvent.pointerId !== current.pointerId) return;
@@ -746,38 +714,20 @@ export default function ProjectSceneListPage() {
       const target = findTargetCell(moveEvent.clientX, moveEvent.clientY);
       if (!current.didDrag) {
         if (
-          isLocationColumn(column) &&
-          horizontalDistance >= 8 &&
-          horizontalDistance > verticalDistance * 1.2 &&
-          reachesOtherLocationCell(moveEvent.clientX, moveEvent.clientY)
-        ) {
-          current.mode = "horizontal-location";
-          current.horizontalTargetReached = true;
-        } else if (
           verticalDistance >= 8 &&
           verticalDistance > horizontalDistance * 1.2 &&
           target?.targetColumn === column &&
           target.targetIndex !== current.originIndex
         ) {
-          current.mode = "vertical-fill";
         } else {
           return;
         }
         current.didDrag = true;
         window.getSelection()?.removeAllRanges();
         document.body.style.userSelect = "none";
-        document.body.style.cursor = current.mode === "horizontal-location"
-          ? "col-resize"
-          : "cell";
+        document.body.style.cursor = "cell";
       }
       moveEvent.preventDefault();
-      if (current.mode === "horizontal-location") {
-        current.horizontalTargetReached = reachesOtherLocationCell(
-          moveEvent.clientX,
-          moveEvent.clientY
-        );
-        return;
-      }
       if (target?.targetColumn !== column) return;
       const nextRange = getDraggedRange(current, target.targetIndex);
       if (
@@ -798,35 +748,6 @@ export default function ProjectSceneListPage() {
       cellDragRef.current = null;
       cleanup();
       if (commit && current?.didDrag) {
-        if (current.mode === "horizontal-location") {
-          if (!current.horizontalTargetReached) return;
-          setItems((currentItems) => currentItems.map((item) => (
-            item.id === rowId
-              ? {
-                  ...item,
-                  mainLocation: current.sourceValue,
-                  subLocation: current.sourceValue
-                }
-              : item
-          )));
-          setEditingCell(null);
-          if (document.activeElement instanceof HTMLElement) {
-            document.activeElement.blur();
-          }
-          const nextCell: SelectedSceneCell = { rowId, column: "mainLocation" };
-          const nextRange: SceneCellRange = {
-            column: "mainLocation",
-            startIndex: current.originIndex,
-            endIndex: current.originIndex
-          };
-          selectedCellRef.current = nextCell;
-          selectedRangeRef.current = nextRange;
-          setSelectedCell(nextCell);
-          setSelectedRange(nextRange);
-          setIsDirty(true);
-          setErrorMessage("");
-          return;
-        }
         const nextLower = Math.min(current.startIndex, current.endIndex);
         const nextUpper = Math.max(current.startIndex, current.endIndex);
         const initialLower = Math.min(current.initialStartIndex, current.initialEndIndex);
@@ -852,13 +773,6 @@ export default function ProjectSceneListPage() {
 
     const handleEnd = (endEvent: PointerEvent) => {
       if (endEvent.pointerId !== drag.pointerId) return;
-      const current = cellDragRef.current;
-      if (current?.mode === "horizontal-location") {
-        current.horizontalTargetReached = reachesOtherLocationCell(
-          endEvent.clientX,
-          endEvent.clientY
-        );
-      }
       finish(true);
     };
 
@@ -1194,7 +1108,10 @@ export default function ProjectSceneListPage() {
                 actorRoles={actorRoles}
                 gridTemplateColumns={gridTemplateColumns}
                 allItems={items}
-                locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+                locationStyle={getMappedLocationStyle(
+                  getLocationPaletteKey(item),
+                  locationStyles
+                )}
                 editingCell={editingCell}
                 selectedRange={selectedRange}
                 onCellSelect={selectCell}
@@ -1336,7 +1253,19 @@ export default function ProjectSceneListPage() {
   );
 }
 
-const mobileSceneGridTemplate = ".42fr .78fr .42fr .56fr 1.28fr .96fr .5fr .98fr";
+const mobileSceneGridTemplate = [
+  "minmax(2.5rem,.42fr)",
+  "minmax(4rem,.72fr)",
+  "minmax(4.75rem,.82fr)",
+  "minmax(2.5rem,.42fr)",
+  "minmax(2.75rem,.42fr)",
+  "minmax(2.75rem,.42fr)",
+  "minmax(10rem,1.65fr)",
+  "minmax(6.5rem,1fr)",
+  "minmax(3.5rem,.5fr)",
+  "minmax(7rem,1.1fr)"
+].join(" ");
+const mobileSceneGridMinWidth = "880px";
 
 function MobileSceneList({
   items,
@@ -1357,32 +1286,28 @@ function MobileSceneList({
 }) {
   return (
     <div
-      className="scene-list-mobile workspace-surface min-w-0 touch-pan-y select-none"
+      className="scene-list-mobile workspace-surface min-w-0 touch-auto select-none overflow-auto"
       aria-label="모바일 씬리스트"
       draggable={false}
       style={{
-        touchAction: "pan-y",
+        touchAction: "auto",
+        maxHeight: "70dvh",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none"
       }}
     >
       <div className="workspace-header workspace-divider sticky top-0 z-[60] grid border-l border-t text-center text-[9px] font-black leading-[1.25] print:static"
-        style={{ gridTemplateColumns: mobileSceneGridTemplate }}
+        style={{
+          gridTemplateColumns: mobileSceneGridTemplate,
+          minWidth: mobileSceneGridMinWidth
+        }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
-        <MobileSceneHeader
-          entries={[
-            ["Location", "대장소"],
-            ["Sub-Location", "세부장소"]
-          ]}
-        />
+        <MobileSceneHeader entries={[["Location", "대장소"]]} />
+        <MobileSceneHeader entries={[["Sub-Location", "세부장소"]]} />
         <MobileSceneHeader entries={[["Day"]]} />
-        <MobileSceneHeader
-          entries={[
-            ["Time", "D/N"],
-            ["Int/Ext", "I/E"]
-          ]}
-        />
+        <MobileSceneHeader entries={[["Time", "D/N"]]} />
+        <MobileSceneHeader entries={[["Int/Ext", "I/E"]]} />
         <MobileSceneHeader entries={[["Content", "씬 내용"]]} />
         <MobileSceneHeader entries={[["Characters", "등장인물"]]} />
         <MobileSceneHeader
@@ -1398,8 +1323,12 @@ function MobileSceneList({
           key={item.id}
           item={item}
           index={index}
+          allItems={items}
           actorRoles={actorRoles}
-          locationStyle={getMappedLocationStyle(item.mainLocation, locationStyles)}
+          locationStyle={getMappedLocationStyle(
+            getLocationPaletteKey(item),
+            locationStyles
+          )}
           canEdit={canEdit}
           onUpdate={onUpdate}
           onCutValidationChange={onCutValidationChange}
@@ -1416,6 +1345,7 @@ function MobileSceneList({
 function MobileSceneRow({
   item,
   index,
+  allItems,
   actorRoles,
   locationStyle,
   canEdit,
@@ -1424,6 +1354,7 @@ function MobileSceneRow({
 }: {
   item: ProjectSceneItem;
   index: number;
+  allItems: ProjectSceneItem[];
   actorRoles: string[];
   locationStyle: PaletteStyle;
   canEdit: boolean;
@@ -1437,39 +1368,54 @@ function MobileSceneRow({
       state: getActorCellState(item, role)
     }))
     .filter(({ state }) => state.mode !== "empty");
-  const mergedLocation = isSameHorizontalLocation(item);
+  const locationMergeRange = getLocationPairMergeRange(
+    allItems,
+    index,
+    "mainLocation"
+  );
+  const locationMergePosition = getMergePosition(index, locationMergeRange);
+  const showLocationValue = locationMergePosition === "single" ||
+    locationMergePosition === "start";
   return (
     <div
       role="row"
-      className="workspace-row workspace-grid-line grid min-w-0 touch-pan-y select-none border-l text-[9px] font-semibold leading-[1.35]"
+      className="workspace-row workspace-grid-line grid min-w-0 touch-auto select-none border-l text-[9px] font-semibold leading-[1.35]"
       draggable={false}
       style={{
         gridTemplateColumns: mobileSceneGridTemplate,
-        gridTemplateRows: "minmax(2rem, auto) minmax(2rem, auto)",
-        touchAction: "pan-y",
+        minWidth: mobileSceneGridMinWidth,
+        gridAutoRows: "minmax(2.25rem, auto)",
+        touchAction: "auto",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none"
       }}
     >
-      <MobileSceneCell className="row-span-2" align="center">
+      <MobileSceneCell align="center">
         {item.sceneNo || index + 1}
       </MobileSceneCell>
       <MobileSceneCell
-        className={mergedLocation ? "row-span-2" : ""}
         align="center"
+        mergePosition={locationMergePosition}
         style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
       >
-        {item.mainLocation}
+        {showLocationValue ? item.mainLocation : null}
       </MobileSceneCell>
-      <MobileSceneCell className="row-span-2" align="center">
+      <MobileSceneCell
+        align="center"
+        mergePosition={locationMergePosition}
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+      >
+        {showLocationValue ? item.subLocation : null}
+      </MobileSceneCell>
+      <MobileSceneCell align="center">
         {item.dayLabel}
       </MobileSceneCell>
       <MobileSceneCell align="center">{item.dayNight}</MobileSceneCell>
-      <MobileSceneCell className="row-span-2" align="left">
+      <MobileSceneCell align="center">{item.interiorExterior}</MobileSceneCell>
+      <MobileSceneCell align="left">
         {item.sceneContent}
       </MobileSceneCell>
       <MobileSceneCell
-        className="row-span-2"
         align="left"
       >
         <span className="flex w-full min-w-0 max-w-full flex-col items-start gap-0.5 overflow-hidden">
@@ -1500,7 +1446,7 @@ function MobileSceneRow({
           ) : null}
         </span>
       </MobileSceneCell>
-      <MobileSceneCell className="row-span-2 !overflow-visible !p-0" align="center">
+      <MobileSceneCell className="!overflow-visible !p-0" align="center">
         <SceneCutInput
           item={item}
           canEdit={canEdit}
@@ -1509,18 +1455,9 @@ function MobileSceneRow({
           onValidationChange={(message) => onCutValidationChange(item.id, message)}
         />
       </MobileSceneCell>
-      <MobileSceneCell className="row-span-2" align="left">
+      <MobileSceneCell align="left">
         {item.props}
       </MobileSceneCell>
-      {!mergedLocation ? (
-        <MobileSceneCell
-          align="center"
-          style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-        >
-          {item.subLocation}
-        </MobileSceneCell>
-      ) : null}
-      <MobileSceneCell align="center">{item.interiorExterior}</MobileSceneCell>
     </div>
   );
 }
@@ -1551,7 +1488,7 @@ function MobileSceneHeader({
             <span>Location</span>
           </span>
         ) : label;
-        const entryClassName = `flex min-h-5 flex-1 touch-pan-y select-none flex-col items-center justify-center py-0.5 text-center ${
+        const entryClassName = `flex min-h-5 flex-1 touch-auto select-none flex-col items-center justify-center py-0.5 text-center ${
           label === "Int/Ext" || label === "#S"
             ? "whitespace-nowrap px-0 text-[8px] tracking-[-0.03em]"
             : isSubLocation
@@ -1590,17 +1527,22 @@ function MobileSceneCell({
   children,
   className = "",
   align = "left",
+  mergePosition = "single",
   style
 }: {
   children: ReactNode;
   className?: string;
   align?: "left" | "center";
+  mergePosition?: MergePosition;
   style?: CSSProperties;
 }) {
+  const mergesWithNext = mergePosition === "start" || mergePosition === "middle";
   return (
     <div
       role="gridcell"
-      className={`workspace-grid-cell workspace-grid-cell-standard flex min-w-0 touch-pan-y select-none items-center overflow-hidden border-b border-r px-0.5 py-1 [overflow-wrap:anywhere] ${
+      className={`workspace-grid-cell ${
+        mergesWithNext ? "workspace-grid-cell-merged" : "workspace-grid-cell-standard"
+      } flex min-w-0 touch-auto select-none items-center overflow-hidden border-b border-r px-0.5 py-1 [overflow-wrap:anywhere] ${
         align === "center" ? "justify-center text-center" : "justify-start whitespace-pre-wrap text-left"
       } ${className}`}
       draggable={false}
@@ -1608,7 +1550,7 @@ function MobileSceneCell({
         ...style,
         maxWidth: "100%",
         boxSizing: "border-box",
-        touchAction: "pan-y",
+        touchAction: "auto",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none"
       }}
@@ -1784,11 +1726,9 @@ const SceneTableRow = memo(function SceneTableRow({
   onCutValidationChange: (id: string, message: string) => void;
 }) {
   const getCellInteraction = (
-    column: SceneCellColumn,
-    mergeRangeOverride?: SceneCellRange
+    column: SceneCellColumn
   ): SceneCellInteraction => {
-    const mergeRange = mergeRangeOverride
-      ?? getVisualMergeRange(allItems, index, column, editingCell);
+    const mergeRange = getVisualMergeRange(allItems, index, column, editingCell);
     const rangeStart = selectedRange ? Math.min(selectedRange.startIndex, selectedRange.endIndex) : -1;
     const rangeEnd = selectedRange ? Math.max(selectedRange.startIndex, selectedRange.endIndex) : -1;
     const isInRange = selectedRange?.column === column && index >= rangeStart && index <= rangeEnd;
@@ -1817,18 +1757,11 @@ const SceneTableRow = memo(function SceneTableRow({
     };
   };
   const sceneNoInteraction = getCellInteraction("sceneNo");
-  const horizontallyMergedLocation = (
-    isSameHorizontalLocation(item) &&
-    !isEditingLocationCell(item, editingCell)
-  );
-  const horizontalLocationRange = horizontallyMergedLocation
-    ? getHorizontalLocationMergeRange(allItems, index, editingCell)
-    : undefined;
   const mainLocationInteraction = {
-    ...getCellInteraction("mainLocation", horizontalLocationRange),
+    ...getCellInteraction("mainLocation"),
     onLongPress: (event: ReactPointerEvent<HTMLDivElement>) => onHeaderLongPress(
       event,
-      horizontallyMergedLocation ? "장소" : "대장소"
+      "대장소"
     )
   };
   const subLocationInteraction = {
@@ -1838,11 +1771,8 @@ const SceneTableRow = memo(function SceneTableRow({
       "세부장소"
     )
   };
-  const concealMainLocation = isVisuallyMerged(mainLocationInteraction);
   const dayNightInteraction = getCellInteraction("dayNight");
-  const concealDayNight = isVisuallyMerged(dayNightInteraction);
   const interiorExteriorInteraction = getCellInteraction("interiorExterior");
-  const concealInteriorExterior = isVisuallyMerged(interiorExteriorInteraction);
   const sceneContentInteraction = getCellInteraction("sceneContent");
   const cutCountInteraction = getCellInteraction("cutCount");
   const propsInteraction = getCellInteraction("props");
@@ -1878,83 +1808,25 @@ const SceneTableRow = memo(function SceneTableRow({
         onChange={(sceneNo) => onUpdate(item.id, { sceneNo })}
       />
 
-      {horizontallyMergedLocation ? (
-        <SceneCellFrame
-          interaction={mainLocationInteraction}
-          value={item.mainLocation}
-          className="col-span-2"
-          style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-        >
-          {canEdit ? (
-            <input
-              value={item.mainLocation}
-              onChange={(event) => onUpdate(item.id, {
-                mainLocation: event.target.value,
-                subLocation: event.target.value
-              })}
-              onFocus={() => {
-                onCellSelect(item.id, "mainLocation", index);
-                onCellEditStart(item.id, "mainLocation");
-              }}
-              onBlur={() => onCellEditEnd(item.id, "mainLocation")}
-              aria-label={`${item.sceneNo || index + 1} Scene Location`}
-              className={`${inputClassName} font-bold ${
-                concealMainLocation ? "text-transparent" : ""
-              }`}
-              style={{ color: concealMainLocation ? "transparent" : locationStyle.color }}
-            />
-          ) : (
-            <span
-              className="flex h-full min-h-9 items-center justify-center px-1.5 py-2 text-center font-bold"
-              style={{ color: locationStyle.color }}
-              title={item.mainLocation}
-            >
-              {concealMainLocation ? "" : item.mainLocation}
-            </span>
-          )}
-        </SceneCellFrame>
-      ) : (
-        <>
-          <SceneCellFrame
-            interaction={mainLocationInteraction}
-            value={item.mainLocation}
-            style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
-          >
-            {canEdit ? (
-              <input
-                value={item.mainLocation}
-                onChange={(event) => onUpdate(item.id, { mainLocation: event.target.value })}
-                onFocus={() => {
-                  onCellSelect(item.id, "mainLocation", index);
-                  onCellEditStart(item.id, "mainLocation");
-                }}
-                onBlur={() => onCellEditEnd(item.id, "mainLocation")}
-                aria-label={`${item.sceneNo || index + 1} Scene Location`}
-                className={`${inputClassName} font-bold ${
-                  concealMainLocation ? "text-transparent" : ""
-                }`}
-                style={{ color: concealMainLocation ? "transparent" : locationStyle.color }}
-              />
-            ) : (
-              <span
-                className="flex h-full min-h-9 items-center justify-center px-1.5 py-2 text-center font-bold"
-                style={{ color: locationStyle.color }}
-                title={item.mainLocation}
-              >
-                {concealMainLocation ? "" : item.mainLocation}
-              </span>
-            )}
-          </SceneCellFrame>
+      <SceneCell
+        value={item.mainLocation}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Location`}
+        canEdit={canEdit}
+        interaction={mainLocationInteraction}
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+        textClassName="font-bold"
+        onChange={(mainLocation) => onUpdate(item.id, { mainLocation })}
+      />
 
-          <SceneCell
-            value={item.subLocation}
-            ariaLabel={`${item.sceneNo || index + 1} Scene Sub-Location`}
-            canEdit={canEdit}
-            interaction={subLocationInteraction}
-            onChange={(subLocation) => onUpdate(item.id, { subLocation })}
-          />
-        </>
-      )}
+      <SceneCell
+        value={item.subLocation}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Sub-Location`}
+        canEdit={canEdit}
+        interaction={subLocationInteraction}
+        style={{ backgroundColor: locationStyle.background, color: locationStyle.color }}
+        textClassName="font-bold"
+        onChange={(subLocation) => onUpdate(item.id, { subLocation })}
+      />
       <SceneCell
         value={item.dayLabel}
         ariaLabel={`${item.sceneNo || index + 1} Scene Day`}
@@ -1964,7 +1836,7 @@ const SceneTableRow = memo(function SceneTableRow({
       />
 
       <SceneCellFrame interaction={dayNightInteraction} value={item.dayNight}>
-        {canEdit ? (
+        {canEdit && dayNightInteraction.isEditing ? (
           <select
             value={item.dayNight}
             onChange={(event) => onUpdate(item.id, { dayNight: event.target.value })}
@@ -1974,7 +1846,7 @@ const SceneTableRow = memo(function SceneTableRow({
             }}
             onBlur={() => onCellEditEnd(item.id, "dayNight")}
             aria-label={`${item.sceneNo || index + 1} Scene Time`}
-            className={`${selectClassName} ${concealDayNight ? "text-transparent" : ""}`}
+            className={selectClassName}
           >
             <option value="" />
             <option value="D">D</option>
@@ -1982,13 +1854,13 @@ const SceneTableRow = memo(function SceneTableRow({
           </select>
         ) : (
           <span className="block px-1 py-2 text-center font-bold">
-            {concealDayNight ? "" : item.dayNight}
+            {item.dayNight}
           </span>
         )}
       </SceneCellFrame>
 
       <SceneCellFrame interaction={interiorExteriorInteraction} value={item.interiorExterior}>
-        {canEdit ? (
+        {canEdit && interiorExteriorInteraction.isEditing ? (
           <select
             value={item.interiorExterior}
             onChange={(event) => onUpdate(item.id, { interiorExterior: event.target.value })}
@@ -1998,7 +1870,7 @@ const SceneTableRow = memo(function SceneTableRow({
             }}
             onBlur={() => onCellEditEnd(item.id, "interiorExterior")}
             aria-label={`${item.sceneNo || index + 1} Scene Int/Ext`}
-            className={`${selectClassName} ${concealInteriorExterior ? "text-transparent" : ""}`}
+            className={selectClassName}
           >
             <option value="" />
             <option value="I">I</option>
@@ -2006,13 +1878,13 @@ const SceneTableRow = memo(function SceneTableRow({
           </select>
         ) : (
           <span className="block px-1 py-2 text-center font-bold">
-            {concealInteriorExterior ? "" : item.interiorExterior}
+            {item.interiorExterior}
           </span>
         )}
       </SceneCellFrame>
 
       <SceneCellFrame interaction={sceneContentInteraction} value={item.sceneContent}>
-        {canEdit ? (
+        {canEdit && sceneContentInteraction.isEditing ? (
           <AutoGrowSceneTextarea
             value={item.sceneContent}
             onChange={(sceneContent) => onUpdate(item.id, { sceneContent })}
@@ -2103,7 +1975,7 @@ const SceneTableRow = memo(function SceneTableRow({
       <SceneCellFrame interaction={cutCountInteraction} value={getSceneCellValue(item, "cutCount")}>
         <SceneCutInput
           item={item}
-          canEdit={canEdit}
+          canEdit={canEdit && cutCountInteraction.isEditing}
           onFocus={() => {
             onCellSelect(item.id, "cutCount", index);
             onCellEditStart(item.id, "cutCount");
@@ -2115,7 +1987,7 @@ const SceneTableRow = memo(function SceneTableRow({
       </SceneCellFrame>
 
       <SceneCellFrame interaction={propsInteraction} value={item.props}>
-        {canEdit ? (
+        {canEdit && propsInteraction.isEditing ? (
           <AutoGrowSceneTextarea
             value={item.props}
             onChange={(props) => onUpdate(item.id, { props })}
@@ -2330,6 +2202,8 @@ function SceneCell({
   canEdit,
   interaction,
   textAlign = "center",
+  style,
+  textClassName = "",
   onChange
 }: {
   value: string;
@@ -2337,16 +2211,19 @@ function SceneCell({
   canEdit: boolean;
   interaction?: SceneCellInteraction;
   textAlign?: "left" | "center";
+  style?: CSSProperties;
+  textClassName?: string;
   onChange: (value: string) => void;
 }) {
-  const concealRepeatedValue = Boolean(
+  const isEditing = Boolean(canEdit && interaction?.isEditing);
+  const hasMergedRange = Boolean(
     interaction &&
-    isVisuallyMerged(interaction)
+    interaction.mergeRange.startIndex !== interaction.mergeRange.endIndex
   );
 
   return (
-    <SceneCellFrame interaction={interaction} value={value}>
-      {canEdit ? (
+    <SceneCellFrame interaction={interaction} value={value} style={style}>
+      {isEditing ? (
         <input
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -2362,21 +2239,82 @@ function SceneCell({
             }
           }}
           aria-label={ariaLabel}
-          className={`${inputClassName} ${textAlign === "left" ? "text-left" : ""} ${
-            concealRepeatedValue ? "text-transparent" : ""
-          }`}
+          className={`${inputClassName} ${textAlign === "left" ? "text-left" : ""} ${textClassName}`}
+          style={{ color: style?.color }}
         />
-      ) : (
+      ) : hasMergedRange && interaction?.mergePosition === "start" ? (
+        <MergedLocationValue
+          interaction={interaction}
+          value={value}
+          color={style?.color}
+          className={textClassName}
+        />
+      ) : !hasMergedRange ? (
         <span
-          className={`block truncate px-1.5 py-2 font-medium ${
+          className={`block truncate px-1.5 py-2 font-medium ${textClassName} ${
             textAlign === "left" ? "text-left" : "text-center"
           }`}
+          style={{ color: style?.color }}
           title={value}
         >
-          {concealRepeatedValue ? "" : value}
+          {value}
         </span>
-      )}
+      ) : null}
     </SceneCellFrame>
+  );
+}
+
+function MergedLocationValue({
+  interaction,
+  value,
+  color,
+  className
+}: {
+  interaction: SceneCellInteraction;
+  value: string;
+  color?: CSSProperties["color"];
+  className: string;
+}) {
+  const valueRef = useRef<HTMLSpanElement | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const valueElement = valueRef.current;
+    const startCell = valueElement?.closest<HTMLElement>(
+      "[data-scene-row-id][data-scene-cell-column]"
+    );
+    const grid = startCell?.closest("[role='grid']");
+    if (!startCell || !grid) return undefined;
+
+    const updateHeight = () => {
+      const endCell = Array.from(grid.querySelectorAll<HTMLElement>(
+        "[data-scene-row-id][data-scene-cell-column]"
+      )).find((cell) => (
+        cell.dataset.sceneRowId === interaction.mergeEndRowId &&
+        cell.dataset.sceneCellColumn === interaction.column
+      ));
+      if (!endCell) return;
+      const startRect = startCell.getBoundingClientRect();
+      const endRect = endCell.getBoundingClientRect();
+      setHeight(Math.max(startRect.height, endRect.bottom - startRect.top));
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [interaction.column, interaction.mergeEndRowId]);
+
+  if (!value.trim()) return null;
+  return (
+    <span
+      ref={valueRef}
+      className={`pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center truncate px-1 text-center ${className}`}
+      style={{ height: height ?? "100%", color }}
+      title={value}
+    >
+      {value}
+    </span>
   );
 }
 
@@ -2462,56 +2400,9 @@ function SceneCellFrame({
   style?: CSSProperties;
   children: ReactNode;
 }) {
-  const frameRef = useRef<HTMLDivElement | null>(null);
-  const [mergedHeight, setMergedHeight] = useState<number | null>(null);
   const mergesWithNext = interaction?.mergePosition === "start" || interaction?.mergePosition === "middle";
-  const mergeSpan = interaction
-    ? Math.abs(interaction.mergeRange.endIndex - interaction.mergeRange.startIndex) + 1
-    : 1;
-  const showsMergedValue = Boolean(
-    interaction?.mergePosition === "start" &&
-    mergeSpan > 1 &&
-    value.trim()
-  );
-
-  useLayoutEffect(() => {
-    if (!showsMergedValue || !interaction) {
-      setMergedHeight(null);
-      return undefined;
-    }
-    const frame = frameRef.current;
-    const grid = frame?.closest("[role='grid']");
-    if (!frame || !grid) return undefined;
-
-    const updateHeight = () => {
-      const cells = grid.querySelectorAll<HTMLElement>(
-        "[data-scene-row-id][data-scene-cell-column]"
-      );
-      const endCell = Array.from(cells).find((cell) => (
-        cell.dataset.sceneRowId === interaction.mergeEndRowId &&
-        cell.dataset.sceneCellColumn === interaction.column
-      ));
-      if (!endCell) return;
-      const startRect = frame.getBoundingClientRect();
-      const endRect = endCell.getBoundingClientRect();
-      setMergedHeight(Math.max(startRect.height, endRect.bottom - startRect.top));
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(grid);
-    return () => observer.disconnect();
-  }, [
-    interaction?.column,
-    interaction?.mergeEndRowId,
-    mergeSpan,
-    showsMergedValue,
-    value
-  ]);
-
   return (
     <div
-      ref={frameRef}
       role="gridcell"
       tabIndex={-1}
       data-scene-row-id={interaction?.rowId}
@@ -2554,7 +2445,6 @@ function SceneCellFrame({
         : undefined}
       onDoubleClick={interaction?.canEdit
         ? (event) => {
-            if (!event.currentTarget.querySelector("input, textarea, select")) return;
             event.preventDefault();
             interaction.onSelect(interaction.rowId, interaction.column, interaction.rowIndex);
             interaction.onEditStart(interaction.rowId, interaction.column);
@@ -2579,24 +2469,8 @@ function SceneCellFrame({
       }}
     >
       {children}
-      {showsMergedValue ? (
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-center truncate px-1 text-center font-bold"
-          style={{
-            height: mergedHeight ?? `calc(${mergeSpan} * 2.25rem)`,
-            color: style?.color
-          }}
-        >
-          {value}
-        </span>
-      ) : null}
     </div>
   );
-}
-
-function isVisuallyMerged(interaction: Pick<SceneCellInteraction, "mergeRange">) {
-  return interaction.mergeRange.startIndex !== interaction.mergeRange.endIndex;
 }
 
 function getMergePosition(rowIndex: number, range: SceneCellRange): MergePosition {
@@ -2625,23 +2499,18 @@ function getVisualMergeRange(
 ): SceneCellRange {
   const single = { column, startIndex: rowIndex, endIndex: rowIndex };
   if (!isVisualMergeColumn(column)) return single;
+  if (isLocationColumn(column)) {
+    return getLocationPairMergeRange(items, rowIndex, column, editingCell);
+  }
   const value = getSceneCellValue(items[rowIndex], column).trim();
   if (!value) return single;
   if (isActorColumn(column) && value !== ACTOR_COLOR_CELL_VALUE) return single;
-  const locationColumn = isLocationColumn(column);
-  const isEditingCurrent = locationColumn
-    ? isEditingLocationCell(items[rowIndex], editingCell)
-    : isEditingCell(items[rowIndex], column, editingCell);
-  if (isEditingCurrent) return single;
+  if (isEditingCell(items[rowIndex], column, editingCell)) return single;
   const matchesCurrentGroup = (candidate: ProjectSceneItem | undefined) => (
-    locationColumn
-      ? hasSameLocationPair(items[rowIndex], candidate)
-      : getSceneCellValue(candidate, column).trim() === value
+    getSceneCellValue(candidate, column).trim() === value
   );
   const isEditingCandidate = (candidate: ProjectSceneItem | undefined) => (
-    locationColumn
-      ? isEditingLocationCell(candidate, editingCell)
-      : isEditingCell(candidate, column, editingCell)
+    isEditingCell(candidate, column, editingCell)
   );
 
   let startIndex = rowIndex;
@@ -2668,31 +2537,24 @@ function getActiveVisualRange(
   rowIndex: number,
   column: SceneCellColumn
 ) {
-  if (
-    isLocationColumn(column) &&
-    isSameHorizontalLocation(items[rowIndex])
-  ) {
-    return getHorizontalLocationMergeRange(items, rowIndex);
-  }
   return getVisualMergeRange(items, rowIndex, column);
 }
 
-function getHorizontalLocationMergeRange(
+function getLocationPairMergeRange(
   items: ProjectSceneItem[],
   rowIndex: number,
+  column: SceneLocationColumn,
   editingCell?: SelectedSceneCell | null
 ): SceneCellRange {
-  const column: SceneCellColumn = "mainLocation";
   const single = { column, startIndex: rowIndex, endIndex: rowIndex };
   const item = items[rowIndex];
-  if (!item || !isSameHorizontalLocation(item)) return single;
+  if (!item || (!item.mainLocation.trim() && !item.subLocation.trim())) return single;
   if (isEditingLocationCell(item, editingCell)) return single;
 
   let startIndex = rowIndex;
   let endIndex = rowIndex;
   while (
     startIndex > 0 &&
-    isSameHorizontalLocation(items[startIndex - 1]) &&
     !isEditingLocationCell(items[startIndex - 1], editingCell) &&
     hasSameLocationPair(item, items[startIndex - 1])
   ) {
@@ -2700,22 +2562,12 @@ function getHorizontalLocationMergeRange(
   }
   while (
     endIndex < items.length - 1 &&
-    isSameHorizontalLocation(items[endIndex + 1]) &&
     !isEditingLocationCell(items[endIndex + 1], editingCell) &&
     hasSameLocationPair(item, items[endIndex + 1])
   ) {
     endIndex += 1;
   }
   return { column, startIndex, endIndex };
-}
-
-function isSameHorizontalLocation(item: ProjectSceneItem | undefined) {
-  if (!item) return false;
-  const mainLocation = item.mainLocation.trim();
-  return Boolean(
-    mainLocation &&
-    mainLocation === item.subLocation.trim()
-  );
 }
 
 function hasSameLocationPair(
@@ -2760,31 +2612,19 @@ function isEditingCell(
 }
 
 function getVisualCellsForRow(
-  item: ProjectSceneItem | undefined,
+  _item: ProjectSceneItem | undefined,
   columns: SceneCellColumn[]
 ): VisualSceneCell[] {
-  const mergesLocation = isSameHorizontalLocation(item);
-  return columns.flatMap((column) => {
-    if (mergesLocation && column === "subLocation") return [];
-    if (mergesLocation && column === "mainLocation") {
-      return [{
-        representative: "mainLocation",
-        logicalColumns: ["mainLocation", "subLocation"]
-      }];
-    }
-    return [{ representative: column, logicalColumns: [column] }];
-  });
+  return columns.map((column) => ({
+    representative: column
+  }));
 }
 
 function getVisualRepresentative(
-  item: ProjectSceneItem | undefined,
+  _item: ProjectSceneItem | undefined,
   column: SceneCellColumn
 ) {
-  const visualCells = getVisualCellsForRow(item, [column]);
-  if (visualCells.length > 0) return visualCells[0].representative;
-  return isLocationColumn(column) && isSameHorizontalLocation(item)
-    ? "mainLocation"
-    : column;
+  return column;
 }
 
 function getAdjacentVisualColumn(
@@ -2855,13 +2695,7 @@ function getDraggedRange(drag: CellDragState, targetIndex: number) {
 }
 
 function isVisualMergeColumn(column: SceneCellColumn): column is SceneVisualMergeColumn {
-  return isActorColumn(column) || [
-    "mainLocation",
-    "subLocation",
-    "dayLabel",
-    "dayNight",
-    "interiorExterior"
-  ].includes(column);
+  return isActorColumn(column) || isLocationColumn(column);
 }
 
 function isFillColumn(column: SceneCellColumn): column is SceneFillColumn {
@@ -2993,19 +2827,7 @@ function setVisualSceneCellValue(
   column: SceneCellColumn,
   rawValue: string
 ) {
-  const candidateColumns: SceneCellColumn[] = isLocationColumn(column)
-    ? ["mainLocation", "subLocation"]
-    : [column];
-  const visualCell = getVisualCellsForRow(item, candidateColumns).find(
-    (cell) => cell.logicalColumns.includes(column)
-  );
-  const logicalColumns = visualCell?.logicalColumns ?? [column];
-  return logicalColumns.reduce(
-    (currentItem, logicalColumn) => (
-      setSceneCellValue(currentItem, logicalColumn, rawValue)
-    ),
-    item
-  );
+  return setSceneCellValue(item, column, rawValue);
 }
 
 function isTextEditingTarget(target: EventTarget | null) {
@@ -3225,6 +3047,10 @@ function getMappedLocationStyle(
 ): PaletteStyle {
   const normalized = location.trim().toLocaleLowerCase();
   return normalized ? styles.get(normalized) ?? neutralPaletteStyle : neutralPaletteStyle;
+}
+
+function getLocationPaletteKey(item: ProjectSceneItem) {
+  return item.mainLocation.trim() || item.subLocation.trim();
 }
 
 function getLocationPaletteIndex(location: string) {
