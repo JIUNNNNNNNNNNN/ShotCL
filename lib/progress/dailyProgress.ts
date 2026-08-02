@@ -32,14 +32,28 @@ export function isProcessedCutStatus(status: unknown) {
   return normalized === "ok" || normalized === "omit";
 }
 
+/** 사용자에게 표시하는 퍼센트를 정수 0~100으로 한 번만 정규화합니다. */
+export function normalizeProgressPercent(value: number) {
+  const rounded = Number.isFinite(value) ? Math.round(value) : 0;
+  return Math.min(100, Math.max(0, rounded));
+}
+
+/** 화면에 표시되는 퍼센트와 동일한 경계값으로 진행 상태 문구를 결정합니다. */
+export function getDailyProgressMessage(progressPercent: number) {
+  const normalized = normalizeProgressPercent(progressPercent);
+  if (normalized === 100) return "고생하셨습니다!";
+  if (normalized >= 95) return "슬바합시다,";
+  return "집에 가기까지";
+}
+
 /** 상세 화면과 회차 카드가 같은 반올림·0컷·clamp 규칙을 공유합니다. */
 export function calculateProgressPercent(totalCutCount: number, processedCutCount: number) {
   const safeTotal = Math.max(0, Number.isFinite(totalCutCount) ? totalCutCount : 0);
   const safeProcessed = Math.max(0, Number.isFinite(processedCutCount) ? processedCutCount : 0);
   const rawPercent = safeTotal > 0
-    ? Math.round((safeProcessed / safeTotal) * 100)
+    ? (safeProcessed / safeTotal) * 100
     : 0;
-  return Math.min(100, Math.max(0, rawPercent));
+  return normalizeProgressPercent(rawPercent);
 }
 
 /** 현재 진행표에 실제로 렌더링되는 컷을 stable id로 중복 제거해 진행률을 계산합니다. */

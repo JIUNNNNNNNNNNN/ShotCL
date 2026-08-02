@@ -1,4 +1,8 @@
-import type { DailyProgressSummary as DailyProgressSummaryValue } from "@/lib/progress/dailyProgress";
+import {
+  getDailyProgressMessage,
+  normalizeProgressPercent,
+  type DailyProgressSummary as DailyProgressSummaryValue
+} from "@/lib/progress/dailyProgress";
 
 type DailyProgressSummaryProps = {
   progress: DailyProgressSummaryValue;
@@ -6,12 +10,20 @@ type DailyProgressSummaryProps = {
 
 /** 일일 진행표 상단에서 퍼센트와 상태별 컷 수를 compact하게 보여줍니다. */
 export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
+  const progressPercent = normalizeProgressPercent(progress.progressPercent);
+  const progressMessage = getDailyProgressMessage(progressPercent);
+
   return (
     <section className="mb-3 border border-field-border bg-white p-3" aria-label="일일 촬영 진행률">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-black text-field-primary">
-          진행률 <span className="tabular-nums">{progress.progressPercent}%</span>
-        </h2>
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="break-words text-sm font-black leading-[1.35] text-field-primary">
+            {progressMessage}
+          </h2>
+          <p className="mt-0.5 text-2xl font-black leading-none text-field-primary tabular-nums">
+            {progressPercent}%
+          </p>
+        </div>
         <span className="text-[11px] font-bold text-field-muted">
           처리 {progress.processedCutCount}/{progress.totalCutCount}
         </span>
@@ -22,11 +34,11 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
         aria-label="촬영 진행률"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={progress.progressPercent}
+        aria-valuenow={progressPercent}
       >
         <div
           className="h-full bg-field-primary transition-[width] duration-200"
-          style={{ width: `${progress.progressPercent}%` }}
+          style={{ width: `${progressPercent}%` }}
         />
       </div>
       <p className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-bold leading-5 text-field-muted">

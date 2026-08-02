@@ -8,6 +8,7 @@ import { ArrowLeft, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "
 import { DailyPlanCoverflow, type DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
+import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
 import {
   DailyPlanGatheringLocations,
@@ -534,13 +535,11 @@ export default function ProjectDetailPage() {
 
   return (
     <>
-      <div className="relative z-30 mb-3 flex items-center justify-between" aria-label="진행 페이지 이동 메뉴">
-        <div className="min-w-0 flex-1 pr-3 text-left md:text-center">
-          <p className="truncate text-sm font-black text-field-primary">{project.name} / {formatEpisodeLabel(selectedPlan, 0)}</p>
-          <p className="truncate text-[11px] font-bold text-field-muted">{selectedPlan.shootingDate || "촬영일 미정"}</p>
-        </div>
-
-        {!progressOnly ? <details className="group relative">
+      <ProgressDetailHeader
+        projectName={project.name}
+        episodeLabel={formatEpisodeLabel(selectedPlan, 0)}
+        shootingDate={selectedPlan.shootingDate}
+        action={!progressOnly ? <details className="group relative">
           <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
             <Ellipsis className="h-5 w-5" aria-hidden />
             <span className="sr-only">프로젝트 보조 기능</span>
@@ -561,7 +560,7 @@ export default function ProjectDetailPage() {
             </Link>
           </nav>
         </details> : <span className="rounded-[3px] border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도</span>}
-      </div>
+      />
 
       <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
         <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
