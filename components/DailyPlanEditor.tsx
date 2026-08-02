@@ -52,6 +52,11 @@ import {
   hasDailyPlanLocationSearchMetadata
 } from "@/lib/dailyPlan/location";
 import {
+  buildDailyPlanPreviewLocationRows,
+  buildSceneLocationOptions,
+  type DailyPlanPreviewLocationRow
+} from "@/lib/dailyPlan/sceneLocations";
+import {
   filterRenderablePreviewRows,
   getPreviewCellText,
   hasMeaningfulRowValue,
@@ -81,6 +86,8 @@ import {
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanMobilePortraitPreview } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
+import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
+import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
 import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
@@ -210,7 +217,7 @@ type WindowWithDaumPostcode = Window & {
   };
 };
 
-type ReorderCollection = "locations" | "meals" | "scenes" | "timetable" | "starring";
+type ReorderCollection = "meals" | "scenes" | "timetable" | "starring";
 
 type LocationInputMode = "search" | "manual";
 
@@ -367,6 +374,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
     [mealTimes, printMeta.timetableRowOrder, scenes]
+  );
+  const sceneLocationOptions = useMemo(
+    () => buildSceneLocationOptions(sceneListItems),
+    [sceneListItems]
   );
   const effectivePrintMeta = useMemo(
     () => deriveDailyPlanHeadcount({
@@ -945,7 +956,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       return;
     }
 
-    if (collection === "locations") setLocations((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "meals") setMealTimes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "scenes") setScenes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "starring") {
@@ -1502,6 +1512,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
             <section className="field-subsection overflow-visible p-1.5 md:p-2">
               <div className="grid gap-1.5">
+                <DailyPlanSceneLocations
+                  options={sceneLocationOptions}
+                  selected={printMeta.selectedSceneLocations}
+                  onChange={(selectedSceneLocations) => setPrintMeta((current) => ({
+                    ...current,
+                    selectedSceneLocations
+                  }))}
+                />
                 {locations.map((location, index) => {
                   const isManualMode = locationInputModes[location.id] === "manual";
                   const isSearching = addressSearchLocationId === location.id && addressSearchMessage === ADDRESS_SEARCH_LOADING;
@@ -1513,18 +1531,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <div
                       key={location.id}
                       className="relative min-w-0 rounded-[3px] border border-field-border bg-white"
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => finishReorder(event, "locations", index)}
                     >
                       <div
-                        className="grid min-h-[42px] min-w-0 grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-1 py-0.5 pl-1 pr-10 md:min-h-12 md:gap-1.5 md:pl-1.5 md:pr-11"
+                        className="grid min-h-[42px] min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 py-0.5 pl-1 pr-10 md:min-h-12 md:gap-1.5 md:pl-1.5 md:pr-11"
                         role="group"
                         aria-label={`촬영장소 ${index + 1} 입력`}
                       >
                         <div className="flex min-w-0 shrink-0 items-center whitespace-nowrap">
-                          <span className="hidden md:inline-flex">
-                            <DragHandle label={`촬영장소 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "locations", index)} />
-                          </span>
                           <h3 className="px-0.5 text-[9px] font-black leading-[1.35] text-field-primary sm:text-[10px] md:px-1 md:text-xs">
                             촬영장소{locations.length > 1 ? ` ${index + 1}` : ""}
                           </h3>
@@ -1607,62 +1620,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         </div>
                       </div>
 
-                      <details className="group absolute right-1 top-1/2 z-30 -translate-y-1/2 md:right-1.5">
-                        <summary
-                          className={`inline-flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-[3px] border text-field-muted hover:border-field-primary hover:text-field-primary [&::-webkit-details-marker]:hidden ${
-                            location.isPrimary ? "border-field-primary bg-field-light text-field-primary" : "border-field-border bg-white"
-                          }`}
-                          aria-label={`촬영장소 ${index + 1} 관리 메뉴`}
-                          title={location.isPrimary ? "집합장소 · 관리 메뉴" : "촬영장소 관리 메뉴"}
-                        >
-                          <MoreHorizontal className="h-4 w-4" aria-hidden />
-                        </summary>
-                        <div className="absolute right-0 top-full z-40 mt-1 grid w-36 gap-1 rounded-[3px] border border-field-border bg-white p-1.5 shadow-lg">
-                          <button
-                            type="button"
-                            aria-pressed={Boolean(location.isPrimary)}
-                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
-                            onClick={(event) => {
-                              setMeetingLocation(index);
-                              event.currentTarget.closest("details")?.removeAttribute("open");
-                            }}
-                          >
-                            {location.isPrimary ? "집합장소" : "집합장소 지정"}
-                          </button>
-                          <button
-                            type="button"
-                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
-                            onClick={(event) => {
-                              setExpandedLocationDetailId((current) => current === location.id ? null : location.id);
-                              event.currentTarget.closest("details")?.removeAttribute("open");
-                            }}
-                          >
-                            {expandedLocationDetailId === location.id ? "장소/주소 보기" : "상세 메모 입력"}
-                          </button>
-                          {index === locations.length - 1 ? (
-                            <button
-                              type="button"
-                              className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-primary hover:bg-field-light"
-                              onClick={(event) => {
-                                addLocation();
-                                event.currentTarget.closest("details")?.removeAttribute("open");
-                              }}
-                            >
-                              촬영장소 추가
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="min-h-8 rounded-[2px] px-2 text-left text-xs font-bold text-field-danger hover:bg-red-50"
-                            onClick={(event) => {
-                              deleteLocation(index);
-                              event.currentTarget.closest("details")?.removeAttribute("open");
-                            }}
-                          >
-                            촬영장소 삭제
-                          </button>
-                        </div>
-                      </details>
+                      <DailyPlanLocationMenu
+                        label={`촬영장소 ${index + 1}`}
+                        isPrimary={Boolean(location.isPrimary)}
+                        isDetailExpanded={expandedLocationDetailId === location.id}
+                        canAdd={index === locations.length - 1}
+                        onSetPrimary={() => setMeetingLocation(index)}
+                        onToggleDetail={() => setExpandedLocationDetailId((current) => current === location.id ? null : location.id)}
+                        onAdd={addLocation}
+                        onDelete={() => deleteLocation(index)}
+                      />
                     </div>
                   );
                 })}
@@ -3626,7 +3593,7 @@ const printCellClass = "border border-black px-1.5 py-1 text-center align-middle
 const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-black`;
 
 function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
-  const locations = data.locations.filter(isPrintableLocation);
+  const locations = buildDailyPlanPreviewLocationRows(data.meta.selectedSceneLocations, data.locations);
   const timetableRows = filterRenderablePreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(data.meta.starring, getPrintPersonDisplayValues);
   const teamRows = filterRenderablePreviewRows(data.meta.teams, getPrintTeamDisplayValues);
@@ -3907,15 +3874,10 @@ function createPrintWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField
   ];
 }
 
-function createPrintLocationFields(location: DailyPlanLocation): PreviewDisplayField[] {
+function createPrintLocationFields(location: DailyPlanPreviewLocationRow): PreviewDisplayField[] {
   return [
     { key: "name", label: "장소명", span: 6, value: location.name },
-    {
-      key: "address",
-      label: "주소",
-      span: 8,
-      value: getLocationAddress(location) || location.detail
-    }
+    { key: "address", label: "주소", span: 8, value: location.address }
   ];
 }
 
@@ -4067,10 +4029,6 @@ function getSceneNaturalNumber(value: string) {
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isPrintableLocation(location: DailyPlanLocation) {
-  return Boolean(location.name.trim() || location.detail.trim() || getLocationAddress(location).trim());
 }
 
 function formatSceneNumber(value: string) {

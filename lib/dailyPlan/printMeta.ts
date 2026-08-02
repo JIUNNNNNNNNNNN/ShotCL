@@ -1,6 +1,10 @@
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { resolveKoreanWeatherRegion } from "@/lib/koreanWeatherRegions";
 import { MAX_SCENE_CUT_COUNT, normalizeSceneCutCount } from "@/lib/sceneCutCount";
+import {
+  normalizeSceneLocationSelections,
+  type DailyPlanSceneLocationSelection
+} from "@/lib/dailyPlan/sceneLocations";
 
 export type DailyPlanTimetableRowType = "scene" | "event";
 
@@ -164,6 +168,8 @@ export type DailyPlanPrintMeta = {
   mainStaff: DailyPlanMainStaffRow[];
   starring: CallSheetPerson[];
   teams: TeamCallSheetRow[];
+  /** 씬리스트 대장소를 사용자가 선택한 순서 그대로 저장합니다. */
+  selectedSceneLocations: DailyPlanSceneLocationSelection[];
   /** 부서별 집합정보에서 파생된 안정적인 지점과 위치 사진 metadata입니다. */
   gatheringPoints: DailyPlanGatheringPoint[];
 };
@@ -196,6 +202,7 @@ export function createDefaultDailyPlanPrintMeta(): DailyPlanPrintMeta {
     mainStaff: [],
     starring: [createBlankCallSheetPerson()],
     teams: [],
+    selectedSceneLocations: [],
     gatheringPoints: []
   };
 }
@@ -280,6 +287,7 @@ export function normalizeDailyPlanPrintMeta(meta: DailyPlanPrintMeta): DailyPlan
     mainStaff: normalizeMainStaff(meta.mainStaff),
     starring: normalizePeople(meta.starring),
     teams: normalizeTeams(meta.teams),
+    selectedSceneLocations: normalizeSceneLocationSelections(meta.selectedSceneLocations),
     gatheringPoints: normalizeGatheringPoints(meta.gatheringPoints)
   };
 }

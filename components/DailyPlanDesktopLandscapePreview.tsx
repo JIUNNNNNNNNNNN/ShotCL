@@ -13,7 +13,10 @@ import {
   hasMeaningfulRowValue,
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
-import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import {
+  buildDailyPlanPreviewLocationRows,
+  type DailyPlanPreviewLocationRow
+} from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
 
 type DailyPlanDesktopLandscapePreviewProps = {
@@ -36,7 +39,7 @@ const callSheetColumnCount = 8;
 
 /** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
 export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDesktopLandscapePreviewProps) {
-  const printableLocations = locations.filter(isPrintableLocation);
+  const printableLocations = buildDailyPlanPreviewLocationRows(meta.selectedSceneLocations, locations);
   const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
   const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
@@ -323,15 +326,10 @@ function createWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
   ];
 }
 
-function createLocationFields(location: DailyPlanLocation): PreviewDisplayField[] {
+function createLocationFields(location: DailyPlanPreviewLocationRow): PreviewDisplayField[] {
   return [
     { key: "name", label: "장소명", span: 6, value: location.name },
-    {
-      key: "address",
-      label: "주소",
-      span: 8,
-      value: getDailyPlanLocationAddress(location) || location.detail
-    }
+    { key: "address", label: "주소", span: 8, value: location.address }
   ];
 }
 
@@ -414,9 +412,6 @@ function getTeamDisplayValues(team: DailyPlanPrintMeta["teams"][number]) {
   return [team.team, team.total, team.callTime, team.callLocation, team.notes];
 }
 
-function isPrintableLocation(location: DailyPlanLocation) {
-  return Boolean(location.name.trim() || location.detail.trim() || getDailyPlanLocationAddress(location).trim());
-}
 
 function formatDate(value: string) {
   return value ? value.replace(/-/g, ".") : "";

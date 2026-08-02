@@ -9,7 +9,10 @@ import {
   type PreviewDisplayField
 } from "@/lib/dailyPlan/previewDisplay";
 import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
-import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import {
+  buildDailyPlanPreviewLocationRows,
+  type DailyPlanPreviewLocationRow
+} from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
 
 type DailyPlanMobilePortraitPreviewProps = {
@@ -29,7 +32,7 @@ const eventRowClass = "daily-plan-preview-event";
 
 /** Google Sheet의 `세로` 시트와 같은 10열 구성으로 모바일 일촬표를 표시합니다. */
 export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanMobilePortraitPreviewProps) {
-  const locationRows = locations.filter(isPrintableLocation);
+  const locationRows = buildDailyPlanPreviewLocationRows(meta.selectedSceneLocations, locations);
   const sheetTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const sceneDetailRows = sheetTimetableRows.filter(
     (row): row is Extract<DailyPlanPreviewTimetableRow, { type: "scene" }> => row.type === "scene"
@@ -339,10 +342,6 @@ function CallSheetTable({
   );
 }
 
-function isPrintableLocation(location: DailyPlanLocation) {
-  return Boolean(location.name.trim() || location.detail.trim() || getDailyPlanLocationAddress(location).trim());
-}
-
 function createMainStaffFields(member: { role: string; name: string; contact: string }): PreviewDisplayField[] {
   return [
     { key: "role", label: "역할", span: 2, value: member.role },
@@ -362,15 +361,10 @@ function createWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
   ];
 }
 
-function createLocationFields(location: DailyPlanLocation): PreviewDisplayField[] {
+function createLocationFields(location: DailyPlanPreviewLocationRow): PreviewDisplayField[] {
   return [
     { key: "name", label: "장소명", span: 2, value: location.name },
-    {
-      key: "address",
-      label: "주소",
-      span: 6,
-      value: getDailyPlanLocationAddress(location) || location.detail
-    }
+    { key: "address", label: "주소", span: 6, value: location.address }
   ];
 }
 
