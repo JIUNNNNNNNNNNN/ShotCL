@@ -16,6 +16,10 @@ import {
   isDailyPlanAdditionalScheduleType,
   normalizeDailyPlanAdditionalScheduleType
 } from "@/lib/dailyPlan/additionalSchedule";
+import {
+  normalizeDailyPlanLocationAssignments,
+  normalizeSceneLocationSelections
+} from "@/lib/dailyPlan/sceneLocations";
 import { normalizeProjectBasicInfo } from "@/lib/projectBasicInfo";
 
 type AnyRow = Record<string, any>;
@@ -45,12 +49,22 @@ function normalizeDailyPlanSourceType(value: unknown): DailyPlanSourceType {
 function normalizeLocations(value: unknown): DailyPlanLocation[] {
   if (!Array.isArray(value)) return [];
 
-  return value.map((item, index) => {
+  const locations = value.map((item, index) => {
     const source = item as Partial<DailyPlanLocation>;
+    const legacyAddress = String(
+      source.roadAddress || source.address || source.manualAddress || ""
+    ).trim();
+    const legacyName = String(source.name ?? "").trim();
+    const providerPlaceName = String(
+      source.providerPlaceName
+      || (legacyName && legacyName !== legacyAddress ? legacyName : "")
+    ).trim();
     return {
       id: source.id || `loc_${index + 1}`,
       name: source.name || "",
       detail: source.detail || "",
+      providerPlaceName: providerPlaceName || undefined,
+      selectedMajorLocations: normalizeSceneLocationSelections(source.selectedMajorLocations),
       inputMode: source.inputMode === "search" || source.inputMode === "manual" || source.inputMode === "none"
         ? source.inputMode
         : undefined,
@@ -67,6 +81,8 @@ function normalizeLocations(value: unknown): DailyPlanLocation[] {
       naverMapUrl: source.naverMapUrl || ""
     };
   });
+
+  return normalizeDailyPlanLocationAssignments(locations);
 }
 
 export function normalizeDailyPlanMealTimes(value: unknown): DailyPlanMealTime[] {
@@ -166,7 +182,7 @@ export function dailyPlanDraftToRow(projectId: string, draft: DailyPlanDraft) {
     shoot_end_time: draft.shootEndTime,
     meeting_location: draft.meetingLocation,
     shooting_location: draft.shootingLocation,
-    shooting_locations: draft.shootingLocations,
+    shooting_locations: normalizeDailyPlanLocationAssignments(draft.shootingLocations),
     meal_time: draft.mealTime,
     meal_times: draft.mealTimes,
     safety_notice: draft.safetyNotice,

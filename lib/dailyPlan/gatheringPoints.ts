@@ -7,6 +7,7 @@ import {
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import { getDailyPlanLocationDisplayName } from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 
 export type DerivedGatheringDepartment = {
@@ -421,8 +422,15 @@ function resolveLocationId(team: TeamCallSheetRow, locations: DailyPlanLocation[
   if (preferredId && locations.some((location) => location.id === preferredId)) return preferredId;
   const locationName = normalizedLocationKey(team.callLocation);
   if (!locationName) return "";
-  const matches = locations.filter((location) => normalizedLocationKey(location.name) === locationName);
-  return matches.length === 1 ? matches[0].id : "";
+  const matches = locations.filter((location) => (
+    normalizedLocationKey(getDailyPlanLocationDisplayName(location)) === locationName
+  ));
+  if (matches.length === 1) return matches[0].id;
+  // 과거 일촬표가 provider name을 저장한 경우의 relation 복구용이며 화면 표기에는 쓰지 않습니다.
+  const legacyMatches = locations.filter((location) => (
+    normalizedLocationKey(location.providerPlaceName || location.name) === locationName
+  ));
+  return legacyMatches.length === 1 ? legacyMatches[0].id : "";
 }
 
 function findLocation(locations: DailyPlanLocation[], locationId: string, locationName: string) {
@@ -430,10 +438,15 @@ function findLocation(locations: DailyPlanLocation[], locationId: string, locati
     const byId = locations.find((location) => location.id === locationId);
     if (byId) return byId;
   }
+  const normalizedName = normalizedLocationKey(locationName);
   const matches = locations.filter((location) => (
-    normalizedLocationKey(location.name) === normalizedLocationKey(locationName)
+    normalizedLocationKey(getDailyPlanLocationDisplayName(location)) === normalizedName
   ));
-  return matches.length === 1 ? matches[0] : null;
+  if (matches.length === 1) return matches[0];
+  const legacyMatches = locations.filter((location) => (
+    normalizedLocationKey(location.providerPlaceName || location.name) === normalizedName
+  ));
+  return legacyMatches.length === 1 ? legacyMatches[0] : null;
 }
 
 function getLocationAddress(location: DailyPlanLocation) {

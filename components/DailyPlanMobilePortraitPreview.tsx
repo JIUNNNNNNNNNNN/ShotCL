@@ -32,7 +32,7 @@ const eventRowClass = "daily-plan-preview-event";
 
 /** Google Sheet의 `세로` 시트와 같은 10열 구성으로 모바일 일촬표를 표시합니다. */
 export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanMobilePortraitPreviewProps) {
-  const locationRows = buildDailyPlanPreviewLocationRows(meta.selectedSceneLocations, locations);
+  const locationRows = buildDailyPlanPreviewLocationRows(locations);
   const sheetTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const sceneDetailRows = sheetTimetableRows.filter(
     (row): row is Extract<DailyPlanPreviewTimetableRow, { type: "scene" }> => row.type === "scene"

@@ -9,6 +9,7 @@ import {
   normalizeGatheringLocationName
 } from "@/lib/dailyPlan/gatheringPoints";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import { getDailyPlanLocationDisplayName } from "@/lib/dailyPlan/sceneLocations";
 import { decodeDailyPlanMemo, type DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
 import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 
@@ -430,6 +431,5 @@ function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace |
 }
 
 function getPrimaryLocationName(location: DailyPlanLocation) {
-  return normalizeGatheringLocationName(location.name)
-    || normalizeGatheringLocationName(getDailyPlanLocationAddress(location));
+  return normalizeGatheringLocationName(getDailyPlanLocationDisplayName(location));
 }

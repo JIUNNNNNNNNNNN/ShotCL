@@ -54,6 +54,11 @@ import {
 import {
   buildDailyPlanPreviewLocationRows,
   buildSceneLocationOptions,
+  createSceneLocationKey,
+  formatDailyPlanTimetableLocation,
+  getDailyPlanLocationDisplayName,
+  migrateLegacySceneLocationsToLocationCards,
+  normalizeDailyPlanLocationAssignments,
   type DailyPlanPreviewLocationRow
 } from "@/lib/dailyPlan/sceneLocations";
 import {
@@ -87,6 +92,7 @@ import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, D
 import { DailyPlanMobilePortraitPreview } from "@/components/DailyPlanMobilePortraitPreview";
 import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
 import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
+import { DailyPlanLocationReorderList } from "@/components/DailyPlanLocationReorderList";
 import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
 import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -135,6 +141,7 @@ type SceneBlockInput = {
   runtime: string;
   locationId: string;
   locationName: string;
+  mainLocation: string;
   subLocation: string;
   dayNight: string;
   storyDay: string;
@@ -176,6 +183,7 @@ type DailyPlanPreviewScene = {
   runtimeMinutes: number | null;
   runtime: string;
   locationName: string;
+  mainLocation: string;
   subLocation: string;
   location: DailyPlanLocation | null;
   dayNight: string;
@@ -285,10 +293,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       projectStaffDepartments,
       initialPlanDraft.episode || initialDefaults.printMeta.day
     );
-    const initialPrintMeta: DailyPlanPrintMeta = isNewDailyPlan
+    const printMetaWithTimetableDefaults: DailyPlanPrintMeta = isNewDailyPlan
       ? { ...staffPrintMeta, timetableRowOrder: ["event"] }
       : staffPrintMeta;
-    const initialLocations = buildInitialLocations(initialPlanDraft);
+    const initialLocations = migrateLegacySceneLocationsToLocationCards(
+      buildInitialLocations(initialPlanDraft),
+      printMetaWithTimetableDefaults.selectedSceneLocations
+    );
+    const initialPrintMeta: DailyPlanPrintMeta = {
+      ...printMetaWithTimetableDefaults,
+      // 과거 전역 선택값은 첫 실제 촬영지 카드로 1회 이관합니다.
+      selectedSceneLocations: []
+    };
     const initialMeals = buildInitialMeals(initialPlanDraft, isNewDailyPlan);
     const initialSourceShots = initialShotDrafts ?? initialShots.map(dailyPlanShotToDraft);
     const hasStoredSceneRows = initialPrintMeta.timetableScenes.length > 0 || initialSourceShots.length > 0;
@@ -358,6 +374,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [addressSearchLocationId, setAddressSearchLocationId] = useState<string | null>(null);
   const [addressSearchMessage, setAddressSearchMessage] = useState("");
   const [expandedLocationDetailId, setExpandedLocationDetailId] = useState<string | null>(null);
+  const [openLocationMenuId, setOpenLocationMenuId] = useState<string | null>(null);
+  const [openLocationPickerId, setOpenLocationPickerId] = useState<string | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("");
@@ -369,7 +387,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     new Set(initialPrintMeta.automaticTimetableRowIds)
   );
 
-  const flattenedShots = useMemo(() => scenesToShotDrafts(scenes), [scenes]);
+  const flattenedShots = useMemo(() => scenesToShotDrafts(scenes, locations), [locations, scenes]);
   const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
@@ -378,6 +396,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sceneLocationOptions = useMemo(
     () => buildSceneLocationOptions(sceneListItems),
     [sceneListItems]
+  );
+  const sceneLocationAssignments = useMemo(
+    () => buildSceneLocationAssignments(locations),
+    [locations]
   );
   const effectivePrintMeta = useMemo(
     () => deriveDailyPlanHeadcount({
@@ -622,6 +644,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     });
   }
 
+  function updateLocationSceneSelections(
+    index: number,
+    selectedMajorLocations: NonNullable<DailyPlanLocation["selectedMajorLocations"]>
+  ) {
+    const selectedKeys = new Set(selectedMajorLocations.map((item) => item.key));
+    setLocations((current) => current.map((location, locationIndex) => {
+      if (locationIndex === index) return { ...location, selectedMajorLocations };
+      const nextSelections = (location.selectedMajorLocations ?? []).filter((item) => !selectedKeys.has(item.key));
+      return nextSelections.length === (location.selectedMajorLocations ?? []).length
+        ? location
+        : { ...location, selectedMajorLocations: nextSelections };
+    }));
+  }
+
   function setMeetingLocation(index: number) {
     setLocations((current) => current.map((location, locationIndex) => ({ ...location, isPrimary: locationIndex === index })));
   }
@@ -675,10 +711,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           const selectedAddress = data.userSelectedType === "J" ? data.jibunAddress : data.roadAddress;
           const address = selectedAddress || data.roadAddress || data.jibunAddress || data.address;
           const previousAddress = getLocationAddress(target).trim();
-          const shouldSyncName = !target.name.trim() || target.name.trim() === previousAddress;
+          const providerPlaceName = target.providerPlaceName?.trim()
+            || (target.name.trim() && target.name.trim() !== previousAddress ? target.name.trim() : "");
 
           updateLocation(index, {
-            name: shouldSyncName ? address : target.name,
+            name: providerPlaceName,
+            providerPlaceName,
             roadAddress: address,
             address: data.jibunAddress || data.address || address,
             inputMode: "search",
@@ -821,6 +859,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           sceneNumber: "",
           sceneTitle: "",
           description: "",
+          mainLocation: "",
           subLocation: "",
           subject: "",
           cutCount: "",
@@ -1157,7 +1196,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         projectId: project.id,
         dailyPlanId,
         plan: planForSave,
-        shots: scenesToShotDrafts(scenes)
+        shots: scenesToShotDrafts(scenes, locations)
       });
       if (saved.saveStatus === "duplicate") {
         setMessage(saved.message);
@@ -1511,40 +1550,41 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
           <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
             <section className="field-subsection overflow-visible p-1.5 md:p-2">
-              <div className="grid gap-1.5">
-                <DailyPlanSceneLocations
-                  options={sceneLocationOptions}
-                  selected={printMeta.selectedSceneLocations}
-                  onChange={(selectedSceneLocations) => setPrintMeta((current) => ({
-                    ...current,
-                    selectedSceneLocations
-                  }))}
-                />
-                {locations.map((location, index) => {
+              <DailyPlanLocationReorderList
+                items={locations}
+                onChange={setLocations}
+                disabled={openLocationMenuId !== null || openLocationPickerId !== null}
+                renderItem={(location, index, { isDragging }) => {
                   const isManualMode = locationInputModes[location.id] === "manual";
                   const isSearching = addressSearchLocationId === location.id && addressSearchMessage === ADDRESS_SEARCH_LOADING;
                   const locationAddress = getLocationAddress(location);
-                  const locationDisplayValue = location.name.trim() || locationAddress;
-                  const locationTitle = [location.name.trim(), locationAddress.trim()].filter(Boolean).join(" · ");
 
                   return (
                     <div
-                      key={location.id}
-                      className="relative min-w-0 rounded-[3px] border border-field-border bg-white"
+                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 rounded-[3px] border bg-white p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
+                        isDragging ? "border-field-primary bg-field-light shadow-md" : "border-field-border"
+                      }`}
+                      role="group"
+                      aria-label={`촬영장소 ${index + 1}`}
                     >
-                      <div
-                        className="grid min-h-[42px] min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 py-0.5 pl-1 pr-10 md:min-h-12 md:gap-1.5 md:pl-1.5 md:pr-11"
-                        role="group"
-                        aria-label={`촬영장소 ${index + 1} 입력`}
-                      >
-                        <div className="flex min-w-0 shrink-0 items-center whitespace-nowrap">
-                          <h3 className="px-0.5 text-[9px] font-black leading-[1.35] text-field-primary sm:text-[10px] md:px-1 md:text-xs">
-                            촬영장소{locations.length > 1 ? ` ${index + 1}` : ""}
-                          </h3>
-                        </div>
+                      <DailyPlanSceneLocations
+                        options={sceneLocationOptions}
+                        selected={location.selectedMajorLocations ?? []}
+                        locationId={location.id}
+                        assignments={sceneLocationAssignments}
+                        onChange={(selectedMajorLocations) => updateLocationSceneSelections(index, selectedMajorLocations)}
+                        onOpenChange={(open) => {
+                          setOpenLocationPickerId((current) => {
+                            if (open) return location.id;
+                            return current === location.id ? null : current;
+                          });
+                        }}
+                      />
 
+                      <div className="grid min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-1 max-md:col-span-2 max-md:row-start-2">
                         <button
                           type="button"
+                          data-no-location-reorder
                           aria-pressed={locationInputModes[location.id] === "search"}
                           onClick={() => openDaumAddressSearch(index)}
                           className={`inline-flex min-h-9 w-[2.55rem] shrink-0 items-center justify-center rounded-[3px] border px-1 text-[10px] font-black md:w-[4.75rem] md:gap-1.5 md:text-xs ${
@@ -1558,6 +1598,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         </button>
                         <button
                           type="button"
+                          data-no-location-reorder
                           aria-pressed={isManualMode}
                           onClick={() => toggleManualLocationInput(index)}
                           className={`min-h-9 w-[2.7rem] shrink-0 rounded-[3px] border px-1 text-[10px] font-black md:w-[5.25rem] md:text-xs ${
@@ -1589,10 +1630,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                                 className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={getDailyPlanManualAddress(location)}
                                 onCommit={(value) => {
-                                  const previousManualAddress = getDailyPlanManualAddress(location).trim();
-                                  const shouldSyncName = !location.name.trim() || location.name.trim() === previousManualAddress;
                                   updateLocation(index, {
-                                    name: shouldSyncName ? value : location.name,
                                     manualAddress: value,
                                     inputMode: "manual"
                                   });
@@ -1606,34 +1644,43 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                               <PixelDogLoader size="xs" compact />
                             </div>
                           ) : (
-                            <label className="block min-w-0">
-                              <span className="sr-only">촬영장소 {index + 1} 선택 장소 또는 주소</span>
-                              <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
-                                value={locationDisplayValue}
-                                onCommit={(value) => updateLocation(index, { name: value })}
-                                placeholder={(addressSearchLocationId === location.id ? addressSearchMessage : "") || "선택한 장소 또는 주소"}
-                                title={locationTitle || undefined}
-                              />
-                            </label>
+                            <div
+                              className={`flex min-h-9 min-w-0 items-center overflow-hidden rounded-[3px] border px-2 text-[10px] font-bold md:text-[13px] ${
+                                locationAddress ? "border-field-border bg-white text-field-text" : "border-field-border bg-field-soft text-field-muted"
+                              }`}
+                              title={locationAddress || undefined}
+                            >
+                              <span className="truncate">
+                                {locationAddress || (addressSearchLocationId === location.id ? addressSearchMessage : "") || "실제 촬영 주소"}
+                              </span>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      <DailyPlanLocationMenu
-                        label={`촬영장소 ${index + 1}`}
-                        isPrimary={Boolean(location.isPrimary)}
-                        isDetailExpanded={expandedLocationDetailId === location.id}
-                        canAdd={index === locations.length - 1}
-                        onSetPrimary={() => setMeetingLocation(index)}
-                        onToggleDetail={() => setExpandedLocationDetailId((current) => current === location.id ? null : location.id)}
-                        onAdd={addLocation}
-                        onDelete={() => deleteLocation(index)}
-                      />
+                      <div className="max-md:col-start-2 max-md:row-start-1">
+                        <DailyPlanLocationMenu
+                          label={`촬영장소 ${index + 1}`}
+                          isPrimary={Boolean(location.isPrimary)}
+                          isDetailExpanded={expandedLocationDetailId === location.id}
+                          canAdd={index === locations.length - 1}
+                          isOpen={openLocationMenuId === location.id}
+                          onSetPrimary={() => setMeetingLocation(index)}
+                          onToggleDetail={() => setExpandedLocationDetailId((current) => current === location.id ? null : location.id)}
+                          onAdd={addLocation}
+                          onDelete={() => deleteLocation(index)}
+                          onOpenChange={(open) => {
+                            setOpenLocationMenuId((current) => {
+                              if (open) return location.id;
+                              return current === location.id ? null : current;
+                            });
+                          }}
+                        />
+                      </div>
                     </div>
                   );
-                })}
-              </div>
+                }}
+              />
             </section>
 
           </div>
@@ -1704,7 +1751,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           <span className={mobileTimetableLabelClass}>장소</span>
                           <select className={centeredSelectClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
                             <option value="">빈칸</option>
-                            {locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+                            {locations.filter(isMeaningfulDailyPlanLocationCard).map((location, locationIndex) => (
+                              <option key={location.id} value={location.id}>{getDailyPlanLocationOptionLabel(location, locationIndex)}</option>
+                            ))}
                           </select>
                         </td>
                         <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-12`}>
@@ -1745,7 +1794,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
-                      <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}><span className={mobileTimetableLabelClass}>장소</span><select aria-label={`촬영 행 ${sceneIndex + 1} 장소`} className={centeredSelectClass} value={scene.locationId} onChange={(event) => updateSceneLocation(sceneIndex, event.target.value)}><option value="">빈칸</option>{locations.filter((location) => location.name.trim()).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
+                        <span className={mobileTimetableLabelClass}>장소</span>
+                        <div
+                          className={`${centeredSelectClass} flex items-center justify-center truncate`}
+                          title={formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation) || undefined}
+                        >
+                          {formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation) || "빈칸"}
+                        </div>
+                      </td>
                       <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
                         <span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
@@ -2592,10 +2649,11 @@ function CallLocationSelect({
 }) {
   const listId = useId();
   const locationOptions = locations.flatMap((location, index) => {
-    const name = location.name.trim();
-    if (!name) return [];
-    const duplicateCount = locations.filter((candidate) => (
-      normalizeGatheringLocationNameForInput(candidate.name)
+    if (!isMeaningfulDailyPlanLocationCard(location)) return [];
+    const name = getDailyPlanLocationOptionLabel(location, index);
+    const duplicateCount = locations.filter((candidate, candidateIndex) => (
+      isMeaningfulDailyPlanLocationCard(candidate)
+      && normalizeGatheringLocationNameForInput(getDailyPlanLocationOptionLabel(candidate, candidateIndex))
       === normalizeGatheringLocationNameForInput(name)
     )).length;
     const detail = String(location.roadAddress || location.address || location.detail || "").trim();
@@ -2623,8 +2681,8 @@ function CallLocationSelect({
             return;
           }
           const normalizedName = normalizeGatheringLocationNameForInput(nextValue);
-          const matches = locations.filter((location) => (
-            normalizeGatheringLocationNameForInput(location.name) === normalizedName
+          const matches = locationOptions.filter((option) => (
+            normalizeGatheringLocationNameForInput(option.name) === normalizedName
           ));
           onChange(nextValue, matches.length === 1 ? matches[0].id : "");
         }}
@@ -3593,7 +3651,7 @@ const printCellClass = "border border-black px-1.5 py-1 text-center align-middle
 const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-black`;
 
 function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
-  const locations = buildDailyPlanPreviewLocationRows(data.meta.selectedSceneLocations, data.locations);
+  const locations = buildDailyPlanPreviewLocationRows(data.locations);
   const timetableRows = filterRenderablePreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(data.meta.starring, getPrintPersonDisplayValues);
   const teamRows = filterRenderablePreviewRows(data.meta.teams, getPrintTeamDisplayValues);
@@ -3979,7 +4037,7 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTime
     start: scene.startTime || "",
     end: scene.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
-    location: scene.subLocation || "",
+    location: formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation),
     dayNight: normalizeDayNight(scene.dayNight),
     sceneNumber: formatSceneNumber(scene.sceneNumber),
     totalCut: getSceneTotalCutForPreview(scene),
@@ -3989,14 +4047,17 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTime
     notes: scene.notes || ""
   }));
 
-  const additionalScheduleRows: DailyPlanPreviewTimetableRow[] = data.mealTimes.map((meal) => ({
-    type: "additionalSchedule",
-    start: meal.startTime || "",
-    end: meal.endTime || "",
-    runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
-    location: data.locations.find((location) => location.id === meal.locationId)?.name ?? "",
-    memo: meal.memo
-  }));
+  const additionalScheduleRows: DailyPlanPreviewTimetableRow[] = data.mealTimes.map((meal) => {
+    const locationIndex = data.locations.findIndex((location) => location.id === meal.locationId);
+    return {
+      type: "additionalSchedule",
+      start: meal.startTime || "",
+      end: meal.endTime || "",
+      runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
+      location: locationIndex >= 0 ? getDailyPlanLocationOptionLabel(data.locations[locationIndex], locationIndex) : "",
+      memo: meal.memo
+    };
+  });
 
   const orderedRows = hasExplicitTimetableOrder
     ? mergeDailyPlanTimetableRows(sceneRows, additionalScheduleRows, data.meta.timetableRowOrder)
@@ -4338,18 +4399,28 @@ function buildPlanForSave(
     ...meta,
     timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
   }), locations);
-  const nextLocations = locations
-    .filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim())
-    .map(sanitizeManualLocation);
+  const nextLocations = normalizeDailyPlanLocationAssignments(
+    locations
+      .filter(isMeaningfulDailyPlanLocationCard)
+      .map(sanitizeManualLocation)
+  );
   const nextMeals = mealTimes.filter(isMeaningfulTimetableEvent);
 
   return {
     ...plan,
     episode: derivedMeta.day.trim() || plan.episode,
-    memo: encodeDailyPlanMemo({ ...derivedMeta, memoText: derivedMeta.memoText ?? plan.memo }),
+    memo: encodeDailyPlanMemo({
+      ...derivedMeta,
+      // 전역 대장소 선택값은 카드별 selectedMajorLocations로 이관되었습니다.
+      selectedSceneLocations: [],
+      memoText: derivedMeta.memoText ?? plan.memo
+    }),
     shootingLocations: nextLocations,
     mealTimes: nextMeals,
-    shootingLocation: nextLocations.map((location) => location.name.trim()).filter(Boolean).join(", "),
+    shootingLocation: nextLocations
+      .flatMap((location) => location.selectedMajorLocations ?? [])
+      .map((location) => location.name)
+      .join(", "),
     mealTime: nextMeals
       .map((meal) => [
         formatTimeRange(meal.startTime, meal.endTime),
@@ -4370,25 +4441,66 @@ function sanitizeManualLocation(location: DailyPlanLocation): DailyPlanLocation 
   };
 }
 
+function isMeaningfulDailyPlanLocationCard(location: DailyPlanLocation) {
+  return Boolean(
+    location.selectedMajorLocations?.length
+    || getLocationAddress(location).trim()
+    || location.detail.trim()
+    || location.providerPlaceName?.trim()
+    || location.name.trim()
+  );
+}
+
+function getDailyPlanLocationOptionLabel(location: DailyPlanLocation, index: number) {
+  return getDailyPlanLocationDisplayName(location) || `촬영장소 ${index + 1}`;
+}
+
+function buildSceneLocationAssignments(locations: DailyPlanLocation[]) {
+  const assignments: Record<string, { locationId: string; label: string }> = {};
+  locations.forEach((location, index) => {
+    const label = getLocationAddress(location).trim() || `촬영장소 ${index + 1}`;
+    (location.selectedMajorLocations ?? []).forEach((selection) => {
+      if (!assignments[selection.key]) {
+        assignments[selection.key] = { locationId: location.id, label };
+      }
+    });
+  });
+  return assignments;
+}
+
 function buildInitialLocations(plan: DailyPlanDraft): DailyPlanLocation[] {
   if (plan.shootingLocations?.length) {
     return plan.shootingLocations.map(materializeLegacyManualLocation);
   }
-  if (plan.shootingLocation.trim()) return [{ id: makeLocalId("loc"), name: plan.shootingLocation, detail: "" }];
+  if (plan.shootingLocation.trim()) return [{
+    id: makeLocalId("loc"),
+    name: "",
+    manualAddress: plan.shootingLocation,
+    inputMode: "manual",
+    selectedMajorLocations: [],
+    detail: ""
+  }];
   return [createBlankLocation()];
 }
 
 function materializeLegacyManualLocation(location: DailyPlanLocation): DailyPlanLocation {
   const storedAddress = getDailyPlanSearchAddress(location);
+  const providerPlaceName = location.providerPlaceName?.trim()
+    || (location.name.trim() && location.name.trim() !== storedAddress ? location.name.trim() : "");
+  const normalizedLocation = {
+    ...location,
+    providerPlaceName: providerPlaceName || undefined,
+    selectedMajorLocations: location.selectedMajorLocations ?? []
+  };
   const shouldTreatAsManual = location.inputMode === "manual"
     || (
       location.inputMode === undefined
       && Boolean(storedAddress)
       && !hasDailyPlanLocationSearchMetadata(location)
     );
-  if (!shouldTreatAsManual || location.manualAddress?.trim()) return location;
+  if (!shouldTreatAsManual || location.manualAddress?.trim()) return normalizedLocation;
   return {
-    ...location,
+    ...normalizedLocation,
     inputMode: "manual",
     manualAddress: storedAddress
   };
@@ -4459,6 +4571,7 @@ function normalizeSceneCharacters(value: string) {
 function createSceneSourceSnapshot(item: ProjectSceneItem): DailyPlanTimetableSceneSourceSnapshot {
   return {
     sceneNumber: item.sceneNo,
+    mainLocation: item.mainLocation,
     subLocation: item.subLocation,
     sceneContent: item.sceneContent,
     characters: normalizeSceneCharacters(item.characters),
@@ -4504,6 +4617,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     sceneNumber: source.sceneNo,
     sceneTitle: "",
     description: sourceSnapshot.sceneContent,
+    mainLocation: sourceSnapshot.mainLocation,
     subLocation: sourceSnapshot.subLocation,
     subject: sourceSnapshot.characters,
     cuts: []
@@ -4536,6 +4650,7 @@ function serializeTimetableScenes(
           runtime: scene.runtime,
           locationId: scene.locationId,
           locationName: scene.locationName,
+          mainLocation: scene.mainLocation,
           subLocation: scene.subLocation,
           dayNight: scene.dayNight,
           storyDay: scene.storyDay,
@@ -4571,7 +4686,7 @@ function restoreTimetableScenes(
   locations: DailyPlanLocation[],
   sceneListItems: ProjectSceneItem[]
 ): SceneBlockInput[] {
-  if (metadata.length === 0) return shotsToScenes(shots, locations);
+  if (metadata.length === 0) return shotsToScenes(shots, locations, sceneListItems);
   const sourcesById = new Map(sceneListItems.map((item) => [item.id, item]));
 
   return metadata.map((entry) => {
@@ -4610,6 +4725,7 @@ function restoreTimetableScenes(
       runtime: snapshot.runtime,
       locationId: snapshot.locationId,
       locationName: snapshot.locationName,
+      mainLocation: effective.mainLocation,
       subLocation: effective.subLocation,
       dayNight: snapshot.dayNight,
       storyDay: snapshot.storyDay,
@@ -4625,7 +4741,11 @@ function restoreTimetableScenes(
   });
 }
 
-function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation[]): SceneBlockInput[] {
+function shotsToScenes(
+  shots: DailyPlanShotDraft[],
+  locations: DailyPlanLocation[],
+  sceneListItems: ProjectSceneItem[]
+): SceneBlockInput[] {
   if (shots.length === 0) return [createBlankScene(1, locations[0])];
 
   const scenes: SceneBlockInput[] = [];
@@ -4642,11 +4762,16 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
     let scene = sceneMap.get(key);
     if (!scene) {
       const location = locations.find((item) => item.id === shot.locationId) ?? locations.find((item) => item.name === (shot.locationName || shot.subLocation));
+      const matchingSceneSources = sceneListItems.filter((item) => (
+        normalizeLegacySceneNumber(item.sceneNo) === normalizeLegacySceneNumber(shot.sceneNumber)
+      ));
+      const sceneSource = matchingSceneSources.length === 1 ? matchingSceneSources[0] : null;
+      const sourceSnapshot = sceneSource ? createSceneSourceSnapshot(sceneSource) : null;
       const sceneMetadata = decodeSceneMemoMetadata(shot.sceneMemo ?? "");
       scene = {
         id: makeLocalId("scene"),
-        sourceSceneId: null,
-        sourceSnapshot: null,
+        sourceSceneId: sceneSource?.id ?? null,
+        sourceSnapshot,
         sceneContentOverride: null,
         charactersOverride: null,
         characterIdsOverride: null,
@@ -4660,7 +4785,8 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
         runtime: calculateRuntime(shot.startTime ?? "", shot.endTime ?? ""),
         locationId: location?.id ?? shot.locationId ?? "",
         locationName: location?.name ?? shot.locationName ?? shot.subLocation ?? "",
-        subLocation: shot.subLocation ?? "",
+        mainLocation: sourceSnapshot?.mainLocation ?? "",
+        subLocation: sourceSnapshot?.subLocation || shot.subLocation || "",
         dayNight: shot.dayNight ?? "",
         storyDay: shot.storyDay ?? "",
         shootingOrder: sceneMetadata.shootingOrder,
@@ -4692,7 +4818,11 @@ function shotsToScenes(shots: DailyPlanShotDraft[], locations: DailyPlanLocation
   return scenes.map((scene) => ({ ...scene, cuts: scene.cuts, cutCount: String(scene.cuts.length) }));
 }
 
-function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
+function normalizeLegacySceneNumber(value: unknown) {
+  return String(value ?? "").normalize("NFKC").trim().replace(/^S#?\s*/i, "").toLocaleLowerCase("ko-KR");
+}
+
+function scenesToShotDrafts(scenes: SceneBlockInput[], locations: DailyPlanLocation[]): DailyPlanShotDraft[] {
   let orderIndex = 0;
 
   return scenes
@@ -4701,13 +4831,19 @@ function scenesToShotDrafts(scenes: SceneBlockInput[]): DailyPlanShotDraft[] {
       orderIndex += 1;
       const cutNumber = String(cutIndex + 1);
       const cut = scene.cuts[cutIndex];
+      const mainLocationKey = scene.mainLocation.trim() ? createSceneLocationKey(scene.mainLocation) : "";
+      const linkedLocation = mainLocationKey
+        ? locations.find((location) => (
+          location.selectedMajorLocations?.some((selection) => selection.key === mainLocationKey)
+        ))
+        : undefined;
       return {
         ...createBlankDailyPlanShotDraft(orderIndex, scene.sceneNumber, cutNumber),
         startTime: scene.startTime,
         endTime: scene.endTime,
         sceneTitle: scene.sceneTitle,
-        locationId: scene.locationId,
-        locationName: scene.locationName,
+        locationId: linkedLocation?.id ?? scene.locationId,
+        locationName: scene.mainLocation,
         subject: scene.subject,
         subLocation: scene.subLocation,
         dayNight: scene.dayNight,
@@ -4740,6 +4876,7 @@ function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlo
     runtime: "",
     locationId: location?.id ?? "",
     locationName: location?.name ?? "",
+    mainLocation: "",
     subLocation: "",
     dayNight: "",
     storyDay: "",
@@ -4758,6 +4895,8 @@ function createBlankLocation(): DailyPlanLocation {
   return {
     id: makeLocalId("loc"),
     name: "",
+    providerPlaceName: "",
+    selectedMajorLocations: [],
     detail: "",
     manualAddress: "",
     address: "",
@@ -4978,6 +5117,8 @@ function isMeaningfulTimetableScene(scene: SceneBlockInput) {
     scene.startTime,
     scene.endTime,
     scene.locationName,
+    scene.mainLocation,
+    scene.subLocation,
     scene.dayNight,
     scene.sceneNumber,
     scene.sourceSceneId,
@@ -5217,7 +5358,7 @@ function syncFirstCut(cuts: SceneCutInput[], patch: Partial<SceneCutInput>) {
 
 function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput[], meta: DailyPlanPrintMeta): DailyPlanPreviewData {
   const derivedMeta = deriveDailyPlanHeadcount(meta);
-  const locations = (plan.shootingLocations ?? []).filter((location) => location.name.trim() || location.detail.trim() || getLocationAddress(location).trim());
+  const locations = (plan.shootingLocations ?? []).filter(isMeaningfulDailyPlanLocationCard);
   const mealTimes = (plan.mealTimes ?? [])
     .filter(hasRenderableAdditionalScheduleValue)
     .map((meal) => ({
@@ -5256,6 +5397,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         runtimeMinutes: getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime),
         runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, startTime, endTime)),
         locationName: scene.locationName,
+        mainLocation: scene.mainLocation,
         subLocation: scene.subLocation,
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDayNight(scene.dayNight),
@@ -5270,7 +5412,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         cuts
       };
     })
-    .filter((scene) => scene.sceneNumber || scene.locationName || scene.cuts.length > 0);
+    .filter((scene) => scene.sceneNumber || scene.mainLocation || scene.subLocation || scene.cuts.length > 0);
   const totalCutCount = sumSceneCutCounts(previewScenes.map((scene) => scene.totalCuts));
 
   return {

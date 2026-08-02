@@ -4,10 +4,19 @@ export type DailyPlanSourceType = "web_editor" | "excel_import";
 
 export type DailyPlanShotStatus = "촬영 전" | "촬영중" | "OK" | "보류" | "Omit";
 
+export type DailyPlanSceneLocationSelection = {
+  key: string;
+  name: string;
+};
+
 export type DailyPlanLocation = {
   id: string;
   name: string;
   detail: string;
+  /** 지도 검색 결과의 실제 시설명입니다. 극 중 장소 대표명으로 사용하지 않습니다. */
+  providerPlaceName?: string;
+  /** 이 실제 촬영 주소에 연결된 씬리스트 대장소입니다. 배열 순서가 표시 순서입니다. */
+  selectedMajorLocations?: DailyPlanSceneLocationSelection[];
   inputMode?: "search" | "manual" | "none";
   /** 검색 주소와 별도로 보존하는 직접입력 주소입니다. */
   manualAddress?: string;

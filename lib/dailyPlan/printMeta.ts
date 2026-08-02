@@ -1,10 +1,8 @@
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { resolveKoreanWeatherRegion } from "@/lib/koreanWeatherRegions";
 import { MAX_SCENE_CUT_COUNT, normalizeSceneCutCount } from "@/lib/sceneCutCount";
-import {
-  normalizeSceneLocationSelections,
-  type DailyPlanSceneLocationSelection
-} from "@/lib/dailyPlan/sceneLocations";
+import { normalizeSceneLocationSelections } from "@/lib/dailyPlan/sceneLocations";
+import type { DailyPlanSceneLocationSelection } from "@/lib/types";
 
 export type DailyPlanTimetableRowType = "scene" | "event";
 
@@ -81,6 +79,8 @@ export type DailyPlanMainStaffRow = {
  */
 export type DailyPlanTimetableSceneSourceSnapshot = {
   sceneNumber: string;
+  /** 예전 metadata에 없던 값은 decode 시 빈 문자열로 정규화합니다. */
+  mainLocation: string;
   subLocation: string;
   sceneContent: string;
   characters: string;
@@ -108,6 +108,8 @@ export type DailyPlanTimetableSceneRowSnapshot = {
   runtime: string;
   locationId: string;
   locationName: string;
+  /** 예전 metadata에 없던 값은 decode 시 빈 문자열로 정규화합니다. */
+  mainLocation: string;
   subLocation: string;
   dayNight: string;
   storyDay: string;
@@ -168,7 +170,7 @@ export type DailyPlanPrintMeta = {
   mainStaff: DailyPlanMainStaffRow[];
   starring: CallSheetPerson[];
   teams: TeamCallSheetRow[];
-  /** 씬리스트 대장소를 사용자가 선택한 순서 그대로 저장합니다. */
+  /** @deprecated 카드별 selectedMajorLocations로 옮기기 전 전역 저장값의 decode 호환 필드입니다. */
   selectedSceneLocations: DailyPlanSceneLocationSelection[];
   /** 부서별 집합정보에서 파생된 안정적인 지점과 위치 사진 metadata입니다. */
   gatheringPoints: DailyPlanGatheringPoint[];
@@ -395,6 +397,9 @@ export function resolveDailyPlanTimetableSceneValues(
       : hasCurrentSource
         ? currentSource.characters
         : meta.rowSnapshot.subject,
+    mainLocation: hasCurrentSource
+      ? currentSource.mainLocation ?? ""
+      : meta.rowSnapshot.mainLocation ?? "",
     subLocation: hasCurrentSource
       ? currentSource.subLocation
       : meta.rowSnapshot.subLocation,
@@ -463,6 +468,7 @@ function normalizeDailyPlanTimetableSceneSourceSnapshot(
   if (!isUnknownRecord(value)) return null;
   return {
     sceneNumber: normalizeMetaText(value.sceneNumber),
+    mainLocation: normalizeMetaText(value.mainLocation),
     subLocation: normalizeMetaText(value.subLocation),
     sceneContent: normalizeMetaText(value.sceneContent),
     characters: normalizeMetaText(value.characters),
@@ -499,6 +505,7 @@ function normalizeDailyPlanTimetableSceneRowSnapshot(
     runtime: normalizeMetaText(value.runtime),
     locationId: normalizeMetaText(value.locationId),
     locationName: normalizeMetaText(value.locationName),
+    mainLocation: normalizeMetaText(value.mainLocation),
     subLocation: normalizeMetaText(value.subLocation),
     dayNight: normalizeMetaText(value.dayNight),
     storyDay: normalizeMetaText(value.storyDay),

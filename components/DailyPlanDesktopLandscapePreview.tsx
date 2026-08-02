@@ -39,7 +39,7 @@ const callSheetColumnCount = 8;
 
 /** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
 export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDesktopLandscapePreviewProps) {
-  const printableLocations = buildDailyPlanPreviewLocationRows(meta.selectedSceneLocations, locations);
+  const printableLocations = buildDailyPlanPreviewLocationRows(locations);
   const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
   const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
