@@ -1771,15 +1771,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
-                        <div className="grid min-w-0 gap-1">
-                          {scene.mainLocation ? (
-                            <span
-                              className="block min-w-0 truncate text-center text-[10px] font-bold leading-[1.35] text-field-muted"
-                              title={scene.mainLocation}
-                            >
-                              {scene.mainLocation}
-                            </span>
-                          ) : null}
+                        <div className="flex min-h-[38px] min-w-0 items-center justify-center">
                           <DraftInput
                             className={timetableInputClass}
                             value={scene.subLocation}
