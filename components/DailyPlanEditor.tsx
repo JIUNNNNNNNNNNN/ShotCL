@@ -795,7 +795,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function addScene() {
-    setScenes((current) => [...current, createBlankScene(current.length + 1, locations[0])]);
+    setScenes((current) => [...current, createBlankScene()]);
     setPrintMeta((current) => ({
       ...current,
       timetableRowOrder: current.timetableRowOrder.length > 0
@@ -832,7 +832,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       }));
     }
     setScenes((current) => {
-      if (current.length <= 1) return [createBlankScene(1, locations[0])];
+      if (current.length <= 1) return [createBlankScene()];
       return current.filter((_, index) => index !== sceneIndex);
     });
   }
@@ -1713,15 +1713,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         </section>
 
         <section className="field-section mt-3 p-1.5 md:mt-5 md:p-5">
-          <div className="flex items-center justify-between gap-2 md:grid md:grid-cols-[1fr_auto] md:gap-4 md:items-center">
-            <div>
-              <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
-            </div>
-            <Button variant="secondary" onClick={addScene}>
-              <Plus className="h-4 w-4" aria-hidden />
-              촬영 행 추가
-            </Button>
-          </div>
+          <h2 className="text-lg font-black text-field-primary">TIME TABLE 입력</h2>
 
           <div className="mt-1.5 w-full md:mt-5">
             <table className="w-full table-fixed border-collapse text-xs max-lg:block">
@@ -1796,11 +1788,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                         <span className={mobileTimetableLabelClass}>장소</span>
-                        <div
-                          className={`${centeredSelectClass} flex items-center justify-center truncate`}
-                          title={formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation) || undefined}
-                        >
-                          {formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation) || "빈칸"}
+                        <div className="grid min-w-0 gap-1">
+                          <span
+                            className="block min-w-0 truncate text-center text-[10px] font-bold leading-[1.35] text-field-muted"
+                            title={scene.mainLocation || undefined}
+                          >
+                            {scene.mainLocation || "대장소"}
+                          </span>
+                          <DraftInput
+                            className={timetableInputClass}
+                            value={scene.subLocation}
+                            onCommit={(value) => updateScene(sceneIndex, { subLocation: value })}
+                            placeholder="세부장소"
+                            aria-label={`촬영 행 ${sceneIndex + 1} 세부장소`}
+                          />
                         </div>
                       </td>
                       <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
@@ -1868,15 +1869,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </tbody>
             </table>
           </div>
-          <div className="mt-3 w-full">
-            <button
-              type="button"
-              className="flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-[#e2c96e] bg-[#fff3c4] px-4 py-3 text-center text-sm font-black text-field-primary transition-colors hover:bg-[#ffedaa]"
-              onClick={addMealTime}
-            >
+          <div className="mt-3 grid w-full grid-cols-2 gap-2">
+            <Button variant="secondary" className="w-full px-2 text-xs sm:text-sm" onClick={addScene}>
+              <Plus className="h-4 w-4" aria-hidden />
+              촬영 행 추가
+            </Button>
+            <Button variant="secondary" className="w-full px-2 text-xs sm:text-sm" onClick={addMealTime}>
               <Plus className="h-4 w-4" aria-hidden />
               기타 일정 행 추가
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -3087,7 +3088,7 @@ function SceneSourceSelector({
         className={compactInputClass}
         value={legacySceneNumber}
         onCommit={onLegacySceneNumberChange}
-        placeholder="SCENE"
+        placeholder="씬 선택"
         aria-label={ariaLabel}
       />
     );
@@ -3110,9 +3111,9 @@ function SceneSourceSelector({
       {value && !selectedSourceExists ? (
         <option value={value}>{formatSceneSelectionNumber(legacySceneNumber) || "씬 선택"}</option>
       ) : null}
-      {items.map((item, index) => (
+      {items.filter((item) => Boolean(formatSceneSourceOption(item))).map((item) => (
         <option key={item.id} value={item.id}>
-          {formatSceneSourceOption(item, index)}
+          {formatSceneSourceOption(item)}
         </option>
       ))}
     </select>
@@ -4556,8 +4557,8 @@ function buildInitialMeals(plan: DailyPlanDraft, isNewDailyPlan: boolean): Daily
   return isNewDailyPlan ? [createBlankOtherSchedule("집합장소")] : [];
 }
 
-function formatSceneSourceOption(item: ProjectSceneItem, index: number) {
-  return formatSceneSelectionNumber(item.sceneNo) || String(index + 1);
+function formatSceneSourceOption(item: ProjectSceneItem) {
+  return formatSceneSelectionNumber(item.sceneNo);
 }
 
 function formatSceneSelectionNumber(value: string) {
@@ -4746,7 +4747,7 @@ function shotsToScenes(
   locations: DailyPlanLocation[],
   sceneListItems: ProjectSceneItem[]
 ): SceneBlockInput[] {
-  if (shots.length === 0) return [createBlankScene(1, locations[0])];
+  if (shots.length === 0) return [createBlankScene()];
 
   const scenes: SceneBlockInput[] = [];
   const sceneMap = new Map<string, SceneBlockInput>();
@@ -4776,7 +4777,7 @@ function shotsToScenes(
         charactersOverride: null,
         characterIdsOverride: null,
         totalCutsOverride: null,
-        sceneNumber: shot.sceneNumber || String(scenes.length + 1),
+        sceneNumber: shot.sceneNumber ?? "",
         sceneTitle: shot.sceneTitle ?? "",
         description: shot.description ?? "",
         startTime: shot.startTime ?? "",
@@ -4785,8 +4786,8 @@ function shotsToScenes(
         runtime: calculateRuntime(shot.startTime ?? "", shot.endTime ?? ""),
         locationId: location?.id ?? shot.locationId ?? "",
         locationName: location?.name ?? shot.locationName ?? shot.subLocation ?? "",
-        mainLocation: sourceSnapshot?.mainLocation ?? "",
-        subLocation: sourceSnapshot?.subLocation || shot.subLocation || "",
+        mainLocation: shot.locationName ?? "",
+        subLocation: shot.subLocation ?? "",
         dayNight: shot.dayNight ?? "",
         storyDay: shot.storyDay ?? "",
         shootingOrder: sceneMetadata.shootingOrder,
@@ -4858,7 +4859,7 @@ function scenesToShotDrafts(scenes: SceneBlockInput[], locations: DailyPlanLocat
     }));
 }
 
-function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlockInput {
+function createBlankScene(): SceneBlockInput {
   return {
     id: makeLocalId("scene"),
     sourceSceneId: null,
@@ -4867,15 +4868,15 @@ function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlo
     charactersOverride: null,
     characterIdsOverride: null,
     totalCutsOverride: null,
-    sceneNumber: String(order),
+    sceneNumber: "",
     sceneTitle: "",
     description: "",
     startTime: "",
     endTime: "",
     runtimeMinutes: null,
     runtime: "",
-    locationId: location?.id ?? "",
-    locationName: location?.name ?? "",
+    locationId: "",
+    locationName: "",
     mainLocation: "",
     subLocation: "",
     dayNight: "",
@@ -4886,8 +4887,8 @@ function createBlankScene(order: number, location?: DailyPlanLocation): SceneBlo
     props: "",
     costumeMakeup: "",
     sceneMemo: "",
-    cutCount: "1",
-    cuts: [createBlankCut([])]
+    cutCount: "",
+    cuts: []
   };
 }
 

@@ -397,12 +397,10 @@ export function resolveDailyPlanTimetableSceneValues(
       : hasCurrentSource
         ? currentSource.characters
         : meta.rowSnapshot.subject,
-    mainLocation: hasCurrentSource
-      ? currentSource.mainLocation ?? ""
-      : meta.rowSnapshot.mainLocation ?? "",
-    subLocation: hasCurrentSource
-      ? currentSource.subLocation
-      : meta.rowSnapshot.subLocation,
+    // 장소값은 씬 선택 이벤트에서 row snapshot으로 확정합니다. 페이지 로드나
+    // 씬리스트 refetch가 사용자가 수정한 대/세부장소를 다시 덮어쓰지 않게 합니다.
+    mainLocation: meta.rowSnapshot.mainLocation ?? "",
+    subLocation: meta.rowSnapshot.subLocation,
     totalCuts: hasTotalCutsOverride
       ? meta.totalCutsOverride ?? null
       : hasCurrentSource
