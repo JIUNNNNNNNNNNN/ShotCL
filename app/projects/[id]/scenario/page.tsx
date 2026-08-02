@@ -45,6 +45,7 @@ export default function ProjectScenarioPage() {
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const selectedAssetIdRef = useRef("");
   const [projectName, setProjectName] = useState("");
   const [assets, setAssets] = useState<ProjectReferenceAsset[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -102,8 +103,15 @@ export default function ProjectScenarioPage() {
 
   useEffect(() => {
     const scenes = selectedAsset?.scenarioScenes ?? [];
+    const nextSelectedAssetId = selectedAsset?.id ?? "";
+    const selectedAssetChanged = selectedAssetIdRef.current !== nextSelectedAssetId;
     setDraftScenes(scenes.map((scene) => ({ ...scene })));
-    setExpandedSceneId(scenes[0]?.id ?? "");
+    setExpandedSceneId((current) => (
+      selectedAssetChanged || !scenes.some((scene) => scene.id === current)
+        ? ""
+        : current
+    ));
+    selectedAssetIdRef.current = nextSelectedAssetId;
     setIsEditing(false);
     setHasChanges(false);
     setQuery("");
@@ -232,7 +240,6 @@ export default function ProjectScenarioPage() {
   function addScene() {
     const scene = createBlankScene(draftScenes.length + 1);
     setDraftScenes((current) => [...current, scene]);
-    setExpandedSceneId(scene.id);
     setIsEditing(true);
     setHasChanges(true);
   }
@@ -259,7 +266,7 @@ export default function ProjectScenarioPage() {
   function cancelEditing() {
     const scenes = selectedAsset?.scenarioScenes ?? [];
     setDraftScenes(scenes.map((scene) => ({ ...scene })));
-    setExpandedSceneId(scenes[0]?.id ?? "");
+    setExpandedSceneId((current) => scenes.some((scene) => scene.id === current) ? current : "");
     setIsEditing(false);
     setHasChanges(false);
     setErrorMessage("");
