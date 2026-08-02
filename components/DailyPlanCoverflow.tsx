@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   forwardRef,
@@ -82,12 +83,13 @@ export function DailyPlanCoverflow({
   onOpenContextMenu,
   ariaLabel = "일촬표 선택 카드"
 }: DailyPlanCoverflowProps) {
+  const logicalItems = useMemo(() => dedupeLogicalItems(items), [items]);
   const [activeItemKey, setActiveItemKey] = useState("");
   const [interactionPhase, setInteractionPhase] = useState<InteractionPhase>("idle");
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const selectionSlotRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef(new Map<string, HTMLButtonElement>());
-  const itemsRef = useRef(items);
+  const itemsRef = useRef(logicalItems);
   const onActivateRef = useRef(onActivate);
   const positionRef = useRef(INITIAL_EMPTY_POSITION);
   const activeItemKeyRef = useRef("");
@@ -104,9 +106,7 @@ export function DailyPlanCoverflow({
   const renderFrameRef = useRef<number | null>(null);
   const suppressGeneratedClickRef = useRef(false);
   const reducedMotionRef = useRef(false);
-  const itemsKey = items.map((item) => item.id).join("|");
-  itemsRef.current = items;
-  onActivateRef.current = onActivate;
+  const itemsKey = JSON.stringify(logicalItems.map(getItemKey));
 
   const updateInteractionPhase = useCallback((phase: InteractionPhase) => {
     setInteractionPhase(phase);
@@ -141,14 +141,15 @@ export function DailyPlanCoverflow({
     const currentItems = itemsRef.current;
     const count = currentItems.length;
     const viewport = viewportRef.current;
-    if (!viewport || count === 0) return;
+    if (!viewport) return;
     const { cardWidth, cardStep } = getCardMetrics(viewport.clientWidth);
     if (selectionSlotRef.current) selectionSlotRef.current.style.width = `${cardWidth + 8}px`;
+    if (count === 0) return;
     const normalizedPosition = count === 1 ? positionRef.current : positiveModulo(positionRef.current, count);
     const reduceMotion = reducedMotionRef.current;
 
     currentItems.forEach((item, index) => {
-      const card = cardRefs.current.get(item.id);
+      const card = cardRefs.current.get(getItemKey(item));
       if (!card) return;
       const distance = count === 1
         ? -normalizedPosition
@@ -185,6 +186,12 @@ export function DailyPlanCoverflow({
     });
   }, [renderCards]);
 
+  const cancelScheduledRender = useCallback(() => {
+    if (renderFrameRef.current === null) return;
+    cancelAnimationFrame(renderFrameRef.current);
+    renderFrameRef.current = null;
+  }, []);
+
   const commitCenteredItem = useCallback((logicalPosition: number, focusCard = false) => {
     const currentItems = itemsRef.current;
     if (currentItems.length === 0) {
@@ -194,10 +201,11 @@ export function DailyPlanCoverflow({
     }
     const nextIndex = positiveModulo(Math.round(logicalPosition), currentItems.length);
     const nextItem = currentItems[nextIndex];
-    activeItemKeyRef.current = nextItem.id;
-    setActiveItemKey(nextItem.id);
+    const nextItemKey = getItemKey(nextItem);
+    activeItemKeyRef.current = nextItemKey;
+    setActiveItemKey(nextItemKey);
     if (focusCard) {
-      requestAnimationFrame(() => cardRefs.current.get(nextItem.id)?.focus());
+      requestAnimationFrame(() => cardRefs.current.get(nextItemKey)?.focus());
     }
     return nextItem;
   }, []);
@@ -214,7 +222,7 @@ export function DailyPlanCoverflow({
       !centeredItem
       || !hasExplicitIntent
       || !source
-      || pendingItemKey !== centeredItem.id
+      || pendingItemKey !== getItemKey(centeredItem)
       || activationLockedRef.current
     ) {
       updateInteractionPhase("idle");
@@ -223,10 +231,7 @@ export function DailyPlanCoverflow({
 
     activationLockedRef.current = true;
     updateInteractionPhase("activating");
-    if (renderFrameRef.current !== null) {
-      cancelAnimationFrame(renderFrameRef.current);
-      renderFrameRef.current = null;
-    }
+    cancelScheduledRender();
 
     let accepted = true;
     try {
@@ -249,7 +254,7 @@ export function DailyPlanCoverflow({
       activationUnlockTimerRef.current = null;
       updateInteractionPhase("idle");
     }, ACTIVATION_LOCK_MS);
-  }, [updateInteractionPhase]);
+  }, [cancelScheduledRender, updateInteractionPhase]);
 
   const settleSnap = useCallback((target: number, focusCard: boolean) => {
     const settledPosition = normalizeSnappedPosition(target, itemsRef.current.length);
@@ -308,7 +313,7 @@ export function DailyPlanCoverflow({
       return;
     }
     snapTo(target, {
-      activationItemKey: targetItem.id,
+      activationItemKey: getItemKey(targetItem),
       activationSource: "drag"
     });
   }, [clearActivationIntent, snapTo]);
@@ -397,11 +402,33 @@ export function DailyPlanCoverflow({
   }, [clearActivationIntent, resetPointerSession, snapTo, updateInteractionPhase]);
 
   useLayoutEffect(() => {
-    const currentItems = itemsRef.current;
+    itemsRef.current = logicalItems;
+    onActivateRef.current = onActivate;
+  }, [logicalItems, onActivate]);
+
+  useLayoutEffect(() => {
+    const currentItems = logicalItems;
     resetPointerSession(false);
     cancelMotion();
+    cancelScheduledRender();
     clearActivationIntent();
-    const preservedIndex = currentItems.findIndex((item) => item.id === activeItemKeyRef.current);
+
+    if (activationUnlockTimerRef.current !== null) {
+      window.clearTimeout(activationUnlockTimerRef.current);
+      activationUnlockTimerRef.current = null;
+    }
+    activationLockedRef.current = false;
+    suppressGeneratedClickRef.current = false;
+    updateInteractionPhase("idle");
+
+    const liveItemKeys = new Set(currentItems.map(getItemKey));
+    cardRefs.current.forEach((_card, itemKey) => {
+      if (!liveItemKeys.has(itemKey)) cardRefs.current.delete(itemKey);
+    });
+
+    const preservedIndex = currentItems.findIndex(
+      (item) => getItemKey(item) === activeItemKeyRef.current
+    );
     if (!didInitializeRef.current || preservedIndex < 0) {
       positionRef.current = INITIAL_EMPTY_POSITION;
       activeItemKeyRef.current = "";
@@ -409,10 +436,11 @@ export function DailyPlanCoverflow({
       didInitializeRef.current = true;
     } else {
       positionRef.current = preservedIndex;
-      activeItemKeyRef.current = currentItems[preservedIndex]?.id ?? "";
-      setActiveItemKey(currentItems[preservedIndex]?.id ?? "");
+      const preservedItemKey = getItemKey(currentItems[preservedIndex]);
+      activeItemKeyRef.current = preservedItemKey;
+      setActiveItemKey(preservedItemKey);
     }
-    renderCards();
+    scheduleRender();
   // itemsKey intentionally represents stable logical item identity and ordering.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemsKey]);
@@ -420,12 +448,12 @@ export function DailyPlanCoverflow({
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return undefined;
-    const resizeObserver = new ResizeObserver(renderCards);
+    const resizeObserver = new ResizeObserver(scheduleRender);
     resizeObserver.observe(viewport);
     const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const updateReducedMotion = () => {
       reducedMotionRef.current = mediaQuery.matches;
-      renderCards();
+      scheduleRender();
     };
     updateReducedMotion();
     mediaQuery.addEventListener?.("change", updateReducedMotion);
@@ -433,7 +461,7 @@ export function DailyPlanCoverflow({
       resizeObserver.disconnect();
       mediaQuery.removeEventListener?.("change", updateReducedMotion);
     };
-  }, [renderCards]);
+  }, [scheduleRender]);
 
   useEffect(() => {
     const cancelInteraction = () => {
@@ -466,9 +494,9 @@ export function DailyPlanCoverflow({
   useEffect(() => () => {
     clearLongPress();
     cancelMotion();
-    if (renderFrameRef.current !== null) cancelAnimationFrame(renderFrameRef.current);
+    cancelScheduledRender();
     if (activationUnlockTimerRef.current !== null) window.clearTimeout(activationUnlockTimerRef.current);
-  }, [cancelMotion, clearLongPress]);
+  }, [cancelMotion, cancelScheduledRender, clearLongPress]);
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (
@@ -480,7 +508,9 @@ export function DailyPlanCoverflow({
     ) return;
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-carousel-item-id]");
     const itemId = target?.dataset.carouselItemId;
-    const item = itemId ? items.find((candidate) => candidate.id === itemId) : undefined;
+    const item = itemId
+      ? itemsRef.current.find((candidate) => getItemKey(candidate) === itemId)
+      : undefined;
 
     cancelMotion();
     clearActivationIntent();
@@ -490,7 +520,7 @@ export function DailyPlanCoverflow({
     pointerSessionRef.current = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
-      itemId: item?.id ?? null,
+      itemId: item ? getItemKey(item) : null,
       captureTarget: event.currentTarget,
       didCapture: false,
       startX: event.clientX,
@@ -594,11 +624,12 @@ export function DailyPlanCoverflow({
   function requestItemActivation(item: DailyPlanCarouselItem, source: ActivationSource, focusCard: boolean) {
     const currentItems = itemsRef.current;
     const count = currentItems.length;
-    const itemIndex = currentItems.findIndex((candidate) => candidate.id === item.id);
+    const itemKey = getItemKey(item);
+    const itemIndex = currentItems.findIndex((candidate) => getItemKey(candidate) === itemKey);
     if (itemIndex < 0 || count === 0 || activationLockedRef.current) return;
     snapTo(getNearestTargetPosition(itemIndex, positionRef.current, count), {
       focusCard,
-      activationItemKey: item.id,
+      activationItemKey: itemKey,
       activationSource: source
     });
   }
@@ -689,16 +720,18 @@ export function DailyPlanCoverflow({
         className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 border-2 border-field-primary/45"
       />
       <div className="pointer-events-none absolute inset-0 z-[1] [transform-style:preserve-3d]">
-        {items.map((item) => (
+        {logicalItems.map((item) => (
           <CarouselCard
-            key={item.id}
+            key={getItemKey(item)}
             ref={(element) => {
-              if (element) cardRefs.current.set(item.id, element);
-              else cardRefs.current.delete(item.id);
+              const itemKey = getItemKey(item);
+              if (element) cardRefs.current.set(itemKey, element);
+              else cardRefs.current.delete(itemKey);
             }}
             item={item}
+            itemKey={getItemKey(item)}
             disabled={disabled}
-            active={item.id === activeItemKey}
+            active={getItemKey(item) === activeItemKey}
             className="absolute left-1/2 top-1/2 w-[132px] will-change-transform motion-reduce:transition-none"
             tabIndex={0}
             onClick={handleCardClick}
@@ -709,8 +742,8 @@ export function DailyPlanCoverflow({
       </div>
       {activeItemKey ? (
         <span className="sr-only" aria-live="polite">
-          {items.find((item) => item.id === activeItemKey)?.ariaLabel
-            ?? items.find((item) => item.id === activeItemKey)?.label} 선택됨
+          {logicalItems.find((item) => getItemKey(item) === activeItemKey)?.ariaLabel
+            ?? logicalItems.find((item) => getItemKey(item) === activeItemKey)?.label} 선택됨
         </span>
       ) : null}
     </div>
@@ -719,6 +752,7 @@ export function DailyPlanCoverflow({
 
 type CarouselCardProps = {
   item: DailyPlanCarouselItem;
+  itemKey: string;
   disabled: boolean;
   active?: boolean;
   className?: string;
@@ -730,6 +764,7 @@ type CarouselCardProps = {
 
 const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function CarouselCard({
   item,
+  itemKey,
   disabled,
   active = false,
   className = "",
@@ -747,7 +782,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
     <button
       ref={ref}
       type="button"
-      data-carousel-item-id={item.id}
+      data-carousel-item-id={itemKey}
       data-plan-id={item.planId}
       disabled={disabled}
       aria-label={item.kind === "new"
@@ -796,6 +831,23 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
     </button>
   );
 });
+
+function getItemKey(item: DailyPlanCarouselItem) {
+  const planId = String(item.planId ?? "").trim();
+  if (item.kind === "plan") return planId ? `daily-plan:${planId}` : "";
+  return String(item.id ?? "").trim();
+}
+
+/** 잘못 중복된 조회 결과도 DOM/React key 계층으로 들어오기 전에 stable ID로 한 번만 남깁니다. */
+function dedupeLogicalItems(items: DailyPlanCarouselItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const itemKey = getItemKey(item);
+    if (!itemKey || seen.has(itemKey)) return false;
+    seen.add(itemKey);
+    return true;
+  });
+}
 
 function getCardMetrics(viewportWidth: number) {
   const cardWidth = clamp(viewportWidth * 0.34, 124, 168);

@@ -34,6 +34,17 @@ const CONTEXT_MENU_WIDTH = 232;
 const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
 
+/** 서버가 반환한 canonical 일촬표를 ID 기준으로 한 번만 보관합니다. */
+function upsertCanonicalDailyPlan(
+  current: DailyPlanListItem[],
+  next: DailyPlanListItem
+) {
+  const plansById = new Map<string, DailyPlanListItem>();
+  current.forEach((item) => plansById.set(item.id, item));
+  plansById.set(next.id, next);
+  return Array.from(plansById.values());
+}
+
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
   const id = params.id;
@@ -55,6 +66,7 @@ export default function DailyPlansPage() {
   const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
   const [pendingDeleteItem, setPendingDeleteItem] = useState<PendingDeleteItem | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const duplicateInFlightRef = useRef<string | null>(null);
   const navigationLockedRef = useRef(false);
   const navigationUnlockTimerRef = useRef<number | null>(null);
   const canManage = role !== "progress" && project?.accessRole !== "progress";
@@ -161,7 +173,7 @@ export default function DailyPlansPage() {
   }
 
   function handleActivateItem(item: DailyPlanCarouselItem) {
-    if (!projectId || isDuplicating || pendingDeleteItem) return false;
+    if (!projectId || duplicateInFlightRef.current || isDuplicating || pendingDeleteItem) return false;
     if (item.kind === "new") {
       navigateOnce(`/projects/${projectId}/daily-plans/new`);
       return true;
@@ -179,6 +191,7 @@ export default function DailyPlansPage() {
       item.kind !== "plan"
       || !item.planId
       || !canManage
+      || duplicateInFlightRef.current
       || isDuplicating
       || isDeleting
       || pendingDeleteItem
@@ -195,7 +208,16 @@ export default function DailyPlansPage() {
   }
 
   async function handleDuplicate(plan: DailyPlanListItem) {
-    if (!projectId || isDuplicating || isDeleting || pendingDeleteItem || !canManage) return;
+    if (
+      !projectId
+      || duplicateInFlightRef.current
+      || isDuplicating
+      || isDeleting
+      || pendingDeleteItem
+      || !canManage
+    ) return;
+    // setState가 반영되기 전의 연속 click/long-press click도 같은 요청을 두 번 만들지 못하게 합니다.
+    duplicateInFlightRef.current = plan.id;
     setContextMenu(null);
     setIsDuplicating(true);
     setErrorMessage("");
@@ -206,19 +228,17 @@ export default function DailyPlansPage() {
         ...duplicated.plan,
         shotCount: duplicated.shots.length
       };
-      setPlans((current) => current.some((item) => item.id === duplicatedItem.id)
-        ? current
-        : [...current, duplicatedItem]
-      );
+      setPlans((current) => upsertCanonicalDailyPlan(current, duplicatedItem));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "일촬표를 복사하지 못했습니다.");
     } finally {
+      if (duplicateInFlightRef.current === plan.id) duplicateInFlightRef.current = null;
       setIsDuplicating(false);
     }
   }
 
   function requestDelete(plan: DailyPlanListItem) {
-    if (!projectId || isDuplicating || isDeleting || !canManage) return;
+    if (!projectId || duplicateInFlightRef.current || isDuplicating || isDeleting || !canManage) return;
     setContextMenu(null);
     setDeleteErrorMessage("");
     setPendingDeleteItem({
@@ -235,7 +255,7 @@ export default function DailyPlansPage() {
 
   async function confirmDelete() {
     const target = pendingDeleteItem;
-    if (!projectId || !target || isDeleting || !canManage) return;
+    if (!projectId || !target || duplicateInFlightRef.current || isDeleting || !canManage) return;
     setIsDeleting(true);
     setDeleteErrorMessage("");
 
@@ -329,12 +349,16 @@ function DailyPlanContextMenu({
       aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
       className="fixed z-[100] grid w-[232px] gap-1 border border-field-divider bg-field-elevated p-1.5 text-field-text"
       style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
     >
       <button
         type="button"
         role="menuitem"
         className="min-h-9 px-2.5 text-left text-xs font-bold text-field-text hover:bg-field-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:opacity-50"
-        onClick={onDuplicate}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDuplicate();
+        }}
         disabled={disabled}
       >
         복사해서 새 일촬표 만들기
@@ -343,7 +367,10 @@ function DailyPlanContextMenu({
         type="button"
         role="menuitem"
         className="min-h-9 px-2.5 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger disabled:opacity-50"
-        onClick={onDelete}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
         disabled={disabled}
       >
         삭제

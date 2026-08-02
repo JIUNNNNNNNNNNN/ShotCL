@@ -8,6 +8,7 @@ import {
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
+import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
@@ -581,32 +582,41 @@ async function insertDailyPlanShots(projectId: string, dailyPlanId: string, shot
 
 /** 저장된 일촬표를 복사해 새 일촬표로 만듭니다. */
 export async function duplicateDailyPlan(projectId: string, dailyPlanId: string): Promise<DailyPlanWithShots> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duplicateSourceDailyPlanId: dailyPlanId })
+    });
+    const payload = (await response.json().catch(() => ({}))) as SaveDailyPlanApiPayload;
+    const planRow = payload.dailyPlan ?? payload.plan;
+    if (response.ok && planRow && payload.shots) {
+      return {
+        plan: dailyPlanFromRow(planRow),
+        shots: payload.shots.map(dailyPlanShotFromRow)
+      };
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || payload.message || "일촬표를 복사하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
   const existing = await getDailyPlanWithShots(projectId, dailyPlanId);
   if (!existing) throw new Error("복사할 일촬표를 찾을 수 없습니다.");
-
-  const draft: DailyPlanDraft = {
-    title: `${existing.plan.title || "일촬표"} 복사본`,
-    sourceType: "web_editor",
-    sourceFileName: existing.plan.sourceFileName,
-    shootingDate: existing.plan.shootingDate,
-    episode: existing.plan.episode,
-    director: existing.plan.director,
-    dop: existing.plan.dop,
-    assistantDirector: existing.plan.assistantDirector,
-    production: existing.plan.production,
-    callTime: existing.plan.callTime,
-    shootStartTime: existing.plan.shootStartTime,
-    shootEndTime: existing.plan.shootEndTime,
-    meetingLocation: existing.plan.meetingLocation,
-    shootingLocation: existing.plan.shootingLocation,
-    shootingLocations: existing.plan.shootingLocations ?? [],
-    mealTime: existing.plan.mealTime,
-    mealTimes: existing.plan.mealTimes ?? [],
-    safetyNotice: existing.plan.safetyNotice,
-    memo: existing.plan.memo
-  };
-  const shotDrafts = existing.shots.map(dailyPlanShotToDraft);
-  return saveDailyPlanWithShots({ projectId, plan: draft, shots: shotDrafts, allowDuplicate: true });
+  const localPlans = readLocalBuckets().dailyPlans.filter((plan) => plan.projectId === projectId);
+  const duplicate = buildDailyPlanDuplicateDraft({
+    plan: existing.plan,
+    shots: existing.shots,
+    existingEpisodes: localPlans.map((plan) => plan.episode)
+  });
+  return saveDailyPlanWithShots({
+    projectId,
+    plan: duplicate.plan,
+    shots: duplicate.shots,
+    allowDuplicate: true
+  });
 }
 
 /** 저장된 일촬표와 연결 컷 행을 삭제합니다. */

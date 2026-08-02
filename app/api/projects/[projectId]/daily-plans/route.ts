@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { dailyPlanDraftToRow, dailyPlanShotDraftToRow } from "@/lib/data/mappers";
+import {
+  dailyPlanDraftToRow,
+  dailyPlanFromRow,
+  dailyPlanShotDraftToRow,
+  dailyPlanShotFromRow
+} from "@/lib/data/mappers";
+import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import { mergeLatestGatheringPhotoMetadata } from "@/lib/dailyPlan/gatheringPoints";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
@@ -14,6 +20,10 @@ type DailyPlanSaveBody = {
   plan: DailyPlanDraft;
   shots: DailyPlanShotDraft[];
   allowDuplicate?: boolean;
+};
+
+type DailyPlanSaveRequestBody = Partial<DailyPlanSaveBody> & {
+  duplicateSourceDailyPlanId?: string;
 };
 
 const SAVED_MESSAGE = "일촬표가 저장되었습니다.";
@@ -59,9 +69,64 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
     if (grant.role !== "admin") return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: 403 });
-    const body = (await request.json()) as DailyPlanSaveBody;
-    if (!body.plan || !Array.isArray(body.shots)) {
-      return NextResponse.json({ ok: false, status: "failed", error: "저장할 일촬표 정보가 올바르지 않습니다." }, { status: 400 });
+    const requestBody = (await request.json()) as DailyPlanSaveRequestBody;
+    const supabase = requireProjectAccessDb();
+    let body: DailyPlanSaveBody;
+
+    if (requestBody.duplicateSourceDailyPlanId) {
+      const duplicateSourceDailyPlanId = String(requestBody.duplicateSourceDailyPlanId).trim();
+      const [
+        { data: sourcePlanRow, error: sourcePlanError },
+        { data: sourceShotRows, error: sourceShotError },
+        { data: episodeRows, error: episodeError }
+      ] = await Promise.all([
+        supabase
+          .from("daily_plans")
+          .select("*")
+          .eq("project_id", projectId)
+          .eq("id", duplicateSourceDailyPlanId)
+          .maybeSingle(),
+        supabase
+          .from("daily_plan_shots")
+          .select("*")
+          .eq("project_id", projectId)
+          .eq("daily_plan_id", duplicateSourceDailyPlanId)
+          .order("order_index", { ascending: true }),
+        supabase
+          .from("daily_plans")
+          .select("episode")
+          .eq("project_id", projectId)
+      ]);
+      if (sourcePlanError) throw sourcePlanError;
+      if (sourceShotError) throw sourceShotError;
+      if (episodeError) throw episodeError;
+      if (!sourcePlanRow) {
+        return NextResponse.json(
+          { ok: false, status: "failed", error: "복사할 일촬표를 찾을 수 없습니다." },
+          { status: 404 }
+        );
+      }
+
+      const duplicate = buildDailyPlanDuplicateDraft({
+        plan: dailyPlanFromRow(sourcePlanRow),
+        shots: (sourceShotRows ?? []).map(dailyPlanShotFromRow),
+        existingEpisodes: (episodeRows ?? []).map((row) => row.episode)
+      });
+      body = {
+        plan: duplicate.plan,
+        shots: duplicate.shots,
+        allowDuplicate: true
+      };
+    } else {
+      if (!requestBody.plan || !Array.isArray(requestBody.shots)) {
+        return NextResponse.json({ ok: false, status: "failed", error: "저장할 일촬표 정보가 올바르지 않습니다." }, { status: 400 });
+      }
+      body = {
+        dailyPlanId: requestBody.dailyPlanId,
+        plan: requestBody.plan,
+        shots: requestBody.shots,
+        allowDuplicate: requestBody.allowDuplicate
+      };
     }
     body.plan = {
       ...body.plan,
@@ -69,8 +134,6 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       // 알 수 없는 지역 문자열은 서울 등 임의 지역으로 대체하지 않고 미선택으로 저장합니다.
       memo: encodeDailyPlanMemo(decodeDailyPlanMemo(body.plan.memo))
     };
-    const supabase = requireProjectAccessDb();
-
     if (!body.dailyPlanId && !body.allowDuplicate) {
       const duplicate = await findDuplicateDailyPlan(supabase, projectId, body.plan);
       if (duplicate) {
