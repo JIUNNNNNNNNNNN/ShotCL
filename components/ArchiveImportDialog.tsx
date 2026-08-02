@@ -351,13 +351,13 @@ export function ArchiveImportDialog({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/30 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
-      <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col rounded-t-2xl border border-field-border bg-white shadow-[0_18px_54px_rgba(20,32,27,0.2)] sm:rounded-2xl">
+      <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col border border-field-border bg-field-panel">
         <header className="flex items-center justify-between border-b border-field-border px-4 py-3">
           <div className="min-w-0">
             <h2 className="font-display truncate text-lg font-black text-field-primary">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
-            <p className="truncate text-xs font-bold text-field-muted">{sourceLabel} · {pages.length}페이지/이미지</p>
+            <p className="truncate text-xs text-field-muted">{sourceLabel} · {pages.length}페이지/이미지</p>
           </div>
-          <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-border text-field-muted" aria-label="가져오기 닫기">
+          <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center border border-field-border text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="가져오기 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
@@ -405,8 +405,8 @@ export function ArchiveImportDialog({
                 cutNo
               })}
             />
-            <details className="mx-auto mt-3 max-w-5xl border border-field-border bg-white">
-              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-black text-field-primary">
+            <details className="mx-auto mt-3 max-w-5xl border border-field-border bg-field-panel">
+              <summary className="cursor-pointer select-none px-3 py-2 text-xs font-bold text-field-primary">
                 제목·씬·컷·메모
               </summary>
               <div className="border-t border-field-border p-3">
@@ -468,7 +468,7 @@ export function ArchiveImportDialog({
               />
             </div>
             <footer className="flex items-center justify-between gap-3 border-t border-field-border px-4 py-3">
-              <p className="inline-flex items-center gap-1 text-xs font-bold text-field-muted">
+              <p className="inline-flex items-center gap-1 text-xs text-field-muted">
                 {results.some((result) => result.crop) ? <Crop className="h-4 w-4" aria-hidden /> : <FileImage className="h-4 w-4" aria-hidden />}
                 {results.length}개 결과 확인
               </p>
@@ -484,7 +484,7 @@ export function ArchiveImportDialog({
                   sceneNo,
                   cutNo
                 })}
-                className="inline-flex min-h-11 items-center gap-2 rounded-[3px] bg-field-primary px-5 text-sm font-black text-white disabled:opacity-50"
+                className="inline-flex min-h-11 items-center gap-2 bg-field-primary px-5 text-sm font-bold text-black transition-colors hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden />
                 {isInteractionLocked ? "저장 중" : "추출 확정"}
@@ -511,9 +511,9 @@ function ArchiveImportProgressOverlay({
   const phaseLabel = archiveImportPhaseLabel(progress.phase);
 
   return (
-    <div className="absolute inset-0 z-50 grid place-items-center bg-white/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-5">
+    <div className="absolute inset-0 z-50 grid place-items-center bg-field-panel/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-5">
       <section
-        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-sm gap-3 overflow-y-auto rounded-[3px] border border-field-border bg-white p-4 shadow-[0_14px_34px_rgba(20,32,27,0.18)]"
+        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-sm gap-3 overflow-y-auto border border-field-border bg-field-panel p-4"
         role="status"
         aria-live="polite"
         aria-label={`콘티 이미지 처리 중, ${phaseLabel}, ${percent}%`}
@@ -522,18 +522,18 @@ function ArchiveImportProgressOverlay({
           <h3 className="font-display text-base font-black text-field-primary">
             콘티 이미지 처리 중
           </h3>
-          <p className="text-sm font-black text-field-text">{phaseLabel}</p>
+          <p className="text-sm font-bold text-field-text">{phaseLabel}</p>
         </div>
 
         <div className="flex items-end justify-between gap-3">
-          <p className="min-w-0 text-xs font-bold text-field-muted">
+          <p className="min-w-0 text-xs text-field-muted">
             {current} / {total}
           </p>
           <p className="shrink-0 text-sm font-black text-field-primary">{percent}%</p>
         </div>
 
         <div
-          className="h-3 overflow-hidden rounded-[2px] border border-field-border bg-field-soft"
+          className="h-3 overflow-hidden border border-field-border bg-field-soft"
           role="progressbar"
           aria-label="콘티 이미지 처리 진행률"
           aria-valuemin={0}
@@ -541,12 +541,12 @@ function ArchiveImportProgressOverlay({
           aria-valuenow={percent}
         >
           <div
-            className="h-full rounded-none bg-field-primary transition-[width] duration-150 ease-linear motion-reduce:transition-none"
+            className="h-full bg-field-primary transition-[width] duration-150 ease-linear motion-reduce:transition-none"
             style={{ width: `${percent}%` }}
           />
         </div>
 
-        <div className="grid grid-cols-2 border-y border-field-border text-xs font-bold text-field-muted">
+        <div className="grid grid-cols-2 border-y border-field-border text-xs text-field-muted">
           <p className="border-r border-field-border px-2 py-2">
             저장 {Math.max(0, progress.savedCount)}개
           </p>
@@ -555,7 +555,7 @@ function ArchiveImportProgressOverlay({
           </p>
         </div>
 
-        <p className="text-xs font-bold leading-5 text-field-danger">
+        <p className="text-xs leading-5 text-field-danger">
           처리 중에는 화면을 닫거나 새로고침하지 마세요.
         </p>
       </section>
@@ -653,12 +653,12 @@ function ArchiveMetadataFields({
   const selectedSceneExists = scenes.some((scene) => scene.id === sceneId);
   return (
     <div className="grid content-start gap-2">
-      <label className="grid gap-1 text-xs font-black text-field-muted">
+      <label className="grid gap-1 text-xs font-bold text-field-muted">
         제목
-        <input disabled={disabled} value={title} onChange={(event) => onTitleChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft disabled:opacity-70" placeholder="선택 사항" />
+        <input disabled={disabled} value={title} onChange={(event) => onTitleChange(event.target.value)} className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25 disabled:bg-field-soft disabled:opacity-70" placeholder="선택 사항" />
       </label>
       {showSceneCut ? <div className="grid grid-cols-2 gap-2">
-        <label className="grid gap-1 text-xs font-black text-field-muted">
+        <label className="grid gap-1 text-xs font-bold text-field-muted">
           씬
           {scenes.length > 0 || sceneId ? (
             <select
@@ -668,7 +668,7 @@ function ArchiveMetadataFields({
                 const scene = scenes.find((entry) => entry.id === event.target.value);
                 onSceneChange(scene?.id || "", scene?.sceneNo || "");
               }}
-              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text"
+              className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
             >
               <option value="">연결 안 함</option>
               {sceneId && !selectedSceneExists ? (
@@ -685,13 +685,13 @@ function ArchiveMetadataFields({
               disabled={disabled}
               value={sceneNo}
               onChange={(event) => onSceneNoChange(event.target.value)}
-              className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text"
+              className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
             />
           )}
         </label>
-        <label className="grid gap-1 text-xs font-black text-field-muted">컷<input disabled={disabled} value={cutNo} onChange={(event) => onCutNoChange(event.target.value)} className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm text-field-text disabled:bg-field-soft disabled:opacity-70" /></label>
+        <label className="grid gap-1 text-xs font-bold text-field-muted">컷<input disabled={disabled} value={cutNo} onChange={(event) => onCutNoChange(event.target.value)} className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25 disabled:bg-field-soft disabled:opacity-70" /></label>
       </div> : null}
-      <label className="grid gap-1 text-xs font-black text-field-muted">메모<textarea disabled={disabled} value={memo} onChange={(event) => onMemoChange(event.target.value)} rows={3} className="rounded-lg border border-field-border bg-white px-3 py-2 text-sm leading-5 text-field-text disabled:bg-field-soft disabled:opacity-70" /></label>
+      <label className="grid gap-1 text-xs font-bold text-field-muted">메모<textarea disabled={disabled} value={memo} onChange={(event) => onMemoChange(event.target.value)} rows={3} className="border border-field-border bg-field-panel px-3 py-2 text-sm leading-5 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25 disabled:bg-field-soft disabled:opacity-70" /></label>
     </div>
   );
 }
@@ -788,10 +788,10 @@ function StoryboardCropWorkflow({
   return (
     <div className="mx-auto grid max-w-5xl content-start gap-2">
       <div className="flex min-h-8 items-center justify-between gap-2">
-        <p className="text-xs font-black text-field-primary sm:text-sm">
+        <p className="text-xs font-bold text-field-primary sm:text-sm">
           {cropTemplate ? "칸을 누르거나 여러 칸을 드래그하세요" : "첫 그림칸을 드래그하세요"}
         </p>
-        <span className="shrink-0 text-[11px] font-bold text-field-muted">
+        <span className="shrink-0 text-[11px] text-field-muted">
           {activePageIndex + 1}/{pages.length} 페이지 · {activeCandidates.length}개
         </span>
       </div>
@@ -816,12 +816,12 @@ function StoryboardCropWorkflow({
           onCandidateChange={onCandidateChange}
         />
       ) : referencePage ? (
-        <p className="p-6 text-center text-sm font-bold text-field-muted">페이지를 표시할 수 없습니다.</p>
+        <p className="p-6 text-center text-sm text-field-muted">페이지를 표시할 수 없습니다.</p>
       ) : null}
 
       {saveReport ? (
         <section
-          className="grid gap-1 border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-950"
+          className="grid gap-1 border border-field-primary bg-field-panel px-3 py-2 text-[11px] text-field-text"
           aria-live="polite"
         >
           <p>
@@ -830,7 +830,7 @@ function StoryboardCropWorkflow({
           </p>
           {saveReport.failures.length > 0 ? (
             <details>
-              <summary className="cursor-pointer font-black">실패 항목 보기</summary>
+              <summary className="cursor-pointer font-bold">실패 항목 보기</summary>
               <ul className="mt-1 grid max-h-28 gap-1 overflow-y-auto">
                 {saveReport.failures.map((failure) => (
                   <li key={failure.resultId}>
@@ -843,16 +843,16 @@ function StoryboardCropWorkflow({
         </section>
       ) : null}
 
-      <div className="sticky bottom-0 z-30 flex flex-wrap items-center justify-between gap-2 border border-field-border bg-white/95 p-2 shadow-[0_-8px_24px_rgba(20,32,27,0.1)] backdrop-blur">
+      <div className="sticky bottom-0 z-30 flex flex-wrap items-center justify-between gap-2 border border-field-border bg-field-panel p-2">
         <div className="flex items-center gap-1">
-          <span className="px-1 text-[11px] font-black text-field-primary">
+          <span className="px-1 text-[11px] font-bold text-field-primary">
             현재 {activeCandidates.length} · 전체 {candidates.length}
           </span>
           <button
             type="button"
             onClick={() => activePage && onAddAutomaticCandidates(activePage)}
             disabled={!cropTemplate || !activePage || isEditorLocked}
-            className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+            className="inline-flex min-h-9 items-center gap-1 border border-field-border px-2.5 text-[11px] font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-40"
           >
             <Grid2X2 className="h-3.5 w-3.5" aria-hidden />
             자동 후보
@@ -862,7 +862,7 @@ function StoryboardCropWorkflow({
               type="button"
               onClick={() => onResetPageGrid(activePage, editingCandidate)}
               disabled={isEditorLocked}
-              className="min-h-9 rounded-[3px] border border-field-border px-2.5 text-[11px] font-black text-field-primary disabled:opacity-40"
+              className="min-h-9 border border-field-border px-2.5 text-[11px] font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-40"
             >
               격자 재설정
             </button>
@@ -871,7 +871,7 @@ function StoryboardCropWorkflow({
             type="button"
             onClick={onUndo}
             disabled={candidates.length === 0 || isEditorLocked}
-            className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-40"
+            className="grid h-9 w-9 place-items-center border border-field-border text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-40"
             aria-label="마지막 후보 취소"
           >
             <Undo2 className="h-4 w-4" aria-hidden />
@@ -881,7 +881,7 @@ function StoryboardCropWorkflow({
               type="button"
               onClick={() => editingCandidate && onDeleteCandidate(editingCandidate.id)}
               disabled={isEditorLocked}
-              className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-danger/35 text-field-danger disabled:opacity-40"
+              className="grid h-9 w-9 place-items-center border border-field-danger/60 text-field-danger transition-colors hover:bg-field-danger hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger disabled:opacity-40"
               aria-label="선택한 crop 후보 삭제"
             >
               <Trash2 className="h-4 w-4" aria-hidden />
@@ -890,20 +890,20 @@ function StoryboardCropWorkflow({
         </div>
 
         <div className="flex items-center gap-1">
-          <button type="button" onClick={() => movePage(-1)} disabled={activePageIndex <= 0 || isSaving} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-35" aria-label="이전 페이지">
+          <button type="button" onClick={() => movePage(-1)} disabled={activePageIndex <= 0 || isSaving} className="grid h-9 w-9 place-items-center border border-field-border text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-35" aria-label="이전 페이지">
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>
-          <button type="button" onClick={() => movePage(1)} disabled={activePageIndex >= pages.length - 1 || isSaving} className="grid h-9 w-9 place-items-center rounded-[3px] border border-field-border text-field-primary disabled:opacity-35" aria-label="다음 페이지">
+          <button type="button" onClick={() => movePage(1)} disabled={activePageIndex >= pages.length - 1 || isSaving} className="grid h-9 w-9 place-items-center border border-field-border text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-35" aria-label="다음 페이지">
             <ChevronRight className="h-4 w-4" aria-hidden />
           </button>
-          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-9 rounded-[3px] border border-field-border px-3 text-[11px] font-black text-field-muted disabled:opacity-40">
+          <button type="button" onClick={onCancel} disabled={isSaving} className="min-h-9 border border-field-border px-3 text-[11px] text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-40">
             취소
           </button>
           <button
             type="button"
             onClick={onConfirmExtraction}
             disabled={!cropTemplate || candidates.length === 0 || isSaving}
-            className="inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-[11px] font-black text-white disabled:opacity-40"
+            className="inline-flex min-h-9 items-center gap-1 bg-field-primary px-3 text-[11px] font-bold text-black transition-colors hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-40"
           >
             <Save className="h-3.5 w-3.5" aria-hidden />
             {isSaving
@@ -1215,7 +1215,7 @@ function StoryboardCropCanvas({
       onContextMenu={(event) => event.preventDefault()}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={page.previewUrl} alt="" draggable={false} className="pointer-events-none block h-full w-full select-none rounded-none object-fill" />
+      <img src={page.previewUrl} alt="" draggable={false} className="pointer-events-none block h-full w-full select-none object-fill" />
       {selectionCrop && cropTemplate ? (
         <>
           {gridCells.map((cell) => (
@@ -1224,8 +1224,8 @@ function StoryboardCropCanvas({
               aria-hidden
               className={`pointer-events-none absolute border ${
                 selectedGuideKeys.has(cell.key)
-                  ? "border-[#ef8f39] bg-[#ef8f39]/16"
-                  : "border-[#ef8f39]/30"
+                  ? "border-field-primary bg-field-primary/15"
+                  : "border-field-primary/30"
               }`}
               style={{
                 left: `${cell.crop.x * 100}%`,
@@ -1252,7 +1252,7 @@ function StoryboardCropCanvas({
           role="button"
           tabIndex={0}
           aria-label="첫 콘티 기준 crop 이동 및 크기 조절"
-          className="absolute cursor-move border-2 border-[#ef8f39] bg-[#ef8f39]/10"
+          className="absolute cursor-move border-2 border-field-primary bg-field-primary/10"
           style={{
             left: `${referenceCrop.x * 100}%`,
             top: `${referenceCrop.y * 100}%`,
@@ -1276,7 +1276,7 @@ function StoryboardCropCanvas({
                 onPointerDown={(event) => startReferenceAdjustment(event, "reference-resize", handle)}
                 onClick={(event) => event.stopPropagation()}
               >
-                <span className="block h-3 w-3 border-2 border-white bg-[#ef8f39]" />
+                <span className="block h-3 w-3 border-2 border-black bg-field-primary" />
               </button>
             ))
             : null}
@@ -1290,7 +1290,7 @@ function StoryboardCropCanvas({
             event.stopPropagation();
             onConfirmTemplate();
           }}
-          className="absolute z-20 inline-flex min-h-9 -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-[3px] bg-field-primary px-3 text-[11px] font-black text-white shadow-[0_4px_16px_rgba(20,66,52,0.24)]"
+          className="absolute z-20 inline-flex min-h-9 -translate-x-1/2 items-center gap-1 whitespace-nowrap border border-field-primary bg-field-primary px-3 text-[11px] font-bold text-black"
           style={{
             left: `clamp(4.75rem, ${(referenceCrop.x + referenceCrop.width / 2) * 100}%, calc(100% - 4.75rem))`,
             top: `clamp(0.5rem, ${(referenceCrop.y + referenceCrop.height + 0.015) * 100}%, calc(100% - 2.75rem))`
@@ -1325,10 +1325,10 @@ function StoryboardCropCanvas({
               onSelect(candidate.id);
             }
           }}
-          className={`absolute cursor-move border-2 bg-[#ef8f39]/12 ${
+          className={`absolute cursor-move border-2 bg-field-primary/10 ${
             selectedCandidateId === candidate.id
-              ? `z-10 ${overlaps ? "border-field-danger" : "border-[#d96f18]"} ring-2 ring-white/90`
-              : overlaps ? "border-field-danger" : "border-[#ef8f39]"
+              ? `z-10 ${overlaps ? "border-field-danger" : "border-field-primary"} ring-2 ring-white/90`
+              : overlaps ? "border-field-danger" : "border-field-primary"
           }`}
           style={{
             left: `${candidate.crop.x * 100}%`,
@@ -1338,7 +1338,7 @@ function StoryboardCropCanvas({
           }}
           aria-label={`후보 ${index + 1} 수정`}
         >
-          <span className="pointer-events-none absolute left-0 top-0 grid h-5 min-w-5 place-items-center bg-[#ef8f39] px-1 text-[10px] font-black text-white">
+          <span className="pointer-events-none absolute left-0 top-0 grid h-5 min-w-5 place-items-center bg-field-primary px-1 text-[10px] font-black text-black">
             {candidateNumbers.get(candidate.id) ?? index + 1}
           </span>
           {selectedCandidateId === candidate.id
@@ -1355,7 +1355,7 @@ function StoryboardCropCanvas({
                 onPointerDown={(event) => startCandidateDrag(event, candidate, "resize", handle)}
                 onClick={(event) => event.stopPropagation()}
               >
-                <span className="block h-3 w-3 border-2 border-white bg-[#ef8f39]" />
+                <span className="block h-3 w-3 border-2 border-black bg-field-primary" />
               </button>
             ))
             : null}
@@ -1512,8 +1512,8 @@ function OverheadCropWorkflow({
   return (
     <div className="grid content-start gap-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-black text-field-primary">저장할 페이지 선택</p>
-        <button type="button" onClick={() => onSelectedIdsChange(selectedCount === pages.length ? new Set() : new Set(pages.map((page) => page.id)))} className="min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
+        <p className="text-sm font-bold text-field-primary">저장할 페이지 선택</p>
+        <button type="button" onClick={() => onSelectedIdsChange(selectedCount === pages.length ? new Set() : new Set(pages.map((page) => page.id)))} className="min-h-9 border border-field-border px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
           {selectedCount === pages.length ? "전체 해제" : "전체 선택"}
         </button>
       </div>
@@ -1531,12 +1531,12 @@ function OverheadCropWorkflow({
                 else next.add(page.id);
                 return next;
               })}
-              className={`relative grid gap-1 border bg-white p-1.5 text-left ${selected ? "border-field-primary ring-2 ring-field-primary/20" : "border-field-border"}`}
+              className={`relative grid gap-1 border bg-field-panel p-1.5 text-left ${selected ? "border-field-primary ring-2 ring-field-primary/20" : "border-field-border"}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={page.previewUrl} alt={`${page.index + 1}페이지 미리보기`} draggable={false} className="block aspect-[4/3] h-auto w-full select-none rounded-none object-contain" />
-              <span className="truncate px-1 text-[11px] font-bold text-field-muted">{page.index + 1}. {page.name}</span>
-              {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[3px] bg-field-primary text-white"><Check className="h-4 w-4" aria-hidden /></span> : null}
+              <img src={page.previewUrl} alt={`${page.index + 1}페이지 미리보기`} draggable={false} className="block aspect-[4/3] h-auto w-full select-none object-contain" />
+              <span className="truncate px-1 text-[11px] text-field-muted">{page.index + 1}. {page.name}</span>
+              {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center bg-field-primary text-black"><Check className="h-4 w-4" aria-hidden /></span> : null}
             </button>
           );
         })}
@@ -1544,10 +1544,10 @@ function OverheadCropWorkflow({
       <div className="grid gap-2 border border-field-border bg-field-soft/45 p-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-black text-field-primary">페이지 crop</p>
-            <p className="text-[11px] font-bold text-field-muted">선택한 페이지에 같은 상대 좌표를 적용합니다.</p>
+            <p className="text-sm font-bold text-field-primary">페이지 crop</p>
+            <p className="text-[11px] text-field-muted">선택한 페이지에 같은 상대 좌표를 적용합니다.</p>
           </div>
-          <label className="inline-flex items-center gap-2 text-xs font-black text-field-primary"><input type="checkbox" checked={applyCrop} onChange={(event) => onApplyCropChange(event.target.checked)} />적용</label>
+          <label className="inline-flex items-center gap-2 text-xs font-bold text-field-primary"><input type="checkbox" checked={applyCrop} onChange={(event) => onApplyCropChange(event.target.checked)} />적용</label>
         </div>
         {referencePage ? <CropSelector page={referencePage} value={crop} disabled={!applyCrop || isSaving} onChange={onCropChange} label="부감도 페이지 crop" /> : null}
         <CropNumbers crop={crop} />
@@ -1558,7 +1558,7 @@ function OverheadCropWorkflow({
 
 function CropNumbers({ crop }: { crop: RelativeCrop }) {
   return (
-    <div className="grid grid-cols-4 gap-1 text-[10px] font-bold text-field-muted">
+    <div className="grid grid-cols-4 gap-1 text-[10px] text-field-muted">
       <span>x {Math.round(crop.x * 100)}%</span>
       <span>y {Math.round(crop.y * 100)}%</span>
       <span>w {Math.round(crop.width * 100)}%</span>
@@ -1648,14 +1648,14 @@ function CropSelector({
       onContextMenu={(event) => event.preventDefault()}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={page.previewUrl} alt={label} draggable={false} className="pointer-events-none block h-full w-full select-none rounded-none object-fill" />
+      <img src={page.previewUrl} alt={label} draggable={false} className="pointer-events-none block h-full w-full select-none object-fill" />
       {value.width > 0 && value.height > 0 ? (
         <div
-          className="absolute cursor-move border-2 border-[#ef8f39] bg-[#ef8f39]/10 shadow-[0_0_0_999px_rgba(0,0,0,0.22)]"
+          className="absolute cursor-move border-2 border-field-primary bg-field-primary/10 shadow-[0_0_0_999px_rgba(0,0,0,0.55)]"
           style={{ left: `${value.x * 100}%`, top: `${value.y * 100}%`, width: `${value.width * 100}%`, height: `${value.height * 100}%` }}
           onPointerDown={(event) => startDrag(event, "move")}
         >
-          <button type="button" tabIndex={-1} aria-label="crop 크기 조절" className="absolute -bottom-2 -right-2 h-5 w-5 cursor-se-resize border-2 border-white bg-[#ef8f39]" onPointerDown={(event) => startDrag(event, "resize")} />
+          <button type="button" tabIndex={-1} aria-label="crop 크기 조절" className="absolute -bottom-2 -right-2 h-5 w-5 cursor-se-resize border-2 border-black bg-field-primary" onPointerDown={(event) => startDrag(event, "resize")} />
         </div>
       ) : null}
     </div>

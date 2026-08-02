@@ -17,9 +17,9 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}
-      className="block h-full max-h-full w-full max-w-full rounded-none bg-[#fbfaf6]"
+      className="block h-full max-h-full w-full max-w-full  bg-[#fbfaf6]"
       preserveAspectRatio="xMidYMid meet"
-      shapeRendering="geometricPrecision"
+      shapeRendering="crispEdges"
       role="img"
       aria-label={label}
     >
@@ -47,13 +47,12 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
               y={shape.y}
               width={shape.width}
               height={shape.height}
-              rx="8"
               fill="rgba(255,255,255,0.7)"
-              stroke="#77746e"
+              stroke="#111111"
               strokeWidth="5"
             />
             {shape.label ? (
-              <text x={shape.x + 18} y={shape.y + 36} fill="#4f4c46" fontSize="28" fontWeight="700">
+              <text x={shape.x + 18} y={shape.y + 36} fill="#111111" fontSize="28" fontWeight="700">
                 {shape.label}
               </text>
             ) : null}
@@ -80,11 +79,11 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
       {diagram.people.map((person) => (
         <g key={person.id}>
           <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`}>
-            <circle cx="0" cy="0" r="28" fill="#fff" stroke="#0f3d2e" strokeWidth="7" />
-            <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#0f3d2e" />
+            <circle cx="0" cy="0" r="28" fill="#fff" stroke="#111111" strokeWidth="7" />
+            <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#111111" />
           </g>
           {person.label ? (
-            <text x={person.x} y={person.y + 66 * person.scale} textAnchor="middle" fill="#0f3d2e" fontSize="28" fontWeight="800">
+            <text x={person.x} y={person.y + 66 * person.scale} textAnchor="middle" fill="#111111" fontSize="28" fontWeight="700">
               {person.label}
             </text>
           ) : null}
@@ -94,12 +93,12 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
       {diagram.cameras.map((camera) => (
         <g key={camera.id}>
           <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
-            <rect x={camera.x - 35} y={camera.y - 27} width="58" height="54" rx="8" fill="#0f3d2e" />
-            <path d={`M ${camera.x + 20} ${camera.y - 22} L ${camera.x + 62} ${camera.y - 38} L ${camera.x + 62} ${camera.y + 38} L ${camera.x + 20} ${camera.y + 22} Z`} fill="#0f3d2e" />
+            <rect x={camera.x - 35} y={camera.y - 27} width="58" height="54" fill="#111111" />
+            <path d={`M ${camera.x + 20} ${camera.y - 22} L ${camera.x + 62} ${camera.y - 38} L ${camera.x + 62} ${camera.y + 38} L ${camera.x + 20} ${camera.y + 22} Z`} fill="#111111" />
             <circle cx={camera.x - 6} cy={camera.y} r="12" fill="#fbfaf6" />
           </g>
           {camera.label ? (
-            <text x={camera.x} y={camera.y + 70} textAnchor="middle" fill="#0f3d2e" fontSize="28" fontWeight="800">
+            <text x={camera.x} y={camera.y + 70} textAnchor="middle" fill="#111111" fontSize="28" fontWeight="700">
               {camera.label}
             </text>
           ) : null}

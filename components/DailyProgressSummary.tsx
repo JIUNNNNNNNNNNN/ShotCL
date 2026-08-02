@@ -14,22 +14,22 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
   const progressMessage = getDailyProgressMessage(progressPercent);
 
   return (
-    <section className="mb-3 border border-field-border bg-white p-3" aria-label="일일 촬영 진행률">
+    <section className="mb-3 border border-field-border bg-field-panel p-3" aria-label="일일 촬영 진행률">
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="break-words text-sm font-black leading-[1.35] text-field-primary">
+          <h2 className="break-words text-sm font-bold leading-[1.35] text-field-primary">
             {progressMessage}
           </h2>
-          <p className="mt-0.5 text-2xl font-black leading-none text-field-primary tabular-nums">
+          <p className="mt-0.5 text-2xl font-bold leading-none text-field-primary tabular-nums">
             {progressPercent}%
           </p>
         </div>
-        <span className="text-[11px] font-bold text-field-muted">
+        <span className="text-[11px] font-normal text-field-muted">
           처리 {progress.processedCutCount}/{progress.totalCutCount}
         </span>
       </div>
       <div
-        className="mt-2 h-2 overflow-hidden rounded-[2px] border border-field-border bg-field-soft"
+        className="mt-2 h-2 overflow-hidden  border border-field-border bg-field-soft"
         role="progressbar"
         aria-label="촬영 진행률"
         aria-valuemin={0}
@@ -41,7 +41,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
           style={{ width: `${progressPercent}%` }}
         />
       </div>
-      <p className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-bold leading-5 text-field-muted">
+      <p className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-normal leading-5 text-field-muted">
         <span>OK <strong className="tabular-nums text-field-primary">{progress.okCutCount}</strong></span>
         <span aria-hidden>·</span>
         <span>OMIT <strong className="tabular-nums text-field-danger">{progress.omitCutCount}</strong></span>

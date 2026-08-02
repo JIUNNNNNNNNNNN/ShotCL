@@ -12,10 +12,10 @@ export const ArchiveDeleteDropZone = forwardRef<HTMLDivElement, { isActive: bool
       >
         <div
           ref={ref}
-          className={`flex min-h-16 w-full items-center justify-center gap-2 rounded-[3px] border-2 px-4 py-3 font-black shadow-sm transition-[transform,border-color,background-color,color] duration-150 motion-reduce:transition-none ${
+          className={`flex min-h-16 w-full items-center justify-center gap-2 border-2 px-4 py-3 font-black transition-[transform,border-color,background-color,color] duration-150 motion-reduce:transition-none ${
           isActive
-            ? "scale-[1.04] border-field-danger bg-[#fff1f1] text-field-danger"
-            : "border-field-border bg-white text-field-muted"
+            ? "scale-[1.04] border-field-danger bg-field-danger/10 text-field-danger"
+            : "border-field-border bg-field-panel text-field-muted"
           }`}
           role="status"
           aria-label={isActive ? "삭제 영역에 놓을 수 있습니다" : "삭제 영역"}

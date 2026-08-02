@@ -36,9 +36,9 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const inputClassName =
-  "h-8 w-full min-w-0 rounded-xl border border-field-border bg-white px-2 text-center text-xs font-bold text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 w-full min-w-0 border border-field-border bg-field-panel px-2 text-center text-xs text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 const notesTextareaClassName =
-  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap rounded-xl border border-field-border bg-white px-2 py-1 text-center text-xs font-bold leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border border-field-border bg-field-panel px-2 py-1 text-center text-xs leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
 const desktopEditableGridClassName =
@@ -430,9 +430,9 @@ export default function StaffListPage() {
 
   if (!project) {
     return (
-      <div className="rounded-[2rem] border border-field-danger bg-white p-6 text-center">
+      <div className="border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-black text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
-        <Link href="/" className="mt-4 inline-flex rounded-[3px] border border-field-border px-4 py-2 text-sm font-black text-field-primary">
+        <Link href="/" className="mt-4 inline-flex border border-field-border bg-field-panel px-4 py-2 text-sm font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
           홈으로
         </Link>
       </div>
@@ -441,21 +441,21 @@ export default function StaffListPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl pb-20">
-      <section className="rounded-[1.5rem] border border-field-border bg-white px-4 py-3 shadow-sm">
+      <section className="border border-field-border bg-field-panel px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[3px] bg-field-primary text-white">
+            <div className="grid h-10 w-10 shrink-0 place-items-center bg-field-primary text-black">
               <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
               <h1 className="font-display text-xl font-black text-field-primary">스탭 리스트</h1>
-              <p className="truncate text-xs font-bold text-field-muted">{project.name} · 프로젝트 공통</p>
+              <p className="truncate text-xs text-field-muted">{project.name} · 프로젝트 공통</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary transition hover:bg-field-soft"
+              className="inline-flex h-9 items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -465,7 +465,7 @@ export default function StaffListPage() {
                 type="button"
                 onClick={() => void save(members, departments, true)}
                 disabled={isSaving || !isDirty}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 bg-field-primary px-3 text-xs font-bold text-black transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
@@ -473,7 +473,7 @@ export default function StaffListPage() {
             ) : null}
           </div>
         </div>
-        <p className="mt-2 text-[11px] font-bold text-field-muted" aria-live="polite">
+        <p className="mt-2 text-[11px] text-field-muted" aria-live="polite">
           {canEdit
             ? "프로젝트 전체에서 사용할 스탭을 직접 추가하고 수정한 뒤 저장 버튼을 눌러주세요."
             : "프로젝트 스탭과 회차별 참여 상태를 읽기 전용으로 확인할 수 있습니다."}
@@ -484,19 +484,19 @@ export default function StaffListPage() {
       </section>
 
       {errorMessage ? (
-        <p className="mt-3 rounded-xl border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger">{errorMessage}</p>
+        <p className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-xs font-bold text-field-danger">{errorMessage}</p>
       ) : null}
       {message ? (
-        <p className="mt-3 rounded-xl border border-field-primary bg-field-light px-3 py-2 text-xs font-bold text-field-primary">{message}</p>
+        <p className="mt-3 border border-field-primary bg-field-panel px-3 py-2 text-xs font-bold text-field-primary">{message}</p>
       ) : null}
 
-      <section className="mt-3 rounded-2xl border border-field-border bg-white px-2.5 py-2 shadow-sm">
+      <section className="mt-3 border border-field-border bg-field-panel px-2.5 py-2">
         <div className={`grid h-8 items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
           {canEdit ? (
             <button
               type="button"
               onClick={() => setIsDepartmentsOpen((current) => !current)}
-              className="flex h-8 min-w-0 items-center justify-between gap-2 rounded-xl px-2 text-xs font-black text-field-primary transition hover:bg-field-soft"
+              className="flex h-8 min-w-0 items-center justify-between gap-2 border border-field-border bg-field-panel px-2 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-expanded={isDepartmentsOpen}
               aria-controls="staff-departments-panel"
             >
@@ -515,14 +515,14 @@ export default function StaffListPage() {
                   setIsNotesSummaryOpen((current) => !current);
                 }
               }}
-              className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-xl bg-field-soft/60 px-2 text-left text-[11px] font-bold text-field-muted transition hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/30"
+              className="group flex h-8 w-full min-w-0 items-center gap-1.5 border border-field-border bg-field-panel px-2 text-left text-[11px] text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
               aria-expanded={notesSummary.items.length > 0 ? isNotesSummaryOpen : undefined}
               aria-controls={notesSummary.items.length > 0 ? "staff-notes-summary-popover" : undefined}
             >
               {notesSummary.displayText ? (
                 <>
-                  <span className="shrink-0 text-field-primary">특이사항</span>
+                  <span className="shrink-0 text-field-primary group-hover:text-black">특이사항</span>
                   <span className="truncate">{notesSummary.displayText}</span>
                   <ChevronDown
                     className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${isNotesSummaryOpen ? "rotate-180" : ""}`}
@@ -534,7 +534,7 @@ export default function StaffListPage() {
             {isNotesSummaryOpen ? (
               <div
                 id="staff-notes-summary-popover"
-                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-field-border bg-white p-2.5 text-left shadow-lg"
+                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border border-field-border bg-field-panel p-2.5 text-left"
                 role="dialog"
                 aria-label="특이사항 전체보기"
               >
@@ -542,7 +542,7 @@ export default function StaffListPage() {
                   {notesSummary.items.map((item) => (
                     <li
                       key={item.id}
-                      className="rounded-lg bg-field-soft/60 px-2.5 py-2 text-xs font-bold leading-relaxed text-field-text [overflow-wrap:anywhere]"
+                      className="border border-field-border bg-field-soft px-2.5 py-2 text-xs leading-relaxed text-field-text [overflow-wrap:anywhere]"
                     >
                       {item.owner ? <span className="text-field-primary">{item.owner}:</span> : null}
                       <span className="whitespace-pre-wrap">{item.owner ? " " : ""}{item.notes}</span>
@@ -567,7 +567,7 @@ export default function StaffListPage() {
                 onDelete={() => deleteDepartment(department.id)}
               />
             ))}
-            <div className="flex h-8 items-center rounded-[3px] border border-dashed border-field-border bg-field-soft/50 pl-2">
+            <div className="flex h-8 items-center border border-dashed border-field-border bg-field-soft/50 pl-2">
               <input
                 type="text"
                 value={newDepartmentName}
@@ -599,7 +599,7 @@ export default function StaffListPage() {
                 onBlur={() => {
                   pendingDepartmentSubmitRef.current = false;
                 }}
-                className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-field-text outline-none placeholder:text-center"
+                className="w-24 min-w-0 bg-transparent text-center text-xs text-field-text outline-none placeholder:text-center focus-visible:ring-2 focus-visible:ring-field-primary/25"
                 placeholder="+ 부서 추가"
                 aria-label="새 부서 이름"
                 maxLength={100}
@@ -607,7 +607,7 @@ export default function StaffListPage() {
               <button
                 type="button"
                 onClick={() => addDepartment()}
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] text-field-primary transition hover:bg-field-light active:scale-90"
+                className="grid h-8 w-8 shrink-0 place-items-center text-field-primary transition-colors hover:bg-field-primary hover:text-black active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                 aria-label="부서 추가"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -617,7 +617,7 @@ export default function StaffListPage() {
         ) : null}
       </section>
 
-      <section className="mt-3 rounded-[1.5rem] border border-field-border bg-white p-2 shadow-sm">
+      <section className="mt-3 border border-field-border bg-field-panel p-2">
         {staffGroups.length > 0 ? (
           <div className="grid gap-2">
             {staffGroups.map((group) => {
@@ -625,16 +625,16 @@ export default function StaffListPage() {
               return (
                 <section
                   key={group.key}
-                  className="overflow-visible rounded-xl border border-l-[3px]"
+                  className="overflow-visible border border-l-[3px]"
                   data-staff-department={group.name}
                   style={{
                     backgroundColor: departmentColor.background,
                     borderColor: departmentColor.border
                   }}
                 >
-                  <div className="overflow-hidden rounded-t-[calc(0.75rem-1px)]">
+                  <div className="overflow-hidden">
                     <header
-                      className="flex h-7 items-center border-b px-2.5 text-xs font-black text-field-primary"
+                      className="flex h-7 items-center border-b px-2.5 text-xs font-black text-[#1c1c1a]"
                       style={{
                         backgroundColor: `${departmentColor.border}33`,
                         borderColor: departmentColor.border
@@ -646,14 +646,14 @@ export default function StaffListPage() {
                           <button
                             type="button"
                             onClick={() => addMember(group.name)}
-                            className="grid h-5 w-5 shrink-0 place-items-center rounded-[3px] border border-current/20 bg-white/70 text-field-primary transition hover:bg-white active:scale-90"
+                            className="grid h-5 w-5 shrink-0 place-items-center border border-black/25 bg-black text-field-primary transition-colors hover:bg-field-primary hover:text-black active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
                             aria-label={`${group.name} 부서에 인원 추가`}
                           >
                             <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
                           </button>
                         ) : null}
                       </span>
-                      <span className="ml-auto shrink-0 text-[10px] text-field-muted">
+                      <span className="ml-auto shrink-0 text-[10px] text-black/65">
                         {group.members.length}명
                       </span>
                     </header>
@@ -751,7 +751,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
         canEdit
           ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
           : `grid-cols-6 ${desktopGridClassName}`
-      } ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70 shadow-sm" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
+      } ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
       style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
@@ -844,7 +844,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] border border-field-danger/25 bg-white text-field-danger/60 transition hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/25 bg-field-panel text-field-danger/60 transition-colors hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -902,7 +902,7 @@ function EpisodeParticipationCells({
       {episodeNumbers.length > 0 ? (
         <div
           ref={scrollContainerRef}
-          className="h-7 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-md [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
+          className="h-7 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
           aria-label={`${member.name || "스탭"} 참여 회차`}
           onDragStart={(event) => event.preventDefault()}
           onScroll={() => {
@@ -927,12 +927,12 @@ function EpisodeParticipationCells({
                   aria-pressed={participating}
                   aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
                   disabled={!canEdit}
-                  className={`h-7 min-w-0 select-none whitespace-nowrap border-y border-r border-field-border p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:rounded-l-md first:border-l last:rounded-r-md focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
+                  className={`h-7 min-w-0 select-none whitespace-nowrap border-y border-r border-field-border p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:border-l focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
                     canEdit ? "cursor-pointer active:brightness-95" : "cursor-default"
                   } ${
                     participating
                       ? "opacity-100"
-                      : "bg-white/80 text-field-muted"
+                      : "bg-field-panel/80 text-field-muted"
                   }`}
                   style={participating ? {
                     backgroundColor: departmentColor.border,
@@ -990,7 +990,7 @@ function EpisodeParticipationCells({
           </div>
         </div>
       ) : (
-        <span className="grid h-7 min-w-0 flex-1 place-items-center rounded-md border border-field-border bg-white/70 text-[10px] font-black text-field-muted">
+        <span className="grid h-7 min-w-0 flex-1 place-items-center border border-field-border bg-field-panel/70 text-[10px] font-black text-field-muted">
           -
         </span>
       )}
@@ -1027,7 +1027,7 @@ function DepartmentChip({
 
   return (
     <div
-      className="flex h-8 items-center rounded-[3px] border pl-2 shadow-sm"
+      className="flex h-8 items-center border pl-2"
       style={{
         backgroundColor: departmentColor.background,
         borderColor: departmentColor.border
@@ -1050,7 +1050,7 @@ function DepartmentChip({
             event.currentTarget.blur();
           }
         }}
-        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-field-text outline-none"
+        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-[#1c1c1a] outline-none focus-visible:ring-2 focus-visible:ring-black/30"
         aria-label={`${department.name} 부서명 수정`}
         maxLength={100}
       />
@@ -1064,7 +1064,7 @@ function DepartmentChip({
           event.stopPropagation();
           onDelete();
         }}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] text-field-muted transition hover:bg-field-danger hover:text-white active:scale-90"
+        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
         aria-label={`${department.name} 부서 삭제`}
       >
         <X className="h-3 w-3" aria-hidden />

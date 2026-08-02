@@ -34,7 +34,7 @@ type ShotEditorModalProps = {
 };
 
 const fieldClass =
-  "min-h-11 w-full rounded-md border border-field-border bg-white px-3 py-2 text-base text-field-text outline-none focus:border-field-primary";
+  "min-h-11 w-full  border border-field-border bg-black px-3 py-2 text-base font-normal text-white outline-none placeholder:text-field-muted/70 focus:border-field-primary focus:ring-1 focus:ring-field-primary";
 const textareaClass = `${fieldClass} resize-none leading-6`;
 
 function emptyValues(orderIndex: number): ShotEditorValues {
@@ -135,16 +135,16 @@ export function ShotEditorModal({
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
         className={cn(
-          "w-full overflow-y-auto bg-field-soft shadow-[0_12px_32px_rgba(20,32,27,0.16)]",
+          "w-full overflow-y-auto  border border-field-border bg-field-panel",
           mode === "add"
-            ? "max-h-[92dvh] rounded-t-2xl p-4 sm:mx-auto sm:max-w-3xl sm:rounded-2xl"
-            : "mx-auto max-h-[72dvh] max-w-[26rem] rounded-[1rem] p-3"
+            ? "max-h-[92dvh] p-4 sm:mx-auto sm:max-w-3xl"
+            : "mx-auto max-h-[72dvh] max-w-[26rem] p-3"
         )}
       >
         <div className={cn("mx-auto", mode === "add" && "max-w-3xl")}>
           <div className={cn("flex items-center justify-between gap-2", mode === "add" ? "mb-4" : "mb-1")}>
             {mode === "add" ? (
-              <h2 className="text-lg font-black text-field-primary">새 컷 추가</h2>
+              <h2 className="text-lg font-bold text-field-primary">새 컷 추가</h2>
             ) : (
               <span className="sr-only">{readOnly ? "컷 내용 보기" : "컷 내용 수정"}</span>
             )}
@@ -152,7 +152,7 @@ export function ShotEditorModal({
               variant="ghost"
               onClick={onClose}
               aria-label="팝업 닫기"
-              className="ml-auto !h-8 !min-h-8 !w-8 !border-0 !px-0 !py-0"
+              className="ml-auto !h-8 !min-h-8 !w-8  !border !border-field-border !bg-black !px-0 !py-0 !text-field-muted hover:!border-field-primary hover:!text-field-primary"
             >
               <X className="h-4 w-4" aria-hidden />
             </Button>
@@ -161,7 +161,7 @@ export function ShotEditorModal({
           <div className={cn("grid", mode === "add" ? "gap-3" : "gap-2")}>
             {mode === "add" ? <div className="grid grid-cols-3 gap-3">
               <label className="grid gap-2">
-                <span className="text-xs font-black text-field-muted">씬 번호</span>
+                <span className="text-xs font-normal text-field-muted">씬 번호</span>
                 <input
                   value={values.sceneNumber}
                   readOnly={readOnly}
@@ -170,7 +170,7 @@ export function ShotEditorModal({
                 />
               </label>
               <label className="grid gap-2">
-                <span className="text-xs font-black text-field-muted">컷 번호</span>
+                <span className="text-xs font-normal text-field-muted">컷 번호</span>
                 <input
                   value={values.cutNumber}
                   readOnly={readOnly}
@@ -179,7 +179,7 @@ export function ShotEditorModal({
                 />
               </label>
               <label className="grid gap-2">
-                <span className="text-xs font-black text-field-muted">순서</span>
+                <span className="text-xs font-normal text-field-muted">순서</span>
                 <input
                   type="number"
                   min={1}
@@ -191,12 +191,12 @@ export function ShotEditorModal({
             </div> : null}
 
             {mode === "add" ? <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">제목</span>
+              <span className="text-xs font-normal text-field-muted">제목</span>
               <input required value={values.title} onChange={(event) => updateField("title", event.target.value)} className={fieldClass} />
             </label> : null}
 
             <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">컷 내용</span>
+              <span className="text-xs font-normal text-field-muted">컷 내용</span>
               <textarea
                 value={values.description}
                 readOnly={readOnly}
@@ -207,7 +207,7 @@ export function ShotEditorModal({
             </label>
 
             {mode === "add" ? <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">장소</span>
+              <span className="text-xs font-normal text-field-muted">장소</span>
               <input
                 value={values.location}
                 readOnly={readOnly}
@@ -217,7 +217,7 @@ export function ShotEditorModal({
             </label> : null}
 
             <label className={cn("grid", mode === "add" ? "gap-2" : "gap-1.5")}>
-              <span className={cn("font-black text-field-muted", mode === "add" ? "text-xs" : "text-[11px]")}>등장인물</span>
+              <span className={cn("font-normal text-field-muted", mode === "add" ? "text-xs" : "text-[11px]")}>등장인물</span>
               <input
                 value={values.charactersText}
                 readOnly={readOnly}
@@ -228,12 +228,12 @@ export function ShotEditorModal({
             </label>
 
             {mode === "add" ? <label className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">메모</span>
+              <span className="text-xs font-normal text-field-muted">메모</span>
               <textarea value={values.memo} rows={2} onChange={(event) => updateField("memo", event.target.value)} className={textareaClass} />
             </label> : null}
 
             {mode === "add" ? <div className="grid gap-2">
-              <span className="text-xs font-black text-field-muted">상태</span>
+              <span className="text-xs font-normal text-field-muted">상태</span>
               <div className="grid grid-cols-3 gap-2">
                 {(["pending", "ok", "omit"] as ShotStatus[]).map((status) => (
                   <button
@@ -242,8 +242,8 @@ export function ShotEditorModal({
                     onClick={() => updateField("status", status)}
                     className={
                       values.status === status
-                        ? "min-h-11 rounded-md bg-field-primary text-sm font-black text-white"
-                        : "min-h-11 rounded-md border border-field-border bg-white text-sm font-black text-field-muted"
+                        ? "min-h-11  border border-field-primary bg-field-primary text-sm font-bold text-black"
+                        : "min-h-11  border border-field-border bg-black text-sm font-normal text-field-muted hover:border-field-primary hover:text-white"
                     }
                   >
                     {status === "pending" ? "대기" : status}

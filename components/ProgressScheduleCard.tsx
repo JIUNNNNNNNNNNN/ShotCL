@@ -20,7 +20,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
     <article
       onClick={() => onOpen(item)}
       className={cn(
-        "grid cursor-pointer gap-2 rounded-[1.35rem] border border-[#e2c96e] bg-[#fff3c4] px-3 py-2.5 text-field-text transition-[border-color,transform] active:scale-[0.995]",
+        "grid cursor-pointer gap-2 border border-field-primary bg-field-soft px-3 py-2.5 text-field-text transition-[border-color,transform] active:scale-[0.995]",
         item.imageUrl && "grid-cols-[4.5rem_minmax(0,1fr)]"
       )}
       aria-label={`${title} 기타일정 상세 보기`}
@@ -32,34 +32,34 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
             event.stopPropagation();
             onImagePreview(item.imageUrl!, title);
           }}
-          className="!h-16 !min-h-0 !w-[4.5rem] !rounded-none !border-0 !bg-transparent !p-0"
+          className="!h-16 !min-h-0 !w-[4.5rem]  !border-0 !bg-transparent !p-0"
           title="기타일정 그림 크게 보기"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={item.imageUrl}
             alt={`${title} 그림`}
-            className="block h-full w-full rounded-none object-contain"
+            className="block h-full w-full  object-contain"
           />
         </button>
       ) : null}
 
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-3">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 rounded-[3px] border border-[#d9bd59] bg-[#fff8dd] px-2 py-1 text-[10px] font-black text-field-primary">
+        <span className="shrink-0 border border-field-primary bg-field-primary px-2 py-1 text-[10px] font-bold text-black">
           기타일정
         </span>
         {time ? (
-          <span className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-black text-[#64551f]">
+          <span className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-bold text-field-primary">
             <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {time}
           </span>
         ) : null}
       </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-black leading-5 text-field-text">{title}</p>
+          <p className="truncate text-sm font-bold leading-5 text-field-text">{title}</p>
           {item.progressMemo?.trim() ? (
-            <p className="mt-0.5 truncate text-[11px] font-bold leading-4 text-[#74652c]">{item.progressMemo.trim()}</p>
+            <p className="mt-0.5 truncate text-[11px] leading-4 text-field-muted">{item.progressMemo.trim()}</p>
           ) : null}
         </div>
       </div>

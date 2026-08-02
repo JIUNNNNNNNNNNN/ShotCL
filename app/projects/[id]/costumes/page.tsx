@@ -651,8 +651,8 @@ export default function ProjectCostumesPage() {
       <div className="mx-auto grid w-full max-w-6xl gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display truncate text-xl font-black text-field-primary">의상</h1>
-            <p className="truncate text-xs font-bold text-field-muted">{projectName} · 씬별 의상표</p>
+            <h1 className="font-display truncate text-xl font-bold text-field-primary">의상</h1>
+            <p className="truncate text-xs text-field-muted">{projectName} · 씬별 의상표</p>
           </div>
           <label className="min-w-0 flex-1 sm:max-w-[280px]">
             <span className="sr-only">일촬표 씬 필터</span>
@@ -690,20 +690,20 @@ export default function ProjectCostumesPage() {
               </Button>
             </>
           ) : (
-            <span className="rounded-[3px] border border-field-border bg-white px-2.5 py-1.5 text-[11px] font-black text-field-muted">읽기 전용</span>
+            <span className="border border-field-border bg-field-panel px-2.5 py-1.5 text-[11px] font-bold text-field-muted">읽기 전용</span>
           )}
         </div>
 
         {canEdit && isDirty ? (
-          <p className="text-xs font-black text-amber-700">저장되지 않은 변경사항이 있습니다.</p>
+          <p className="text-xs font-bold text-field-primary">저장되지 않은 변경사항이 있습니다.</p>
         ) : null}
         {errorMessage ? (
-          <p role="alert" className="rounded-lg border border-field-danger bg-red-50 px-3 py-1.5 text-xs font-bold text-field-danger">
+          <p role="alert" className="border border-field-danger bg-field-danger/10 px-3 py-1.5 text-xs font-bold text-field-danger">
             {errorMessage}
           </p>
         ) : null}
         {noticeMessage ? (
-          <p role="status" className="rounded-lg border border-field-secondary bg-field-light px-3 py-1.5 text-xs font-bold text-field-primary">
+          <p role="status" className="border border-field-primary bg-field-light px-3 py-1.5 text-xs font-bold text-field-primary">
             {noticeMessage}
           </p>
         ) : null}
@@ -711,7 +711,7 @@ export default function ProjectCostumesPage() {
         {isFiltering ? (
           <div className="py-8"><PixelDogLoader size="sm" /></div>
         ) : filteredScenes.length === 0 ? (
-          <div className="rounded-2xl border border-field-border bg-white px-4 py-12 text-center text-sm font-bold text-field-muted">
+          <div className="border border-field-border bg-field-panel px-4 py-12 text-center text-sm text-field-muted">
             {scenes.length === 0 ? "등록된 의상 씬이 없습니다." : "선택한 일촬표에 포함된 의상 씬이 없습니다."}
           </div>
         ) : (
@@ -732,7 +732,7 @@ export default function ProjectCostumesPage() {
                   + (draft?.hairFiles.length ?? 0);
               }, 0);
               return (
-                <section key={scene.id} className="overflow-hidden rounded-xl border border-field-border bg-white">
+                <section key={scene.id} className="overflow-hidden border border-field-border bg-field-panel">
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5 bg-field-light px-2.5 py-1.5">
                     <button
                       type="button"
@@ -742,8 +742,8 @@ export default function ProjectCostumesPage() {
                     >
                       <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
                       <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <strong className="break-words text-sm font-black text-field-primary">{sceneLabel(scene)}</strong>
-                        <span className="text-[11px] font-bold text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
+                        <strong className="break-words text-sm font-bold text-field-primary">{sceneLabel(scene)}</strong>
+                        <span className="text-[11px] text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
                       </span>
                     </button>
                     {totalEpisodes > 0 ? (
@@ -773,7 +773,7 @@ export default function ProjectCostumesPage() {
                   {expanded ? (
                     <div className="border-t border-field-border p-1.5 sm:p-2">
                       {scene.items.length > 0 ? (
-                        <div className="mb-1 hidden grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] gap-2 px-2 text-[10px] font-black text-field-muted lg:grid">
+                        <div className="mb-1 hidden grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] gap-2 px-2 text-[10px] font-bold text-field-muted lg:grid">
                           <span>배역 / 제공자</span>
                           <span>의상</span>
                           <span>헤어</span>
@@ -782,7 +782,7 @@ export default function ProjectCostumesPage() {
                       ) : null}
                       <div className="grid gap-1.5 sm:divide-y sm:divide-field-border sm:gap-0">
                         {scene.items.length === 0 ? (
-                          <p className="py-5 text-center text-xs font-bold text-field-muted">이 씬에 등록된 배역이 없습니다.</p>
+                          <p className="py-5 text-center text-xs text-field-muted">이 씬에 등록된 배역이 없습니다.</p>
                         ) : scene.items.map((item) => (
                           <CostumeItemCard
                             key={item.id}
@@ -920,10 +920,10 @@ function CostumeItemCard({
   const customProvider = draft.provider && !providerOptions.includes(draft.provider);
   if (!canEdit) {
     return (
-      <article className="grid gap-2 rounded-lg border border-field-border bg-white p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:rounded-none lg:border-0 lg:px-2 lg:py-2">
+      <article className="grid gap-2 border border-field-border bg-field-panel p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:border-0 lg:px-2 lg:py-2">
         <div className="min-w-0 border-b border-field-border pb-1 lg:border-0 lg:pb-0">
-          <h3 className="break-words text-xs font-black leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
-          {item.actorName ? <p className="break-words text-[10px] font-bold leading-4 text-field-muted">{item.actorName}</p> : null}
+          <h3 className="break-words text-xs font-bold leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
+          {item.actorName ? <p className="break-words text-[10px] leading-4 text-field-muted">{item.actorName}</p> : null}
           <dl className="mt-1 border-t border-field-border pt-1">
             <ReadOnlyValue label="제공자" value={item.provider} />
           </dl>
@@ -942,13 +942,13 @@ function CostumeItemCard({
           title={item.actorRole || item.actorName}
           onPreview={onPreview}
         />
-        <span className="hidden text-center text-[10px] font-bold text-field-muted lg:block">보기</span>
+        <span className="hidden text-center text-[10px] text-field-muted lg:block">보기</span>
       </article>
     );
   }
 
   return (
-    <article className="grid gap-2 rounded-lg border border-field-border bg-white p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:rounded-none lg:border-0 lg:px-2 lg:py-2">
+    <article className="grid gap-2 border border-field-border bg-field-panel p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:border-0 lg:px-2 lg:py-2">
       <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
         <CompactField label="배역">
           <input
@@ -1059,7 +1059,7 @@ function EditableMediaField({
 }) {
   return (
     <div className="grid min-w-0 content-start gap-1">
-      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
+      <span className="text-[9px] font-bold leading-4 text-field-muted lg:sr-only">{label}</span>
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
         <div className="flex min-h-32 min-w-0 items-start gap-1.5 overflow-x-auto overflow-y-hidden pb-1">
           {images.map((image) => (
@@ -1071,7 +1071,7 @@ function EditableMediaField({
               <button
                 type="button"
                 onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-[3px] bg-white/95 text-field-danger"
+                className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-border bg-field-panel/95 text-field-danger"
                 aria-label={`저장 시 ${label} 이미지 삭제`}
               >
                 <X className="h-4 w-4" aria-hidden />
@@ -1100,7 +1100,7 @@ function EditableMediaField({
           </label>
         </div>
         <label className="grid gap-0.5">
-          <span className="text-[10px] font-black text-field-muted">{label} 메모</span>
+          <span className="text-[10px] font-bold text-field-muted">{label} 메모</span>
           <textarea
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
@@ -1128,16 +1128,16 @@ function PendingImagePreview({
   const url = useMemo(() => URL.createObjectURL(pending.file), [pending.file]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
   return (
-    <div className="relative h-32 w-32 shrink-0 border border-amber-300 bg-field-soft">
+    <div className="relative h-32 w-32 shrink-0 border border-field-primary bg-field-soft">
       <button type="button" onClick={() => onPreview(url)} className="h-full w-full">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt={`${title} 새 이미지`} className="h-full w-full object-contain" />
       </button>
-      <span className="absolute bottom-1 left-1 rounded bg-black/65 px-1.5 py-0.5 text-[9px] font-bold text-white">저장 전</span>
+      <span className="absolute bottom-1 left-1 border border-field-border bg-black/80 px-1.5 py-0.5 text-[9px] font-bold text-field-text">저장 전</span>
       <button
         type="button"
         onClick={onRemove}
-        className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-[3px] bg-white/95 text-field-danger"
+        className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-border bg-field-panel/95 text-field-danger"
         aria-label="선택한 이미지 제외"
       >
         <X className="h-4 w-4" aria-hidden />
@@ -1161,7 +1161,7 @@ function ReadOnlyMediaField({
 }) {
   return (
     <div className="grid min-w-0 content-start gap-1">
-      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
+      <span className="text-[9px] font-bold leading-4 text-field-muted lg:sr-only">{label}</span>
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(152px,1fr)_minmax(118px,.64fr)] sm:items-start">
         {images.length > 0 ? <div className="flex min-h-32 gap-1.5 overflow-x-auto overflow-y-hidden pb-1">
           {images.map((image) => (
@@ -1170,10 +1170,10 @@ function ReadOnlyMediaField({
               <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
             </button>
           ))}
-        </div> : <div className="grid min-h-32 place-items-center border border-dashed border-field-border text-[10px] font-bold text-field-muted">이미지 없음</div>}
+        </div> : <div className="grid min-h-32 place-items-center border border-dashed border-field-border text-[10px] text-field-muted">이미지 없음</div>}
         <div className="min-h-32 border border-field-border bg-field-soft p-2">
-          <span className="text-[10px] font-black text-field-muted">{label} 메모</span>
-          <p className="mt-1 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</p>
+          <span className="text-[10px] font-bold text-field-muted">{label} 메모</span>
+          <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-field-text">{value || "미입력"}</p>
         </div>
       </div>
     </div>
@@ -1183,8 +1183,8 @@ function ReadOnlyMediaField({
 function ReadOnlyValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[9px] font-black leading-4 text-field-muted lg:hidden">{label}</dt>
-      <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs font-bold leading-5 text-field-text">{value || "미입력"}</dd>
+      <dt className="text-[9px] font-bold leading-4 text-field-muted lg:hidden">{label}</dt>
+      <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5 text-field-text">{value || "미입력"}</dd>
     </div>
   );
 }
@@ -1211,10 +1211,10 @@ function EpisodeChecks({
           <label
             key={episode}
             title={automatic ? `${episode}회차 일촬표에서 자동 반영됨` : `${episode}회차`}
-            className={`flex h-6 min-w-7 items-center justify-center gap-0.5 border px-1 text-[10px] font-black ${
+            className={`flex h-6 min-w-7 items-center justify-center gap-0.5 border px-1 text-[10px] font-bold ${
               checked
-                ? "border-field-primary bg-field-primary text-white"
-                : "border-field-border bg-white text-field-muted"
+                ? "border-field-primary bg-field-primary text-black"
+                : "border-field-border bg-field-panel text-field-muted"
             } ${canEdit && !automatic ? "cursor-pointer" : "cursor-default"}`}
           >
             <input
@@ -1247,15 +1247,15 @@ function SceneSeedSummary({
 }) {
   if (selectedScene && presentActors.length > 0) {
     return (
-      <p className="text-xs font-bold leading-5 text-field-muted">
+      <p className="text-xs leading-5 text-field-muted">
         씬 내용과 메모는 가져오지 않고, 배우칸이 색상/등장 상태인 배역 {presentActors.length}명만 모두 추가합니다.
       </p>
     );
   }
 
   return (
-    <div className="grid gap-2 rounded-lg border border-field-border bg-field-soft p-2.5">
-      <p className="text-xs font-bold leading-5 text-field-muted">
+    <div className="grid gap-2 border border-field-border bg-field-soft p-2.5">
+      <p className="text-xs leading-5 text-field-muted">
         {selectedScene
           ? "이 씬에는 색상/등장 상태인 배우칸이 없어 배역을 자동 추가하지 않습니다."
           : "직접 입력한 씬에는 배역을 자동 추가하지 않습니다."}
@@ -1279,9 +1279,9 @@ function SceneSeedSummary({
 function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[90] flex items-end bg-black/20 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="mx-auto max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-4 sm:rounded-2xl">
+      <div className="mx-auto max-h-[90dvh] w-full max-w-lg overflow-y-auto border border-field-border bg-field-panel p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-display text-lg font-black text-field-primary">{title}</h2>
+          <h2 className="font-display text-lg font-bold text-field-primary">{title}</h2>
           <IconButton label="닫기" onClick={onClose}><X className="h-4 w-4" aria-hidden /></IconButton>
         </div>
         {children}
@@ -1310,7 +1310,7 @@ function IconButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`grid shrink-0 place-items-center rounded-[3px] border border-field-border bg-white ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
+      className={`grid shrink-0 place-items-center border border-field-border bg-field-panel ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
     >
       {children}
     </button>
@@ -1320,7 +1320,7 @@ function IconButton({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid min-w-0 content-start gap-1.5">
-      <span className="text-xs font-black text-field-muted">{label}</span>
+      <span className="text-xs font-bold text-field-muted">{label}</span>
       {children}
     </label>
   );
@@ -1329,7 +1329,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function CompactField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid min-w-0 content-start gap-0.5">
-      <span className="text-[9px] font-black leading-4 text-field-muted lg:sr-only">{label}</span>
+      <span className="text-[9px] font-bold leading-4 text-field-muted lg:sr-only">{label}</span>
       {children}
     </label>
   );
@@ -1765,4 +1765,4 @@ function normalizeActorKey(role: string, name: string) {
   return (role || name).normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
 }
 
-const compactInputClass = "min-h-8 w-full rounded-md border border-field-border bg-white px-2 py-0.5 text-xs leading-5 outline-none focus:border-field-primary";
+const compactInputClass = "min-h-8 w-full border border-field-border bg-field-panel px-2 py-0.5 text-xs leading-5 outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";

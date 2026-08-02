@@ -48,7 +48,7 @@ export function ProjectGuideMenu({ projectId, role, queryString = "" }: ProjectG
       <div className="w-full max-w-3xl">
         <div className="mb-5 text-center sm:mb-6">
           <h1 className="font-display text-2xl font-black text-field-primary sm:text-3xl">프로젝트 메뉴</h1>
-          <p className="mt-1.5 text-sm font-bold text-field-muted">작업할 기능을 선택하세요.</p>
+          <p className="mt-1.5 text-sm text-field-muted">작업할 기능을 선택하세요.</p>
         </div>
 
         <nav className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3" aria-label="프로젝트 기능 길잡이">
@@ -59,10 +59,10 @@ export function ProjectGuideMenu({ projectId, role, queryString = "" }: ProjectG
                 key={item.id}
                 href={createGuideHref(projectBasePath, item.path, queryString)}
                 aria-label={`${item.label}로 이동`}
-                className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2.5 rounded-2xl border border-field-border bg-white px-2 py-3 text-center text-field-muted transition-[background-color,border-color,color,transform,box-shadow] hover:border-field-secondary hover:bg-field-soft hover:text-field-primary active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 sm:min-h-28"
+                className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2.5 border border-field-border bg-field-panel px-2 py-3 text-center text-field-muted transition-[background-color,border-color,color,transform] hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black sm:min-h-28"
               >
                 <item.icon className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" strokeWidth={2} aria-hidden />
-                <span className="w-full break-keep text-sm font-black leading-[1.35]">{item.label}</span>
+                <span className="w-full break-keep text-sm font-bold leading-[1.35]">{item.label}</span>
               </Link>
             ))}
         </nav>

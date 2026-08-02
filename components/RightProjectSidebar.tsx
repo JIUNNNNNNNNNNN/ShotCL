@@ -94,7 +94,7 @@ export function RightProjectSidebar({
             : "프로젝트 관리 메뉴 열기"}
         aria-expanded={isOpen}
         aria-controls="right-project-menu"
-        className="ml-auto grid h-10 w-10 place-items-center rounded-[3px] border border-field-secondary bg-white/95 text-field-primary shadow-[0_3px_10px_rgba(28,28,26,0.08)] transition-[background-color,border-color,transform] hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:h-11 md:w-11"
+        className="ml-auto grid h-10 w-10 place-items-center border border-field-primary bg-field-panel text-field-primary transition-[background-color,border-color,transform] hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 md:h-11 md:w-11"
       >
         {isOpen
           ? <X className="h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />
@@ -146,7 +146,7 @@ const PanelContent = memo(function PanelContent({
   const projectBasePath = `/projects/${projectId}`;
 
   return (
-    <div className="overflow-hidden rounded-[1.5rem] border border-field-border bg-white shadow-sm">
+    <div className="overflow-hidden border border-field-border bg-field-panel">
       <div className="flex items-start gap-3 border-b border-field-border bg-field-soft px-4 py-3">
         <div className="min-w-0 flex-1">
           <p className="font-display truncate text-lg font-black text-field-primary">{projectName || "프로젝트"}</p>
@@ -157,7 +157,7 @@ const PanelContent = memo(function PanelContent({
             type="button"
             onClick={onClose}
             aria-label="프로젝트 패널 닫기"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-[3px] border border-field-border bg-white text-field-muted transition active:scale-95"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-border bg-field-panel text-field-muted transition hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -327,7 +327,7 @@ function SideActionLink({
   return (
     <Link
       href={href}
-      className="flex min-h-10 items-center gap-2 rounded-[3px] border border-field-border bg-white px-3 py-2 text-sm font-black text-field-primary transition hover:bg-field-soft active:scale-[0.99]"
+      className="flex min-h-10 items-center gap-2 border border-field-border bg-field-panel px-3 py-2 text-sm font-black text-field-text transition hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden />
       {children}
@@ -348,7 +348,7 @@ function SideActionButton({
     <button
       type="button"
       onClick={onClick}
-      className="flex min-h-10 w-full items-center gap-2 rounded-[3px] border border-field-border bg-white px-3 py-2 text-left text-sm font-black text-field-primary transition hover:bg-field-soft active:scale-[0.99]"
+      className="flex min-h-10 w-full items-center gap-2 border border-field-border bg-field-panel px-3 py-2 text-left text-sm font-black text-field-text transition hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden />
       {children}

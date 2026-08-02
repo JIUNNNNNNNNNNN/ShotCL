@@ -250,10 +250,10 @@ type OpenMeteoResponse = {
 
 const dayNightOptions = ["D", "N"];
 const inputClass =
-  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
+  "min-h-[38px] w-full min-w-0 border border-field-border bg-field-panel px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
 
 const compactInputClass =
-  "min-h-[38px] w-full min-w-0 rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[13px] font-bold text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
+  "min-h-[38px] w-full min-w-0 border border-field-border bg-field-panel px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-light [&::-webkit-date-and-time-value]:text-center";
 
 const centeredSelectClass = `${compactInputClass} [text-align-last:center]`;
 const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden text-center text-ellipsis whitespace-nowrap`;
@@ -261,7 +261,7 @@ const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-primary max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
-const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
+const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5  max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
 const maxRuntimeMinutes = 1440;
 const desktopPreviewDocumentWidth = 1120;
@@ -1345,16 +1345,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   return (
     <div className="print-daily-plan">
       <div className="daily-plan-editor no-print text-center text-[13px] md:text-sm">
-        {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
-        {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
+        {message ? <div className="mb-4  border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
+        {errorMessage ? <div className="mb-4  border border-field-danger bg-field-panel p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black">
-              <span className="max-w-[55vw] truncate rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
+              <span className="max-w-[55vw] truncate  border border-field-border bg-field-panel px-3 py-1.5 text-field-primary">{plan.title || "새 일촬표"}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
-              className="inline-flex min-h-10 items-center justify-center rounded-[3px] border border-field-border bg-white px-4 text-sm font-black text-field-text"
+              className="inline-flex min-h-10 items-center justify-center  border border-field-border bg-field-panel px-4 text-sm font-black text-field-text"
             >
               목록으로 돌아가기
             </Link>
@@ -1438,12 +1438,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
             </div> : mainStaffSummary ? (
-              <p className="hidden rounded-md border border-field-border bg-field-soft px-3 py-2 text-center text-xs font-bold text-field-muted md:block">
+              <p className="hidden border border-field-border bg-field-soft px-3 py-2 text-center text-xs font-normal text-field-muted md:block">
                 {mainStaffSummary}
               </p>
             ) : null}
             {projectConstraintMessage ? (
-              <p className="rounded-md border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger" role="status">
+              <p className="border border-field-danger bg-field-panel px-3 py-2 text-xs font-normal text-field-danger" role="status">
                 {projectConstraintMessage}
               </p>
             ) : null}
@@ -1544,7 +1544,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </div>
             </div>
 
-            {weatherStatus ? <p className="mt-3 hidden text-xs font-bold text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
+            {weatherStatus ? <p className="mt-3 hidden text-xs font-normal text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
           </section>
 
           <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
@@ -1560,8 +1560,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   return (
                     <div
-                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 rounded-[3px] border bg-white p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
-                        isDragging ? "border-field-primary bg-field-light shadow-md" : "border-field-border"
+                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5  border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
+                        isDragging ? "border-field-primary bg-field-light " : "border-field-border"
                       }`}
                       role="group"
                       aria-label={`촬영장소 ${index + 1}`}
@@ -1586,10 +1586,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           data-no-location-reorder
                           aria-pressed={locationInputModes[location.id] === "search"}
                           onClick={() => openDaumAddressSearch(index)}
-                          className={`inline-flex min-h-9 w-[2.55rem] shrink-0 items-center justify-center rounded-[3px] border px-1 text-[10px] font-black md:w-[4.75rem] md:gap-1.5 md:text-xs ${
+                          className={`inline-flex min-h-9 w-[2.55rem] shrink-0 items-center justify-center  border px-1 text-[10px] font-black md:w-[4.75rem] md:gap-1.5 md:text-xs ${
                             locationInputModes[location.id] === "search"
                               ? "border-field-primary bg-field-light text-field-primary"
-                              : "border-field-border bg-white text-field-primary"
+                              : "border-field-border bg-field-panel text-field-primary"
                           }`}
                         >
                           <Search className="hidden h-3.5 w-3.5 shrink-0 md:block" aria-hidden />
@@ -1600,10 +1600,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           data-no-location-reorder
                           aria-pressed={isManualMode}
                           onClick={() => toggleManualLocationInput(index)}
-                          className={`min-h-9 w-[2.7rem] shrink-0 rounded-[3px] border px-1 text-[10px] font-black md:w-[5.25rem] md:text-xs ${
+                          className={`min-h-9 w-[2.7rem] shrink-0  border px-1 text-[10px] font-black md:w-[5.25rem] md:text-xs ${
                             isManualMode
                               ? "border-field-primary bg-field-light text-field-primary"
-                              : "border-field-border bg-white text-field-primary"
+                              : "border-field-border bg-field-panel text-field-primary"
                           }`}
                         >
                           <span className="md:hidden">직접</span>
@@ -1639,13 +1639,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                               />
                             </label>
                           ) : isSearching ? (
-                            <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden rounded-[3px] border border-field-border bg-field-soft">
+                            <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden  border border-field-border bg-field-soft">
                               <PixelDogLoader size="xs" compact />
                             </div>
                           ) : (
                             <div
-                              className={`flex min-h-9 min-w-0 items-center overflow-hidden rounded-[3px] border px-2 text-[10px] font-bold md:text-[13px] ${
-                                locationAddress ? "border-field-border bg-white text-field-text" : "border-field-border bg-field-soft text-field-muted"
+                              className={`flex min-h-9 min-w-0 items-center overflow-hidden border px-2 text-[10px] font-normal md:text-[13px] ${
+                                locationAddress ? "border-field-border bg-field-panel text-field-text" : "border-field-border bg-field-soft text-field-muted"
                               }`}
                               title={locationAddress || undefined}
                             >
@@ -1685,7 +1685,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           </div>
 
           <div className="order-3 mt-3 grid grid-cols-2 gap-1.5 md:hidden">
-            <div className="min-w-0 rounded-md border border-field-border bg-field-soft p-1.5">
+            <div className="min-w-0  border border-field-border bg-field-soft p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-primary">주의사항</span>
               <MemoPopoverField
                 value={plan.safetyNotice}
@@ -1694,7 +1694,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onChange={(value) => updatePlanField("safetyNotice", value)}
               />
             </div>
-            <div className="min-w-0 rounded-md border border-field-border bg-field-soft p-1.5">
+            <div className="min-w-0  border border-field-border bg-field-soft p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-primary">Memo</span>
               <MemoPopoverField
                 value={printMeta.memoText}
@@ -1734,7 +1734,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     const meal = row.item;
                     const mealIndex = row.sourceIndex;
                     return (
-                      <tr key={meal.id} className={`bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                      <tr key={meal.id} className={`bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2  max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                         <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="기타 일정" ariaLabel={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
                         <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -1766,7 +1766,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const sceneIndex = row.sourceIndex;
                   const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
                   return (
-                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-md max-lg:border max-lg:border-field-border max-lg:bg-white max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2  max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -1870,11 +1870,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </Button>
           </div>
           {isStaffOpen ? <div className="mt-5 grid gap-5 text-center lg:grid-cols-2">
-            <section className="rounded-md border border-field-border bg-field-soft p-4 text-center">
+            <section className=" border border-field-border bg-field-soft p-4 text-center">
               <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
                   <h3 className="text-center text-base font-black text-field-primary">배우</h3>
-                  <p className="mt-1 text-center text-sm font-bold text-field-muted">배우별 콜 시간, 집합 장소, 주의사항을 입력합니다.</p>
+                  <p className="mt-1 text-center text-sm font-normal text-field-muted">배우별 콜 시간, 집합 장소, 주의사항을 입력합니다.</p>
                 </div>
                 <Button variant="secondary" onClick={addStarring}>
                   <Plus className="h-4 w-4" aria-hidden />
@@ -1885,7 +1885,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 {printMeta.starring.map((person, index) => (
                   <div
                     key={person.id}
-                    className="grid items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[auto_1fr_1fr_1fr_1.2fr_1.2fr_auto]"
+                    className="grid items-center gap-2  border border-field-border bg-field-panel p-2 text-center md:grid-cols-[auto_1fr_1fr_1fr_1.2fr_1.2fr_auto]"
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={(event) => finishReorder(event, "starring", index)}
                   >
@@ -1906,10 +1906,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </div>
             </section>
 
-            <section className="rounded-md border border-field-border bg-field-soft p-4 text-center">
+            <section className=" border border-field-border bg-field-soft p-4 text-center">
               <div>
                 <h3 className="text-center text-base font-black text-field-primary">스태프 / 부서</h3>
-                <p className="mt-1 text-center text-sm font-bold text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
+                <p className="mt-1 text-center text-sm font-normal text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
               </div>
               <div className="mt-4 grid gap-2">
                 {effectivePrintMeta.teams.length > 0 ? (
@@ -1921,16 +1921,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <span>주의사항</span>
                   </div>
                 ) : (
-                  <p className="rounded-md border border-dashed border-field-border bg-white px-3 py-4 text-sm font-bold text-field-muted">
+                  <p className="border border-dashed border-field-border bg-field-panel px-3 py-4 text-sm font-normal text-field-muted">
                     스탭리스트에 등록된 부서가 없습니다.
                   </p>
                 )}
                 {effectivePrintMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid grid-cols-2 items-center gap-2 rounded-md border border-field-border bg-white p-2 text-center md:grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)]"
+                    className="grid grid-cols-2 items-center gap-2  border border-field-border bg-field-panel p-2 text-center md:grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)]"
                   >
-                    <div className="flex min-h-[38px] items-center justify-center rounded-md bg-field-soft px-2 text-sm font-black text-field-primary">
+                    <div className="flex min-h-[38px] items-center justify-center  bg-field-soft px-2 text-sm font-black text-field-primary">
                       {team.team || "미분류"}
                     </div>
                     <TeamCountInput
@@ -1972,7 +1972,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         }));
                         return (
                           <div key={point.id} className="grid gap-1 border-b border-field-border pb-2 md:grid-cols-[minmax(7rem,1fr)_auto] md:items-center">
-                            <p className="min-w-0 truncate text-xs font-bold text-field-text">{point.locationName}</p>
+                            <p className="min-w-0 truncate text-xs font-normal text-field-text">{point.locationName}</p>
                             <GatheringPhotoStrip
                               photos={point.photos}
                               locationName={point.locationName}
@@ -1995,7 +1995,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
       <section className="field-section mt-5 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-          <p className="text-sm font-bold text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
+          <p className="text-sm font-normal text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <Button onClick={() => saveCurrentPlan()} disabled={isSaving}>
               <Save className="h-5 w-5" aria-hidden />
@@ -2168,7 +2168,7 @@ function EpisodeField({
 
   if (mobile) {
     return (
-      <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+      <label className="grid min-w-0 gap-0.5 overflow-hidden  border border-field-border bg-field-soft p-1">
         <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">회차</span>
         {hasConstrainedOptions ? (
           <select
@@ -2253,7 +2253,7 @@ function MobileInfoField({
 }) {
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden  border border-field-border bg-field-soft p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
       <DraftInput
         className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
@@ -2283,7 +2283,7 @@ function MobileTotalCrewField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden  border border-field-border bg-field-soft p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">총 인원</span>
       <TotalCrewInput
         value={value}
@@ -2319,7 +2319,7 @@ function TotalCrewInput({
     <div className="relative min-w-0">
       <input
         type="text"
-        className={`${className} px-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        className={`${className} px-5 ${isAutomatic ? "bg-field-soft" : "bg-field-panel"}`}
         value={isFocused ? draft : value}
         inputMode="numeric"
         pattern="[0-9]*"
@@ -2338,7 +2338,7 @@ function TotalCrewInput({
         }}
         onBlur={() => setIsFocused(false)}
       />
-      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-field-muted">명</span>
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-normal text-field-muted">명</span>
     </div>
   );
 }
@@ -2365,7 +2365,7 @@ function TeamCountInput({
     <div className="relative">
       <input
         type="text"
-        className={`${compactInputClass} px-5 ${isAutomatic ? "bg-field-soft" : "bg-white"}`}
+        className={`${compactInputClass} px-5 ${isAutomatic ? "bg-field-soft" : "bg-field-panel"}`}
         value={draft}
         inputMode="numeric"
         pattern="[0-9]*"
@@ -2380,14 +2380,14 @@ function TeamCountInput({
         }}
         onBlur={() => setIsFocused(false)}
       />
-      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-black text-field-muted">명</span>
+      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-normal text-field-muted">명</span>
     </div>
   );
 }
 
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-soft p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 gap-0.5 overflow-hidden  border border-field-border bg-field-soft p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-primary">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
@@ -2461,12 +2461,12 @@ function EditableWeatherCard({
 
   if (isEditing) {
     return (
-      <label ref={cardRef} className="grid min-h-12 content-center rounded-[3px] border border-field-primary bg-white px-1.5 py-1 text-center ring-1 ring-field-primary/20">
+      <label ref={cardRef} className="grid min-h-12 content-center  border border-field-primary bg-field-panel px-1.5 py-1 text-center ring-1 ring-field-primary/20">
         <span className="text-[10px] font-black text-field-muted">{label}</span>
         <input
           autoFocus
           aria-label={`${label} 수정`}
-          className={`mt-0.5 min-w-0 rounded-[2px] border bg-white px-1 py-0.5 text-center text-xs font-black text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
+          className={`mt-0.5 min-w-0 border bg-field-panel px-1 py-0.5 text-center text-xs font-normal text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
           type="text"
           inputMode={timeValue ? "numeric" : undefined}
           pattern={timeValue ? "[0-9]*" : undefined}
@@ -2504,9 +2504,9 @@ function EditableWeatherCard({
   }
 
   return (
-    <button type="button" onClick={startEditing} className="grid min-h-12 content-center rounded-[3px] border border-field-border bg-white px-1.5 py-1 text-center hover:border-field-primary hover:bg-field-light">
+    <button type="button" onClick={startEditing} className="grid min-h-12 content-center  border border-field-border bg-field-panel px-1.5 py-1 text-center hover:border-field-primary hover:bg-field-light">
       <span className="text-[10px] font-black text-field-muted">{label}</span>
-      <span className="mt-0.5 truncate text-xs font-black text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
+      <span className="mt-0.5 truncate text-xs font-normal text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
   );
 }
@@ -2525,7 +2525,7 @@ function RoleContactGroup({
   onContactChange: (value: string) => void;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-md border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden  border border-field-border bg-field-soft p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="whitespace-nowrap text-xs font-black text-field-primary">{role}</span>
       <DraftInput
         className={`${compactInputClass} min-w-0`}
@@ -2611,7 +2611,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
           aria-label={`소요시간 ${savedValue || "미입력"}분`}
           title={isInvalid ? `1~${maxRuntimeMinutes}분 사이의 숫자를 입력해주세요.` : undefined}
         />
-        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs font-black text-field-muted" aria-hidden>M</span>
+        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs font-normal text-field-muted" aria-hidden>M</span>
       </div>
     </div>
   );
@@ -2798,7 +2798,7 @@ function ShootingOrderField({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex min-h-[38px] w-full min-w-0 items-center justify-center rounded-md border bg-white px-2.5 py-1.5 text-center text-sm font-bold leading-[1.35] transition-colors ${
+        className={`flex min-h-[38px] w-full min-w-0 items-center justify-center border bg-field-panel px-2.5 py-1.5 text-center text-sm font-normal leading-[1.35] transition-colors ${
           savedValidation.error
             ? "border-field-danger text-field-danger ring-1 ring-field-danger/20"
             : displayValue
@@ -2831,7 +2831,7 @@ function ShootingOrderField({
       ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
-          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/20 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4"
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) cancelAndClose();
           }}
@@ -2840,11 +2840,11 @@ function ShootingOrderField({
             role="dialog"
             aria-modal="true"
             aria-label={`${ariaLabel} 입력`}
-            className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto overscroll-contain rounded-t-xl border border-field-border bg-white p-3 shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl"
+            className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto overscroll-contain  border border-field-border bg-field-panel p-3  sm:max-h-[calc(100dvh-2rem)] "
             data-shooting-order-popover
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <p className="mb-2 text-center text-xs font-bold leading-[1.35] text-field-muted">
+            <p className="mb-2 text-center text-xs font-normal leading-[1.35] text-field-muted">
               숫자 사이를 스페이스로 구분하세요
             </p>
             <input
@@ -2876,9 +2876,9 @@ function ShootingOrderField({
             />
             <div className="mt-2 min-h-5" aria-live="polite">
               {draftValidation.error ? (
-                <p className="text-[11px] font-bold leading-[1.35] text-field-danger">{draftValidation.error}</p>
+                <p className="text-[11px] font-normal leading-[1.35] text-field-danger">{draftValidation.error}</p>
               ) : draftNumbers.length > 0 ? (
-                <p className="truncate text-center text-[11px] font-bold leading-[1.35] text-field-muted">
+                <p className="truncate text-center text-[11px] font-normal leading-[1.35] text-field-muted">
                   {draftNumbers.join("-")}
                 </p>
               ) : null}
@@ -2888,7 +2888,7 @@ function ShootingOrderField({
                 <button
                   key={number}
                   type="button"
-                  className="min-h-11 rounded-md border border-field-border bg-white py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                  className="min-h-11  border border-field-border bg-field-panel py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={() => insertAtCursor(String(number))}
                 >
@@ -2898,7 +2898,7 @@ function ShootingOrderField({
               <span aria-hidden />
               <button
                 type="button"
-                className="min-h-11 rounded-md border border-field-border bg-white py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                className="min-h-11  border border-field-border bg-field-panel py-2 text-base font-bold leading-[1.35] text-field-text active:bg-field-soft"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => insertAtCursor("0")}
               >
@@ -2906,7 +2906,7 @@ function ShootingOrderField({
               </button>
               <button
                 type="button"
-                className="min-h-11 rounded-md border border-field-border bg-white px-1 py-2 text-xs font-bold leading-[1.35] text-field-text active:bg-field-soft"
+                className="min-h-11  border border-field-border bg-field-panel px-1 py-2 text-xs font-bold leading-[1.35] text-field-text active:bg-field-soft"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={deleteAtCursor}
               >
@@ -2914,7 +2914,7 @@ function ShootingOrderField({
               </button>
               <button
                 type="button"
-                className="col-span-3 min-h-11 rounded-md border border-field-primary bg-field-soft px-3 py-2 text-sm font-bold leading-[1.35] text-field-primary active:bg-field-primary/15"
+                className="col-span-3 min-h-11  border border-field-primary bg-field-soft px-3 py-2 text-sm font-bold leading-[1.35] text-field-primary active:bg-field-primary/15"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => insertAtCursor(" ")}
               >
@@ -2924,7 +2924,7 @@ function ShootingOrderField({
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                className="min-h-10 rounded-md border border-field-border bg-field-soft px-2 py-2 text-xs font-bold leading-[1.35] text-field-primary transition-colors hover:border-field-primary disabled:cursor-not-allowed disabled:opacity-45"
+                className="min-h-10  border border-field-border bg-field-soft px-2 py-2 text-xs font-bold leading-[1.35] text-field-primary transition-colors hover:border-field-primary disabled:cursor-not-allowed disabled:opacity-45"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={appendRemainingCutsToDraft}
                 disabled={Boolean(draftValidation.error)}
@@ -2933,7 +2933,7 @@ function ShootingOrderField({
               </button>
               <button
                 type="button"
-                className="min-h-10 rounded-md border border-field-border bg-white px-2 py-2 text-xs font-bold leading-[1.35] text-field-danger transition-colors hover:border-field-danger disabled:cursor-not-allowed disabled:opacity-45"
+                className="min-h-10  border border-field-border bg-field-panel px-2 py-2 text-xs font-bold leading-[1.35] text-field-danger transition-colors hover:border-field-danger disabled:cursor-not-allowed disabled:opacity-45"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={() => updateDraft("")}
                 disabled={!draftValue}
@@ -2944,14 +2944,14 @@ function ShootingOrderField({
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                className="min-h-10 rounded-md border border-field-border bg-white px-3 py-2 text-sm font-bold leading-[1.35] text-field-muted"
+                className="min-h-10  border border-field-border bg-field-panel px-3 py-2 text-sm font-bold leading-[1.35] text-field-muted"
                 onClick={cancelAndClose}
               >
                 취소
               </button>
               <button
                 type="button"
-                className="min-h-10 rounded-md border border-field-primary bg-field-primary px-3 py-2 text-sm font-bold leading-[1.35] text-white disabled:cursor-not-allowed disabled:opacity-45"
+                className="min-h-10  border border-field-primary bg-field-primary px-3 py-2 text-sm font-bold leading-[1.35] text-black disabled:cursor-not-allowed disabled:opacity-45"
                 onClick={commitAndClose}
                 disabled={Boolean(draftValidation.error)}
               >
@@ -2985,7 +2985,7 @@ function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragSta
       type="button"
       draggable
       onDragStart={onDragStart}
-      className="inline-flex h-9 w-9 cursor-grab items-center justify-center rounded-md border border-field-border bg-white text-field-muted active:cursor-grabbing"
+      className="inline-flex h-9 w-9 cursor-grab items-center justify-center  border border-field-border bg-field-panel text-field-muted active:cursor-grabbing"
       aria-label={label}
       title={label}
       tabIndex={tabIndex}
@@ -3020,7 +3020,7 @@ function TimetableOrderControls({
         type="button"
         onClick={() => onMove(rowIndex, "up")}
         disabled={rowIndex === 0}
-        className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
+        className="hidden h-10 w-10 items-center justify-center  border border-field-border bg-field-panel text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
         aria-label={`${ariaLabel} 위로 이동`}
         title="위로 이동"
         tabIndex={-1}
@@ -3031,7 +3031,7 @@ function TimetableOrderControls({
         type="button"
         onClick={() => onMove(rowIndex, "down")}
         disabled={rowIndex === rowCount - 1}
-        className="hidden h-10 w-10 items-center justify-center rounded-md border border-field-border bg-white text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
+        className="hidden h-10 w-10 items-center justify-center  border border-field-border bg-field-panel text-field-primary disabled:cursor-not-allowed disabled:opacity-35 max-lg:inline-flex"
         aria-label={`${ariaLabel} 아래로 이동`}
         title="아래로 이동"
         tabIndex={-1}
@@ -3177,7 +3177,7 @@ function TimetableLinkedFieldLabel({
       {canReset ? (
         <button
           type="button"
-          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:border-field-primary hover:text-field-primary"
+          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center  border border-field-border bg-field-panel text-field-muted hover:border-field-primary hover:text-field-primary"
           onClick={onReset}
           aria-label={`${label} 씬리스트 원본값 사용`}
           title="씬리스트 원본값 사용"
@@ -3269,7 +3269,7 @@ function SceneCastSelector({
     <div ref={selectorRef} className="relative">
       <button
         type="button"
-        className="flex min-h-[38px] w-full items-center justify-center rounded-md border border-field-border bg-white px-2 py-1.5 text-center text-[12px] font-bold leading-[1.4] text-field-text"
+        className="flex min-h-[38px] w-full items-center justify-center border border-field-border bg-field-panel px-2 py-1.5 text-center text-[12px] font-normal leading-[1.4] text-field-text"
         onClick={() => {
           if (isOpen) cancelSelection();
           else openSelector();
@@ -3283,16 +3283,16 @@ function SceneCastSelector({
       </button>
       {isOpen ? (
         <>
-          <button type="button" tabIndex={-1} aria-label="배역 선택 취소" className="fixed inset-0 z-20 cursor-default bg-black/10" onClick={cancelSelection} />
+          <button type="button" tabIndex={-1} aria-label="배역 선택 취소" className="fixed inset-0 z-20 cursor-default bg-black/65" onClick={cancelSelection} />
           <div
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
-            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden rounded-md border border-field-border bg-white text-center shadow-lg max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)] max-lg:rounded-b-none max-lg:rounded-t-xl max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
+            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden  border border-field-border bg-field-panel text-center  max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)]   max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
           >
             <div className="flex items-center justify-between border-b border-field-border px-3 py-2">
               <strong className="text-sm text-field-primary">등장인물 선택</strong>
-              <span className="text-xs font-bold text-field-muted">{draftSelectedIds.length}명 선택</span>
+              <span className="text-xs font-normal text-field-muted">{draftSelectedIds.length}명 선택</span>
             </div>
             <div role="listbox" aria-multiselectable="true" className="grid min-h-0 flex-1 gap-1 overflow-y-auto p-2">
               {options.length > 0 ? options.map((option) => {
@@ -3302,7 +3302,7 @@ function SceneCastSelector({
                     key={option.id}
                     role="option"
                     aria-selected={checked}
-                    className="flex min-h-11 cursor-pointer items-center justify-start gap-2 rounded-md px-3 py-1.5 text-left hover:bg-field-soft"
+                    className="flex min-h-11 cursor-pointer items-center justify-start gap-2  px-3 py-1.5 text-left hover:bg-field-soft"
                   >
                     <input
                       type="checkbox"
@@ -3310,23 +3310,23 @@ function SceneCastSelector({
                       onChange={() => toggleId(option.id)}
                       className="h-4 w-4 shrink-0 accent-field-primary"
                     />
-                    <span className="break-words text-sm font-bold text-field-text">{option.label}</span>
+                    <span className="break-words text-sm font-normal text-field-text">{option.label}</span>
                   </label>
                 );
-              }) : <p className="px-2 py-3 text-sm font-bold text-field-muted">배역명이 입력된 배우가 없습니다.</p>}
+              }) : <p className="px-2 py-3 text-sm font-normal text-field-muted">배역명이 입력된 배우가 없습니다.</p>}
             </div>
             <div className="flex items-center gap-2 border-t border-field-border p-2">
               <button
                 type="button"
-                className="mr-auto min-h-9 rounded-[3px] border border-field-border px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-field-primary"
+                className="mr-auto min-h-9  border border-field-border px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-field-primary"
                 onClick={() => setDraftSelectedIds([])}
               >
                 전체 해제
               </button>
-              <button type="button" className="min-h-9 rounded-[3px] border border-field-border px-4 text-xs font-bold text-field-muted hover:border-field-primary" onClick={cancelSelection}>
+              <button type="button" className="min-h-9  border border-field-border px-4 text-xs font-bold text-field-muted hover:border-field-primary" onClick={cancelSelection}>
                 취소
               </button>
-              <button type="button" className="min-h-9 rounded-[3px] bg-field-primary px-4 text-xs font-bold text-white hover:brightness-110" onClick={completeSelection}>
+              <button type="button" className="min-h-9  bg-field-primary px-4 text-xs font-bold text-black hover:brightness-110" onClick={completeSelection}>
                 완료
               </button>
             </div>
@@ -3342,7 +3342,7 @@ function CircularDeleteButton({ label, onClick, tabIndex }: { label: string; onC
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-danger bg-white text-field-danger hover:bg-field-danger hover:text-white"
+      className="inline-flex h-8 w-8 items-center justify-center  border border-field-danger bg-field-panel text-field-danger hover:bg-field-danger hover:text-white"
       aria-label={label}
       title={label}
       tabIndex={tabIndex}
@@ -3456,7 +3456,7 @@ function IconButton({ children, label, onClick, disabled = false }: { children: 
   return (
     <button
       type="button"
-      className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-field-border bg-white px-2 text-field-primary disabled:cursor-not-allowed disabled:opacity-40"
+      className="inline-flex min-h-10 min-w-10 items-center justify-center  border border-field-border bg-field-panel px-2 text-field-primary disabled:cursor-not-allowed disabled:opacity-40"
       onClick={onClick}
       disabled={disabled}
       title={label}
@@ -3483,7 +3483,7 @@ function MenuButton({
   return (
     <button
       type="button"
-      className={`flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-center text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex min-h-10 items-center justify-center gap-2  px-3 text-center text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${
         danger ? "text-field-danger hover:bg-field-danger hover:text-white" : "text-field-primary hover:bg-field-soft"
       }`}
       onClick={onClick}
@@ -3511,13 +3511,13 @@ function MoveMenu({
   return (
     <details className="relative">
       <summary
-        className="inline-flex min-h-10 min-w-10 cursor-pointer list-none items-center justify-center rounded-md border border-field-border bg-white px-2 text-field-primary"
+        className="inline-flex min-h-10 min-w-10 cursor-pointer list-none items-center justify-center  border border-field-border bg-field-panel px-2 text-field-primary"
         title={label}
         aria-label={label}
       >
         <MoreHorizontal className="h-4 w-4" aria-hidden />
       </summary>
-      <div className="absolute right-0 z-20 mt-2 grid min-w-36 gap-1 rounded-md border border-field-border bg-white p-2 shadow-lg">
+      <div className="absolute right-0 z-20 mt-2 grid min-w-36 gap-1  border border-field-border bg-field-panel p-2 ">
         <MenuButton label="위로 이동" onClick={onMoveUp} disabled={upDisabled}>
           <ArrowUp className="h-4 w-4" aria-hidden />
         </MenuButton>
@@ -3532,7 +3532,7 @@ function MoveMenu({
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
-    <section className="mt-5 rounded-md border border-field-border bg-white p-2 md:p-5">
+    <section className="mt-5  border border-field-border bg-field-panel p-2 md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-field-primary">실시간 일촬표 미리보기</h2>
       </div>
@@ -3578,7 +3578,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   }, []);
 
   return (
-    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden rounded-md bg-white md:block">
+    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden  bg-field-panel md:block">
       <div
         className="relative mx-auto max-w-full"
         style={{ width: desktopPreviewDocumentWidth * scale, height: scaledHeight || undefined }}
@@ -3604,7 +3604,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
 function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewData; onClose: () => void; onPrint: () => void }) {
   return (
     <div className="screen-only no-print fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
-      <div className="mx-auto max-w-6xl rounded-md bg-white p-4 shadow-2xl">
+      <div className="mx-auto max-w-6xl  bg-field-panel p-4 ">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-field-border pb-3">
           <div>
             <p className="text-xs font-black text-field-muted">PDF 미리보기</p>
@@ -3620,7 +3620,7 @@ function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewD
             </IconButton>
           </div>
         </div>
-        <DailyPlanPrintDocument data={data} className="rounded-md border border-field-border bg-white p-5 text-[12px] leading-6 text-black" />
+        <DailyPlanPrintDocument data={data} className="border border-field-border bg-white p-5 text-[12px] leading-6 text-black" />
       </div>
     </div>
   );

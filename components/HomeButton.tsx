@@ -93,12 +93,12 @@ export function HomeButton() {
       type="button"
       aria-label={projectId ? "회차 선택으로 이동, 길게 누르면 메인 홈으로 이동" : "메인 홈으로 이동"}
       title={projectId ? "회차 선택 · 길게 누르면 메인 홈" : "메인 홈"}
-      className={`fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center rounded-[3px] border bg-white/95 text-field-primary shadow-[0_3px_10px_rgba(28,28,26,0.08)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform] hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:left-5 md:h-11 md:w-11 ${
+      className={`fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center  border bg-field-panel/95 text-white transition-[background-color,border-color,transform] hover:border-field-primary hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black md:left-5 md:h-11 md:w-11 ${
         isArmed
-          ? "scale-95 border-[#d7b95f] bg-[#fff9df] shadow-[0_0_0_3px_rgba(215,185,95,0.18),0_4px_14px_rgba(215,185,95,0.3)]"
+          ? "scale-95 border-field-primary bg-field-primary text-black"
           : isPressing
-            ? "scale-90 border-[#d7b95f] bg-field-light"
-            : "border-field-secondary active:scale-95"
+            ? "scale-90 border-field-primary bg-field-soft text-field-primary"
+            : "border-field-border active:scale-95"
       }`}
       style={{ touchAction: "none", WebkitTouchCallout: "none" }}
       onContextMenu={(event) => event.preventDefault()}
@@ -151,7 +151,7 @@ export function HomeButton() {
           y="3"
           width="38"
           height="38"
-          rx="2"
+          rx="0"
           fill="none"
           stroke="#d7b95f"
           strokeWidth="2.5"

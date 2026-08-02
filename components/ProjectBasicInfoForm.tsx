@@ -22,7 +22,7 @@ type ProjectBasicInfoFormProps = {
 };
 
 const fieldClass =
-  "min-h-11 w-full min-w-0 rounded-xl border border-field-border bg-white px-3 py-2 text-center text-sm font-bold text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-11 w-full min-w-0 border border-field-border bg-field-panel px-3 py-2 text-center text-sm text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
 export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: ProjectBasicInfoFormProps) {
@@ -183,17 +183,17 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="min-w-0">
           <p className="font-display text-xl font-black text-field-primary md:text-2xl">프로젝트 기본정보</p>
-          <p className="mt-1 truncate text-sm font-bold text-field-muted">{projectName}</p>
+          <p className="mt-1 truncate text-sm text-field-muted">{projectName}</p>
         </div>
-        <span className="rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black text-field-muted">
+        <span className="border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
           프로젝트 공통 정보
         </span>
       </div>
 
-      <section className="rounded-2xl border border-field-border bg-white p-3 md:p-5">
+      <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="grid gap-3 md:grid-cols-[0.55fr_1fr_1fr]">
           <label className="grid gap-1.5">
-            <span className="text-xs font-black text-field-primary">총회차</span>
+            <span className="text-xs font-bold text-field-primary">총회차</span>
             <input
               className={fieldClass}
               type="text"
@@ -218,18 +218,18 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         </div>
       </section>
 
-      <section className="rounded-2xl border border-field-border bg-white p-3 md:p-5">
+      <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-black text-field-primary">메인 스태프</h2>
-            <p className="text-[11px] font-bold text-field-muted">
+            <h2 className="text-sm font-bold text-field-primary">메인 스태프</h2>
+            <p className="text-[11px] text-field-muted">
               인원·직책 중복 제한 없음 · 일촬표 표시는 회차별 최대 3명
             </p>
           </div>
           <Button
             type="button"
             variant="secondary"
-            className="h-9 min-h-9 w-9 shrink-0 rounded-[3px] p-0"
+            className="h-9 min-h-9 w-9 shrink-0 p-0"
             aria-label="메인 스태프 추가"
             onClick={() => setValue((current) => ({
               ...current,
@@ -263,7 +263,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
             {episodeLimitViolations.map(({ episodeNumber, members }) => (
               <p
                 key={episodeNumber}
-                className="rounded-lg border border-field-danger bg-white px-3 py-2 text-xs font-bold text-field-danger"
+                className="border border-field-danger bg-field-panel px-3 py-2 text-xs font-bold text-field-danger"
               >
                 {episodeNumber}회차 일촬표 표시 인원이 {members.length}명입니다. 최대 3명까지 선택할 수 있습니다.
                 <span className="mt-0.5 block text-[11px]">
@@ -275,11 +275,11 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         ) : null}
       </section>
 
-      <section className="rounded-2xl border border-field-border bg-white p-3 md:p-5">
+      <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-black text-field-primary">배우 정보</h2>
-            <p className="truncate text-[11px] font-bold text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
+            <h2 className="text-sm font-bold text-field-primary">배우 정보</h2>
+            <p className="truncate text-[11px] text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
           </div>
           <Button
             type="button"
@@ -306,7 +306,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       </section>
 
       {errorMessage ? (
-        <p className="rounded-xl border border-field-danger bg-white px-4 py-3 text-sm font-bold text-field-danger">
+        <p className="border border-field-danger bg-field-panel px-4 py-3 text-sm font-bold text-field-danger">
           {errorMessage}
         </p>
       ) : null}
@@ -324,7 +324,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-1.5">
-      <span className="text-xs font-black text-field-primary">{label}</span>
+      <span className="text-xs font-bold text-field-primary">{label}</span>
       <input className={fieldClass} type="date" value={value} onChange={(event) => onChange(event.currentTarget.value)} required />
     </label>
   );
@@ -352,9 +352,9 @@ const StaffFields = memo(function StaffFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid min-w-0 gap-1.5 rounded-xl border border-field-border bg-field-soft/50 p-2">
+    <div className="grid min-w-0 gap-1.5 border border-field-border bg-field-soft/50 p-2">
       <div className="flex items-center justify-between gap-1">
-        <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-black text-field-primary">
+        <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-bold text-field-primary">
           <input
             type="checkbox"
             checked={member.includeInDailyPlan}
@@ -364,7 +364,7 @@ const StaffFields = memo(function StaffFields({
         </label>
         <button
           type="button"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-[3px] text-field-danger transition active:scale-95"
+          className="grid h-7 w-7 shrink-0 place-items-center border border-transparent text-field-danger transition hover:border-field-danger active:scale-95"
           aria-label={`메인 스태프 ${index + 1} 삭제`}
           onClick={() => onDelete(index)}
         >
@@ -450,7 +450,7 @@ function EpisodeSelectionField({
 
   return (
     <div className="grid min-w-0 gap-1">
-      <span className="text-center text-[10px] font-black text-field-primary">참여 회차</span>
+      <span className="text-center text-[10px] font-bold text-field-primary">참여 회차</span>
       <button
         type="button"
         className={`${fieldClass} flex min-h-9 items-center justify-between gap-2 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-field-soft disabled:text-field-muted`}
@@ -470,7 +470,7 @@ function EpisodeSelectionField({
       {open && totalEpisodes && typeof document !== "undefined"
         ? createPortal(
           <div
-            className="fixed inset-0 z-[90] flex items-end justify-center bg-black/25 p-0 sm:items-center sm:p-4"
+            className="fixed inset-0 z-[90] flex items-end justify-center bg-black/75 p-0 sm:items-center sm:p-4"
             onPointerDown={(event) => {
               if (event.currentTarget === event.target) onClose();
             }}
@@ -479,18 +479,18 @@ function EpisodeSelectionField({
               role="dialog"
               aria-modal="true"
               aria-label={`${member.name || member.role || "메인 스태프"} 참여 회차 선택`}
-              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-field-border bg-white shadow-xl sm:rounded-2xl"
+              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden border border-field-border bg-field-panel"
             >
               <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-black text-field-primary">참여 회차</p>
-                  <p className="truncate text-xs font-bold text-field-muted">
+                  <p className="text-sm font-bold text-field-primary">참여 회차</p>
+                  <p className="truncate text-xs text-field-muted">
                     {member.role || "직책 미입력"} · {member.name || "이름 미입력"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-[3px] border border-field-border text-field-muted transition hover:bg-field-soft active:scale-95"
+                  className="grid h-9 w-9 shrink-0 place-items-center border border-field-border text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   aria-label="참여 회차 선택 닫기"
                   onClick={onClose}
                 >
@@ -501,7 +501,7 @@ function EpisodeSelectionField({
               <div className="min-h-0 overflow-y-auto p-3 overscroll-contain">
                 <button
                   type="button"
-                  className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-field-border px-3 py-2 text-left text-sm font-bold text-field-text transition hover:bg-field-soft active:scale-[0.99]"
+                  className="flex min-h-11 w-full items-center gap-3 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99]"
                   role="checkbox"
                   aria-checked={selectedEpisodes === null}
                   onClick={() => onChange(null)}
@@ -517,7 +517,7 @@ function EpisodeSelectionField({
                       <button
                         key={episodeNumber}
                         type="button"
-                        className="flex min-h-11 items-center gap-2 rounded-xl border border-field-border px-3 py-2 text-left text-sm font-bold text-field-text transition hover:bg-field-soft active:scale-[0.99]"
+                        className="flex min-h-11 items-center gap-2 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99]"
                         role="checkbox"
                         aria-checked={checked}
                         onClick={() => toggleEpisode(episodeNumber)}
@@ -550,10 +550,10 @@ function EpisodeSelectionField({
 function SelectionMark({ checked }: { checked: boolean }) {
   return (
     <span
-      className={`grid h-5 w-5 shrink-0 place-items-center rounded-md border ${
+      className={`grid h-5 w-5 shrink-0 place-items-center border ${
         checked
-          ? "border-field-primary bg-field-primary text-white"
-          : "border-field-border bg-white text-transparent"
+          ? "border-field-primary bg-field-primary text-black"
+          : "border-field-border bg-field-panel text-transparent"
       }`}
       aria-hidden
     >
@@ -574,7 +574,7 @@ const ActorFields = memo(function ActorFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-xl border border-field-border bg-field-soft/50 p-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 border border-field-border bg-field-soft/50 p-2">
       <input
         className={fieldClass}
         value={actor.role}
@@ -591,7 +591,7 @@ const ActorFields = memo(function ActorFields({
       />
       <button
         type="button"
-        className="grid h-10 w-10 place-items-center rounded-[3px] border border-field-danger bg-white text-field-danger transition active:scale-95"
+        className="grid h-10 w-10 place-items-center border border-field-danger bg-field-panel text-field-danger transition-colors hover:bg-field-danger hover:text-white active:scale-95"
         aria-label={`배우 ${index + 1} 삭제`}
         onClick={() => onDelete(index)}
       >

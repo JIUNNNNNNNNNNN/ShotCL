@@ -162,13 +162,13 @@ function RotationHandle({
         strokeDasharray="8 6"
         pointerEvents="none"
       />
-      <circle cx={pivot.x} cy={pivot.y} r="7" fill="#0f3d2e" stroke="#fff" strokeWidth="3" pointerEvents="none" />
+      <circle cx={pivot.x} cy={pivot.y} r="7" fill="#111111" stroke="#fff" strokeWidth="3" pointerEvents="none" />
       <circle
         cx={handle.x}
         cy={handle.y}
         r="14"
-        fill="#fff7d8"
-        stroke="#0f3d2e"
+        fill="#d7b95f"
+        stroke="#111111"
         strokeWidth="5"
         className="cursor-grab active:cursor-grabbing"
         role="button"
@@ -694,36 +694,36 @@ export function ShotOverheadEditor({
         role="dialog"
         aria-modal="true"
         aria-label={`${shot.title} 부감도 ${readOnly ? "보기" : "편집"}`}
-        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-6xl flex-col overflow-hidden rounded-t-[1.4rem] border border-field-border bg-white shadow-[0_12px_40px_rgba(20,32,27,0.18)] sm:max-h-[94dvh] sm:rounded-[1.4rem]"
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-6xl flex-col overflow-hidden  border border-field-border bg-field-panel sm:max-h-[94dvh]"
       >
         <header className="flex items-center justify-between gap-3 border-b border-field-border px-3 py-2.5 sm:px-4">
           <div className="min-w-0">
-            <p className="text-[11px] font-bold text-field-muted">S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}</p>
-            <h2 className="truncate text-base font-black text-field-primary">{readOnly ? "부감도 보기" : "부감도 편집"} · {shot.description || shot.title}</h2>
+            <p className="text-[11px] font-normal text-field-muted">S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}</p>
+            <h2 className="truncate text-base font-bold text-field-primary">{readOnly ? "부감도 보기" : "부감도 편집"} · {shot.description || shot.title}</h2>
           </div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[3px] border border-field-border text-field-muted hover:bg-field-soft" aria-label="부감도 닫기">
+          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center  border border-field-border text-field-muted transition-colors hover:border-field-primary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="부감도 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
 
         {!readOnly ? (
-          <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-field-border bg-field-soft/50 px-3 py-2" aria-label="부감도 도구">
+          <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-field-border bg-black px-3 py-2" aria-label="부감도 도구">
             <ToolButton active={tool === "select"} onClick={() => { setTool("select"); setLineStart(null); }} icon={<MousePointer2 />} label="선택" />
             <ToolButton onClick={addPerson} icon={<UserRound />} label="인물" />
             <ToolButton onClick={addCamera} icon={<Camera />} label="카메라" />
             <ToolButton active={tool === "line"} onClick={chooseLineTool} icon={<Minus />} label={lineStart ? "끝점 선택" : "선"} />
             <ToolButton onClick={addShape} icon={<Square />} label="공간" />
-            <span className="mx-0.5 h-7 w-px shrink-0 bg-field-border" />
+            <span className="mx-0.5 h-7 w-px shrink-0 bg-[#303030]" />
             <ToolButton disabled={!selected} onClick={removeSelected} icon={<Trash2 />} label="삭제" danger />
           </div>
         ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto bg-[#eeeae1] p-2 sm:p-4">
-          <div className="mx-auto aspect-[3/2] w-full max-w-[960px] overflow-hidden rounded-none bg-[#fbfaf6]">
+          <div className="mx-auto aspect-[3/2] w-full max-w-[960px] overflow-hidden  bg-[#fbfaf6]">
             <svg
               ref={svgRef}
               viewBox={`0 0 ${OVERHEAD_CANVAS_WIDTH} ${OVERHEAD_CANVAS_HEIGHT}`}
-              className={cn("h-full w-full select-none rounded-none", !readOnly && "touch-none", tool === "line" && "cursor-crosshair")}
+              className={cn("h-full w-full select-none ", !readOnly && "touch-none", tool === "line" && "cursor-crosshair")}
               shapeRendering="geometricPrecision"
               onPointerDown={handleCanvasPointerDown}
               onPointerMove={handlePointerMove}
@@ -769,13 +769,12 @@ export function ShotOverheadEditor({
                         y={shape.y}
                         width={shape.width}
                         height={shape.height}
-                        rx="8"
                         fill="rgba(255,255,255,0.65)"
-                        stroke={isSelected ? "#0f3d2e" : "#77746e"}
+                        stroke={isSelected ? "#d7b95f" : "#111111"}
                         strokeWidth={isSelected ? 6 : 4}
                         strokeDasharray={isSelected ? "14 8" : undefined}
                       />
-                      {shape.label ? <text pointerEvents="none" x={shape.x + 18} y={shape.y + 34} fill="#4f4c46" fontSize="24" fontWeight="700">{shape.label}</text> : null}
+                      {shape.label ? <text pointerEvents="none" x={shape.x + 18} y={shape.y + 34} fill="#111111" fontSize="24" fontWeight="700">{shape.label}</text> : null}
                     </g>
                     {isSelected && !readOnly ? (
                       <>
@@ -790,7 +789,7 @@ export function ShotOverheadEditor({
                           cy={resizeHandle.y}
                           r="14"
                           fill="#fff"
-                          stroke="#0f3d2e"
+                          stroke="#d7b95f"
                           strokeWidth="6"
                           className="cursor-nwse-resize"
                           onPointerDown={(event) => handleShapeResizePointerDown(event, shape.id)}
@@ -835,7 +834,7 @@ export function ShotOverheadEditor({
                           cy={line.y1}
                           r="13"
                           fill="#fff"
-                          stroke="#0f3d2e"
+                          stroke="#d7b95f"
                           strokeWidth="5"
                           className="cursor-move"
                           onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "start")}
@@ -845,7 +844,7 @@ export function ShotOverheadEditor({
                           cy={line.y2}
                           r="13"
                           fill="#fff"
-                          stroke="#0f3d2e"
+                          stroke="#d7b95f"
                           strokeWidth="5"
                           className="cursor-move"
                           onPointerDown={(event) => handleLineEndpointPointerDown(event, line.id, "end")}
@@ -858,8 +857,8 @@ export function ShotOverheadEditor({
 
               {lineStart ? (
                 <g pointerEvents="none">
-                  <circle cx={lineStart.x} cy={lineStart.y} r="13" fill="#fff" stroke="#0f3d2e" strokeWidth="5" />
-                  <text x={lineStart.x + 20} y={lineStart.y - 16} fill="#0f3d2e" fontSize="22" fontWeight="700">끝점을 선택하세요</text>
+                  <circle cx={lineStart.x} cy={lineStart.y} r="13" fill="#fff" stroke="#d7b95f" strokeWidth="5" />
+                  <text x={lineStart.x + 20} y={lineStart.y - 16} fill="#111111" fontSize="22" fontWeight="700">끝점을 선택하세요</text>
                 </g>
               ) : null}
 
@@ -877,10 +876,10 @@ export function ShotOverheadEditor({
                   <g key={person.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "person", id: person.id })}>
                     {isSelected ? <circle cx={person.x} cy={person.y} r={selectionRadius} fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
                     <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`}>
-                      <circle cx="0" cy="0" r={PERSON_RADIUS} fill="#fff" stroke="#0f3d2e" strokeWidth="7" />
-                      <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#0f3d2e" />
+                      <circle cx="0" cy="0" r={PERSON_RADIUS} fill="#fff" stroke="#111111" strokeWidth="7" />
+                      <path d="M 24 -11 L 46 0 L 24 11 Z" fill="#111111" />
                     </g>
-                    <text pointerEvents="none" x={person.x} y={person.y + selectionRadius + 28} textAnchor="middle" fill="#0f3d2e" fontSize="25" fontWeight="800">{person.label || "인물"}</text>
+                    <text pointerEvents="none" x={person.x} y={person.y + selectionRadius + 28} textAnchor="middle" fill="#111111" fontSize="25" fontWeight="700">{person.label || "인물"}</text>
                     {isSelected && !readOnly ? (
                       <>
                         <RotationHandle
@@ -894,7 +893,7 @@ export function ShotOverheadEditor({
                           cy={person.y + handleOffset}
                           r="13"
                           fill="#fff"
-                          stroke="#0f3d2e"
+                          stroke="#d7b95f"
                           strokeWidth="5"
                           className="cursor-nwse-resize"
                           onPointerDown={(event) => handlePersonScalePointerDown(event, person.id)}
@@ -913,11 +912,11 @@ export function ShotOverheadEditor({
                   <g key={camera.id} onPointerDown={(event) => handleItemPointerDown(event, { kind: "camera", id: camera.id })}>
                     {isSelected ? <circle cx={camera.x} cy={camera.y} r="60" fill="none" stroke="#d7b95f" strokeWidth="6" strokeDasharray="10 7" /> : null}
                     <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
-                      <rect x={camera.x - 35} y={camera.y - 27} width="58" height="54" rx="8" fill="#0f3d2e" />
-                      <path d={`M ${camera.x + 20} ${camera.y - 22} L ${camera.x + 62} ${camera.y - 38} L ${camera.x + 62} ${camera.y + 38} L ${camera.x + 20} ${camera.y + 22} Z`} fill="#0f3d2e" />
+                      <rect x={camera.x - 35} y={camera.y - 27} width="58" height="54" fill="#111111" />
+                      <path d={`M ${camera.x + 20} ${camera.y - 22} L ${camera.x + 62} ${camera.y - 38} L ${camera.x + 62} ${camera.y + 38} L ${camera.x + 20} ${camera.y + 22} Z`} fill="#111111" />
                       <circle cx={camera.x - 6} cy={camera.y} r="12" fill="#fbfaf6" />
                     </g>
-                    <text x={camera.x} y={camera.y + 67} textAnchor="middle" fill="#0f3d2e" fontSize="24" fontWeight="800">{camera.label || "CAM"}</text>
+                    <text x={camera.x} y={camera.y + 67} textAnchor="middle" fill="#111111" fontSize="24" fontWeight="700">{camera.label || "CAM"}</text>
                     {isSelected && !readOnly ? (
                       <RotationHandle
                         pivot={pivot}
@@ -934,16 +933,16 @@ export function ShotOverheadEditor({
         </div>
 
         {!readOnly ? (
-          <div className="shrink-0 border-t border-field-border bg-white px-3 py-2.5 sm:px-4">
+          <div className="shrink-0 border-t border-field-border bg-black px-3 py-2.5 sm:px-4">
             <div className="flex flex-wrap items-end gap-2">
               {(selectedPerson || selectedCamera || selectedShape) ? (
-                <label className="grid min-w-[160px] flex-1 gap-1 text-[11px] font-black text-field-muted">
+                <label className="grid min-w-[160px] flex-1 gap-1 text-[11px] font-normal text-field-muted">
                   라벨
                   <input
                     type="text"
                     value={selectedPerson?.label ?? selectedCamera?.label ?? selectedShape?.label ?? ""}
                     onChange={(event) => updateSelectedLabel(event.target.value)}
-                    className="min-h-10 rounded-lg border border-field-border bg-white px-3 text-sm font-bold text-field-text outline-none focus:border-field-primary"
+                    className="min-h-10  border border-field-border bg-field-panel px-3 text-sm font-normal text-white outline-none focus:border-field-primary focus:ring-1 focus:ring-field-primary"
                     placeholder="라벨"
                   />
                 </label>
@@ -951,10 +950,10 @@ export function ShotOverheadEditor({
 
               {selectedCamera ? (
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => rotateSelectedCamera(-15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedCamera(-15)} className="flex min-h-10 items-center gap-1  border border-field-border bg-field-panel px-3 text-xs font-bold text-white hover:border-field-primary hover:text-field-primary">
                     <RotateCcw className="h-4 w-4" aria-hidden /> -15°
                   </button>
-                  <button type="button" onClick={() => rotateSelectedCamera(15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedCamera(15)} className="flex min-h-10 items-center gap-1  border border-field-border bg-field-panel px-3 text-xs font-bold text-white hover:border-field-primary hover:text-field-primary">
                     <RotateCw className="h-4 w-4" aria-hidden /> +15°
                   </button>
                 </div>
@@ -962,37 +961,37 @@ export function ShotOverheadEditor({
 
               {selectedPerson ? (
                 <div className="flex items-center gap-1">
-                  <button type="button" onClick={() => rotateSelectedPerson(-15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedPerson(-15)} className="flex min-h-10 items-center gap-1  border border-field-border bg-field-panel px-3 text-xs font-bold text-white hover:border-field-primary hover:text-field-primary">
                     <RotateCcw className="h-4 w-4" aria-hidden /> 방향 -15°
                   </button>
-                  <button type="button" onClick={() => rotateSelectedPerson(15)} className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary">
+                  <button type="button" onClick={() => rotateSelectedPerson(15)} className="flex min-h-10 items-center gap-1  border border-field-border bg-field-panel px-3 text-xs font-bold text-white hover:border-field-primary hover:text-field-primary">
                     <RotateCw className="h-4 w-4" aria-hidden /> 방향 +15°
                   </button>
-                  <span className="px-1 text-xs font-bold text-field-muted">크기 {Math.round(selectedPerson.scale * 100)}%</span>
+                  <span className="px-1 text-xs font-normal text-field-muted">크기 {Math.round(selectedPerson.scale * 100)}%</span>
                 </div>
               ) : null}
 
               {selectedShape ? (
                 <>
-                  <label className="grid w-24 gap-1 text-[11px] font-black text-field-muted">
+                  <label className="grid w-24 gap-1 text-[11px] font-normal text-field-muted">
                     너비
-                    <input type="number" min={MIN_SHAPE_WIDTH} max={OVERHEAD_CANVAS_WIDTH} value={Math.round(selectedShape.width)} onChange={(event) => updateSelectedShapeSize("width", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
+                    <input type="number" min={MIN_SHAPE_WIDTH} max={OVERHEAD_CANVAS_WIDTH} value={Math.round(selectedShape.width)} onChange={(event) => updateSelectedShapeSize("width", event.target.value)} className="min-h-10  border border-field-border bg-field-panel px-2 text-center text-sm font-normal text-white outline-none focus:border-field-primary" />
                   </label>
-                  <label className="grid w-24 gap-1 text-[11px] font-black text-field-muted">
+                  <label className="grid w-24 gap-1 text-[11px] font-normal text-field-muted">
                     높이
-                    <input type="number" min={MIN_SHAPE_HEIGHT} max={OVERHEAD_CANVAS_HEIGHT} value={Math.round(selectedShape.height)} onChange={(event) => updateSelectedShapeSize("height", event.target.value)} className="min-h-10 rounded-lg border border-field-border px-2 text-center text-sm font-bold" />
+                    <input type="number" min={MIN_SHAPE_HEIGHT} max={OVERHEAD_CANVAS_HEIGHT} value={Math.round(selectedShape.height)} onChange={(event) => updateSelectedShapeSize("height", event.target.value)} className="min-h-10  border border-field-border bg-field-panel px-2 text-center text-sm font-normal text-white outline-none focus:border-field-primary" />
                   </label>
                 </>
               ) : null}
 
               {selectedLine ? (
-                <div className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-2">
-                  <button type="button" onClick={() => updateSelectedLineColor("black")} aria-pressed={selectedLine.color === "black"} className={cn("h-7 rounded-[3px] px-3 text-xs font-black", selectedLine.color === "black" ? "bg-[#242424] text-white" : "text-field-muted")}>검정</button>
-                  <button type="button" onClick={() => updateSelectedLineColor("red")} aria-pressed={selectedLine.color === "red"} className={cn("h-7 rounded-[3px] px-3 text-xs font-black", selectedLine.color === "red" ? "bg-field-danger text-white" : "text-field-danger")}>빨강</button>
+                <div className="flex min-h-10 items-center gap-1  border border-field-border px-2">
+                  <button type="button" onClick={() => updateSelectedLineColor("black")} aria-pressed={selectedLine.color === "black"} className={cn("h-7  px-3 text-xs font-bold", selectedLine.color === "black" ? "bg-field-primary text-black" : "text-field-muted")}>검정</button>
+                  <button type="button" onClick={() => updateSelectedLineColor("red")} aria-pressed={selectedLine.color === "red"} className={cn("h-7  px-3 text-xs font-bold", selectedLine.color === "red" ? "bg-field-danger text-white" : "text-field-danger")}>빨강</button>
                 </div>
               ) : null}
 
-              {!selected ? <p className="min-w-0 flex-1 text-xs font-bold text-field-muted">요소를 선택하면 라벨·방향·크기를 조정할 수 있습니다.</p> : null}
+              {!selected ? <p className="min-w-0 flex-1 text-xs font-normal text-field-muted">요소를 선택하면 라벨·방향·크기를 조정할 수 있습니다.</p> : null}
 
               <button
                 type="button"
@@ -1002,7 +1001,7 @@ export function ShotOverheadEditor({
                   setLineStart(null);
                   setTool("select");
                 }}
-                className="flex min-h-10 items-center gap-1 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-muted"
+                className="flex min-h-10 items-center gap-1  border border-field-border bg-field-panel px-3 text-xs font-bold text-field-muted hover:border-field-primary hover:text-white"
               >
                 <Eraser className="h-4 w-4" aria-hidden /> 초기화
               </button>
@@ -1010,14 +1009,14 @@ export function ShotOverheadEditor({
                 type="button"
                 onClick={() => onSave(diagram)}
                 disabled={isSaving}
-                className="flex min-h-10 items-center gap-1.5 rounded-[3px] border border-field-primary bg-field-primary px-4 text-sm font-black text-white disabled:opacity-50"
+                className="flex min-h-10 items-center gap-1.5  border border-field-primary bg-field-primary px-4 text-sm font-bold text-black disabled:opacity-50"
               >
                 <Save className="h-4 w-4" aria-hidden /> {isSaving ? "저장 중" : "저장"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="shrink-0 border-t border-field-border bg-white px-4 py-2 text-center text-xs font-bold text-field-muted">
+          <div className="shrink-0 border-t border-field-border bg-black px-4 py-2 text-center text-xs font-normal text-field-muted">
             모바일·진행 권한에서는 부감도를 열람할 수 있습니다.
           </div>
         )}
@@ -1047,8 +1046,8 @@ function ToolButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex min-h-9 shrink-0 items-center gap-1.5 rounded-[3px] border px-3 text-xs font-black transition-colors disabled:opacity-40",
-        active ? "border-field-primary bg-field-primary text-white" : danger ? "border-field-danger/50 bg-white text-field-danger" : "border-field-border bg-white text-field-primary"
+        "flex min-h-9 shrink-0 items-center gap-1.5  border px-3 text-xs font-bold transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+        active ? "border-field-primary bg-field-primary text-black" : danger ? "border-field-danger/60 bg-field-panel text-field-danger" : "border-field-border bg-field-panel text-white hover:border-field-primary hover:text-field-primary"
       )}
     >
       {icon}

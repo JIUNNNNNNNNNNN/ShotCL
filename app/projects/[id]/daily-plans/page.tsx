@@ -271,7 +271,7 @@ export default function DailyPlansPage() {
         </h1>
 
         {errorMessage ? (
-          <p role="alert" className="mx-auto mt-2 w-full max-w-xl border border-field-danger bg-white px-3 py-2 text-center text-sm font-bold text-field-danger">
+          <p role="alert" className="mx-auto mt-2 w-full max-w-xl border border-field-danger bg-field-panel px-3 py-2 text-center text-sm font-bold text-field-danger">
             {errorMessage}
           </p>
         ) : null}
@@ -327,13 +327,13 @@ function DailyPlanContextMenu({
       ref={menuRef}
       role="menu"
       aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
-      className="fixed z-[100] grid w-[232px] gap-1 rounded-[3px] border border-field-border bg-white p-1.5 shadow-lg"
+      className="fixed z-[100] grid w-[232px] gap-1 border border-field-border bg-field-panel p-1.5 text-field-text"
       style={{ left: menu.x, top: menu.y }}
     >
       <button
         type="button"
         role="menuitem"
-        className="min-h-9 rounded-[2px] px-2.5 text-left text-xs font-bold text-field-primary hover:bg-field-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:opacity-50"
+        className="min-h-9 px-2.5 text-left text-xs font-bold text-field-text hover:bg-field-primary hover:text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:opacity-50"
         onClick={onDuplicate}
         disabled={disabled}
       >
@@ -342,7 +342,7 @@ function DailyPlanContextMenu({
       <button
         type="button"
         role="menuitem"
-        className="min-h-9 rounded-[2px] px-2.5 text-left text-xs font-bold text-field-danger hover:bg-red-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger disabled:opacity-50"
+        className="min-h-9 px-2.5 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger disabled:opacity-50"
         onClick={onDelete}
         disabled={disabled}
       >
@@ -367,7 +367,7 @@ function DailyPlanDeleteDialog({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[110] grid place-items-center bg-black/20 p-4"
+      className="fixed inset-0 z-[110] grid place-items-center bg-black/70 p-4"
       role="presentation"
     >
       <div
@@ -376,7 +376,7 @@ function DailyPlanDeleteDialog({
         aria-labelledby="daily-plan-delete-title"
         aria-describedby="daily-plan-delete-description"
         aria-busy={isDeleting}
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-[4px] border border-field-border bg-white p-4 shadow-lg"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto border border-field-border bg-field-panel p-4"
         onPointerDown={(event) => event.stopPropagation()}
       >
         <h2 id="daily-plan-delete-title" className="text-base font-black leading-[1.4] text-field-primary">
@@ -388,7 +388,7 @@ function DailyPlanDeleteDialog({
         </div>
 
         {errorMessage ? (
-          <p role="alert" className="mt-3 rounded-[2px] border border-field-danger bg-red-50 px-3 py-2 text-sm font-bold leading-[1.45] text-field-danger">
+          <p role="alert" className="mt-3 border border-field-danger bg-field-panel px-3 py-2 text-sm font-bold leading-[1.45] text-field-danger">
             {errorMessage}
           </p>
         ) : null}
@@ -397,7 +397,7 @@ function DailyPlanDeleteDialog({
           <button
             type="button"
             autoFocus
-            className="min-h-10 rounded-[3px] border border-field-border bg-white px-3 py-2 text-sm font-bold text-field-text hover:bg-field-light focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-10 border border-field-border bg-field-panel px-3 py-2 text-sm font-bold text-field-text hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:cursor-not-allowed disabled:opacity-50"
             onClick={onCancel}
             disabled={isDeleting}
           >
@@ -405,7 +405,7 @@ function DailyPlanDeleteDialog({
           </button>
           <button
             type="button"
-            className="min-h-10 rounded-[3px] border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-white hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            className="min-h-10 border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-white hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={onConfirm}
             disabled={isDeleting}
           >

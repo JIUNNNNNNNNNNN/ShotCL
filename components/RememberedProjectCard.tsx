@@ -170,7 +170,7 @@ export function RememberedProjectCard({
         }
         onOpen(project);
       }}
-      className="flex min-h-10 touch-pan-y select-none items-center justify-between gap-3 rounded-[3px] border border-field-border bg-field-bg px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-primary hover:bg-field-light active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+      className="flex min-h-10 touch-pan-y select-none items-center justify-between gap-3 border border-field-border bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-primary hover:bg-field-soft active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       style={{ WebkitTouchCallout: "none" }}
       aria-label={`${project.name} 프로젝트 홈 열기`}
       aria-busy={isOpening}
@@ -226,7 +226,7 @@ export function RememberedProjectActions({
   if (confirmationTarget) {
     return (
       <div
-        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/20 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
+        className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]"
         onPointerDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.preventDefault()}
       >
@@ -235,7 +235,7 @@ export function RememberedProjectActions({
           aria-modal="true"
           aria-labelledby="remembered-project-removal-title"
           aria-describedby="remembered-project-removal-description"
-          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto rounded-[3px] border border-field-border bg-white p-4 shadow-[0_14px_38px_rgba(15,61,46,0.2)]"
+          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-border bg-field-panel p-4"
         >
           <h2 id="remembered-project-removal-title" className="text-sm font-black text-field-primary">
             프로젝트 목록에서 지우기
@@ -251,14 +251,14 @@ export function RememberedProjectActions({
               ref={cancelButtonRef}
               type="button"
               onClick={onCancelRemoval}
-              className="min-h-10 rounded-[2px] border border-field-border bg-white px-3 text-xs font-black text-field-primary hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+              className="min-h-10 border border-field-border bg-field-panel px-3 text-xs font-black text-field-text hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               취소
             </button>
             <button
               type="button"
               onClick={() => onConfirmRemoval(confirmationTarget)}
-              className="min-h-10 rounded-[2px] border border-field-danger bg-field-danger px-3 text-xs font-black text-white hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-2"
+              className="min-h-10 border border-field-danger bg-field-danger px-3 text-xs font-black text-white hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-2"
             >
               목록에서 지우기
             </button>
@@ -274,7 +274,7 @@ export function RememberedProjectActions({
     <div
       role="menu"
       aria-label={`${menuTarget.project.name} 프로젝트 메뉴`}
-      className="fixed z-[80] w-44 rounded-[3px] border border-field-border bg-white p-1 shadow-[0_10px_28px_rgba(15,61,46,0.2)]"
+      className="fixed z-[80] w-44 border border-field-border bg-field-panel p-1"
       style={{ left: menuTarget.left, top: menuTarget.top }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => {
@@ -287,7 +287,7 @@ export function RememberedProjectActions({
         type="button"
         role="menuitem"
         onClick={() => onRequestRemoval(menuTarget.project)}
-        className="flex min-h-9 w-full items-center rounded-[2px] px-3 text-left text-xs font-black text-field-danger hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+        className="flex min-h-9 w-full items-center px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       >
         목록에서 지우기
       </button>

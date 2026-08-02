@@ -72,14 +72,14 @@ export function DailyPlanGatheringLocations({
   const canManagePhotos = Boolean(canEdit && place && (place.persistedId || place.departmentIds.length > 0));
 
   return (
-    <section className="mb-3 rounded-[3px] border border-field-border bg-white px-3 py-2.5" aria-labelledby="gathering-locations-title">
+    <section className="mb-3 border border-field-border bg-field-panel px-3 py-2.5" aria-labelledby="gathering-locations-title">
       <div className="flex items-center justify-between gap-3 border-b border-field-border pb-2">
-        <h2 id="gathering-locations-title" className="text-sm font-black text-field-primary">집합장소</h2>
-        {message ? <p className="min-w-0 truncate text-[11px] font-bold text-field-muted">{message}</p> : null}
+        <h2 id="gathering-locations-title" className="text-sm font-bold text-field-primary">집합장소</h2>
+        {message ? <p className="min-w-0 truncate text-[11px] font-normal text-field-muted">{message}</p> : null}
       </div>
 
       {!hasContent ? (
-        <p className="py-2 text-xs font-bold leading-5 text-field-muted">일촬표에 집합장소가 없습니다.</p>
+        <p className="py-2 text-xs font-normal leading-5 text-field-muted">일촬표에 집합장소가 없습니다.</p>
       ) : (
         <GatheringPlaceRow
           callTime={callTime}
@@ -132,14 +132,14 @@ function GatheringPlaceRow({
       <div className="min-w-0">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0">
-            {callTime ? <p className="text-[15px] font-black leading-5 text-field-primary">{callTime}</p> : null}
+            {callTime ? <p className="text-[15px] font-bold leading-5 text-field-primary">{callTime}</p> : null}
             {place?.locationName ? <h3 className="mt-0.5 min-w-0 break-words text-[14px] font-bold leading-5 text-field-text">{place.locationName}</h3> : null}
           </div>
           {canManagePhotos ? (
             <button
               type="button"
               onClick={onManage}
-              className="shrink-0 rounded-[3px] border border-field-border bg-white px-2 py-1 text-[11px] font-black text-field-primary transition-colors hover:border-field-secondary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+              className="shrink-0 border border-field-border bg-field-panel px-2 py-1 text-[11px] font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               사진 관리
             </button>
@@ -173,7 +173,7 @@ export function GatheringPhotoStrip({
           type="button"
           key={photo.id}
           onClick={() => onPreview(index)}
-          className="h-12 w-[4.5rem] shrink-0 overflow-hidden rounded-[2px] border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+          className="h-12 w-[4.5rem] shrink-0 overflow-hidden border border-field-border bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
           aria-label={`${locationName} 위치 사진 ${index + 1} 크게 보기`}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -315,17 +315,17 @@ function GatheringPhotoEditor({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/45 p-0 md:items-center md:justify-center md:p-4" role="dialog" aria-modal="true" aria-label={`${point.locationName} 위치 사진 관리`}>
-      <div className="max-h-[88dvh] w-full overflow-y-auto rounded-t-[4px] border border-field-border bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(0,0,0,0.12)] md:max-w-xl md:rounded-[4px] md:pb-4 md:shadow-[0_10px_30px_rgba(0,0,0,0.16)]">
+      <div className="max-h-[88dvh] w-full overflow-y-auto border border-field-border bg-field-panel p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:max-w-xl md:pb-4">
         <div className="flex items-start justify-between gap-3 border-b border-field-border pb-3">
           <div className="min-w-0">
-            <h2 className="break-words text-base font-black text-field-primary">{point.locationName}</h2>
-            <p className="mt-0.5 text-xs font-bold text-field-muted">위치 사진 관리</p>
+            <h2 className="break-words text-base font-bold text-field-primary">{point.locationName}</h2>
+            <p className="mt-0.5 text-xs font-normal text-field-muted">위치 사진 관리</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted hover:bg-field-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center border border-field-border bg-field-panel text-field-muted transition-colors hover:border-field-primary hover:bg-field-soft hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             aria-label="사진 관리 닫기"
           >
             <X className="h-4 w-4" aria-hidden />
@@ -334,22 +334,22 @@ function GatheringPhotoEditor({
 
         <div className="mt-3 grid gap-2">
           {draftPhotos.length === 0 ? (
-            <p className="border border-dashed border-field-border px-3 py-4 text-center text-xs font-bold text-field-muted">
+            <p className="border border-dashed border-field-border px-3 py-4 text-center text-xs font-normal text-field-muted">
               저장된 위치 사진이 없습니다.
             </p>
           ) : draftPhotos.map((photo, index) => (
             <div key={photo.key} className="grid grid-cols-[5rem_minmax(0,1fr)_auto] items-center gap-2 border-b border-field-border pb-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={photo.previewUrl} alt="" className="h-14 w-20 rounded-[2px] border border-field-border object-cover" />
-              <p className="min-w-0 truncate text-xs font-bold text-field-text">{photo.originalFilename || `사진 ${index + 1}`}</p>
+              <img src={photo.previewUrl} alt="" className="h-14 w-20 border border-field-border object-cover" />
+              <p className="min-w-0 truncate text-xs font-normal text-field-text">{photo.originalFilename || `사진 ${index + 1}`}</p>
               <div className="flex gap-1">
-                <button type="button" onClick={() => moveDraftPhoto(index, -1)} disabled={isSaving || index === 0} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-border bg-white disabled:opacity-30" aria-label="사진 순서 위로">
+                <button type="button" onClick={() => moveDraftPhoto(index, -1)} disabled={isSaving || index === 0} className="flex h-8 w-8 items-center justify-center  border border-field-border bg-field-panel disabled:opacity-30" aria-label="사진 순서 위로">
                   <ChevronUp className="h-3.5 w-3.5" aria-hidden />
                 </button>
-                <button type="button" onClick={() => moveDraftPhoto(index, 1)} disabled={isSaving || index === draftPhotos.length - 1} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-border bg-white disabled:opacity-30" aria-label="사진 순서 아래로">
+                <button type="button" onClick={() => moveDraftPhoto(index, 1)} disabled={isSaving || index === draftPhotos.length - 1} className="flex h-8 w-8 items-center justify-center  border border-field-border bg-field-panel disabled:opacity-30" aria-label="사진 순서 아래로">
                   <ChevronDown className="h-3.5 w-3.5" aria-hidden />
                 </button>
-                <button type="button" onClick={() => removeDraftPhoto(index)} disabled={isSaving} className="flex h-8 w-8 items-center justify-center rounded-[3px] border border-field-danger bg-white text-field-danger disabled:opacity-30" aria-label="사진 삭제">
+                <button type="button" onClick={() => removeDraftPhoto(index)} disabled={isSaving} className="flex h-8 w-8 items-center justify-center  border border-field-danger bg-field-panel text-field-danger disabled:opacity-30" aria-label="사진 삭제">
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </button>
               </div>
@@ -369,20 +369,20 @@ function GatheringPhotoEditor({
           type="button"
           onClick={() => inputRef.current?.click()}
           disabled={isPreparing || isSaving}
-          className="mt-3 flex min-h-[40px] w-full items-center justify-center gap-2 rounded-[3px] border border-field-border bg-field-soft px-3 py-2 text-sm font-black text-field-primary hover:border-field-secondary disabled:opacity-50"
+          className="mt-3 flex min-h-[40px] w-full items-center justify-center gap-2 border border-field-border bg-field-soft px-3 py-2 text-sm font-bold text-field-primary transition-colors hover:border-field-primary disabled:opacity-50"
         >
           <ImagePlus className="h-4 w-4" aria-hidden />
           {isPreparing ? "사진 준비 중" : "사진 선택"}
         </button>
 
-        {errorMessage ? <p className="mt-3 text-sm font-bold leading-5 text-field-danger">{errorMessage}</p> : null}
-        {progress ? <p className="mt-2 text-xs font-bold text-field-muted" role="status">{progress}</p> : null}
+        {errorMessage ? <p className="mt-3 text-sm font-normal leading-5 text-field-danger">{errorMessage}</p> : null}
+        {progress ? <p className="mt-2 text-xs font-normal text-field-muted" role="status">{progress}</p> : null}
 
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-field-border pt-3">
-          <button type="button" onClick={onClose} disabled={isSaving} className="min-h-[42px] rounded-[3px] border border-field-border bg-white px-3 py-2 text-sm font-black text-field-muted disabled:opacity-50">
+          <button type="button" onClick={onClose} disabled={isSaving} className="min-h-[42px] border border-field-border bg-field-panel px-3 py-2 text-sm font-bold text-field-muted transition-colors hover:border-field-primary hover:text-field-primary disabled:opacity-50">
             취소
           </button>
-          <button type="button" onClick={() => void saveChanges()} disabled={isPreparing || isSaving} className="flex min-h-[42px] items-center justify-center gap-2 rounded-[3px] border border-field-primary bg-field-primary px-3 py-2 text-sm font-black text-white disabled:opacity-50">
+          <button type="button" onClick={() => void saveChanges()} disabled={isPreparing || isSaving} className="flex min-h-[42px] items-center justify-center gap-2 border border-field-primary bg-field-primary px-3 py-2 text-sm font-bold text-black disabled:opacity-50">
             <Save className="h-4 w-4" aria-hidden />
             {isSaving ? "저장 중" : "저장"}
           </button>

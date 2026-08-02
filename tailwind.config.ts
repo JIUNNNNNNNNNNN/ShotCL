@@ -20,32 +20,35 @@ const config: Config = {
           "sans-serif"
         ]
       },
+      fontWeight: {
+        normal: "100",
+        black: "700"
+      },
       colors: {
         field: {
-          bg: "#FCFBF7",
-          soft: "#F7F5EF",
-          primary: "#0F3D2E",
-          secondary: "#1F6B4A",
-          light: "#EDF4EF",
-          border: "#DED9CF",
-          text: "#1C1C1A",
-          muted: "#6B6B63",
-          danger: "#9B2C2C"
+          bg: "#000000",
+          panel: "#0D0D0D",
+          soft: "#111111",
+          primary: "#D7B95F",
+          secondary: "#D7B95F",
+          light: "#1A1A1A",
+          border: "#303030",
+          text: "#FFFFFF",
+          muted: "#B5B5B5",
+          danger: "#E25555"
         },
         stage: {
-          black: "#FFFFFF",
-          panel: "#FAFAF7",
-          line: "#E5E2DA",
-          ink: "#1C1C1A",
-          muted: "#6B6B63",
-          amber: "#0F3D2E",
-          cyan: "#1F6B4A",
-          green: "#0F3D2E",
-          red: "#9B2C2C"
+          black: "#000000",
+          panel: "#0D0D0D",
+          line: "#303030",
+          ink: "#FFFFFF",
+          muted: "#B5B5B5",
+          amber: "#D7B95F",
+          red: "#E25555"
         }
       },
       boxShadow: {
-        shooting: "0 0 0 1px rgba(15, 61, 46, 0.24), 0 14px 28px rgba(15, 61, 46, 0.12)"
+        shooting: "0 0 0 1px rgba(215, 185, 95, 0.55)"
       }
     }
   },

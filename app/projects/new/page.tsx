@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { createProject } from "@/lib/data/projects";
 
 const fieldClass =
-  "min-h-12 w-full rounded-md border border-field-border bg-white px-3 py-3 text-base text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-light";
+  "min-h-12 w-full border border-field-border bg-field-panel px-3 py-3 text-base text-field-text outline-none transition placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
 
 /** HTML date input에 넣을 오늘 날짜를 로컬 시간 기준으로 만듭니다. */
 function getTodayInputValue() {
@@ -48,7 +48,7 @@ export default function NewProjectPage() {
     <section className="mx-auto grid w-full max-w-6xl gap-6">
       <PageHeader title="새 프로젝트" description="촬영일과 프로젝트 정보를 입력하세요." />
 
-      <form onSubmit={handleSubmit} className="grid w-full max-w-2xl gap-5 rounded-md border border-field-border bg-white p-5 shadow-sm md:p-6">
+      <form onSubmit={handleSubmit} className="grid w-full max-w-2xl gap-5 border border-field-border bg-field-panel p-5 md:p-6">
         <label className="grid gap-2">
           <span className="text-sm font-black text-field-primary">프로젝트명 <span className="text-field-danger">*</span></span>
           <input
@@ -82,7 +82,7 @@ export default function NewProjectPage() {
         </label>
 
         {errorMessage ? (
-          <div className="rounded-md border border-field-danger bg-white p-3 text-sm font-bold leading-5 text-field-danger">
+          <div className="border border-field-danger bg-field-panel p-3 text-sm font-bold leading-5 text-field-danger">
             <p>프로젝트 생성에 실패했습니다.</p>
             <p className="mt-1 break-words font-medium">{errorMessage}</p>
           </div>
@@ -91,14 +91,14 @@ export default function NewProjectPage() {
         <div className="grid gap-3 pt-1 sm:grid-cols-[160px_1fr] sm:justify-end">
           <Link
             href="/"
-            className="flex min-h-12 items-center justify-center rounded-md border border-field-border bg-white px-4 text-base font-black text-field-primary"
+            className="flex min-h-12 items-center justify-center border border-field-border bg-field-panel px-4 text-base font-bold text-field-text transition-colors hover:border-field-primary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
           >
             취소
           </Link>
           <button
             type="submit"
             disabled={isSaving || !name.trim()}
-            className="flex min-h-12 items-center justify-center gap-2 rounded-md bg-field-primary px-4 text-base font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-h-12 items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 text-base font-bold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save className="h-5 w-5" aria-hidden />
             {isSaving ? "저장 중" : "프로젝트 생성"}

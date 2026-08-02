@@ -221,7 +221,7 @@ export function SceneReorderList({
           >
             {isTarget ? (
               <span
-                className={`pointer-events-none absolute inset-x-1 z-30 h-0.5 rounded-[3px] bg-field-primary ${
+                className={`pointer-events-none absolute inset-x-1 z-30 h-0.5  bg-field-primary ${
                   drag?.insertAfter ? "-bottom-px" : "-top-px"
                 }`}
               />

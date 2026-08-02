@@ -78,7 +78,7 @@ export function ProgressScheduleEditorModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/15 p-3"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3"
       role="dialog"
       aria-modal="true"
       aria-label={readOnly ? "기타일정 그림과 메모 보기" : "기타일정 그림과 메모 수정"}
@@ -89,7 +89,7 @@ export function ProgressScheduleEditorModal({
       <form
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
-        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto rounded-[1rem] bg-[#fff8dc] p-3 shadow-[0_12px_32px_rgba(20,32,27,0.16)]"
+        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-panel p-3"
       >
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="sr-only">{readOnly ? "기타일정 보기" : "기타일정 수정"}</span>
@@ -105,18 +105,18 @@ export function ProgressScheduleEditorModal({
 
         <div className="grid gap-2">
           <div className="grid gap-1.5">
-            <span className="text-[11px] font-black text-[#64551f]">그림</span>
+            <span className="text-[11px] font-bold text-field-primary">그림</span>
             {values.imageUrl ? (
-              <div className="flex max-h-44 w-full items-center justify-center overflow-hidden rounded-none bg-white">
+              <div className="flex max-h-44 w-full items-center justify-center overflow-hidden bg-black">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={values.imageUrl}
                   alt={`${getDailyPlanAdditionalScheduleDisplay(item)} 그림`}
-                  className="block max-h-44 w-full rounded-none object-contain"
+                  className="block max-h-44 w-full object-contain"
                 />
               </div>
             ) : (
-              <div className="grid min-h-20 place-items-center rounded-none bg-white text-[11px] font-black text-field-muted">
+              <div className="grid min-h-20 place-items-center border border-field-border bg-black text-[11px] text-field-muted">
                 <span className="grid place-items-center gap-1">
                   <ImageIcon className="h-5 w-5" aria-hidden />
                   그림 없음
@@ -126,7 +126,7 @@ export function ProgressScheduleEditorModal({
 
             {!readOnly ? (
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex min-h-9 cursor-pointer items-center justify-center rounded-md border border-[#d9bd59] bg-white px-2 text-xs font-black text-field-primary">
+                <label className="flex min-h-9 cursor-pointer items-center justify-center border border-field-border bg-field-panel px-2 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black">
                   이미지 선택
                   <input type="file" accept="image/*,.heic,.heif" className="sr-only" onChange={handleImageChange} />
                 </label>
@@ -134,7 +134,7 @@ export function ProgressScheduleEditorModal({
                   variant="ghost"
                   onClick={() => setValues((current) => ({ ...current, imageFile: null, imageUrl: null }))}
                   disabled={!values.imageUrl}
-                  className="!min-h-9 !border-[#d9bd59] py-1 text-xs"
+                  className="!min-h-9 py-1 text-xs"
                 >
                   이미지 삭제
                 </Button>
@@ -143,14 +143,14 @@ export function ProgressScheduleEditorModal({
           </div>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-black text-[#64551f]">메모</span>
+            <span className="text-[11px] font-bold text-field-primary">메모</span>
             <textarea
               value={values.progressMemo}
               readOnly={readOnly}
               rows={3}
               maxLength={2000}
               onChange={(event) => setValues((current) => ({ ...current, progressMemo: event.target.value }))}
-              className="min-h-20 w-full resize-none rounded-md border border-[#d9bd59] bg-white px-3 py-2 text-sm leading-5 text-field-text outline-none focus:border-field-primary"
+              className="min-h-20 w-full resize-none border border-field-border bg-field-panel px-3 py-2 text-sm leading-5 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
             />
           </label>
         </div>

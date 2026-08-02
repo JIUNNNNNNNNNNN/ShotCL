@@ -1037,11 +1037,11 @@ export default function ProjectSceneListPage() {
 
   if (!project) {
     return (
-      <div className="rounded-2xl border border-field-danger bg-white p-6 text-center">
+      <div className="border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <Link
           href="/"
-          className="mt-4 inline-flex min-h-10 items-center rounded-[3px] border border-field-border px-4 text-sm font-bold text-field-primary"
+          className="mt-4 inline-flex min-h-10 items-center border border-field-border bg-field-panel px-4 text-sm font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
         >
           홈으로
         </Link>
@@ -1051,7 +1051,7 @@ export default function ProjectSceneListPage() {
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
-      <section className="overflow-clip rounded-xl border border-field-border bg-white">
+      <section className="overflow-clip border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
           <h1 className="font-display min-w-0 truncate text-lg font-black text-field-primary">
             {project.name} 씬리스트
@@ -1059,7 +1059,7 @@ export default function ProjectSceneListPage() {
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
+              className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -1069,7 +1069,7 @@ export default function ProjectSceneListPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={isSaving || !isDirty}
-                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 rounded-[3px] bg-field-primary px-3 text-xs font-black text-white transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 bg-field-primary px-3 text-xs font-bold text-black transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving
                   ? <PixelDogLoader size="xs" compact />
@@ -1081,7 +1081,7 @@ export default function ProjectSceneListPage() {
         </div>
 
         {errorMessage ? (
-          <p className="border-b border-field-danger bg-red-50 px-3 py-2 text-xs font-bold text-field-danger">
+          <p className="border-b border-field-danger bg-field-danger/10 px-3 py-2 text-xs font-bold text-field-danger">
             {errorMessage}
           </p>
         ) : null}
@@ -1110,7 +1110,7 @@ export default function ProjectSceneListPage() {
         >
           <div
             role="row"
-            className="sticky top-0 z-[60] grid border-b border-[#aeb6ae] bg-[#e9eee9] text-center text-[11px] font-black leading-4 text-field-primary shadow-[0_1px_0_rgba(15,61,46,0.08)] print:static print:shadow-none"
+            className="sticky top-0 z-[60] grid border-b border-field-border bg-field-soft text-center text-[11px] font-black leading-4 text-field-primary print:static"
             style={{ gridTemplateColumns }}
           >
             <SceneHeaderCell
@@ -1215,7 +1215,7 @@ export default function ProjectSceneListPage() {
               <button
                 type="button"
                 onClick={addItem}
-                className="inline-flex min-h-9 items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 text-xs font-bold text-field-primary transition hover:border-field-primary active:scale-95"
+                className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
                 씬 추가
@@ -1230,13 +1230,13 @@ export default function ProjectSceneListPage() {
           ref={deletePopoverRef}
           role="dialog"
           aria-label={`${deletePopover.label} 삭제 메뉴`}
-          className="fixed z-[80] min-w-24 overflow-hidden rounded-xl border border-red-200 bg-white p-1 shadow-[0_8px_24px_rgba(75,20,20,0.18)]"
+          className="fixed z-[80] min-w-24 overflow-hidden border border-field-danger/50 bg-field-panel p-1"
           style={{ left: deletePopover.left, top: deletePopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
-            className="flex min-h-9 w-full items-center justify-center rounded-lg px-3 text-xs font-black text-field-danger transition hover:bg-red-50 active:scale-[0.97]"
+            className="flex min-h-9 w-full items-center justify-center px-3 text-xs font-bold text-field-danger transition-colors hover:bg-field-danger hover:text-white active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
             onClick={() => {
               const item = items.find((candidate) => candidate.id === deletePopover.itemId);
               setDeletePopover(null);
@@ -1252,7 +1252,7 @@ export default function ProjectSceneListPage() {
         <div
           ref={headerHelpPopoverRef}
           role="tooltip"
-          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center rounded-xl border border-field-border bg-white px-3 py-2 text-center text-xs font-bold text-field-primary shadow-[0_8px_22px_rgba(15,61,46,0.14)] print:hidden"
+          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center border border-field-primary bg-field-panel px-3 py-2 text-center text-xs font-bold text-field-primary print:hidden"
           style={{ left: headerHelpPopover.left, top: headerHelpPopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
@@ -1287,8 +1287,8 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {(canEdit || scenarioReference) ? (
-        <details className="scene-list-landscape mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-black text-field-primary">
+        <details className="scene-list-landscape mt-3 overflow-hidden border border-field-border bg-field-panel">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-primary transition-colors hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
           <div className="border-t border-field-border p-3">
@@ -1309,7 +1309,7 @@ export default function ProjectSceneListPage() {
                 )}
                 rows={7}
                 aria-label="시나리오 참고"
-                className="w-full resize-y rounded-lg border border-field-border bg-white px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-light"
+                className="w-full resize-y border border-field-border bg-field-panel px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
               />
             ) : (
               <p className="whitespace-pre-wrap text-sm font-medium leading-6 text-field-text">
@@ -1321,8 +1321,8 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {scenarioReference ? (
-        <details className="scene-list-mobile mt-3 overflow-hidden rounded-xl border border-field-border bg-white">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-black text-field-primary">
+        <details className="scene-list-mobile mt-3 overflow-hidden border border-field-border bg-field-panel">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-primary transition-colors hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
           <p className="whitespace-pre-wrap border-t border-field-border p-3 text-sm font-medium leading-6 text-field-text">
@@ -1364,7 +1364,7 @@ function MobileSceneList({
         WebkitTouchCallout: "none"
       }}
     >
-      <div className="sticky top-0 z-[60] grid border-l border-t border-[#bfc5bf] bg-[#e9eee9] text-center text-[9px] font-black leading-[1.25] text-field-primary shadow-[0_1px_0_rgba(15,61,46,0.08)] print:static print:shadow-none"
+      <div className="sticky top-0 z-[60] grid border-l border-t border-field-border bg-field-soft text-center text-[9px] font-black leading-[1.25] text-field-primary print:static"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
@@ -1403,7 +1403,7 @@ function MobileSceneList({
           onCutValidationChange={onCutValidationChange}
         />
       )) : (
-        <p className="border-x border-b border-[#bfc5bf] px-3 py-8 text-center text-xs font-semibold text-field-muted">
+        <p className="border-x border-b border-field-border px-3 py-8 text-center text-xs font-semibold text-field-muted">
           등록된 씬이 없습니다.
         </p>
       )}
@@ -1478,12 +1478,10 @@ function MobileSceneRow({
             return (
               <span
                 key={role}
-                className={`max-w-full px-0.5 py-px font-bold [overflow-wrap:anywhere] ${
-                  isColored ? "rounded" : ""
-                }`}
+                className="max-w-full px-0.5 py-px font-bold [overflow-wrap:anywhere]"
                 style={isColored
                   ? { backgroundColor: actorStyle.background, color: actorStyle.color }
-                  : { color: "#2d332f" }}
+                  : { color: "#ffffff" }}
               >
                 {state.mode === "text" ? `${role}: ${state.text}` : role}
               </span>
@@ -1563,7 +1561,7 @@ function MobileSceneHeader({
           <button
             key={label}
             type="button"
-            className={`${entryClassName} w-full cursor-default bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d7b95f]`}
+            className={`${entryClassName} w-full cursor-default bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary`}
             aria-label={label}
             aria-describedby={helpId}
             onPointerDown={(event) => onLongPress?.(event, description ?? "")}
@@ -1666,7 +1664,7 @@ function SceneHeaderCell({
       {helpId && description ? (
         <button
           type="button"
-          className="flex h-full min-h-6 w-full cursor-default touch-pan-y items-center justify-center bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d7b95f]"
+          className="flex h-full min-h-6 w-full cursor-default touch-pan-y items-center justify-center bg-transparent font-black text-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary"
           aria-label={label}
           aria-describedby={helpId}
           onPointerDown={(event) => onLongPress(event, description)}
@@ -1702,7 +1700,7 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
       ref={ref}
       role="dialog"
       aria-label={`${item.sceneNo || "현재"} Scene ${role} 메모`}
-      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden rounded-xl border border-field-border bg-white shadow-[0_10px_28px_rgba(15,61,46,0.16)]"
+      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden border border-field-border bg-field-panel"
       style={{ left, top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -1717,7 +1715,7 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
           maxLength={120}
           aria-label={`${role} 배우칸 메모`}
           placeholder="V.O. / 실루엣 / 대역"
-          className="block min-h-11 w-full bg-white px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
+          className="block min-h-11 w-full bg-field-panel px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
         />
       ) : (
         <p className="min-h-11 px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
@@ -1867,7 +1865,7 @@ const SceneTableRow = memo(function SceneTableRow({
     <div
       role="row"
       data-scene-row-handle={canEdit ? "" : undefined}
-      className="grid min-h-9 bg-white text-[12px]"
+      className="grid min-h-9 bg-field-panel text-[12px]"
       style={{ gridTemplateColumns }}
     >
       <SceneCell
@@ -2092,7 +2090,7 @@ const SceneTableRow = memo(function SceneTableRow({
             <div
               data-scene-character-note-row-id={item.id}
               aria-label={`Characters 세부 메모: ${item.characterNotes}`}
-              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-t border-[#cbd0cb] bg-white/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
+              className="col-span-full max-h-10 min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap border-b border-r border-t border-[#cbd0cb] bg-field-panel/95 px-1 py-0.5 text-[8px] font-semibold leading-3 text-field-muted [overflow-wrap:anywhere]"
             >
               {item.characterNotes}
             </div>
@@ -2607,14 +2605,14 @@ function getMergePosition(rowIndex: number, range: SceneCellRange): MergePositio
 }
 
 function getSelectionBoxShadow(position: MergePosition) {
-  const left = "inset 2px 0 0 #0f3d2e";
-  const right = "inset -2px 0 0 #0f3d2e";
-  const top = "inset 0 2px 0 #0f3d2e";
-  const bottom = "inset 0 -2px 0 #0f3d2e";
+  const left = "inset 2px 0 0 #f4d35e";
+  const right = "inset -2px 0 0 #f4d35e";
+  const top = "inset 0 2px 0 #f4d35e";
+  const bottom = "inset 0 -2px 0 #f4d35e";
   if (position === "start") return `${left}, ${right}, ${top}`;
   if (position === "middle") return `${left}, ${right}`;
   if (position === "end") return `${left}, ${right}, ${bottom}`;
-  return "inset 0 0 0 2px #0f3d2e";
+  return "inset 0 0 0 2px #f4d35e";
 }
 
 function getVisualMergeRange(

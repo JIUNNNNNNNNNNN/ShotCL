@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { getSupabaseBrowserClient, hasSupabaseEnv } from "@/lib/supabase/client";
 
 const fieldClass =
-  "min-h-12 w-full rounded-md border border-field-border bg-white px-3 py-3 text-base text-field-text outline-none focus:border-field-primary";
+  "min-h-12 w-full border border-field-border bg-field-panel px-3 py-3 text-base text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
 
 /** Supabase Auth 이메일 매직링크 로그인 화면입니다. */
 export default function LoginPage() {
@@ -84,7 +84,7 @@ export default function LoginPage() {
           title="로그인"
           description="현재 배포본은 테스트 모드이며 실제 계정 로그인과 프로젝트 공유가 비활성화되어 있습니다."
         />
-        <div className="rounded-md border border-field-border bg-white p-5 font-bold leading-6 text-field-muted">
+        <div className="border border-field-border bg-field-panel p-5 leading-6 text-field-muted">
           Supabase URL과 anon key가 연결되지 않았습니다. 환경변수를 연결한 뒤 실제 계정 로그인과 협업 공유를 사용할 수 있습니다.
         </div>
       </>
@@ -95,27 +95,27 @@ export default function LoginPage() {
     <>
       <PageHeader title="로그인" description="Supabase 이메일 매직링크로 접속합니다." />
 
-      {message ? <div className="mb-4 rounded-md border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
-      {errorMessage ? <div className="mb-4 rounded-md border border-field-danger bg-white p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
+      {message ? <div className="mb-4 border border-field-primary bg-field-light p-4 text-sm font-bold text-field-primary">{message}</div> : null}
+      {errorMessage ? <div className="mb-4 border border-field-danger bg-field-panel p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
       {currentEmail ? (
-        <section className="rounded-md border border-field-border bg-white p-4">
-          <p className="text-sm font-bold text-field-muted">현재 로그인</p>
+        <section className="border border-field-border bg-field-panel p-4">
+          <p className="text-sm text-field-muted">현재 로그인</p>
           <p className="mt-2 break-words text-lg font-black">{currentEmail}</p>
           <button
             type="button"
             onClick={handleLogout}
             disabled={isBusy}
-            className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-field-border bg-white px-4 font-black text-field-primary disabled:opacity-50"
+            className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 border border-field-border bg-field-panel px-4 font-bold text-field-text transition-colors hover:border-field-primary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50"
           >
             <LogOut className="h-5 w-5" aria-hidden />
             로그아웃
           </button>
         </section>
       ) : (
-        <form onSubmit={handleLogin} className="grid gap-4 rounded-md border border-field-border bg-field-soft p-4">
+        <form onSubmit={handleLogin} className="grid gap-4 border border-field-border bg-field-panel p-4">
           <label className="grid gap-2">
-            <span className="text-sm font-bold text-field-muted">이메일</span>
+            <span className="text-sm text-field-muted">이메일</span>
             <input
               type="email"
               required
@@ -129,7 +129,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isBusy || !email.trim()}
-            className="flex min-h-12 items-center justify-center gap-2 rounded-md bg-field-primary px-4 font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-h-12 items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 font-bold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isBusy ? <Mail className="h-5 w-5" aria-hidden /> : <LogIn className="h-5 w-5" aria-hidden />}
             {isBusy ? "전송 중" : "로그인 링크 받기"}

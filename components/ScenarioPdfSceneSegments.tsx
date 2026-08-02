@@ -139,12 +139,12 @@ export function ScenarioPdfSceneSegments({
 
 function SceneImageFallback({ pdfUrl, filename }: { pdfUrl: string; filename: string }) {
   return (
-    <div className="flex min-h-40 items-center justify-center bg-white px-4 py-6">
+    <div className="flex min-h-40 items-center justify-center bg-field-panel px-4 py-6">
       <a
         href={pdfUrl}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-[3px] border border-field-border px-3 text-xs font-black text-field-primary"
+        className="inline-flex min-h-9 items-center gap-1.5 border border-field-border bg-field-bg px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       >
         <ExternalLink className="h-3.5 w-3.5" aria-hidden />
         {filename} 원본 PDF 열기

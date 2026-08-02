@@ -540,29 +540,29 @@ export default function ProjectDetailPage() {
         episodeLabel={formatEpisodeLabel(selectedPlan, 0)}
         shootingDate={selectedPlan.shootingDate}
         action={!progressOnly ? <details className="group relative">
-          <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-[3px] border border-field-border bg-white text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
+          <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-panel text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
             <Ellipsis className="h-5 w-5" aria-hidden />
             <span className="sr-only">프로젝트 보조 기능</span>
           </summary>
-          <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]" aria-label="프로젝트 보조 기능">
+          <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2" aria-label="프로젝트 보조 기능">
             <div className="mb-1 min-w-0 border-b border-field-border px-2 pb-2">
               <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
-              <p className="truncate text-[10px] font-bold text-field-muted">{project.shootDate || "촬영일 미정"}</p>
+              <p className="truncate text-[10px] text-field-muted">{project.shootDate || "촬영일 미정"}</p>
             </div>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-left text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-left text-xs font-bold leading-[1.35] text-field-primary hover:bg-field-light">
               <span className="font-display"><span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden /> 새 컷 추가</span></span>
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-soft">
               <span className="font-display"><span className="inline-flex items-center gap-2"><CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표</span></span>
             </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-soft">
               <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
             </Link>
           </nav>
-        </details> : <span className="rounded-[3px] border border-field-border bg-white px-3 py-2 text-xs font-black text-field-muted">진행도</span>}
+        </details> : <span className="border border-field-border bg-field-panel px-3 py-2 text-xs font-bold text-field-muted">진행도</span>}
       />
 
-      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 rounded-[3px] border border-field-border bg-white px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted transition-colors hover:border-field-secondary hover:bg-field-light">
+      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 border border-field-border bg-field-panel px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted transition-colors hover:border-field-primary hover:bg-field-light">
         <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
       </Link>
 
@@ -577,13 +577,13 @@ export default function ProjectDetailPage() {
       />
 
       {errorMessage ? (
-        <div className="mb-3 rounded-[1.25rem] border border-field-danger bg-white p-3 text-sm font-bold text-field-danger">
+        <div className="mb-3 border border-field-danger bg-field-panel p-3 text-sm font-bold text-field-danger">
           {errorMessage}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="mb-3 rounded-[1.25rem] border border-field-primary bg-field-light p-3 text-sm font-bold text-field-primary">
+        <div className="mb-3 border border-field-primary bg-field-light p-3 text-sm font-bold text-field-primary">
           {successMessage}
         </div>
       ) : null}
@@ -593,11 +593,11 @@ export default function ProjectDetailPage() {
           <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
         </div>
         {shots.length === 0 && scheduleRowCount === 0 ? (
-          <Card className="rounded-[1.5rem]">
+          <Card>
             <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
             <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
             <div className="mt-5 max-w-xs">
-              {!progressOnly ? <Button onClick={() => setIsAddOpen(true)} className="rounded-[3px]">
+              {!progressOnly ? <Button onClick={() => setIsAddOpen(true)}>
                 <Plus className="h-5 w-5" aria-hidden />
                 새 컷 추가
               </Button> : null}
@@ -623,10 +623,10 @@ export default function ProjectDetailPage() {
       </div>
 
       {process.env.NODE_ENV !== "production" && !progressOnly ? (
-        <details className="mt-4 rounded-[1.25rem] border border-field-border bg-white">
+        <details className="mt-4 border border-field-border bg-field-panel">
           <summary className="cursor-pointer px-4 py-3 text-xs font-black text-field-muted">개발용 도구</summary>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-field-border p-4">
-            <p className="text-xs font-bold leading-5 text-field-muted">테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.</p>
+            <p className="text-xs leading-5 text-field-muted">테스트 중 컷이 너무 많아졌을 때만 사용하세요. 프로젝트 정보는 삭제하지 않습니다.</p>
             <Button variant="danger" onClick={handleResetCurrentProjectShots} disabled={isSaving || shots.length === 0}>
               <RotateCcw className="h-5 w-5" aria-hidden /> 현재 회차 컷 목록 초기화
             </Button>
@@ -637,7 +637,7 @@ export default function ProjectDetailPage() {
       {!progressOnly ? <button
         type="button"
         onClick={() => setIsAddOpen(true)}
-        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center rounded-[3px] border border-field-primary bg-field-primary text-white shadow-[0_6px_16px_rgba(15,61,46,0.18)] transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f] focus-visible:ring-offset-2 md:right-8"
+        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center border border-field-primary bg-field-primary text-black transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:right-8"
         aria-label="새 컷 추가"
         title="새 컷 추가"
       >
@@ -792,18 +792,18 @@ function EpisodeSelection({
           </h1>
           {canEdit ? (
             <details className="group absolute right-1 top-0 shrink-0 md:right-3">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 rounded-[3px] border border-field-border bg-white px-3 text-xs font-black text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-secondary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#d7b95f]">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
                 <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
               </summary>
-              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 rounded-[1.25rem] border border-field-border bg-white p-2 shadow-[0_8px_22px_rgba(28,28,26,0.12)]">
-                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-primary hover:bg-field-light">
+              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2">
+                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-primary hover:bg-field-light">
                   <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
                 </Link>
                 <details className="group/settings">
-                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 rounded-[3px] px-3 py-1.5 text-xs font-black leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
+                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
                     <span className="font-display"><span className="inline-flex items-center gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span></span>
                   </summary>
-                  <div className="mx-2 mt-1 rounded-xl border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] font-bold leading-5 text-field-muted">
+                  <div className="mx-2 mt-1 border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] leading-5 text-field-muted">
                     <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
                     <p>현재 권한: admin</p>
                     <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
@@ -815,10 +815,10 @@ function EpisodeSelection({
           ) : null}
         </div>
 
-        {invalidSelection ? <p className="mt-3 border border-field-danger/40 bg-white px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
+        {invalidSelection ? <p className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
 
         {carouselItems.length === 0 ? (
-          <p className="mt-8 text-center text-sm font-bold text-field-muted">진행 가능한 일촬표가 없습니다.</p>
+          <p className="mt-8 text-center text-sm text-field-muted">진행 가능한 일촬표가 없습니다.</p>
         ) : (
           <DailyPlanCoverflow
             items={carouselItems}
@@ -834,7 +834,7 @@ function EpisodeSelection({
 function ModalLoadingFallback() {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/20">
-      <div className="rounded-2xl border border-field-border bg-white p-4 shadow-lg">
+      <div className="border border-field-border bg-field-panel p-4">
         <PixelDogLoader size="sm" compact />
       </div>
     </div>

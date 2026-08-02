@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const variantClass: Record<ButtonVariant, string> = {
-  primary: "border-field-primary bg-field-primary text-white",
-  secondary: "border-field-border bg-field-light text-field-primary",
-  ghost: "border-field-border bg-white text-field-text",
-  danger: "border-field-danger bg-white text-field-danger"
+  primary: "border-field-primary bg-field-primary font-black text-black",
+  secondary: "border-field-border bg-field-soft text-field-text",
+  ghost: "border-field-border bg-field-panel text-field-text",
+  danger: "border-field-danger bg-field-panel font-black text-field-danger"
 };
 
 type BaseProps = {
@@ -23,7 +23,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-2 text-sm font-black leading-[1.35] transition-[background-color,border-color,transform] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-[3px] border px-3 py-2 text-sm font-black leading-[1.35] transition-[background-color,border-color,transform] active:scale-[0.98]",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98]",
         variantClass[variant],
         className
       )}

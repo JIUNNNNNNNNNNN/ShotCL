@@ -143,13 +143,17 @@
 }
 
 :root {
-  color-scheme: light;
-  background: #fcfbf7;
-  --field-paper: #fcfbf7;
-  --field-panel: #ffffff;
-  --field-soft: #f7f5ef;
-  --field-line: #ded9cf;
-  --field-green: #0f3d2e;
+  color-scheme: dark;
+  background: #000000;
+  --field-paper: #000000;
+  --field-panel: #0d0d0d;
+  --field-soft: #111111;
+  --field-line: #303030;
+  --field-text: #ffffff;
+  --field-muted: #b5b5b5;
+  --field-accent: #d7b95f;
+  --field-accent-foreground: #000000;
+  --field-danger: #e25555;
 }
 
 * {
@@ -168,13 +172,14 @@ html {
     "Noto Sans KR",
     sans-serif;
   line-height: 1.45;
+  font-weight: 100;
 }
 
 body {
   min-height: 100%;
   margin: 0;
   background: var(--field-paper);
-  color: #1c1c1a;
+  color: var(--field-text);
   font-family:
     "Paperlogy",
     system-ui,
@@ -184,6 +189,8 @@ body {
     "Noto Sans KR",
     sans-serif;
   line-height: 1.45;
+  font-weight: 100;
+  font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -193,6 +200,7 @@ input,
 textarea,
 select {
   font-family: inherit;
+  font-weight: 100 !important;
   line-height: 1.35;
 }
 
@@ -205,6 +213,28 @@ table {
   font-family: inherit;
 }
 
+table td {
+  font-weight: 100;
+}
+
+th,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+  font-weight: 700;
+}
+
+.font-display,
+.font-display-strong {
+  font-family: "Paperlogy", system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-weight: 700;
+}
+
 a,
 label,
 p,
@@ -215,14 +245,28 @@ div {
 
 button {
   -webkit-tap-highlight-color: transparent;
-  border-radius: 3px !important;
+  border-radius: 0;
+}
+
+.app-theme :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
+.app-theme :where([role="dialog"], [role="menu"], [role="listbox"], [role="option"]) {
+  border-radius: 0;
+}
+
+.app-theme :where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--field-accent);
+}
+
+.app-theme :where(input, textarea, select)::placeholder {
+  color: var(--field-muted);
+  opacity: 1;
 }
 
 summary,
 label:has(input[type="file"]),
 a[class*="inline-flex"],
 a[class*="min-h-"][class*="items-center"] {
-  border-radius: 3px !important;
+  border-radius: 0;
 }
 
 /* New / Join / Go와 프로젝트 궤도처럼 동작 자체가 원형인 컨트롤만 예외입니다. */
@@ -231,27 +275,31 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 ::selection {
-  background: #d9e9df;
-  color: #0f3d2e;
+  background: var(--field-accent);
+  color: var(--field-accent-foreground);
+}
+
+:focus-visible {
+  outline-color: var(--field-accent);
 }
 
 @layer components {
   .field-section {
     border: 1px solid var(--field-line);
-    border-radius: 8px;
+    border-radius: 0;
     background: var(--field-panel);
   }
 
   .field-subsection {
     border: 1px solid var(--field-line);
-    border-radius: 6px;
+    border-radius: 0;
     background: var(--field-soft);
   }
 
   .field-cell {
     min-width: 0;
     border: 1px solid var(--field-line);
-    border-radius: 5px;
+    border-radius: 0;
     background: var(--field-panel);
   }
 }
@@ -292,19 +340,24 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-print-document {
+  background: #ffffff;
+  color: #000000;
   --daily-plan-section-line: rgba(28, 28, 28, 0.82);
   --daily-plan-card-line: rgba(78, 78, 78, 0.68);
   --daily-plan-header-fill: #f2f2f2;
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
 .daily-plan-preview-surface {
+  color: #000000;
   --daily-plan-header-fill: #f2f2f2;
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
 .daily-plan-preview-header {
@@ -342,11 +395,23 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-template td,
-.daily-plan-template th {
+.daily-plan-template th,
+.daily-plan-print-document td,
+.daily-plan-print-document th {
   height: 20px;
   padding: 3px 5px;
   vertical-align: middle;
   word-break: keep-all;
+}
+
+.daily-plan-template td,
+.daily-plan-print-document td {
+  font-weight: 400;
+}
+
+.daily-plan-template th,
+.daily-plan-print-document th {
+  font-weight: 700;
 }
 
 .daily-plan-print-document tr.pdf-section-start > :is(td, th) {

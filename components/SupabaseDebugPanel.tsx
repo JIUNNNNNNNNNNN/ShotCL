@@ -102,9 +102,9 @@ export function SupabaseDebugPanel() {
   }
 
   return (
-    <section className="mt-5 rounded-md border border-field-border bg-field-soft p-4">
+    <section className="mt-5 border border-field-border bg-field-panel p-4">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-field-light text-field-primary">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-border bg-field-soft text-field-primary">
           <Bug className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0">
@@ -119,7 +119,7 @@ export function SupabaseDebugPanel() {
         type="button"
         onClick={runChecks}
         disabled={isChecking}
-        className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-field-primary px-4 text-sm font-black text-white disabled:opacity-60"
+        className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 bg-field-primary px-4 text-sm font-bold text-black transition-colors hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-60"
       >
         <Database className="h-5 w-5" aria-hidden />
         {isChecking ? "점검 중" : "연결 점검"}
@@ -128,7 +128,7 @@ export function SupabaseDebugPanel() {
       {results.length > 0 ? (
         <div className="mt-4 grid gap-2">
           {results.map((result) => (
-            <div key={result.label} className="rounded-md border border-field-border bg-white p-3">
+            <div key={result.label} className="border border-field-border bg-field-soft p-3">
               <p className="text-sm font-black text-field-text">
                 {result.ok ? "OK" : "FAIL"} · {result.label}
               </p>

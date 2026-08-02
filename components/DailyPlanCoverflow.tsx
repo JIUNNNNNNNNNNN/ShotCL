@@ -686,7 +686,7 @@ export function DailyPlanCoverflow({
         ref={selectionSlotRef}
         aria-hidden="true"
         data-carousel-selection-slot
-        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 rounded-[4px] border-2 border-field-primary/45"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 border-2 border-field-primary/45"
       />
       <div className="pointer-events-none absolute inset-0 z-[1] [transform-style:preserve-3d]">
         {items.map((item) => (
@@ -756,8 +756,8 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       }
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
-      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden rounded-[3px] border-2 bg-white px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-primary hover:bg-field-light focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
-        active ? "border-field-primary" : "border-field-border"
+      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-primary hover:bg-field-soft focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
+        active ? "border-field-primary bg-field-light" : "border-field-border"
       } ${
         item.kind === "new"
           ? "text-5xl font-light leading-none text-field-primary"
