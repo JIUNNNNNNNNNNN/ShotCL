@@ -67,6 +67,7 @@ import {
 } from "@/lib/dailyPlan/previewDisplay";
 import {
   DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
+  DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS,
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
   type DailyPlanPreviewTimetableRow
 } from "@/lib/dailyPlan/previewTimetable";
@@ -3532,9 +3533,9 @@ function MoveMenu({
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
-    <section className="mt-5 border border-field-border bg-field-section p-2 md:p-5">
+    <section className="mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
       <div className="grid gap-1">
-        <h2 className="text-lg font-black text-field-text">실시간 일촬표 미리보기</h2>
+        <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
       <ScaledDailyPlanPreview data={data} />
       <DailyPlanMobilePortraitPreview
@@ -3578,7 +3579,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   }, []);
 
   return (
-    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden bg-[#eeeae1] md:block">
+    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden bg-[#e8e8e5] md:block">
       <div
         className="relative mx-auto max-w-full"
         style={{ width: desktopPreviewDocumentWidth * scale, height: scaledHeight || undefined }}
@@ -3724,9 +3725,16 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 장소가 없습니다.</td>
             </tr>
           )}
+        </tbody>
+      </table>
+      <table className="daily-plan-grid daily-plan-export-table -mt-[2.5px] w-full border-collapse border-2 border-black text-center">
+        <PrintDocumentColumns />
+        <tbody>
           <tr className="pdf-section-start daily-plan-preview-header font-black">
             {timetableFields.map((field) => (
-              <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
+              <td key={field.key} colSpan={field.span} className={`${printCellClass} ${getPrintTimetableCompactClass(field.key)}`}>
+                <PrintTimetableHeaderLabel field={field} />
+              </td>
             ))}
           </tr>
           {timetableRows.length > 0 ? timetableRows.map((row, index) => (
@@ -3737,7 +3745,7 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               {row.type === "additionalSchedule" ? (
                 <PrintAdditionalScheduleCells row={row} />
               ) : (
-                <PrintFixedCells
+                <PrintTimetableCells
                   fields={timetableFields.map((field) => ({
                     ...field,
                     value: getPrintTimetableFieldValue(row, field.key)
@@ -3758,6 +3766,10 @@ function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewDat
               총 컷수 {data.totalCutCount}컷
             </td>
           </tr>
+        </tbody>
+      </table>
+      <table className="daily-plan-grid daily-plan-export-table -mt-[2.5px] w-full border-collapse border-2 border-black text-center">
+        <tbody>
           <tr className="pdf-section-start daily-plan-preview-header font-black">
             {memoFields.map((field) => (
               <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
@@ -3827,11 +3839,49 @@ function PrintFixedCells({ fields }: { fields: PreviewDisplayField[] }) {
     <td
       key={cell.key}
       colSpan={cell.span}
-      className={`${printCellClass} break-words [overflow-wrap:anywhere]`}
+      className={`${printCellClass} ${cell.key === "contact" ? "whitespace-nowrap [word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
     >
       {getPreviewCellText(cell.value)}
     </td>
   ));
+}
+
+function PrintDocumentColumns() {
+  const totalWeight = DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
+  return (
+    <colgroup>
+      {DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.map((weight, index) => (
+        <col key={index} style={{ width: `${(weight / totalWeight) * 100}%` }} />
+      ))}
+    </colgroup>
+  );
+}
+
+function PrintTimetableCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((field) => (
+    <td
+      key={field.key}
+      colSpan={field.span}
+      className={`${printCellClass} ${getPrintTimetableCompactClass(field.key)} ${field.key === "location" ? "[word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
+    >
+      <span className={field.key === "location" ? "line-clamp-2" : undefined}>
+        {getPreviewCellText(field.value)}
+      </span>
+    </td>
+  ));
+}
+
+function PrintTimetableHeaderLabel({ field }: { field: PreviewDisplayField }) {
+  if (field.key === "totalCut") {
+    return <><span className="block">Total</span><span className="block">Cut</span></>;
+  }
+  return <>{field.label}</>;
+}
+
+function getPrintTimetableCompactClass(key: string) {
+  return ["dayNight", "sceneNumber", "totalCut"].includes(key)
+    ? "whitespace-nowrap px-0.5 text-[9px] [word-break:keep-all] [overflow-wrap:normal]"
+    : "";
 }
 
 function PrintAdditionalScheduleCells({

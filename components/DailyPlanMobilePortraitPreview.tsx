@@ -26,7 +26,9 @@ type DailyPlanMobilePortraitPreviewProps = {
 const sheetColumnCount = 10;
 const cellClass = "border border-black px-0.5 py-1 align-middle break-words [overflow-wrap:anywhere]";
 const headerCellClass = "daily-plan-preview-header border border-black px-0.5 py-1 align-middle font-bold break-words [overflow-wrap:anywhere]";
-const compactTopCellClass = "box-border min-w-0 border border-black px-0.5 py-0.5 align-middle leading-[1.25] [word-break:keep-all] [overflow-wrap:anywhere]";
+const timetableCellClass = "border border-black px-0.5 py-1 align-middle";
+const timetableHeaderCellClass = "daily-plan-preview-header border border-black px-0.5 py-1 align-middle font-bold";
+const compactTopCellClass = "box-border min-w-0 border border-black px-0.5 py-0.5 align-middle leading-[1.25] [word-break:keep-all]";
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
 const eventRowClass = "daily-plan-preview-event";
@@ -45,7 +47,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
     member.name,
     member.contact
   ]);
-  const compactMainStaffRows = chunkRows(mainStaffRows, 2);
+  const compactMainStaffRows = mainStaffRows;
   const hasTotalCrew = hasMeaningfulRowValue(meta.totalCrew);
   const weatherRows = filterRenderablePreviewRows(
     chunkRows(createWeatherFields(meta), 3),
@@ -64,8 +66,8 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
         <tbody>
           <tr className="h-[54px]">
             <td className={`${cellClass} whitespace-nowrap font-bold`}>
-              <span className="text-[8px]">DAY</span>
-              <span className="ml-0.5 text-[22px] leading-[1.2]">{getPreviewCellText(meta.day)}</span>
+              <span className="block text-[8px] leading-none">DAY</span>
+              <span className="block text-[15px] leading-[1.1]">{getPreviewCellText(meta.day)}</span>
             </td>
             <td
               colSpan={sheetColumnCount - 1}
@@ -90,33 +92,16 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               </td>
             </tr>
           ) : null}
-          {compactMainStaffRows.length > 0 ? compactMainStaffRows.map((row, rowIndex) => {
-            const isLastRow = rowIndex === compactMainStaffRows.length - 1;
-            const placeCrewInEmptyHalf = isLastRow && row.length === 1 && hasTotalCrew;
-            return (
-              <tr key={`portrait-main-staff-${rowIndex}`}>
-                <CompactMainStaffCells member={row[0]} />
-                {row[1] ? (
-                  <CompactMainStaffCells member={row[1]} />
-                ) : placeCrewInEmptyHalf ? (
-                  <CompactCrewCells value={meta.totalCrew} />
-                ) : (
-                  <td colSpan={5} className={compactTopCellClass} />
-                )}
-              </tr>
-            );
-          }) : (
+          {compactMainStaffRows.length > 0 ? compactMainStaffRows.map((member, rowIndex) => (
+            <tr key={`portrait-main-staff-${rowIndex}`}>
+              <CompactMainStaffCells member={member} />
+            </tr>
+          )) : (
             <tr>
-              <td colSpan={hasTotalCrew ? 5 : sheetColumnCount} className={compactTopCellClass}>등록된 메인 스태프가 없습니다.</td>
-              {hasTotalCrew ? <CompactCrewCells value={meta.totalCrew} /> : null}
+              <td colSpan={sheetColumnCount} className={compactTopCellClass}>등록된 메인 스태프가 없습니다.</td>
             </tr>
           )}
-          {hasTotalCrew && mainStaffRows.length > 0 && mainStaffRows.length % 2 === 0 ? (
-            <tr>
-              <td colSpan={5} className={compactTopCellClass}>Total Crew</td>
-              <td colSpan={5} className={`${compactTopCellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(meta.totalCrew)}</td>
-            </tr>
-          ) : null}
+          {hasTotalCrew ? <tr><CompactCrewCells value={meta.totalCrew} /></tr> : null}
         </tbody>
       </table>
 
@@ -153,11 +138,13 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
       </table>
 
       <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
-        <SheetColumns />
+        <SummaryTimetableColumns />
         <thead>
           <tr>
             {timetableSummaryFields.map((field) => (
-              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+              <th key={field.key} colSpan={field.span} className={`${timetableHeaderCellClass} !text-[7px] leading-[1.15] tracking-[-0.05em] ${getTimetableCompactClass(field.key)}`}>
+                <TimetableHeaderLabel field={field} />
+              </th>
             ))}
           </tr>
         </thead>
@@ -167,7 +154,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
               {row.type === "additionalSchedule" ? (
                 <AdditionalScheduleSummaryCells row={row} />
               ) : (
-                <FixedCells
+                <TimetableCells
                   fields={timetableSummaryFields.map((field) => ({
                     ...field,
                     value: getTimetableFieldValue(row, field.key)
@@ -182,18 +169,18 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
       </table>
 
       <table className="mt-1 w-full table-fixed border-collapse border-y-2 border-black text-center">
-        <SheetColumns />
+        <DetailTimetableColumns />
         <thead>
           <tr>
             {timetableDetailFields.map((field) => (
-              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+              <th key={field.key} colSpan={field.span} className={`${timetableHeaderCellClass} !text-[7px] leading-[1.15] tracking-[-0.05em] ${getTimetableCompactClass(field.key)}`}>{field.label}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {sceneDetailRows.map((row, index) => (
             <tr key={`portrait-detail-${index}`} className="h-[21px]">
-              <FixedCells
+              <TimetableCells
                 fields={timetableDetailFields.map((field) => ({
                   ...field,
                   value: getTimetableFieldValue(row, field.key)
@@ -262,6 +249,28 @@ function SheetColumns() {
   );
 }
 
+const summaryTimetableColumnWeights = [11, 11, 8, 9, 8, 7, 11, 10, 12.5, 12.5] as const;
+const detailTimetableColumnWeights = [110, 104, 103, 103, 75, 75, 140, 96, 97, 97] as const;
+
+function SummaryTimetableColumns() {
+  return <WeightedColumns weights={summaryTimetableColumnWeights} />;
+}
+
+function DetailTimetableColumns() {
+  return <WeightedColumns weights={detailTimetableColumnWeights} />;
+}
+
+function WeightedColumns({ weights }: { weights: readonly number[] }) {
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  return (
+    <colgroup>
+      {weights.map((weight, index) => (
+        <col key={index} style={{ width: `${(weight / totalWeight) * 100}%` }} />
+      ))}
+    </colgroup>
+  );
+}
+
 function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   return fields.map((field) => (
     <td key={field.key} colSpan={field.span} className={cellClass}>
@@ -270,15 +279,47 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function TimetableCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((field) => (
+    <td
+      key={field.key}
+      colSpan={field.span}
+      className={`${timetableCellClass} ${getTimetableCompactClass(field.key)} ${field.key === "location" ? "[word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
+    >
+      <span className={field.key === "location" ? "line-clamp-2" : undefined}>
+        {getPreviewCellText(field.value)}
+      </span>
+    </td>
+  ));
+}
+
+function TimetableHeaderLabel({ field }: { field: PreviewDisplayField }) {
+  if (field.key === "totalCut") {
+    return <><span className="block">Total</span><span className="block">Cut</span></>;
+  }
+  return <>{field.label}</>;
+}
+
+function getTimetableCompactClass(key: string) {
+  if (key === "sceneNumber") {
+    return "whitespace-nowrap px-0 text-[8px] tracking-[-0.08em] [word-break:keep-all] [overflow-wrap:normal]";
+  }
+  return ["dayNight", "totalCut"].includes(key)
+    ? "whitespace-nowrap px-0 text-[8px] [word-break:keep-all] [overflow-wrap:normal]"
+    : "";
+}
+
 function CompactMainStaffCells({ member }: { member: { role: string; name: string; contact: string } }) {
   return (
     <>
-      <td colSpan={2} className={`${compactTopCellClass} text-[9px] font-bold`}>
-        {getPreviewCellText(member.role)}
+      <td colSpan={2} className={`${compactTopCellClass} break-words text-[9px] font-bold [overflow-wrap:anywhere]`}>
+        <span className="line-clamp-2">{getPreviewCellText(member.role)}</span>
       </td>
-      <td colSpan={3} className={`${compactTopCellClass} text-[9px]`}>
-        <span className="block min-w-0">{getPreviewCellText(member.name)}</span>
-        {member.contact ? <span className="block min-w-0 text-[8px]">{member.contact}</span> : null}
+      <td colSpan={3} className={`${compactTopCellClass} break-words text-[9px] [overflow-wrap:anywhere]`}>
+        <span className="line-clamp-2">{getPreviewCellText(member.name)}</span>
+      </td>
+      <td colSpan={5} className={`${compactTopCellClass} whitespace-nowrap text-[9px] [overflow-wrap:normal]`}>
+        {getPreviewCellText(member.contact)}
       </td>
     </>
   );
@@ -287,8 +328,8 @@ function CompactMainStaffCells({ member }: { member: { role: string; name: strin
 function CompactCrewCells({ value }: { value: string }) {
   return (
     <>
-      <td colSpan={2} className={compactTopCellClass}>Total Crew</td>
-      <td colSpan={3} className={`${compactTopCellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(value)}</td>
+      <td colSpan={4} className={compactTopCellClass}>Total Crew</td>
+      <td colSpan={6} className={`${compactTopCellClass} ${crewCellClass} font-bold`}>{formatCrewTotal(value)}</td>
     </>
   );
 }
@@ -408,7 +449,7 @@ function createTimetableSummaryFields(): PreviewDisplayField[] {
     { key: "location", label: "LOCATION", span: 2, value: "" },
     {
       key: "dayNight",
-      label: "D/N/S",
+      label: "D/N",
       span: 1,
       value: ""
     },

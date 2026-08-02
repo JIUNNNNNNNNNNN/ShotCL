@@ -4,6 +4,7 @@ import {
 } from "@/lib/dailyPlan/printMeta";
 import {
   DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
+  DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS,
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
   type DailyPlanPreviewTimetableRow
 } from "@/lib/dailyPlan/previewTimetable";
@@ -30,7 +31,7 @@ type DailyPlanDesktopLandscapePreviewProps = {
 const sectionTableClass = "daily-plan-section-table mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
 const halfTableClass = "daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center";
 const cellClass = "border border-black px-1.5 py-1 text-center align-middle";
-const compactStaffCellClass = "min-w-0 border border-black px-1 py-0.5 text-center align-middle text-[10px] leading-[1.25] [word-break:keep-all] [overflow-wrap:anywhere]";
+const compactStaffCellClass = "min-w-0 border border-black px-1 py-0.5 text-center align-middle text-[10px] leading-[1.25] [word-break:keep-all]";
 const headerCellClass = `${cellClass} daily-plan-preview-header font-black`;
 const accentCellClass = "daily-plan-preview-accent";
 const crewCellClass = "daily-plan-preview-summary";
@@ -60,7 +61,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
   ];
 
   return (
-    <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-tight text-black">
+    <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-[1.3] text-black">
       <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
         <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <EqualColumns count={12} />
@@ -85,7 +86,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
             <tr aria-hidden="true" />
             <tr>
               <td rowSpan={3} className={`${cellClass} font-black`}>CALL TIME</td>
-              <td rowSpan={3} colSpan={8} className={`${cellClass} ${accentCellClass}`}>
+              <td rowSpan={3} colSpan={7} className={`${cellClass} ${accentCellClass}`}>
                 {hasMeaningfulRowValue(plan.shootingDate) ? (
                   <>
                     <span className="mr-1 text-[9px] font-bold">Day</span>
@@ -137,11 +138,13 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
       </table>
 
       <table className={sectionTableClass}>
-        <EqualColumns count={timetableColumnCount} />
+        <TimetableColumns />
         <thead>
           <tr>
             {timetableFields.map((field) => (
-              <th key={field.key} colSpan={field.span} className={headerCellClass}>{field.label}</th>
+              <th key={field.key} colSpan={field.span} className={`${headerCellClass} ${getTimetableCompactClass(field.key)}`}>
+                <TimetableHeaderLabel field={field} />
+              </th>
             ))}
           </tr>
         </thead>
@@ -151,7 +154,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
               {row.type === "additionalSchedule" ? (
                 <AdditionalScheduleCells row={row} />
               ) : (
-                <FixedCells
+                <TimetableCells
                   fields={timetableFields.map((field) => ({
                     ...field,
                     value: getTimetableFieldValue(row, field.key)
@@ -234,6 +237,17 @@ function EqualColumns({ count }: { count: number }) {
   );
 }
 
+function TimetableColumns() {
+  const totalWeight = DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
+  return (
+    <colgroup>
+      {DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.map((weight, index) => (
+        <col key={index} style={{ width: `${(weight / totalWeight) * 100}%` }} />
+      ))}
+    </colgroup>
+  );
+}
+
 function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   return fields.map((field) => (
     <td key={field.key} colSpan={field.span} className={`${cellClass} break-words [overflow-wrap:anywhere]`}>
@@ -242,12 +256,43 @@ function FixedCells({ fields }: { fields: PreviewDisplayField[] }) {
   ));
 }
 
+function TimetableCells({ fields }: { fields: PreviewDisplayField[] }) {
+  return fields.map((field) => (
+    <td
+      key={field.key}
+      colSpan={field.span}
+      className={`${cellClass} ${getTimetableCompactClass(field.key)} ${field.key === "location" ? "[word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
+    >
+      <span className={field.key === "location" ? "line-clamp-2" : undefined}>
+        {getPreviewCellText(field.value)}
+      </span>
+    </td>
+  ));
+}
+
+function TimetableHeaderLabel({ field }: { field: PreviewDisplayField }) {
+  if (field.key === "totalCut") {
+    return <><span className="block">Total</span><span className="block">Cut</span></>;
+  }
+  return <>{field.label}</>;
+}
+
+function getTimetableCompactClass(key: string) {
+  return ["dayNight", "sceneNumber", "totalCut"].includes(key)
+    ? "whitespace-nowrap px-0.5 text-[9px] [word-break:keep-all] [overflow-wrap:normal]"
+    : "";
+}
+
 function CompactMainStaffCells({ member }: { member: { role: string; name: string; contact: string } }) {
   return (
     <>
-      <td className={`${compactStaffCellClass} font-bold`}>{getPreviewCellText(member.role)}</td>
-      <td className={compactStaffCellClass}>{getPreviewCellText(member.name)}</td>
-      <td className={compactStaffCellClass}>{getPreviewCellText(member.contact)}</td>
+      <td className={`${compactStaffCellClass} whitespace-nowrap font-bold [overflow-wrap:normal]`}>{getPreviewCellText(member.role)}</td>
+      <td className={`${compactStaffCellClass} break-words [overflow-wrap:anywhere]`}>
+        <span className="line-clamp-2">{getPreviewCellText(member.name)}</span>
+      </td>
+      <td colSpan={2} className={`${compactStaffCellClass} whitespace-nowrap [overflow-wrap:normal]`}>
+        {getPreviewCellText(member.contact)}
+      </td>
     </>
   );
 }

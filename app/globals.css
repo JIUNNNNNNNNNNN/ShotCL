@@ -417,7 +417,7 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-family: inherit;
 }
 
 .daily-plan-print-document {
@@ -438,7 +438,7 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-family: inherit;
 }
 
 .daily-plan-preview-header {
@@ -485,7 +485,6 @@ a[class*="min-h-"][class*="items-center"] {
   word-break: keep-all;
 }
 
-.daily-plan-template td,
 .daily-plan-print-document td {
   font-weight: 400;
 }

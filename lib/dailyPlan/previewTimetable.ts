@@ -26,3 +26,19 @@ export const DAILY_PLAN_TIMETABLE_COLUMN_COUNT = 16;
 export const DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN = 3;
 export const DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN =
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT - DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN;
+
+/**
+ * 데스크톱 화면 미리보기와 PDF가 함께 사용하는 16개 leaf column의 상대 폭입니다.
+ * 기존 colSpan은 유지하면서 LOCATION/D/N/SCENE/Total Cut을 줄이고 긴 정보 열에 폭을 돌려줍니다.
+ */
+export const DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS = [
+  50, 50, 50,
+  36, 36,
+  32,
+  40,
+  40,
+  61, 61, 62,
+  72,
+  50, 50,
+  55, 55
+] as const;
