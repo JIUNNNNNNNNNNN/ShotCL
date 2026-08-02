@@ -3,7 +3,7 @@ import type {
   DailyPlanMealTime
 } from "@/lib/types";
 
-export const dailyPlanAdditionalScheduleTypes = [
+const legacyDailyPlanAdditionalScheduleTypes = [
   "집합장소",
   "이동",
   "식사",
@@ -15,7 +15,7 @@ export const dailyPlanAdditionalScheduleTypes = [
 export function isDailyPlanAdditionalScheduleType(
   value: unknown
 ): value is DailyPlanAdditionalScheduleType {
-  return dailyPlanAdditionalScheduleTypes.includes(
+  return legacyDailyPlanAdditionalScheduleTypes.includes(
     String(value ?? "").trim() as DailyPlanAdditionalScheduleType
   );
 }
@@ -27,16 +27,9 @@ export function normalizeDailyPlanAdditionalScheduleType(
   return isDailyPlanAdditionalScheduleType(normalized) ? normalized : "기타";
 }
 
-/** 기존 memo-only 일정과 새 scheduleType 일정을 같은 제목 정책으로 표시합니다. */
+/** 화면에는 legacy 종류를 노출하지 않고 사용자가 입력한 메모만 표시합니다. */
 export function getDailyPlanAdditionalScheduleDisplay(
-  item: Pick<DailyPlanMealTime, "scheduleType" | "memo">
+  item: Pick<DailyPlanMealTime, "memo">
 ) {
-  const memo = item.memo.trim();
-  const storedType = isDailyPlanAdditionalScheduleType(item.scheduleType)
-    ? item.scheduleType
-    : null;
-
-  if (!storedType) return memo || "기타 일정";
-  if (!memo || memo === storedType) return storedType;
-  return `${storedType} · ${memo}`;
+  return item.memo.trim() || "기타 일정";
 }

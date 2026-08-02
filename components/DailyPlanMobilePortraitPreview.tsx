@@ -57,7 +57,7 @@ export function DailyPlanMobilePortraitPreview({ plan, locations, meta, timetabl
   return (
     <article
       data-testid="daily-plan-mobile-portrait-preview"
-      className="daily-plan-preview-surface mt-4 box-border w-full min-w-0 max-w-full bg-white [font-family:inherit] text-[10px] leading-[1.4] text-black md:hidden"
+      className="daily-plan-preview-surface mx-auto mt-4 box-border w-full min-w-0 max-w-full bg-white [font-family:inherit] text-[10px] leading-[1.4] text-black md:hidden"
     >
       <table className="box-border w-full min-w-0 max-w-full table-fixed border-collapse border-2 border-black text-center">
         <SheetColumns />

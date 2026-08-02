@@ -40,10 +40,8 @@ import {
   reconcileDailyPlanGatheringPoints
 } from "@/lib/dailyPlan/gatheringPoints";
 import {
-  dailyPlanAdditionalScheduleTypes,
   getDailyPlanAdditionalScheduleDisplay,
-  isDailyPlanAdditionalScheduleType,
-  normalizeDailyPlanAdditionalScheduleType
+  isDailyPlanAdditionalScheduleType
 } from "@/lib/dailyPlan/additionalSchedule";
 import {
   getDailyPlanLocationAddress as getLocationAddress,
@@ -266,6 +264,7 @@ const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:rounded-[5px] max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
 const maxRuntimeMinutes = 1440;
+const desktopPreviewDocumentWidth = 1120;
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
 const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
@@ -1749,29 +1748,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           </select>
                         </td>
                         <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-12`}>
-                          <div className="grid min-w-0 gap-1 sm:grid-cols-[7rem_minmax(0,1fr)]">
-                            <label className="min-w-0">
-                              <span className={mobileTimetableLabelClass}>유형</span>
-                              <select
-                                className={centeredSelectClass}
-                                value={normalizeDailyPlanAdditionalScheduleType(meal.scheduleType ?? meal.memo)}
-                                onChange={(event) => updateMealTime(mealIndex, {
-                                  scheduleType: normalizeDailyPlanAdditionalScheduleType(event.target.value)
-                                })}
-                                aria-label={`기타 일정 ${mealIndex + 1} 유형`}
-                              >
-                                {dailyPlanAdditionalScheduleTypes.map((option) => <option key={option} value={option}>{option}</option>)}
-                              </select>
-                            </label>
-                            <div className="min-w-0">
-                              <span className={mobileTimetableLabelClass}>내용</span>
-                              <MemoPopoverField
-                                value={meal.memo}
-                                placeholder="집합장소 / 이동 / 식사 / 준비 / 휴식"
-                                ariaLabel={`기타 일정 ${mealIndex + 1} 내용 수정`}
-                                onChange={(value) => updateMealTime(mealIndex, { memo: value })}
-                              />
-                            </div>
+                          <div className="min-w-0">
+                            <span className={mobileTimetableLabelClass}>메모</span>
+                            <MemoPopoverField
+                              value={meal.memo}
+                              placeholder="메모"
+                              ariaLabel={`기타 일정 ${mealIndex + 1} 메모 수정`}
+                              onChange={(value) => updateMealTime(mealIndex, { memo: value })}
+                            />
                           </div>
                         </td>
                       </tr>
@@ -3591,7 +3575,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
       const currentDocument = documentRef.current;
       if (!currentContainer || !currentDocument) return;
       const availableWidth = currentContainer.clientWidth;
-      const nextScale = Math.min(1, availableWidth / 1120);
+      const nextScale = Math.min(1, availableWidth / desktopPreviewDocumentWidth);
       setScale(nextScale);
       setScaledHeight(currentDocument.scrollHeight * nextScale);
     }
@@ -3604,9 +3588,16 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   }, []);
 
   return (
-    <div ref={containerRef} className="mt-4 hidden w-full overflow-hidden rounded-md bg-white md:block">
-      <div className="relative w-full" style={{ height: scaledHeight || undefined }}>
-        <div ref={documentRef} className="absolute left-0 top-0 w-[1120px] origin-top-left" style={{ transform: `scale(${scale})` }}>
+    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden rounded-md bg-white md:block">
+      <div
+        className="relative mx-auto max-w-full"
+        style={{ width: desktopPreviewDocumentWidth * scale, height: scaledHeight || undefined }}
+      >
+        <div
+          ref={documentRef}
+          className="absolute left-0 top-0 origin-top-left"
+          style={{ width: desktopPreviewDocumentWidth, transform: `scale(${scale})` }}
+        >
           <DailyPlanDesktopLandscapePreview
             plan={data.plan}
             locations={data.locations}
@@ -4539,7 +4530,7 @@ function buildInitialMeals(plan: DailyPlanDraft, isNewDailyPlan: boolean): Daily
         : null;
       return {
         ...meal,
-        scheduleType: normalizeDailyPlanAdditionalScheduleType(meal.scheduleType ?? legacyType),
+        ...(legacyType ? { scheduleType: legacyType } : {}),
         memo: legacyType ? "" : meal.memo,
         runtimeMinutes,
         runtime: formatRuntimeMinutes(runtimeMinutes)
@@ -4547,20 +4538,21 @@ function buildInitialMeals(plan: DailyPlanDraft, isNewDailyPlan: boolean): Daily
     });
   }
   if (plan.mealTime.trim()) {
-    const legacyType = isDailyPlanAdditionalScheduleType(plan.mealTime.trim())
-      ? plan.mealTime.trim()
+    const legacyMealTime = plan.mealTime.trim();
+    const legacyType = isDailyPlanAdditionalScheduleType(legacyMealTime)
+      ? legacyMealTime
       : null;
     return [{
       id: makeLocalId("meal"),
       startTime: "",
       endTime: "",
-      scheduleType: normalizeDailyPlanAdditionalScheduleType(legacyType),
+      ...(legacyType ? { scheduleType: legacyType } : {}),
       runtimeMinutes: null,
       runtime: "",
-      memo: legacyType ? "" : plan.mealTime
+      memo: legacyType ? "" : legacyMealTime
     }];
   }
-  return isNewDailyPlan ? [createBlankOtherSchedule("집합장소")] : [];
+  return isNewDailyPlan ? [createBlankOtherSchedule()] : [];
 }
 
 function formatSceneSourceOption(item: ProjectSceneItem) {
@@ -4911,14 +4903,11 @@ function createBlankLocation(): DailyPlanLocation {
   };
 }
 
-function createBlankOtherSchedule(
-  scheduleType: (typeof dailyPlanAdditionalScheduleTypes)[number] = "기타"
-): DailyPlanMealTime {
+function createBlankOtherSchedule(): DailyPlanMealTime {
   return {
     id: makeLocalId("meal"),
     startTime: "",
     endTime: "",
-    scheduleType,
     runtimeMinutes: null,
     runtime: "",
     locationId: "",
@@ -5036,7 +5025,6 @@ function getAutomaticTimetableStartUpdates(
 function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
   return Boolean(
     event.endTime.trim()
-    || Boolean(event.scheduleType)
     || event.runtimeMinutes != null
     || event.runtime?.trim()
     || event.locationId?.trim()
