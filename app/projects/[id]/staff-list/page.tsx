@@ -625,17 +625,14 @@ export default function StaffListPage() {
               return (
                 <section
                   key={group.key}
-                  className="staff-department-section overflow-visible border border-l-[3px]"
+                  className="staff-department-section workspace-border overflow-visible border border-l-[3px]"
                   data-staff-department={group.name}
-                  style={{ borderColor: departmentColor.border }}
+                  style={{ borderLeftColor: departmentColor.border }}
                 >
                   <div className="overflow-hidden">
                     <header
-                      className="flex h-7 items-center border-b px-2.5 text-xs font-black text-[#1c1c1a]"
-                      style={{
-                        backgroundColor: departmentColor.background,
-                        borderColor: departmentColor.border
-                      }}
+                      className="workspace-header workspace-border flex h-7 items-center border-b px-2.5 text-xs font-black"
+                      style={{ color: departmentColor.border }}
                     >
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="truncate">{group.name || "미분류"}</span>
@@ -650,7 +647,7 @@ export default function StaffListPage() {
                           </button>
                         ) : null}
                       </span>
-                      <span className="ml-auto shrink-0 text-[10px] text-black/65">
+                      <span className="workspace-text-secondary ml-auto shrink-0 text-[10px]">
                         {group.members.length}명
                       </span>
                     </header>
@@ -748,8 +745,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
         canEdit
           ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
           : `grid-cols-6 ${desktopGridClassName}`
-      } workspace-row ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
-      style={showBottomBorder ? { borderColor: departmentColor.border } : undefined}
+      } workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}
@@ -1023,13 +1019,7 @@ function DepartmentChip({
   }
 
   return (
-    <div
-      className="flex h-8 items-center border pl-2"
-      style={{
-        backgroundColor: departmentColor.background,
-        borderColor: departmentColor.border
-      }}
-    >
+    <div className="workspace-control flex h-8 items-center border pl-2">
       <input
         type="text"
         value={draftName}
@@ -1047,7 +1037,8 @@ function DepartmentChip({
             event.currentTarget.blur();
           }
         }}
-        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold text-[#1c1c1a] outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)]"
+        className="w-24 min-w-0 bg-transparent text-center text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)]"
+        style={{ color: departmentColor.border, caretColor: departmentColor.border }}
         aria-label={`${department.name} 부서명 수정`}
         maxLength={100}
       />
@@ -1061,7 +1052,7 @@ function DepartmentChip({
           event.stopPropagation();
           onDelete();
         }}
-        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger/10 hover:text-field-danger active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+        className="workspace-text-secondary grid h-8 w-8 shrink-0 place-items-center transition-colors hover:bg-field-danger/10 hover:text-field-danger active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
         aria-label={`${department.name} 부서 삭제`}
       >
         <X className="h-3 w-3" aria-hidden />

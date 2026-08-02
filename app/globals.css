@@ -416,7 +416,7 @@ a[class*="min-h-"][class*="items-center"] {
   --workspace-surface: var(--surface-01);
   --workspace-surface-subtle: var(--surface-02);
   --workspace-header: var(--surface-02);
-  --workspace-row: var(--surface-02);
+  --workspace-row: var(--surface-03);
   --workspace-control: var(--surface-03);
   --workspace-hover: var(--surface-04);
   --workspace-popup: var(--surface-08);
@@ -647,7 +647,7 @@ a[class*="min-h-"][class*="items-center"] {
 
 @media (hover: hover) {
   .staff-workspace .workspace-row:hover {
-    background-color: var(--workspace-control);
+    background-color: var(--workspace-hover);
   }
 }
 
