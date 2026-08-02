@@ -170,12 +170,12 @@ export function RememberedProjectCard({
         }
         onOpen(project);
       }}
-      className="flex min-h-10 touch-pan-y select-none items-center justify-between gap-3 border border-field-border bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-primary hover:bg-field-soft active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+      className="flex min-h-10 touch-pan-y select-none items-center justify-between gap-3 border border-field-divider bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-subtle hover:bg-field-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       style={{ WebkitTouchCallout: "none" }}
       aria-label={`${project.name} 프로젝트 홈 열기`}
       aria-busy={isOpening}
     >
-      <span className="min-w-0 truncate text-xs font-black text-field-primary">
+      <span className="min-w-0 truncate text-xs font-black text-field-text">
         <span className="font-display">{project.name}</span>
       </span>
       <span className="shrink-0 text-[9px] font-bold text-field-muted">
@@ -235,9 +235,9 @@ export function RememberedProjectActions({
           aria-modal="true"
           aria-labelledby="remembered-project-removal-title"
           aria-describedby="remembered-project-removal-description"
-          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-border bg-field-panel p-4"
+          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-elevated p-4"
         >
-          <h2 id="remembered-project-removal-title" className="text-sm font-black text-field-primary">
+          <h2 id="remembered-project-removal-title" className="text-sm font-black text-field-text">
             프로젝트 목록에서 지우기
           </h2>
           <div id="remembered-project-removal-description" className="mt-3 space-y-2 text-xs font-bold leading-5 text-field-muted">
@@ -251,14 +251,14 @@ export function RememberedProjectActions({
               ref={cancelButtonRef}
               type="button"
               onClick={onCancelRemoval}
-              className="min-h-10 border border-field-border bg-field-panel px-3 text-xs font-black text-field-text hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="min-h-10 border border-field-divider bg-field-panel px-3 text-xs font-black text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               취소
             </button>
             <button
               type="button"
               onClick={() => onConfirmRemoval(confirmationTarget)}
-              className="min-h-10 border border-field-danger bg-field-danger px-3 text-xs font-black text-white hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-2"
+              className="min-h-10 border border-field-danger bg-field-danger px-3 text-xs font-black text-field-text hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger focus-visible:ring-offset-2"
             >
               목록에서 지우기
             </button>
@@ -274,7 +274,7 @@ export function RememberedProjectActions({
     <div
       role="menu"
       aria-label={`${menuTarget.project.name} 프로젝트 메뉴`}
-      className="fixed z-[80] w-44 border border-field-border bg-field-panel p-1"
+      className="fixed z-[80] w-44 border border-field-divider bg-field-elevated p-1"
       style={{ left: menuTarget.left, top: menuTarget.top }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => {
@@ -287,7 +287,7 @@ export function RememberedProjectActions({
         type="button"
         role="menuitem"
         onClick={() => onRequestRemoval(menuTarget.project)}
-        className="flex min-h-9 w-full items-center px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+        className="flex min-h-9 w-full items-center px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       >
         목록에서 지우기
       </button>

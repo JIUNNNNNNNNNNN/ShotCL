@@ -756,12 +756,12 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       }
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
-      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-primary hover:bg-field-soft focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
-        active ? "border-field-primary bg-field-light" : "border-field-border"
+      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-subtle hover:bg-field-hover focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
+        active ? "border-field-primary/80 bg-field-primary/10" : "border-field-divider"
       } ${
         item.kind === "new"
-          ? "text-5xl font-light leading-none text-field-primary"
-          : "text-lg font-black leading-[1.35] text-field-primary md:text-xl"
+          ? "text-5xl font-light leading-none text-field-text"
+          : "text-lg font-black leading-[1.35] text-field-text md:text-xl"
       }`}
       title={titleParts.length > 0 ? titleParts.join(" · ") : undefined}
       onClick={(event) => onClick(event, item)}
@@ -786,7 +786,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
               {item.dateLabel ?? "날짜 미정"}
             </span>
             {item.metaLabel ? (
-              <span className="block whitespace-nowrap text-sm font-black leading-[1.35] tabular-nums text-field-primary md:text-[15px]">
+              <span className="block whitespace-nowrap text-sm font-black leading-[1.35] tabular-nums text-field-subtle md:text-[15px]">
                 {item.metaLabel}
               </span>
             ) : null}

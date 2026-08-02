@@ -144,15 +144,24 @@
 
 :root {
   color-scheme: dark;
-  background: #000000;
-  --field-paper: #000000;
-  --field-panel: #0d0d0d;
-  --field-soft: #111111;
-  --field-line: #303030;
-  --field-text: #ffffff;
-  --field-muted: #b5b5b5;
-  --field-accent: #d7b95f;
-  --field-accent-foreground: #000000;
+  background: #0e1013;
+  --field-paper: #0e1013;
+  --field-panel: #14171b;
+  --field-soft: #191d22;
+  --field-elevated: #1d2127;
+  --field-hover: #232830;
+  --field-input: #121519;
+  --field-line: #2b3038;
+  --field-divider: #3a414b;
+  --field-text: #eceff3;
+  --field-secondary-text: #b4bac3;
+  --field-muted: #858d98;
+  --field-disabled: #626a74;
+  --field-accent: #c8a951;
+  --field-accent-hover: #d0b45a;
+  --field-accent-soft: rgba(200, 169, 81, 0.12);
+  --field-accent-border: rgba(200, 169, 81, 0.55);
+  --field-accent-foreground: #15130d;
   --field-danger: #e25555;
 }
 
@@ -275,8 +284,8 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 ::selection {
-  background: var(--field-accent);
-  color: var(--field-accent-foreground);
+  background: rgba(200, 169, 81, 0.32);
+  color: var(--field-text);
 }
 
 :focus-visible {

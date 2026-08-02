@@ -112,26 +112,26 @@ export function ShotArchivePicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
-      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col  border border-field-border bg-field-panel">
-        <header className="flex items-center justify-between gap-3 border-b border-field-border px-4 py-3">
+    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
+      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-elevated">
+        <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
           <div className="min-w-0">
-            <h2 className="font-display truncate text-lg font-bold text-field-primary">아카이브에서 선택</h2>
+            <h2 className="font-display truncate text-lg font-bold text-field-text">아카이브에서 선택</h2>
             <p className="truncate text-xs font-normal text-field-muted">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
           </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center  border border-field-border text-field-muted transition-colors hover:border-field-primary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
+          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
 
-        <div className="grid gap-3 border-b border-field-border p-3">
+        <div className="grid gap-3 border-b border-field-divider p-3">
           <div className="grid grid-cols-2 gap-2">
             {(["overhead", "storyboard"] as const).map((type) => (
               <button
                 key={type}
                 type="button"
                 onClick={() => setMediaType(type)}
-                className={`min-h-10  border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${mediaType === type ? "border-field-primary bg-field-primary text-black" : "border-field-border bg-black text-white hover:border-field-primary hover:text-field-primary"}`}
+                className={`min-h-10 border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${mediaType === type ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
               >
                 {type === "overhead" ? "부감도" : "콘티"}
               </button>
@@ -139,10 +139,10 @@ export function ShotArchivePicker({
           </div>
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full  border border-field-border bg-black pl-9 pr-3 text-sm font-normal text-white outline-none placeholder:text-field-muted/70 focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-muted/70 focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
           </label>
           {selected ? (
-            <div className="flex items-center justify-between gap-2  border border-field-primary bg-black px-3 py-2">
+            <div className="flex items-center justify-between gap-2 border border-field-primary/70 bg-field-primary/10 px-3 py-2">
               <p className="min-w-0 truncate text-xs font-bold text-field-primary">현재 연결: {selected.filename}</p>
               {!readOnly ? (
                 <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1  border border-field-danger/60 bg-field-panel px-2 text-[11px] font-bold text-field-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger">
@@ -156,7 +156,7 @@ export function ShotArchivePicker({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {isLoading ? <PixelDogLoader size="md" /> : errorMessage ? (
-            <p role="alert" className=" border border-field-danger bg-black p-3 text-sm font-normal text-field-danger">{errorMessage}</p>
+            <p role="alert" className="border border-field-danger bg-field-danger/10 p-3 text-sm font-normal text-field-danger">{errorMessage}</p>
           ) : filtered.length === 0 ? (
             <p className="py-10 text-center text-sm font-normal text-field-muted">선택할 {mediaType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
           ) : (
@@ -169,7 +169,7 @@ export function ShotArchivePicker({
                     type="button"
                     disabled={readOnly || isSaving}
                     onClick={() => selectAsset(asset)}
-                    className={`relative grid min-w-0 gap-1  border bg-black p-1.5 text-left transition-colors disabled:cursor-default ${isSelected ? "border-field-primary ring-2 ring-field-primary/30" : "border-field-border hover:border-field-primary"}`}
+                    className={`relative grid min-w-0 gap-1 border p-1.5 text-left transition-colors disabled:cursor-default ${isSelected ? "border-field-primary/80 bg-field-primary/10 ring-2 ring-field-primary/20" : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"}`}
                   >
                     <div className="grid aspect-[4/3] w-full place-items-center bg-field-soft">
                       {asset.publicUrl ? (
@@ -185,11 +185,11 @@ export function ShotArchivePicker({
                         <ShotOverheadPreview diagram={asset.diagram} label={`${asset.title} 부감도`} />
                       ) : null}
                     </div>
-                    <p className="truncate px-1 text-xs font-bold text-white">{asset.title}</p>
+                    <p className="truncate px-1 text-xs font-bold text-field-text">{asset.title}</p>
                     <p className="truncate px-1 text-[10px] font-normal text-field-muted">
                       {[asset.sceneNo && `S#${asset.sceneNo}`, asset.cutNo && `C#${asset.cutNo}`, asset.memo].filter(Boolean).join(" · ") || "태그 없음"}
                     </p>
-                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center  bg-field-primary text-black"><Check className="h-4 w-4" aria-hidden /></span> : null}
+                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center border border-field-primary/80 bg-field-elevated text-field-primary"><Check className="h-4 w-4" aria-hidden /></span> : null}
                   </button>
                 );
               })}

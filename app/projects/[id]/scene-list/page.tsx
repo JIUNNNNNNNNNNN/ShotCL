@@ -39,7 +39,7 @@ import type {
 } from "@/lib/types";
 
 const inputClassName =
-  "h-full min-h-8 w-full min-w-0 select-text border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none [-webkit-touch-callout:default] focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary";
+  "h-full min-h-8 w-full min-w-0 select-text border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-field-text outline-none [-webkit-touch-callout:default] focus:bg-field-input focus:ring-1 focus:ring-inset focus:ring-field-primary";
 const selectClassName = `${inputClassName} appearance-none`;
 
 type SceneValueColumn =
@@ -1041,7 +1041,7 @@ export default function ProjectSceneListPage() {
         <p className="font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <Link
           href="/"
-          className="mt-4 inline-flex min-h-10 items-center border border-field-border bg-field-panel px-4 text-sm font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+          className="mt-4 inline-flex min-h-10 items-center border border-field-divider bg-field-panel px-4 text-sm font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
         >
           홈으로
         </Link>
@@ -1053,13 +1053,13 @@ export default function ProjectSceneListPage() {
     <main className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
       <section className="overflow-clip border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
-          <h1 className="font-display min-w-0 truncate text-lg font-black text-field-primary">
+          <h1 className="font-display min-w-0 truncate text-lg font-black text-field-text">
             {project.name} 씬리스트
           </h1>
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -1069,7 +1069,7 @@ export default function ProjectSceneListPage() {
                 type="button"
                 onClick={() => void save()}
                 disabled={isSaving || !isDirty}
-                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 bg-field-primary px-3 text-xs font-bold text-black transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-40"
+                className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving
                   ? <PixelDogLoader size="xs" compact />
@@ -1110,7 +1110,7 @@ export default function ProjectSceneListPage() {
         >
           <div
             role="row"
-            className="sticky top-0 z-[60] grid border-b border-field-border bg-field-soft text-center text-[11px] font-black leading-4 text-field-primary print:static"
+            className="sticky top-0 z-[60] grid border-b border-field-border bg-field-soft text-center text-[11px] font-black leading-4 text-field-text print:static"
             style={{ gridTemplateColumns }}
           >
             <SceneHeaderCell
@@ -1215,7 +1215,7 @@ export default function ProjectSceneListPage() {
               <button
                 type="button"
                 onClick={addItem}
-                className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
                 씬 추가
@@ -1230,13 +1230,13 @@ export default function ProjectSceneListPage() {
           ref={deletePopoverRef}
           role="dialog"
           aria-label={`${deletePopover.label} 삭제 메뉴`}
-          className="fixed z-[80] min-w-24 overflow-hidden border border-field-danger/50 bg-field-panel p-1"
+          className="fixed z-[80] min-w-24 overflow-hidden border border-field-danger/50 bg-field-elevated p-1"
           style={{ left: deletePopover.left, top: deletePopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
-            className="flex min-h-9 w-full items-center justify-center px-3 text-xs font-bold text-field-danger transition-colors hover:bg-field-danger hover:text-white active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+            className="flex min-h-9 w-full items-center justify-center px-3 text-xs font-bold text-field-danger transition-colors hover:bg-field-danger hover:text-field-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
             onClick={() => {
               const item = items.find((candidate) => candidate.id === deletePopover.itemId);
               setDeletePopover(null);
@@ -1287,8 +1287,8 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {(canEdit || scenarioReference) ? (
-        <details className="scene-list-landscape mt-3 overflow-hidden border border-field-border bg-field-panel">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-primary transition-colors hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
+        <details className="scene-list-landscape mt-3 overflow-hidden border border-field-divider bg-field-panel">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
           <div className="border-t border-field-border p-3">
@@ -1309,7 +1309,7 @@ export default function ProjectSceneListPage() {
                 )}
                 rows={7}
                 aria-label="시나리오 참고"
-                className="w-full resize-y border border-field-border bg-field-panel px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
+                className="w-full resize-y border border-field-divider bg-field-input px-3 py-2 text-sm font-medium leading-6 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
               />
             ) : (
               <p className="whitespace-pre-wrap text-sm font-medium leading-6 text-field-text">
@@ -1321,8 +1321,8 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {scenarioReference ? (
-        <details className="scene-list-mobile mt-3 overflow-hidden border border-field-border bg-field-panel">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-primary transition-colors hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
+        <details className="scene-list-mobile mt-3 overflow-hidden border border-field-divider bg-field-panel">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary">
             시나리오 참고
           </summary>
           <p className="whitespace-pre-wrap border-t border-field-border p-3 text-sm font-medium leading-6 text-field-text">
@@ -1364,7 +1364,7 @@ function MobileSceneList({
         WebkitTouchCallout: "none"
       }}
     >
-      <div className="sticky top-0 z-[60] grid border-l border-t border-field-border bg-field-soft text-center text-[9px] font-black leading-[1.25] text-field-primary print:static"
+      <div className="sticky top-0 z-[60] grid border-l border-t border-field-border bg-field-soft text-center text-[9px] font-black leading-[1.25] text-field-text print:static"
         style={{ gridTemplateColumns: mobileSceneGridTemplate }}
       >
         <MobileSceneHeader entries={[["#S", "씬"]]} />
@@ -1700,11 +1700,11 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
       ref={ref}
       role="dialog"
       aria-label={`${item.sceneNo || "현재"} Scene ${role} 메모`}
-      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden border border-field-border bg-field-panel"
+      className="fixed z-[90] w-[min(280px,calc(100vw-16px))] overflow-hidden border border-field-divider bg-field-elevated"
       style={{ left, top }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <p className="border-b border-field-border bg-field-soft px-3 py-2 text-xs font-black text-field-primary">
+      <p className="border-b border-field-border bg-field-soft px-3 py-2 text-xs font-black text-field-text">
         {role} · Scene {item.sceneNo || "—"}
       </p>
       {canEdit ? (
@@ -1715,7 +1715,7 @@ const ActorCellTextPopover = forwardRef<HTMLDivElement, {
           maxLength={120}
           aria-label={`${role} 배우칸 메모`}
           placeholder="V.O. / 실루엣 / 대역"
-          className="block min-h-11 w-full bg-field-panel px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
+          className="block min-h-11 w-full bg-field-input px-3 py-2 text-sm font-medium leading-5 text-field-text outline-none placeholder:text-field-muted"
         />
       ) : (
         <p className="min-h-11 px-3 py-2 text-sm font-medium leading-5 text-field-text [overflow-wrap:anywhere]">
@@ -2421,7 +2421,7 @@ function AutoGrowSceneTextarea({
       onFocus={onFocus}
       onBlur={onBlur}
       aria-label={ariaLabel}
-      className="block min-h-9 w-full min-w-0 resize-none overflow-hidden whitespace-pre-wrap border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-semibold leading-5 text-field-text outline-none [overflow-wrap:anywhere] focus:bg-field-light focus:ring-1 focus:ring-inset focus:ring-field-primary"
+      className="block min-h-9 w-full min-w-0 resize-none overflow-hidden whitespace-pre-wrap border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-semibold leading-5 text-field-text outline-none [overflow-wrap:anywhere] focus:bg-field-input focus:ring-1 focus:ring-inset focus:ring-field-primary"
     />
   );
 }

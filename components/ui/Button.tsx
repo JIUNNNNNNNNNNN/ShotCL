@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const variantClass: Record<ButtonVariant, string> = {
-  primary: "border-field-primary bg-field-primary font-black text-black",
-  secondary: "border-field-border bg-field-soft text-field-text",
-  ghost: "border-field-border bg-field-panel text-field-text",
-  danger: "border-field-danger bg-field-panel font-black text-field-danger"
+  primary: "border-field-primary bg-field-primary font-black text-field-accent-foreground hover:border-field-secondary hover:bg-field-secondary",
+  secondary: "border-field-border bg-field-soft text-field-text hover:border-field-divider hover:bg-field-hover",
+  ghost: "border-field-border bg-field-panel text-field-text hover:border-field-divider hover:bg-field-hover",
+  danger: "border-field-danger/70 bg-field-panel font-black text-field-danger hover:border-field-danger hover:bg-field-danger/10"
 };
 
 type BaseProps = {
@@ -23,7 +23,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98]",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary active:scale-[0.98]",
         variantClass[variant],
         className
       )}

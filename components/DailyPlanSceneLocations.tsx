@@ -155,7 +155,7 @@ export function DailyPlanSceneLocations({
         ref={pickerButtonRef}
         type="button"
         data-location-reorder-press
-        className="flex min-h-9 w-full min-w-0 items-center border border-field-border bg-field-panel px-2.5 text-left text-xs font-normal text-field-text transition-colors hover:border-field-primary hover:bg-field-light hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+        className="flex min-h-9 w-full min-w-0 items-center border border-field-border bg-field-input px-2.5 text-left text-xs font-normal text-field-text transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
         aria-expanded={isPickerOpen}
         aria-haspopup="dialog"
         title={selectedLabel || "장소명 선택"}
@@ -171,7 +171,7 @@ export function DailyPlanSceneLocations({
           ref={pickerRef}
           role="dialog"
           aria-label="씬리스트 대장소 선택"
-          className="fixed z-[120] flex flex-col overflow-hidden border border-field-border bg-field-panel"
+          className="fixed z-[120] flex flex-col overflow-hidden border border-field-border bg-field-elevated"
           style={{
             left: pickerPosition.left,
             top: pickerPosition.top,
@@ -203,10 +203,12 @@ export function DailyPlanSceneLocations({
                       type="button"
                       aria-pressed={isSelected}
                       disabled={isAssignedElsewhere}
-                      className={`grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-3 text-left text-xs font-normal disabled:cursor-not-allowed disabled:opacity-55 ${
+                      className={`grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-3 text-left text-xs font-normal transition-colors disabled:cursor-not-allowed ${
                         isSelected
-                          ? "border-field-primary bg-field-light text-field-primary"
-                          : "border-field-border bg-field-panel text-field-text hover:border-field-primary"
+                          ? "border-field-primary bg-field-primary/10 text-field-text"
+                          : isAssignedElsewhere
+                            ? "border-field-border bg-field-disabled text-field-panel"
+                            : "border-field-border bg-field-input text-field-text hover:bg-field-hover"
                       }`}
                       onClick={() => togglePickerOption(option)}
                     >
@@ -229,14 +231,14 @@ export function DailyPlanSceneLocations({
           <div className="grid grid-cols-2 gap-1 border-t border-field-border p-2">
             <button
               type="button"
-              className="min-h-9 border border-field-border bg-field-panel text-xs font-bold text-field-muted transition-colors hover:border-field-primary hover:text-field-primary"
+              className="min-h-9 border border-field-border bg-field-input text-xs font-bold text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
               onClick={() => setIsPickerOpen(false)}
             >
               취소
             </button>
             <button
               type="button"
-              className="min-h-9 border border-field-primary bg-field-primary text-xs font-bold text-black hover:opacity-90"
+              className="min-h-9 border border-field-primary bg-field-primary text-xs font-bold text-field-accent-foreground transition-colors hover:bg-field-secondary"
               onClick={() => {
                 onChange(pickerDraft);
                 setIsPickerOpen(false);

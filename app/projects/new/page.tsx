@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { createProject } from "@/lib/data/projects";
 
 const fieldClass =
-  "min-h-12 w-full border border-field-border bg-field-panel px-3 py-3 text-base text-field-text outline-none transition placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
+  "min-h-12 w-full border border-field-border bg-field-input px-3 py-3 text-base text-field-text outline-none transition placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
 
 /** HTML date input에 넣을 오늘 날짜를 로컬 시간 기준으로 만듭니다. */
 function getTodayInputValue() {
@@ -50,7 +50,7 @@ export default function NewProjectPage() {
 
       <form onSubmit={handleSubmit} className="grid w-full max-w-2xl gap-5 border border-field-border bg-field-panel p-5 md:p-6">
         <label className="grid gap-2">
-          <span className="text-sm font-black text-field-primary">프로젝트명 <span className="text-field-danger">*</span></span>
+          <span className="text-sm font-black text-field-subtle">프로젝트명 <span className="text-field-danger">*</span></span>
           <input
             required
             value={name}
@@ -61,7 +61,7 @@ export default function NewProjectPage() {
         </label>
 
         <label className="grid gap-2">
-          <span className="text-sm font-black text-field-primary">촬영일</span>
+          <span className="text-sm font-black text-field-subtle">촬영일</span>
           <input
             type="date"
             value={shootDate}
@@ -71,7 +71,7 @@ export default function NewProjectPage() {
         </label>
 
         <label className="grid gap-2">
-          <span className="text-sm font-black text-field-primary">설명</span>
+          <span className="text-sm font-black text-field-subtle">설명</span>
           <textarea
             value={description}
             onChange={(event) => setDescription(event.target.value)}
@@ -91,14 +91,14 @@ export default function NewProjectPage() {
         <div className="grid gap-3 pt-1 sm:grid-cols-[160px_1fr] sm:justify-end">
           <Link
             href="/"
-            className="flex min-h-12 items-center justify-center border border-field-border bg-field-panel px-4 text-base font-bold text-field-text transition-colors hover:border-field-primary hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            className="flex min-h-12 items-center justify-center border border-field-border bg-field-panel px-4 text-base font-bold text-field-text transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
           >
             취소
           </Link>
           <button
             type="submit"
             disabled={isSaving || !name.trim()}
-            className="flex min-h-12 items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 text-base font-bold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex min-h-12 items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 text-base font-bold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save className="h-5 w-5" aria-hidden />
             {isSaving ? "저장 중" : "프로젝트 생성"}

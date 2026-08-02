@@ -17,10 +17,10 @@ export function ProgressDetailHeader({
   return (
     <div className="relative z-30 mb-3 flex min-w-0 items-start justify-between" aria-label="진행 페이지 이동 메뉴">
       <div className="min-w-0 flex-1 pr-3 text-left md:text-center">
-        <h1 className="max-w-full break-words text-xl font-black leading-[1.25] text-field-primary md:text-2xl">
+        <h1 className="max-w-full break-words text-xl font-black leading-[1.25] text-field-text md:text-2xl">
           {projectName}
         </h1>
-        <p className="mt-1 text-sm font-black leading-[1.35] text-field-primary">
+        <p className="mt-1 text-sm font-black leading-[1.35] text-field-subtle">
           {episodeLabel}
         </p>
         <p className="mt-0.5 text-[11px] font-bold leading-[1.35] text-field-muted">

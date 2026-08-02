@@ -29,8 +29,8 @@ export default function EditShotsPage() {
     <>
       <PageHeader title="컷 편집" description={project?.name ?? "프로젝트"} />
       <Card>
-        <h2 className="text-xl font-black text-field-primary">편집 방식이 바뀌었습니다</h2>
-        <p className="mt-2 text-base leading-6 text-field-muted">
+        <h2 className="text-xl font-black text-field-text">편집 방식이 바뀌었습니다</h2>
+        <p className="mt-2 text-base leading-6 text-field-subtle">
           이제 컷 리스트에서 카드를 누르면 수정 bottom sheet가 열립니다. 새 컷은 하단의 “새 컷 추가” 버튼으로 추가합니다.
         </p>
         <ButtonLink href={`/projects/${projectId}`} className="mt-5 w-full">

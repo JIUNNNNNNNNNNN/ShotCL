@@ -17,7 +17,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
     <section className="mb-3 border border-field-border bg-field-panel p-3" aria-label="일일 촬영 진행률">
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="break-words text-sm font-bold leading-[1.35] text-field-primary">
+          <h2 className="break-words text-sm font-bold leading-[1.35] text-field-text">
             {progressMessage}
           </h2>
           <p className="mt-0.5 text-2xl font-bold leading-none text-field-primary tabular-nums">
@@ -29,7 +29,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
         </span>
       </div>
       <div
-        className="mt-2 h-2 overflow-hidden  border border-field-border bg-field-soft"
+        className="mt-2 h-2 overflow-hidden border border-field-border bg-field-input"
         role="progressbar"
         aria-label="촬영 진행률"
         aria-valuemin={0}

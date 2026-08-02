@@ -12,7 +12,7 @@ type MemoPopoverFieldProps = {
 };
 
 const triggerClassName =
-  "min-h-[38px] w-full min-w-0 border border-field-border bg-field-panel px-2 py-1.5 text-center text-[13px] text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] text-field-text outline-none transition-colors hover:border-field-primary hover:bg-field-hover focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표 내용 카드와 스텝 특이사항이 함께 쓰는 작은 live-update 편집 카드입니다. */
 export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: MemoPopoverFieldProps) {
@@ -110,14 +110,14 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
           ref={popoverRef}
           role="dialog"
           aria-label={ariaLabel}
-          className="fixed z-[80] border border-field-border bg-field-panel p-2"
+          className="fixed z-[80] border border-field-border bg-field-elevated p-2"
           style={position}
           data-memo-popover
         >
           <div className="flex justify-end">
             <button
               type="button"
-              className="flex h-7 w-7 items-center justify-center border border-transparent text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="flex h-7 w-7 items-center justify-center border border-transparent text-field-muted transition-colors hover:border-field-primary hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               onClick={closePopover}
               aria-label={`${ariaLabel} 닫기`}
             >
@@ -127,7 +127,7 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
           <textarea
             autoFocus
             rows={4}
-            className="w-full resize-y border-0 bg-field-panel p-1.5 pt-0 text-center text-[13px] leading-relaxed text-field-text outline-none"
+            className="w-full resize-y border border-field-border bg-field-input p-1.5 text-center text-[13px] leading-relaxed text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
             value={draftValue}
             onChange={(event) => {
               const nextValue = event.currentTarget.value;

@@ -34,7 +34,7 @@ type ShotEditorModalProps = {
 };
 
 const fieldClass =
-  "min-h-11 w-full  border border-field-border bg-black px-3 py-2 text-base font-normal text-white outline-none placeholder:text-field-muted/70 focus:border-field-primary focus:ring-1 focus:ring-field-primary";
+  "min-h-11 w-full border border-field-border bg-field-input px-3 py-2 text-base font-normal text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-1 focus:ring-field-primary";
 const textareaClass = `${fieldClass} resize-none leading-6`;
 
 function emptyValues(orderIndex: number): ShotEditorValues {
@@ -135,7 +135,7 @@ export function ShotEditorModal({
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
         className={cn(
-          "w-full overflow-y-auto  border border-field-border bg-field-panel",
+          "w-full overflow-y-auto border border-field-divider bg-field-elevated",
           mode === "add"
             ? "max-h-[92dvh] p-4 sm:mx-auto sm:max-w-3xl"
             : "mx-auto max-h-[72dvh] max-w-[26rem] p-3"
@@ -144,7 +144,7 @@ export function ShotEditorModal({
         <div className={cn("mx-auto", mode === "add" && "max-w-3xl")}>
           <div className={cn("flex items-center justify-between gap-2", mode === "add" ? "mb-4" : "mb-1")}>
             {mode === "add" ? (
-              <h2 className="text-lg font-bold text-field-primary">새 컷 추가</h2>
+              <h2 className="text-lg font-bold text-field-text">새 컷 추가</h2>
             ) : (
               <span className="sr-only">{readOnly ? "컷 내용 보기" : "컷 내용 수정"}</span>
             )}
@@ -152,7 +152,7 @@ export function ShotEditorModal({
               variant="ghost"
               onClick={onClose}
               aria-label="팝업 닫기"
-              className="ml-auto !h-8 !min-h-8 !w-8  !border !border-field-border !bg-black !px-0 !py-0 !text-field-muted hover:!border-field-primary hover:!text-field-primary"
+              className="ml-auto !h-8 !min-h-8 !w-8 !border !border-field-border !bg-field-soft !px-0 !py-0 !text-field-muted hover:!border-field-divider hover:!bg-field-hover hover:!text-field-text"
             >
               <X className="h-4 w-4" aria-hidden />
             </Button>
@@ -242,8 +242,8 @@ export function ShotEditorModal({
                     onClick={() => updateField("status", status)}
                     className={
                       values.status === status
-                        ? "min-h-11  border border-field-primary bg-field-primary text-sm font-bold text-black"
-                        : "min-h-11  border border-field-border bg-black text-sm font-normal text-field-muted hover:border-field-primary hover:text-white"
+                        ? "min-h-11 border border-field-primary/70 bg-field-primary/10 text-sm font-bold text-field-text"
+                        : "min-h-11 border border-field-border bg-field-soft text-sm font-normal text-field-muted hover:border-field-divider hover:bg-field-hover hover:text-field-text"
                     }
                   >
                     {status === "pending" ? "대기" : status}

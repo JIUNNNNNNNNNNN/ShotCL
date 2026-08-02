@@ -60,9 +60,9 @@ export function ProjectAccessGate({
 
   if (denied) {
     return (
-      <div className=" border border-field-border bg-field-panel p-5 text-center">
-        <p className="font-bold text-field-primary">Key staff 권한이 필요합니다.</p>
-        <p className="mt-2 text-sm font-normal text-field-muted">Staff 권한은 진행도와 프로젝트 자료를 읽기 전용으로 이용할 수 있습니다.</p>
+      <div className="border border-field-divider bg-field-soft p-5 text-center">
+        <p className="font-bold text-field-text">Key staff 권한이 필요합니다.</p>
+        <p className="mt-2 text-sm font-normal text-field-subtle">Staff 권한은 진행도와 프로젝트 자료를 읽기 전용으로 이용할 수 있습니다.</p>
       </div>
     );
   }

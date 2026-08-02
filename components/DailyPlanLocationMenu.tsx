@@ -130,8 +130,8 @@ export function DailyPlanLocationMenu({
         type="button"
         data-no-location-reorder
         data-daily-plan-location-menu-trigger
-        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center justify-self-end border hover:border-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
-          isPrimary ? "border-field-primary bg-field-primary text-black" : "border-field-border bg-field-panel text-field-muted hover:text-field-primary"
+        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center justify-self-end border hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+          isPrimary ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-muted hover:text-field-text"
         }`}
         aria-label={`${label} 관리 메뉴`}
         aria-haspopup="menu"
@@ -156,7 +156,7 @@ export function DailyPlanLocationMenu({
           ref={menuRef}
           role={isDeleteConfirming ? "alertdialog" : "menu"}
           aria-label={isDeleteConfirming ? `${label} 삭제 확인` : `${label} 관리`}
-          className="fixed z-[130] grid gap-1 border border-field-border bg-field-panel p-1.5 text-field-text"
+          className="fixed z-[130] grid gap-1 border border-field-divider bg-field-elevated p-1.5 text-field-text"
           style={{ left: position.left, top: position.top, width: MENU_WIDTH }}
         >
           {isDeleteConfirming ? (
@@ -168,7 +168,7 @@ export function DailyPlanLocationMenu({
                 <button
                   ref={cancelDeleteRef}
                   type="button"
-                  className="min-h-8 border border-field-border bg-field-panel px-2 text-xs font-bold text-field-text hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="min-h-8 border border-field-divider bg-field-panel px-2 text-xs font-bold text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   onClick={() => {
                     setIsDeleteConfirming(false);
                     window.requestAnimationFrame(updatePosition);
@@ -178,7 +178,7 @@ export function DailyPlanLocationMenu({
                 </button>
                 <button
                   type="button"
-                  className="min-h-8 border border-field-danger bg-field-danger px-2 text-xs font-black text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+                  className="min-h-8 border border-field-danger bg-field-danger px-2 text-xs font-black text-field-text hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
                   onClick={() => run(onDelete)}
                 >
                   삭제
@@ -191,7 +191,7 @@ export function DailyPlanLocationMenu({
                 type="button"
                 role="menuitem"
                 aria-pressed={isPrimary}
-                className="min-h-8 px-2 text-left text-xs font-bold text-field-text hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary aria-[pressed=true]:bg-field-primary aria-[pressed=true]:text-black"
+                className="min-h-8 border border-transparent px-2 text-left text-xs font-bold text-field-text hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary aria-[pressed=true]:border-field-primary/70 aria-[pressed=true]:bg-field-primary/10 aria-[pressed=true]:text-field-primary"
                 onClick={() => run(onSetPrimary)}
               >
                 {isPrimary ? "집합장소" : "집합장소 지정"}
@@ -199,7 +199,7 @@ export function DailyPlanLocationMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="min-h-8 px-2 text-left text-xs font-bold text-field-text hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="min-h-8 px-2 text-left text-xs font-bold text-field-text hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                 onClick={() => run(onToggleDetail)}
               >
                 {isDetailExpanded ? "장소/주소 보기" : "상세 메모 입력"}
@@ -208,7 +208,7 @@ export function DailyPlanLocationMenu({
                 <button
                   type="button"
                   role="menuitem"
-                  className="min-h-8 px-2 text-left text-xs font-bold text-field-text hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="min-h-8 px-2 text-left text-xs font-bold text-field-text hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   onClick={() => run(onAdd)}
                 >
                   촬영장소 추가
@@ -217,7 +217,7 @@ export function DailyPlanLocationMenu({
               <button
                 type="button"
                 role="menuitem"
-                className="min-h-8 px-2 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+                className="min-h-8 px-2 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
                 onClick={() => {
                   setIsDeleteConfirming(true);
                   window.requestAnimationFrame(updatePosition);

@@ -26,29 +26,36 @@ const config: Config = {
       },
       colors: {
         field: {
-          bg: "#000000",
-          panel: "#0D0D0D",
-          soft: "#111111",
-          primary: "#D7B95F",
-          secondary: "#D7B95F",
-          light: "#1A1A1A",
-          border: "#303030",
-          text: "#FFFFFF",
-          muted: "#B5B5B5",
+          bg: "#0E1013",
+          panel: "#14171B",
+          soft: "#191D22",
+          elevated: "#1D2127",
+          hover: "#232830",
+          input: "#121519",
+          primary: "#C8A951",
+          secondary: "#D0B45A",
+          light: "#232830",
+          border: "#2B3038",
+          divider: "#3A414B",
+          text: "#ECEFF3",
+          subtle: "#B4BAC3",
+          muted: "#858D98",
+          disabled: "#626A74",
+          "accent-foreground": "#15130D",
           danger: "#E25555"
         },
         stage: {
-          black: "#000000",
-          panel: "#0D0D0D",
-          line: "#303030",
-          ink: "#FFFFFF",
-          muted: "#B5B5B5",
-          amber: "#D7B95F",
+          black: "#0E1013",
+          panel: "#14171B",
+          line: "#2B3038",
+          ink: "#ECEFF3",
+          muted: "#858D98",
+          amber: "#C8A951",
           red: "#E25555"
         }
       },
       boxShadow: {
-        shooting: "0 0 0 1px rgba(215, 185, 95, 0.55)"
+        shooting: "0 0 0 1px rgba(200, 169, 81, 0.45)"
       }
     }
   },

@@ -540,29 +540,29 @@ export default function ProjectDetailPage() {
         episodeLabel={formatEpisodeLabel(selectedPlan, 0)}
         shootingDate={selectedPlan.shootingDate}
         action={!progressOnly ? <details className="group relative">
-          <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-panel text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
+          <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-panel text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
             <Ellipsis className="h-5 w-5" aria-hidden />
             <span className="sr-only">프로젝트 보조 기능</span>
           </summary>
           <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2" aria-label="프로젝트 보조 기능">
             <div className="mb-1 min-w-0 border-b border-field-border px-2 pb-2">
-              <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
+              <p className="truncate text-xs font-black text-field-text">{project.name}</p>
               <p className="truncate text-[10px] text-field-muted">{project.shootDate || "촬영일 미정"}</p>
             </div>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-left text-xs font-bold leading-[1.35] text-field-primary hover:bg-field-light">
+            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-left text-xs font-bold leading-[1.35] text-field-text hover:bg-field-hover">
               <span className="font-display"><span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden /> 새 컷 추가</span></span>
             </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-hover hover:text-field-text">
               <span className="font-display"><span className="inline-flex items-center gap-2"><CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표</span></span>
             </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-soft">
+            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-hover hover:text-field-text">
               <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
             </Link>
           </nav>
         </details> : <span className="border border-field-border bg-field-panel px-3 py-2 text-xs font-bold text-field-muted">진행도</span>}
       />
 
-      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 border border-field-border bg-field-panel px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted transition-colors hover:border-field-primary hover:bg-field-light">
+      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 border border-field-border bg-field-panel px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text">
         <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
       </Link>
 
@@ -583,18 +583,18 @@ export default function ProjectDetailPage() {
       ) : null}
 
       {successMessage ? (
-        <div className="mb-3 border border-field-primary bg-field-light p-3 text-sm font-bold text-field-primary">
+        <div className="mb-3 border border-field-divider bg-field-soft p-3 text-sm font-bold text-field-subtle">
           {successMessage}
         </div>
       ) : null}
 
       <div id="cut-board" className="scroll-mt-28">
         <div className="mb-2 px-1">
-          <h2 className="text-lg font-black text-field-primary">오늘 컷</h2>
+          <h2 className="text-lg font-black text-field-text">오늘 컷</h2>
         </div>
         {shots.length === 0 && scheduleRowCount === 0 ? (
           <Card>
-            <h2 className="text-xl font-black text-field-primary">아직 등록된 컷이 없습니다</h2>
+            <h2 className="text-xl font-black text-field-text">아직 등록된 컷이 없습니다</h2>
             <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
             <div className="mt-5 max-w-xs">
               {!progressOnly ? <Button onClick={() => setIsAddOpen(true)}>
@@ -637,7 +637,7 @@ export default function ProjectDetailPage() {
       {!progressOnly ? <button
         type="button"
         onClick={() => setIsAddOpen(true)}
-        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center border border-field-primary bg-field-primary text-black transition-[filter,transform] hover:brightness-110 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:right-8"
+        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center border border-field-primary bg-field-primary text-field-accent-foreground transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:right-8"
         aria-label="새 컷 추가"
         title="새 컷 추가"
       >
@@ -787,24 +787,24 @@ function EpisodeSelection({
     <main className="flex min-h-[calc(100dvh-8rem)] min-w-0 items-start justify-center overflow-x-clip pb-12 pt-4 md:pt-7">
       <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
         <div className="relative flex w-full min-w-0 items-start justify-center px-14">
-          <h1 className="max-w-full truncate text-center text-xl font-black leading-[1.35] text-field-primary md:text-2xl" title={project.name}>
+          <h1 className="max-w-full truncate text-center text-xl font-black leading-[1.35] text-field-text md:text-2xl" title={project.name}>
             {project.name}
           </h1>
           {canEdit ? (
             <details className="group absolute right-1 top-0 shrink-0 md:right-3">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-[background-color,transform,border-color] marker:content-none hover:border-field-primary hover:bg-field-light active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-text transition-[background-color,transform,border-color] marker:content-none hover:border-field-divider hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
                 <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
               </summary>
               <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2">
-                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-primary hover:bg-field-light">
+                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-text hover:bg-field-hover">
                   <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
                 </Link>
                 <details className="group/settings">
-                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted marker:content-none hover:bg-field-soft">
+                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted marker:content-none hover:bg-field-hover hover:text-field-text">
                     <span className="font-display"><span className="inline-flex items-center gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span></span>
                   </summary>
                   <div className="mx-2 mt-1 border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] leading-5 text-field-muted">
-                    <p className="truncate text-xs font-black text-field-primary">{project.name}</p>
+                    <p className="truncate text-xs font-black text-field-subtle">{project.name}</p>
                     <p>현재 권한: admin</p>
                     <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
                     <p>실제 삭제는 아직 지원하지 않습니다.</p>

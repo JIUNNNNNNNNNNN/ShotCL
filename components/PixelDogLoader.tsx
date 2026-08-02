@@ -33,7 +33,7 @@ export function PixelDogLoader({
         shapeRendering="crispEdges"
         aria-hidden="true"
       >
-        <g className="pixel-dog-loader__dog" fill="#ffffff">
+        <g className="pixel-dog-loader__dog" fill="#ECEFF3">
           <g className="pixel-dog-loader__tail">
             <rect x="13" y="22" width="12" height="5" />
             <rect x="9" y="18" width="7" height="5" />
@@ -50,7 +50,7 @@ export function PixelDogLoader({
           <rect x="67" y="8" width="8" height="11" />
           <rect x="70" y="5" width="4" height="4" />
 
-          <rect x="70" y="20" width="2" height="2" fill="#000000" />
+          <rect x="70" y="20" width="2" height="2" fill="#0E1013" />
 
           <g className="pixel-dog-loader__legs pixel-dog-loader__legs--a">
             <rect x="24" y="35" width="7" height="9" />
@@ -72,15 +72,15 @@ export function PixelDogLoader({
         </g>
 
         <g className="pixel-dog-loader__platform">
-          <rect x="5" y="48" width="86" height="3" fill="#d7b95f" />
-          <rect x="5" y="51" width="86" height="3" fill="#303030" />
+          <rect x="5" y="48" width="86" height="3" fill="#C8A951" />
+          <rect x="5" y="51" width="86" height="3" fill="#2B3038" />
           <line
             className="pixel-dog-loader__ground"
             x1="5"
             y1="49"
             x2="91"
             y2="49"
-            stroke="#ffffff"
+            stroke="#ECEFF3"
             strokeWidth="2"
             strokeDasharray="8 5"
           />

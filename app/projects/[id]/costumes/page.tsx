@@ -651,7 +651,7 @@ export default function ProjectCostumesPage() {
       <div className="mx-auto grid w-full max-w-6xl gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display truncate text-xl font-bold text-field-primary">의상</h1>
+            <h1 className="font-display truncate text-xl font-bold text-field-text">의상</h1>
             <p className="truncate text-xs text-field-muted">{projectName} · 씬별 의상표</p>
           </div>
           <label className="min-w-0 flex-1 sm:max-w-[280px]">
@@ -703,7 +703,7 @@ export default function ProjectCostumesPage() {
           </p>
         ) : null}
         {noticeMessage ? (
-          <p role="status" className="border border-field-primary bg-field-light px-3 py-1.5 text-xs font-bold text-field-primary">
+          <p role="status" className="border border-field-divider bg-field-soft px-3 py-1.5 text-xs font-bold text-field-subtle">
             {noticeMessage}
           </p>
         ) : null}
@@ -742,7 +742,7 @@ export default function ProjectCostumesPage() {
                     >
                       <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
                       <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <strong className="break-words text-sm font-bold text-field-primary">{sceneLabel(scene)}</strong>
+                        <strong className="break-words text-sm font-bold text-field-text">{sceneLabel(scene)}</strong>
                         <span className="text-[11px] text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
                       </span>
                     </button>
@@ -922,7 +922,7 @@ function CostumeItemCard({
     return (
       <article className="grid gap-2 border border-field-border bg-field-panel p-2 lg:grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] lg:items-start lg:border-0 lg:px-2 lg:py-2">
         <div className="min-w-0 border-b border-field-border pb-1 lg:border-0 lg:pb-0">
-          <h3 className="break-words text-xs font-bold leading-5 text-field-primary">{item.actorRole || "배역 미지정"}</h3>
+          <h3 className="break-words text-xs font-bold leading-5 text-field-text">{item.actorRole || "배역 미지정"}</h3>
           {item.actorName ? <p className="break-words text-[10px] leading-4 text-field-muted">{item.actorName}</p> : null}
           <dl className="mt-1 border-t border-field-border pt-1">
             <ReadOnlyValue label="제공자" value={item.provider} />
@@ -1088,13 +1088,13 @@ function EditableMediaField({
             />
           ))}
           <label
-            className="grid h-14 w-14 shrink-0 cursor-pointer place-items-center self-center border border-dashed border-field-secondary bg-field-light text-field-primary"
+            className="grid h-14 w-14 shrink-0 cursor-pointer place-items-center self-center border border-dashed border-field-divider bg-field-input text-field-muted transition-colors hover:bg-field-hover hover:text-field-text"
             title={`${label} 사진 추가`}
             aria-label={`${label} 사진 추가`}
           >
             <span className="relative">
               <ImagePlus className="h-5 w-5" aria-hidden />
-              <Plus className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 bg-field-light" aria-hidden />
+              <Plus className="absolute -bottom-1.5 -right-1.5 h-3.5 w-3.5 bg-field-input" aria-hidden />
             </span>
             <input type="file" accept="image/*,.heic,.heif" multiple className="hidden" onChange={onFiles} />
           </label>
@@ -1213,7 +1213,7 @@ function EpisodeChecks({
             title={automatic ? `${episode}회차 일촬표에서 자동 반영됨` : `${episode}회차`}
             className={`flex h-6 min-w-7 items-center justify-center gap-0.5 border px-1 text-[10px] font-bold ${
               checked
-                ? "border-field-primary bg-field-primary text-black"
+                ? "border-field-primary bg-field-primary/15 text-field-text"
                 : "border-field-border bg-field-panel text-field-muted"
             } ${canEdit && !automatic ? "cursor-pointer" : "cursor-default"}`}
           >
@@ -1281,7 +1281,7 @@ function BottomSheet({ title, onClose, children }: { title: string; onClose: () 
     <div className="fixed inset-0 z-[90] flex items-end bg-black/20 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="mx-auto max-h-[90dvh] w-full max-w-lg overflow-y-auto border border-field-border bg-field-panel p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="font-display text-lg font-bold text-field-primary">{title}</h2>
+          <h2 className="font-display text-lg font-bold text-field-text">{title}</h2>
           <IconButton label="닫기" onClick={onClose}><X className="h-4 w-4" aria-hidden /></IconButton>
         </div>
         {children}
@@ -1310,7 +1310,7 @@ function IconButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className={`grid shrink-0 place-items-center border border-field-border bg-field-panel ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
+      className={`grid shrink-0 place-items-center border border-field-border bg-field-panel transition-colors hover:border-field-divider hover:bg-field-hover ${compact ? "h-8 w-8" : "h-9 w-9"} ${danger ? "text-field-danger" : "text-field-text"} ${className}`}
     >
       {children}
     </button>
@@ -1765,4 +1765,4 @@ function normalizeActorKey(role: string, name: string) {
   return (role || name).normalize("NFKC").replace(/\s+/g, "").toLocaleLowerCase("ko-KR");
 }
 
-const compactInputClass = "min-h-8 w-full border border-field-border bg-field-panel px-2 py-0.5 text-xs leading-5 outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
+const compactInputClass = "min-h-8 w-full border border-field-border bg-field-input px-2 py-0.5 text-xs leading-5 outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";

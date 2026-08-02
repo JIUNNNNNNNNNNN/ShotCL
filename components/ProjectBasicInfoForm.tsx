@@ -22,7 +22,7 @@ type ProjectBasicInfoFormProps = {
 };
 
 const fieldClass =
-  "min-h-11 w-full min-w-0 border border-field-border bg-field-panel px-3 py-2 text-center text-sm text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "min-h-11 w-full min-w-0 border border-field-border bg-field-input px-3 py-2 text-center text-sm text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
 export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: ProjectBasicInfoFormProps) {
@@ -182,7 +182,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
     <form noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="min-w-0">
-          <p className="font-display text-xl font-black text-field-primary md:text-2xl">프로젝트 기본정보</p>
+          <p className="font-display text-xl font-black text-field-text md:text-2xl">프로젝트 기본정보</p>
           <p className="mt-1 truncate text-sm text-field-muted">{projectName}</p>
         </div>
         <span className="border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
@@ -193,7 +193,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="grid gap-3 md:grid-cols-[0.55fr_1fr_1fr]">
           <label className="grid gap-1.5">
-            <span className="text-xs font-bold text-field-primary">총회차</span>
+            <span className="text-xs font-bold text-field-subtle">총회차</span>
             <input
               className={fieldClass}
               type="text"
@@ -221,7 +221,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-field-primary">메인 스태프</h2>
+            <h2 className="text-sm font-bold text-field-text">메인 스태프</h2>
             <p className="text-[11px] text-field-muted">
               인원·직책 중복 제한 없음 · 일촬표 표시는 회차별 최대 3명
             </p>
@@ -278,7 +278,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       <section className="border border-field-border bg-field-panel p-3 md:p-5">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-bold text-field-primary">배우 정보</h2>
+            <h2 className="text-sm font-bold text-field-text">배우 정보</h2>
             <p className="truncate text-[11px] text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
           </div>
           <Button
@@ -324,7 +324,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="grid gap-1.5">
-      <span className="text-xs font-bold text-field-primary">{label}</span>
+      <span className="text-xs font-bold text-field-subtle">{label}</span>
       <input className={fieldClass} type="date" value={value} onChange={(event) => onChange(event.currentTarget.value)} required />
     </label>
   );
@@ -354,7 +354,7 @@ const StaffFields = memo(function StaffFields({
   return (
     <div className="grid min-w-0 gap-1.5 border border-field-border bg-field-soft/50 p-2">
       <div className="flex items-center justify-between gap-1">
-        <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-bold text-field-primary">
+        <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-bold text-field-subtle">
           <input
             type="checkbox"
             checked={member.includeInDailyPlan}
@@ -450,7 +450,7 @@ function EpisodeSelectionField({
 
   return (
     <div className="grid min-w-0 gap-1">
-      <span className="text-center text-[10px] font-bold text-field-primary">참여 회차</span>
+      <span className="text-center text-[10px] font-bold text-field-subtle">참여 회차</span>
       <button
         type="button"
         className={`${fieldClass} flex min-h-9 items-center justify-between gap-2 px-2 py-1 text-xs disabled:cursor-not-allowed disabled:bg-field-soft disabled:text-field-muted`}
@@ -483,14 +483,14 @@ function EpisodeSelectionField({
             >
               <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-field-primary">참여 회차</p>
+                  <p className="text-sm font-bold text-field-text">참여 회차</p>
                   <p className="truncate text-xs text-field-muted">
                     {member.role || "직책 미입력"} · {member.name || "이름 미입력"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  className="grid h-9 w-9 shrink-0 place-items-center border border-field-border text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="grid h-9 w-9 shrink-0 place-items-center border border-field-border text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   aria-label="참여 회차 선택 닫기"
                   onClick={onClose}
                 >
@@ -501,7 +501,7 @@ function EpisodeSelectionField({
               <div className="min-h-0 overflow-y-auto p-3 overscroll-contain">
                 <button
                   type="button"
-                  className="flex min-h-11 w-full items-center gap-3 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99]"
+                  className="flex min-h-11 w-full items-center gap-3 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-[0.99]"
                   role="checkbox"
                   aria-checked={selectedEpisodes === null}
                   onClick={() => onChange(null)}
@@ -517,7 +517,7 @@ function EpisodeSelectionField({
                       <button
                         key={episodeNumber}
                         type="button"
-                        className="flex min-h-11 items-center gap-2 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black active:scale-[0.99]"
+                        className="flex min-h-11 items-center gap-2 border border-field-border px-3 py-2 text-left text-sm text-field-text transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-[0.99]"
                         role="checkbox"
                         aria-checked={checked}
                         onClick={() => toggleEpisode(episodeNumber)}
@@ -552,7 +552,7 @@ function SelectionMark({ checked }: { checked: boolean }) {
     <span
       className={`grid h-5 w-5 shrink-0 place-items-center border ${
         checked
-          ? "border-field-primary bg-field-primary text-black"
+          ? "border-field-primary bg-field-primary/15 text-field-primary"
           : "border-field-border bg-field-panel text-transparent"
       }`}
       aria-hidden
@@ -591,7 +591,7 @@ const ActorFields = memo(function ActorFields({
       />
       <button
         type="button"
-        className="grid h-10 w-10 place-items-center border border-field-danger bg-field-panel text-field-danger transition-colors hover:bg-field-danger hover:text-white active:scale-95"
+        className="grid h-10 w-10 place-items-center border border-field-danger bg-field-panel text-field-danger transition-colors hover:bg-field-danger/15 active:scale-95"
         aria-label={`배우 ${index + 1} 삭제`}
         onClick={() => onDelete(index)}
       >

@@ -203,14 +203,14 @@ export function WeatherRegionPicker({
       <button
         ref={triggerRef}
         type="button"
-        className="grid min-h-11 w-full grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-2 border border-field-border bg-field-panel px-3 py-2 text-left transition-colors hover:border-field-primary hover:bg-field-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2"
+        className="grid min-h-11 w-full grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-2 border border-field-border bg-field-input px-3 py-2 text-left transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2"
         onClick={openOrClose}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-controls={panelId}
         aria-label={`날씨 기준 지역 ${selected?.label ?? "지역 선택"}`}
       >
-        <span className="text-xs font-bold text-field-primary">날씨 기준 지역</span>
+        <span className="text-xs font-bold text-field-subtle">날씨 기준 지역</span>
         <span className="truncate text-center text-sm font-normal text-field-text">
           {selected?.label ?? "지역 선택"}
         </span>
@@ -228,7 +228,7 @@ export function WeatherRegionPicker({
               role="dialog"
               aria-modal="false"
               aria-labelledby={titleId}
-              className="fixed z-[90] flex flex-col overflow-hidden border border-field-border bg-field-bg"
+              className="fixed z-[90] flex flex-col overflow-hidden border border-field-divider bg-field-elevated"
               style={{
                 left: position.left,
                 top: position.top,
@@ -239,8 +239,8 @@ export function WeatherRegionPicker({
               data-placement={position.placement}
               data-weather-region-popover
             >
-              <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b border-field-border bg-field-panel px-3 py-1.5">
-                <p id={titleId} className="min-w-0 text-xs font-bold text-field-primary">
+              <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b border-field-divider bg-field-soft px-3 py-1.5">
+                <p id={titleId} className="min-w-0 text-xs font-bold text-field-text">
                   날씨 지역 선택
                   <span className="ml-1.5 font-normal text-field-muted">
                     — {activeRegionLabel
@@ -250,7 +250,7 @@ export function WeatherRegionPicker({
                 </p>
                 <button
                   type="button"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center border border-field-border bg-field-panel text-field-muted transition-colors hover:border-field-primary hover:bg-field-light hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center border border-field-border bg-field-panel text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   onClick={() => closePopover(true)}
                   aria-label="날씨 지역 선택 닫기"
                   data-weather-region-close

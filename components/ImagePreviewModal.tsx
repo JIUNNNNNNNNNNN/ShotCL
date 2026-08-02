@@ -50,7 +50,7 @@ export function ImagePreviewModal({
               <p className="mt-0.5 text-xs text-white/75">{safeIndex + 1} / {normalizedImages.length}</p>
             ) : null}
           </div>
-          <button type="button" onClick={onClose} className="flex min-h-[38px] items-center gap-1.5 border border-field-border bg-field-panel px-3 py-1.5 text-sm font-bold text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
+          <button type="button" onClick={onClose} className="flex min-h-[38px] items-center gap-1.5 border border-field-border bg-field-panel px-3 py-1.5 text-sm font-bold text-field-text transition-colors hover:border-field-primary hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
             <X className="h-4 w-4" aria-hidden />
             닫기
           </button>
@@ -60,7 +60,7 @@ export function ImagePreviewModal({
             <button
               type="button"
               onClick={() => onNavigate?.((safeIndex - 1 + normalizedImages.length) % normalizedImages.length)}
-              className="absolute left-2 z-10 flex h-10 w-10 items-center justify-center border border-white/45 bg-black/70 text-white transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="absolute left-2 z-10 flex h-10 w-10 items-center justify-center border border-white/45 bg-black/70 text-white transition-colors hover:border-field-primary hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label="이전 사진"
             >
               <ChevronLeft className="h-5 w-5" aria-hidden />
@@ -76,7 +76,7 @@ export function ImagePreviewModal({
             <button
               type="button"
               onClick={() => onNavigate?.((safeIndex + 1) % normalizedImages.length)}
-              className="absolute right-2 z-10 flex h-10 w-10 items-center justify-center border border-white/45 bg-black/70 text-white transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="absolute right-2 z-10 flex h-10 w-10 items-center justify-center border border-white/45 bg-black/70 text-white transition-colors hover:border-field-primary hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label="다음 사진"
             >
               <ChevronRight className="h-5 w-5" aria-hidden />

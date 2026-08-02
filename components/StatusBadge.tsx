@@ -7,9 +7,9 @@ type StatusBadgeProps = {
 };
 
 const statusClassNames: Record<ShotStatus, string> = {
-  pending: "border-field-border bg-field-panel text-field-muted",
-  ok: "border-field-primary bg-field-primary text-black",
-  omit: "border-field-danger bg-field-danger text-white"
+  pending: "border-field-border bg-field-soft text-field-subtle",
+  ok: "border-field-primary/60 bg-field-primary/10 text-field-primary",
+  omit: "border-field-danger/60 bg-field-danger/10 text-field-danger"
 };
 
 /** 컷 상태를 현장에서 빠르게 구분할 수 있는 고정 배지입니다. */

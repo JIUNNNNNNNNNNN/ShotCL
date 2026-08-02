@@ -44,12 +44,12 @@ export function AppShell({ children }: AppShellProps) {
 function TestModeWarning({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
-      <aside role="alert" className="mb-3 border border-field-primary bg-field-panel px-3 py-2.5 text-field-text">
+      <aside role="alert" className="mb-3 border border-field-primary/60 bg-field-primary/10 px-3 py-2.5 text-field-text">
         <details>
           <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-black marker:content-none">
             <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
             테스트 모드 · 이 브라우저에만 저장됩니다.
-            <span className="ml-auto text-xs text-field-primary">안내 보기</span>
+            <span className="ml-auto text-xs text-field-subtle">안내 보기</span>
           </summary>
           <p className="mt-2 pl-6 text-xs leading-5 text-field-muted">
             Supabase Auth/RLS가 연결되지 않아 프로젝트는 다른 사람과 공유되지 않습니다. 실제 작품 정보, 배우 연락처, 촬영 장소, 콘티 파일을 입력하지 마세요. 협업 공유 기능은 Supabase Auth/RLS 연결 후 사용할 수 있습니다.
@@ -62,7 +62,7 @@ function TestModeWarning({ compact = false }: { compact?: boolean }) {
   return (
     <aside
       role="alert"
-      className="mb-3 border border-field-primary bg-field-panel p-3 text-field-text"
+      className="mb-3 border border-field-primary/60 bg-field-primary/10 p-3 text-field-text"
     >
       <div className="flex items-start gap-3">
         <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />

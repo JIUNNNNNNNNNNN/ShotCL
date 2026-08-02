@@ -838,7 +838,7 @@ export default function HomePage() {
           <div
             className={`functional-circle absolute inset-0 border-2 border-field-primary/70 bg-field-primary/10 transition-[transform,background-color] duration-[260ms] ease-out ${
               selectedProjectId
-                ? "scale-[1.18] bg-field-primary/25 motion-safe:animate-[project-target-confirm_420ms_ease-out]"
+                ? "scale-[1.18] bg-field-primary/15 motion-safe:animate-[project-target-confirm_420ms_ease-out]"
                 : isProjectTargetEngaged
                   ? "scale-[1.1] bg-field-primary/20"
                   : "scale-100"
@@ -894,18 +894,18 @@ export default function HomePage() {
                   }}
                   className={`functional-circle flex h-full w-full flex-col items-center justify-center border bg-field-panel px-2 text-center text-field-text outline-none transition-[background-color,border-color,filter] duration-[240ms] ease-out ${
                     isSelectedProject
-                      ? "border-field-primary !bg-field-primary text-black brightness-90 motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
+                      ? "border-field-primary !bg-field-primary/15 text-field-text motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
                       : isActive
-                      ? "border-field-primary !bg-field-primary text-black brightness-95"
-                      : "border-field-secondary/50 hover:border-field-primary hover:bg-field-light"
+                      ? "border-field-primary !bg-field-primary/15 text-field-text"
+                      : "border-field-border hover:border-field-divider hover:bg-field-hover"
                   } active:brightness-90 focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
                   aria-label={`${project.name} ${pickerTitle}`}
                   aria-pressed={isActive || isSelectedProject}
                 >
-                  <span className={`overflow-hidden text-[11px] font-bold leading-[1.4] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs ${isActive || isSelectedProject ? "text-black" : "text-field-text"}`}>
+                  <span className="overflow-hidden text-[11px] font-bold leading-[1.4] text-field-text [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
                     <span className="font-display">{project.name}</span>
                   </span>
-                  <span className={`mt-1 hidden max-w-full truncate text-[9px] md:block md:text-[10px] ${isActive || isSelectedProject ? "text-black/70" : "text-field-muted"}`}>
+                  <span className={`mt-1 hidden max-w-full truncate text-[9px] md:block md:text-[10px] ${isActive || isSelectedProject ? "text-field-subtle" : "text-field-muted"}`}>
                     {project.accessRole === "progress" ? "Staff" : project.shareConfigured ? "Key staff" : "공유 설정 필요"}
                   </span>
                 </button>
@@ -919,7 +919,7 @@ export default function HomePage() {
                   className="absolute -right-1 -top-1 flex h-7 w-7 items-center justify-center text-field-muted transition-transform hover:scale-105 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   aria-label={`${project.name} 목록에서 숨기기`}
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-primary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-divider hover:bg-field-hover">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
@@ -1046,11 +1046,11 @@ export default function HomePage() {
                         } ${
                           isEmphasized
                             ? isProjectRingOpen
-                              ? "z-20 scale-[0.86] border-field-primary !bg-field-primary !text-black opacity-85 brightness-95 md:scale-[0.94] md:opacity-100"
-                              : "z-20 scale-[0.94] border-field-primary !bg-field-primary !text-black opacity-100 brightness-95"
+                              ? "z-20 scale-[0.86] border-field-primary !bg-field-primary/15 !text-field-text opacity-85 md:scale-[0.94] md:opacity-100"
+                              : "z-20 scale-[0.94] border-field-primary !bg-field-primary/15 !text-field-text opacity-100"
                             : isProjectRingOpen
-                              ? "z-10 scale-[0.7] border-field-border opacity-55 hover:border-field-primary hover:opacity-75 md:scale-[0.82] md:opacity-70"
-                              : "z-10 scale-[0.82] border-field-border opacity-70 hover:border-field-primary hover:opacity-90"
+                              ? "z-10 scale-[0.7] border-field-border opacity-55 hover:border-field-divider hover:opacity-75 md:scale-[0.82] md:opacity-70"
+                              : "z-10 scale-[0.82] border-field-border opacity-70 hover:border-field-divider hover:opacity-90"
                         } ${isSelected ? "motion-safe:animate-[main-selection-confirm_260ms_ease-out]" : ""} active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
                       >
                         <span
@@ -1096,7 +1096,7 @@ export default function HomePage() {
             }`}
           >
             <div className="mb-2 flex items-center justify-center gap-1.5">
-              <h1 className="border border-field-border bg-field-panel px-3 py-1 text-[11px] font-bold text-field-primary">
+              <h1 className="border border-field-border bg-field-panel px-3 py-1 text-[11px] font-bold text-field-text">
                 <span className="font-display">{pickerTitle}</span>
               </h1>
             </div>
@@ -1115,7 +1115,7 @@ export default function HomePage() {
                   className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center text-field-muted transition-transform hover:scale-105 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   aria-label="새 프로젝트 입력 닫기"
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-primary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-divider hover:bg-field-hover">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
@@ -1127,7 +1127,7 @@ export default function HomePage() {
                   }}
                   placeholder="프로젝트 이름"
                   aria-label="새 프로젝트 이름"
-                  className="h-10 min-w-0 border border-field-border bg-field-bg px-3 text-center text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+                  className="h-10 min-w-0 border border-field-border bg-field-input px-3 text-center text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
                 />
                 <input
                   type="password"
@@ -1137,7 +1137,7 @@ export default function HomePage() {
                   onChange={(event) => setAdminPassword(sanitizePasscode(event.target.value))}
                   placeholder="Key staff 비밀번호 4자리"
                   aria-label="Key staff 비밀번호"
-                  className="h-10 min-w-0 border border-field-border bg-field-bg px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+                  className="h-10 min-w-0 border border-field-border bg-field-input px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
                 />
                 <input
                   type="password"
@@ -1147,13 +1147,13 @@ export default function HomePage() {
                   onChange={(event) => setProgressPassword(sanitizePasscode(event.target.value))}
                   placeholder="Staff 비밀번호 4자리"
                   aria-label="Staff 비밀번호"
-                  className="h-10 min-w-0 border border-field-border bg-field-bg px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+                  className="h-10 min-w-0 border border-field-border bg-field-input px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
                 />
                 {newProjectError ? <p className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                 <button
                   type="submit"
                   disabled={isCreatingProject}
-                  className="h-10 border border-field-primary bg-field-primary px-3 text-xs font-bold text-black transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg"
+                  className="h-10 border border-field-primary bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-secondary active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg"
                 >
                   <span className="font-display">{isCreatingProject ? "만드는 중" : "만들기"}</span>
                 </button>
@@ -1173,12 +1173,12 @@ export default function HomePage() {
                   className="absolute -right-2 -top-2 flex h-7 w-7 items-center justify-center text-field-muted transition-transform hover:scale-105 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   aria-label="프로젝트 참여 입력 닫기"
                 >
-                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-primary hover:bg-field-soft">
+                  <span className="flex h-[22px] w-[22px] items-center justify-center border border-field-border bg-field-panel transition-colors hover:border-field-divider hover:bg-field-hover">
                     <X className="h-3 w-3" aria-hidden />
                   </span>
                 </button>
                 <section className="grid gap-2" aria-labelledby="join-existing-project-title">
-                  <p id="join-existing-project-title" className="px-1 text-[11px] font-black text-field-primary">
+                  <p id="join-existing-project-title" className="px-1 text-[11px] font-black text-field-subtle">
                     기존 프로젝트 참여
                   </p>
                   <input
@@ -1189,7 +1189,7 @@ export default function HomePage() {
                     }}
                     placeholder="프로젝트 이름"
                     aria-label="참여할 프로젝트 이름"
-                    className="h-10 min-w-0 border border-field-border bg-field-bg px-3 text-center text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+                    className="h-10 min-w-0 border border-field-border bg-field-input px-3 text-center text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
                   />
                   <input
                     type="password"
@@ -1199,20 +1199,20 @@ export default function HomePage() {
                     onChange={(event) => setJoinPassword(sanitizePasscode(event.target.value))}
                     placeholder="비밀번호 4자리"
                     aria-label="프로젝트 참여 비밀번호"
-                    className="h-10 min-w-0 border border-field-border bg-field-bg px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+                    className="h-10 min-w-0 border border-field-border bg-field-input px-3 text-center text-xs tracking-[0.25em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
                   />
                   {newProjectError ? <p role="alert" className="px-2 text-center text-[10px] font-bold leading-4 text-field-danger">{newProjectError}</p> : null}
                   <button
                     type="submit"
                     disabled={isCreatingProject || Boolean(selectedProjectId)}
-                    className="h-10 border border-field-primary bg-field-primary px-3 text-xs font-bold text-black transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg"
+                    className="h-10 border border-field-primary bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-secondary active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg"
                   >
                     <span className="font-display">{isCreatingProject ? "확인 중" : "참여"}</span>
                   </button>
                 </section>
 
                 <section className="grid gap-2 border-t border-field-border pt-3" aria-labelledby="joined-projects-title">
-                  <p id="joined-projects-title" className="px-1 text-[11px] font-black text-field-primary">
+                  <p id="joined-projects-title" className="px-1 text-[11px] font-black text-field-subtle">
                     이전에 참여한 프로젝트
                   </p>
                   {isLoading ? (
@@ -1251,7 +1251,7 @@ export default function HomePage() {
         {feedback ? (
           <p
             role="status"
-            className={`absolute z-30 whitespace-nowrap border border-field-border bg-field-panel px-3 py-1.5 text-[11px] font-bold text-field-primary ${
+            className={`absolute z-30 whitespace-nowrap border border-field-border bg-field-panel px-3 py-1.5 text-[11px] font-bold text-field-subtle ${
               feedback.target === "progress"
                 ? "left-1/2 top-[calc(100%+0.5rem)] -translate-x-1/2"
                 : "right-[calc(100%+0.5rem)] top-1/3"

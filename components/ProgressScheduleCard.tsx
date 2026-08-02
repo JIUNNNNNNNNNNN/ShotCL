@@ -20,7 +20,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
     <article
       onClick={() => onOpen(item)}
       className={cn(
-        "grid cursor-pointer gap-2 border border-field-primary bg-field-soft px-3 py-2.5 text-field-text transition-[border-color,transform] active:scale-[0.995]",
+        "grid cursor-pointer gap-2 border border-field-border border-l-2 border-l-field-primary bg-field-elevated px-3 py-2.5 text-field-text transition-[background-color,border-color,transform] hover:bg-field-hover active:scale-[0.995]",
         item.imageUrl && "grid-cols-[4.5rem_minmax(0,1fr)]"
       )}
       aria-label={`${title} 기타일정 상세 보기`}
@@ -46,11 +46,11 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
 
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-3">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 border border-field-primary bg-field-primary px-2 py-1 text-[10px] font-bold text-black">
+        <span className="shrink-0 border border-field-primary bg-field-primary px-2 py-1 text-[10px] font-bold text-field-accent-foreground">
           기타일정
         </span>
         {time ? (
-          <span className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-bold text-field-primary">
+          <span className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-bold text-field-subtle">
             <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {time}
           </span>

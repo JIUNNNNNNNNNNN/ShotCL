@@ -96,21 +96,21 @@ export function KoreaWeatherRegionMap({
         }
 
         .korea-weather-map-surface {
-          fill: #111111;
-          stroke: #737373;
+          fill: var(--field-panel);
+          stroke: var(--field-divider);
           stroke-width: 1.25;
           transition: fill 120ms ease, stroke 120ms ease, stroke-width 120ms ease;
         }
 
         .korea-weather-map-region[data-active="true"] .korea-weather-map-surface {
-          fill: #262626;
-          stroke: #d7b95f;
+          fill: var(--field-hover);
+          stroke: var(--field-accent);
           stroke-width: 2;
         }
 
         .korea-weather-map-region[data-selected="true"] .korea-weather-map-surface {
-          fill: #d7b95f;
-          stroke: #ffffff;
+          fill: var(--field-accent-soft);
+          stroke: var(--field-accent);
           stroke-width: 2;
         }
 

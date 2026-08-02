@@ -102,13 +102,13 @@ export function SupabaseDebugPanel() {
   }
 
   return (
-    <section className="mt-5 border border-field-border bg-field-panel p-4">
+    <section className="mt-5 border border-field-border bg-field-soft p-4">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-border bg-field-soft text-field-primary">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-border bg-field-elevated text-field-subtle">
           <Bug className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0">
-          <h2 className="text-base font-black text-field-primary">개발용 Supabase 점검</h2>
+          <h2 className="text-base font-black text-field-text">개발용 Supabase 점검</h2>
           <p className="mt-1 text-sm leading-5 text-field-muted">
             키 값은 표시하지 않고, 설정 여부와 projects select/insert 결과만 확인합니다.
           </p>
@@ -119,7 +119,7 @@ export function SupabaseDebugPanel() {
         type="button"
         onClick={runChecks}
         disabled={isChecking}
-        className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 bg-field-primary px-4 text-sm font-bold text-black transition-colors hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-60"
+        className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 text-sm font-bold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-60"
       >
         <Database className="h-5 w-5" aria-hidden />
         {isChecking ? "점검 중" : "연결 점검"}
@@ -128,7 +128,7 @@ export function SupabaseDebugPanel() {
       {results.length > 0 ? (
         <div className="mt-4 grid gap-2">
           {results.map((result) => (
-            <div key={result.label} className="border border-field-border bg-field-soft p-3">
+            <div key={result.label} className="border border-field-border bg-field-elevated p-3">
               <p className="text-sm font-black text-field-text">
                 {result.ok ? "OK" : "FAIL"} · {result.label}
               </p>

@@ -36,9 +36,9 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const inputClassName =
-  "h-8 w-full min-w-0 border border-field-border bg-field-panel px-2 text-center text-xs text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "h-8 w-full min-w-0 border border-field-divider bg-field-input px-2 text-center text-xs text-field-text outline-none transition placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 const notesTextareaClassName =
-  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border border-field-border bg-field-panel px-2 py-1 text-center text-xs leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
+  "h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border border-field-divider bg-field-input px-2 py-1 text-center text-xs leading-5 text-field-text outline-none transition [overflow-wrap:anywhere] placeholder:text-center focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
 const desktopEditableGridClassName =
@@ -432,7 +432,7 @@ export default function StaffListPage() {
     return (
       <div className="border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-black text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
-        <Link href="/" className="mt-4 inline-flex border border-field-border bg-field-panel px-4 py-2 text-sm font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
+        <Link href="/" className="mt-4 inline-flex border border-field-divider bg-field-panel px-4 py-2 text-sm font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
           홈으로
         </Link>
       </div>
@@ -444,18 +444,18 @@ export default function StaffListPage() {
       <section className="border border-field-border bg-field-panel px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-10 w-10 shrink-0 place-items-center bg-field-primary text-black">
+            <div className="grid h-10 w-10 shrink-0 place-items-center border border-field-divider bg-field-soft text-field-text">
               <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
-              <h1 className="font-display text-xl font-black text-field-primary">스탭 리스트</h1>
+              <h1 className="font-display text-xl font-black text-field-text">스탭 리스트</h1>
               <p className="truncate text-xs text-field-muted">{project.name} · 프로젝트 공통</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
-              className="inline-flex h-9 items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="inline-flex h-9 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
@@ -465,7 +465,7 @@ export default function StaffListPage() {
                 type="button"
                 onClick={() => void save(members, departments, true)}
                 disabled={isSaving || !isDirty}
-                className="inline-flex h-9 items-center gap-1.5 bg-field-primary px-3 text-xs font-bold text-black transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground transition-colors hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
@@ -487,7 +487,7 @@ export default function StaffListPage() {
         <p className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-xs font-bold text-field-danger">{errorMessage}</p>
       ) : null}
       {message ? (
-        <p className="mt-3 border border-field-primary bg-field-panel px-3 py-2 text-xs font-bold text-field-primary">{message}</p>
+        <p className="mt-3 border border-field-divider bg-field-elevated px-3 py-2 text-xs font-bold text-field-subtle">{message}</p>
       ) : null}
 
       <section className="mt-3 border border-field-border bg-field-panel px-2.5 py-2">
@@ -496,7 +496,7 @@ export default function StaffListPage() {
             <button
               type="button"
               onClick={() => setIsDepartmentsOpen((current) => !current)}
-              className="flex h-8 min-w-0 items-center justify-between gap-2 border border-field-border bg-field-panel px-2 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="flex h-8 min-w-0 items-center justify-between gap-2 border border-field-divider bg-field-panel px-2 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-expanded={isDepartmentsOpen}
               aria-controls="staff-departments-panel"
             >
@@ -515,14 +515,14 @@ export default function StaffListPage() {
                   setIsNotesSummaryOpen((current) => !current);
                 }
               }}
-              className="group flex h-8 w-full min-w-0 items-center gap-1.5 border border-field-border bg-field-panel px-2 text-left text-[11px] text-field-muted transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="group flex h-8 w-full min-w-0 items-center gap-1.5 border border-field-divider bg-field-panel px-2 text-left text-[11px] text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
               aria-expanded={notesSummary.items.length > 0 ? isNotesSummaryOpen : undefined}
               aria-controls={notesSummary.items.length > 0 ? "staff-notes-summary-popover" : undefined}
             >
               {notesSummary.displayText ? (
                 <>
-                  <span className="shrink-0 text-field-primary group-hover:text-black">특이사항</span>
+                  <span className="shrink-0 text-field-subtle">특이사항</span>
                   <span className="truncate">{notesSummary.displayText}</span>
                   <ChevronDown
                     className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${isNotesSummaryOpen ? "rotate-180" : ""}`}
@@ -534,7 +534,7 @@ export default function StaffListPage() {
             {isNotesSummaryOpen ? (
               <div
                 id="staff-notes-summary-popover"
-                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border border-field-border bg-field-panel p-2.5 text-left"
+                className="absolute right-0 top-full z-30 mt-1 max-h-64 w-[min(24rem,calc(100vw-2rem))] overflow-y-auto border border-field-divider bg-field-elevated p-2.5 text-left"
                 role="dialog"
                 aria-label="특이사항 전체보기"
               >
@@ -544,7 +544,7 @@ export default function StaffListPage() {
                       key={item.id}
                       className="border border-field-border bg-field-soft px-2.5 py-2 text-xs leading-relaxed text-field-text [overflow-wrap:anywhere]"
                     >
-                      {item.owner ? <span className="text-field-primary">{item.owner}:</span> : null}
+                      {item.owner ? <span className="text-field-subtle">{item.owner}:</span> : null}
                       <span className="whitespace-pre-wrap">{item.owner ? " " : ""}{item.notes}</span>
                     </li>
                   ))}
@@ -556,7 +556,7 @@ export default function StaffListPage() {
         {canEdit && isDepartmentsOpen ? (
           <div
             id="staff-departments-panel"
-            className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-border px-1 pt-2"
+            className="mt-1.5 flex flex-wrap items-center gap-1.5 border-t border-field-divider px-1 pt-2"
           >
             {departments.map((department, index) => (
               <DepartmentChip
@@ -567,7 +567,7 @@ export default function StaffListPage() {
                 onDelete={() => deleteDepartment(department.id)}
               />
             ))}
-            <div className="flex h-8 items-center border border-dashed border-field-border bg-field-soft/50 pl-2">
+            <div className="flex h-8 items-center border border-dashed border-field-divider bg-field-soft/50 pl-2">
               <input
                 type="text"
                 value={newDepartmentName}
@@ -607,7 +607,7 @@ export default function StaffListPage() {
               <button
                 type="button"
                 onClick={() => addDepartment()}
-                className="grid h-8 w-8 shrink-0 place-items-center text-field-primary transition-colors hover:bg-field-primary hover:text-black active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="grid h-8 w-8 shrink-0 place-items-center text-field-text transition-colors hover:bg-field-hover active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                 aria-label="부서 추가"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -646,7 +646,7 @@ export default function StaffListPage() {
                           <button
                             type="button"
                             onClick={() => addMember(group.name)}
-                            className="grid h-5 w-5 shrink-0 place-items-center border border-black/25 bg-black text-field-primary transition-colors hover:bg-field-primary hover:text-black active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                            className="grid h-5 w-5 shrink-0 place-items-center border border-black/25 bg-black text-field-text transition-colors hover:bg-field-hover active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
                             aria-label={`${group.name} 부서에 인원 추가`}
                           >
                             <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
@@ -844,7 +844,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/25 bg-field-panel text-field-danger/60 transition-colors hover:border-field-danger hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/25 bg-field-panel text-field-danger/60 transition-colors hover:border-field-danger hover:bg-field-danger hover:text-field-text active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -1064,7 +1064,7 @@ function DepartmentChip({
           event.stopPropagation();
           onDelete();
         }}
-        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger hover:text-white active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+        className="grid h-8 w-8 shrink-0 place-items-center text-black/60 transition-colors hover:bg-field-danger hover:text-field-text active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
         aria-label={`${department.name} 부서 삭제`}
       >
         <X className="h-3 w-3" aria-hidden />

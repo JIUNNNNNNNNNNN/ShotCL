@@ -89,7 +89,7 @@ export function ProgressScheduleEditorModal({
       <form
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
-        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-panel p-3"
+        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-elevated p-3"
       >
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="sr-only">{readOnly ? "기타일정 보기" : "기타일정 수정"}</span>
@@ -105,7 +105,7 @@ export function ProgressScheduleEditorModal({
 
         <div className="grid gap-2">
           <div className="grid gap-1.5">
-            <span className="text-[11px] font-bold text-field-primary">그림</span>
+            <span className="text-[11px] font-bold text-field-subtle">그림</span>
             {values.imageUrl ? (
               <div className="flex max-h-44 w-full items-center justify-center overflow-hidden bg-black">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -126,7 +126,7 @@ export function ProgressScheduleEditorModal({
 
             {!readOnly ? (
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex min-h-9 cursor-pointer items-center justify-center border border-field-border bg-field-panel px-2 text-xs font-bold text-field-primary transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black">
+                <label className="flex min-h-9 cursor-pointer items-center justify-center border border-field-border bg-field-input px-2 text-xs font-bold text-field-text transition-colors hover:bg-field-hover">
                   이미지 선택
                   <input type="file" accept="image/*,.heic,.heif" className="sr-only" onChange={handleImageChange} />
                 </label>
@@ -143,14 +143,14 @@ export function ProgressScheduleEditorModal({
           </div>
 
           <label className="grid gap-1.5">
-            <span className="text-[11px] font-bold text-field-primary">메모</span>
+            <span className="text-[11px] font-bold text-field-subtle">메모</span>
             <textarea
               value={values.progressMemo}
               readOnly={readOnly}
               rows={3}
               maxLength={2000}
               onChange={(event) => setValues((current) => ({ ...current, progressMemo: event.target.value }))}
-              className="min-h-20 w-full resize-none border border-field-border bg-field-panel px-3 py-2 text-sm leading-5 text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/25"
+              className="min-h-20 w-full resize-none border border-field-border bg-field-input px-3 py-2 text-sm leading-5 text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/20"
             />
           </label>
         </div>

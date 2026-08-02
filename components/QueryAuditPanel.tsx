@@ -31,10 +31,10 @@ export function QueryAuditPanel() {
 
   return (
     <aside className="fixed bottom-3 left-3 z-[120] w-[min(24rem,calc(100vw-1.5rem))] text-xs">
-      <details className="border border-field-primary bg-field-panel">
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-bold text-field-primary marker:content-none">
+      <details className="border border-field-divider bg-field-elevated">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-bold text-field-subtle marker:content-none">
           Query audit
-          <span className="ml-auto bg-field-primary px-2 py-0.5 text-black">
+          <span className="ml-auto border border-field-border bg-field-soft px-2 py-0.5 text-field-text">
             {totalCalls} calls · {duplicateCalls} duplicates
           </span>
         </summary>
@@ -43,7 +43,7 @@ export function QueryAuditPanel() {
             <button
               type="button"
               onClick={clearQueryAudit}
-              className="min-h-7 border border-field-border bg-field-panel px-2 text-field-text transition-colors hover:border-field-primary hover:bg-field-primary hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="min-h-7 border border-field-border bg-field-soft px-2 text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               로그 초기화
             </button>
@@ -58,7 +58,7 @@ export function QueryAuditPanel() {
                     <p className="truncate font-bold text-field-text" title={item.label}>{item.label}</p>
                     <p className="truncate text-[10px] text-field-muted" title={item.source}>{item.source}</p>
                   </div>
-                  <div className="text-right font-bold text-field-primary">
+                  <div className="text-right font-bold text-field-subtle">
                     <p>{item.calls}회 · {item.totalDurationMs}ms</p>
                     <p className="text-[10px]">{item.failures ? `실패 ${item.failures}` : item.lastStatus}</p>
                   </div>

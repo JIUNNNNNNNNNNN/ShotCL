@@ -2794,7 +2794,7 @@ export default function ProjectStoryboardOverheadPage() {
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-display truncate text-xl font-bold text-field-primary">부감도&콘티 아카이브</h1>
+            <h1 className="font-display truncate text-xl font-bold text-field-text">부감도&콘티 아카이브</h1>
             <p className="truncate text-xs text-field-muted">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
           {!canEdit ? <span className="border border-field-border bg-field-panel px-3 py-2 text-xs font-bold text-field-muted">읽기 전용</span> : null}
@@ -2823,7 +2823,7 @@ export default function ProjectStoryboardOverheadPage() {
                   className={`grid min-h-28 place-items-center border-2 border-dashed px-4 py-5 text-center transition-colors ${
                     active
                       ? "border-field-primary bg-field-primary/15 text-field-primary"
-                      : "border-field-border bg-field-soft/45 text-field-primary"
+                      : "border-field-divider bg-field-soft/45 text-field-subtle"
                   }`}
                   onDragEnter={(event) => {
                     event.preventDefault();
@@ -2854,31 +2854,31 @@ export default function ProjectStoryboardOverheadPage() {
           <div className="grid gap-2 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center">
             <div className="grid grid-cols-3 gap-2">
               {(["all", "overhead", "storyboard"] as const).map((type) => (
-                <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 border px-4 text-sm font-bold transition-colors ${activeType === type ? "border-field-primary bg-field-primary text-black" : "border-field-border bg-field-panel text-field-primary hover:border-field-primary"}`}>
+                <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 border px-4 text-sm font-bold transition-colors ${activeType === type ? "border-field-primary bg-field-primary/15 text-field-text" : "border-field-divider bg-field-panel text-field-muted hover:border-field-subtle hover:bg-field-hover hover:text-field-text"}`}>
                   {type === "all" ? "전체" : type === "overhead" ? "부감도" : "콘티"}
                 </button>
               ))}
             </div>
             <label className="relative block min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-border bg-field-panel pl-9 pr-3 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="제목, 메모, 씬, 컷 검색" />
+              <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="제목, 메모, 씬, 컷 검색" />
             </label>
             {canEdit ? (
               <div className="flex flex-wrap justify-end gap-2">
                 {activeType !== "storyboard" ? (
-                  <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary">
+                  <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                     <MapIcon className="h-4 w-4" aria-hidden />
                     직접 만들기
                   </button>
                 ) : null}
                 {selectedArchiveType ? (
                   <>
-                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary">
+                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                       <ImagePlus className="h-4 w-4" aria-hidden />
                       이미지
                       <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(selectedArchiveType, event)} />
                     </label>
-                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-primary bg-field-primary px-3 text-xs font-bold text-black transition hover:brightness-95">
+                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition hover:border-field-subtle hover:bg-field-hover">
                       <Upload className="h-4 w-4" aria-hidden />
                       PDF
                       <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(selectedArchiveType, event)} />
@@ -2886,7 +2886,7 @@ export default function ProjectStoryboardOverheadPage() {
                   </>
                 ) : (
                   (["overhead", "storyboard"] as const).map((type) => (
-                    <label key={type} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary">
+                    <label key={type} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                       <Upload className="h-4 w-4" aria-hidden />
                       {type === "overhead" ? "부감도 업로드" : "콘티 업로드"}
                       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareMixedUpload(type, event)} />
@@ -2906,7 +2906,7 @@ export default function ProjectStoryboardOverheadPage() {
                   type="button"
                   disabled={scopeSelectionKeys.length === 0 || isSaving}
                   onClick={toggleSelectionMode}
-                  className="min-h-9 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary disabled:opacity-40"
+                  className={`min-h-9 border px-3 text-xs font-bold transition-colors disabled:opacity-40 ${selectionMode ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
                   aria-pressed={selectionMode}
                 >
                   {selectionMode ? "선택 종료" : "선택"}
@@ -2916,7 +2916,7 @@ export default function ProjectStoryboardOverheadPage() {
                     type="button"
                     disabled={scopeSelectionKeys.length === 0 || isSaving}
                     onClick={toggleCurrentAssetScope}
-                    className="min-h-9 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary disabled:opacity-40"
+                    className={`min-h-9 border px-3 text-xs font-bold transition-colors disabled:opacity-40 ${allScopeAssetsSelected ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
                     aria-pressed={allScopeAssetsSelected}
                   >
                     {allScopeAssetsSelected ? "전체 해제" : "전체 선택"}
@@ -2939,20 +2939,20 @@ export default function ProjectStoryboardOverheadPage() {
                     clearSelection();
                     void cropStoredAsset(asset);
                   }}
-                  className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary disabled:opacity-50"
+                  className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50"
                 >
                   <Crop className="h-3.5 w-3.5" aria-hidden />
                   크롭
                 </button>
               ) : null}
               {selectedCount === 1 ? (
-                <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary">
+                <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                   <Info className="h-3.5 w-3.5" aria-hidden />
                   {singleSelectedReferenceAsset ? "정보 수정" : "정보"}
                 </button>
               ) : null}
               {singleSelectedReferenceAsset ? (
-                <button type="button" onClick={renameSingleSelectedAsset} className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-primary">
+                <button type="button" onClick={renameSingleSelectedAsset} className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                   이름 변경
                 </button>
               ) : null}
@@ -2970,7 +2970,7 @@ export default function ProjectStoryboardOverheadPage() {
 
         <Card className="grid gap-3">
           <div>
-            <h2 className="font-display text-lg font-bold text-field-primary">{activeType === "all" ? "전체" : activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
+            <h2 className="font-display text-lg font-bold text-field-text">{activeType === "all" ? "전체" : activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
             <p className="text-xs text-field-muted">이미지 원본 비율을 유지하며 모서리를 자르지 않습니다.</p>
           </div>
           {archiveGroups.length === 0 ? (
@@ -2986,7 +2986,7 @@ export default function ProjectStoryboardOverheadPage() {
                     <button
                       type="button"
                       onClick={() => toggleSceneCollapsed(group.key)}
-                      className="flex min-h-9 w-full items-center gap-1.5 px-1 text-left text-sm font-bold text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/35"
+                      className="flex min-h-9 w-full items-center gap-1.5 px-1 text-left text-sm font-bold text-field-text hover:text-field-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/35"
                       aria-expanded={!collapsed}
                       aria-controls={scenePanelId}
                     >
@@ -3035,7 +3035,7 @@ export default function ProjectStoryboardOverheadPage() {
                                 cancelActiveReorderDrag();
                                 exitReorderMode(orderGroupKey);
                               }}
-                              className="min-h-8 border border-field-primary bg-field-panel px-3 text-[11px] font-bold text-field-primary transition-colors hover:bg-field-primary hover:text-black"
+                              className="min-h-8 border border-field-primary bg-field-panel px-3 text-[11px] font-bold text-field-primary transition-colors hover:bg-field-hover hover:text-field-text"
                             >
                               완료
                             </button>
@@ -3108,7 +3108,7 @@ export default function ProjectStoryboardOverheadPage() {
                           {pendingMetadataAssetIds.has(asset.id) ? (
                             <span className="pointer-events-none absolute left-1 top-1 z-20 h-2 w-2 bg-field-primary" title="정보 저장 중" aria-label="정보 저장 중" />
                           ) : null}
-                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center border border-field-border bg-field-panel px-1 text-[11px] font-bold text-field-primary">
+                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center border border-field-divider bg-field-panel px-1 text-[11px] font-bold text-field-subtle">
                             {orderNumber}
                           </span>
                           <button
@@ -3191,7 +3191,7 @@ export default function ProjectStoryboardOverheadPage() {
         {sourceAssets.length > 0 ? (
           <Card className="grid gap-3">
             <div>
-              <h2 className="font-display text-base font-bold text-field-primary">보존된 원본</h2>
+              <h2 className="font-display text-base font-bold text-field-text">보존된 원본</h2>
               <p className="text-xs text-field-muted">PDF와 crop 전 이미지입니다. 추출 결과를 삭제해도 원본은 별도 자료로 남습니다.</p>
             </div>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -3235,11 +3235,11 @@ export default function ProjectStoryboardOverheadPage() {
                         mimeType: asset.mimeType,
                         filename: asset.filename
                       }) === "pdf"
-                        ? <FileText className="h-7 w-7 shrink-0 text-field-primary" aria-hidden />
-                        : <FileImage className="h-7 w-7 shrink-0 text-field-primary" aria-hidden />}
+                        ? <FileText className="h-7 w-7 shrink-0 text-field-subtle" aria-hidden />
+                        : <FileImage className="h-7 w-7 shrink-0 text-field-subtle" aria-hidden />}
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs font-bold text-field-text">{archiveDisplayName(asset)}</span>
-                        <span className="block text-[11px] text-field-primary underline underline-offset-2">원본 보기</span>
+                        <span className="block text-[11px] text-field-subtle underline underline-offset-2">원본 보기</span>
                       </span>
                     </button>
                     {canEdit && asset.assetType === "storyboard" && detectArchiveCropSourceKind({ mimeType: asset.mimeType, filename: asset.filename }) ? (
@@ -3249,7 +3249,7 @@ export default function ProjectStoryboardOverheadPage() {
                           event.stopPropagation();
                           void cropStoredAsset(asset);
                         }}
-                        className="min-h-9 shrink-0 border border-field-border bg-field-panel px-3 text-[11px] font-bold text-field-primary transition-colors hover:border-field-primary"
+                        className="min-h-9 shrink-0 border border-field-divider bg-field-panel px-3 text-[11px] font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover"
                       >
                         crop
                       </button>
@@ -3423,17 +3423,17 @@ function CompactConfirm({
   onCancel: () => void;
 }) {
   return (
-    <section className="flex flex-wrap items-center gap-2 border border-field-border bg-field-panel p-3" role="alertdialog" aria-label="삭제 확인">
+    <section className="flex flex-wrap items-center gap-2 border border-field-divider bg-field-elevated p-3" role="alertdialog" aria-label="삭제 확인">
       <p className="min-w-0 flex-1 text-xs leading-5 text-field-text">{message}</p>
       {errorMessage ? (
         <p className="basis-full text-xs font-bold leading-5 text-field-danger" role="alert">
           {errorMessage}
         </p>
       ) : null}
-      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-muted transition-colors hover:border-field-primary disabled:opacity-50">
+      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">
         취소
       </button>
-      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 border border-field-danger bg-field-danger px-3 text-xs font-bold text-white disabled:opacity-50">
+      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 border border-field-danger bg-field-danger px-3 text-xs font-bold text-field-text disabled:opacity-50">
         {isSaving ? "처리 중" : "삭제"}
       </button>
     </section>
@@ -3529,7 +3529,7 @@ function MetadataPopover({
   return createPortal(
     <section
       ref={popoverRef}
-      className={`fixed z-[140] grid max-h-[min(70dvh,22rem)] gap-3 overflow-y-auto border border-field-border bg-field-panel p-3 ${
+      className={`fixed z-[140] grid max-h-[min(70dvh,22rem)] gap-3 overflow-y-auto border border-field-divider bg-field-elevated p-3 ${
         anchor
           ? "w-64 max-w-[calc(100vw-24px)]"
           : "inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] mx-auto max-w-sm sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
@@ -3543,8 +3543,8 @@ function MetadataPopover({
       aria-label="자료 정보 수정"
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-display text-base font-bold text-field-primary">정보 수정</h2>
-        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-border bg-field-panel text-field-text transition-colors hover:border-field-primary" aria-label="정보 수정 닫기">
+        <h2 className="font-display text-base font-bold text-field-text">정보 수정</h2>
+        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-divider bg-field-panel text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover" aria-label="정보 수정 닫기">
           <X className="h-4 w-4" aria-hidden />
         </button>
       </div>
@@ -3560,7 +3560,7 @@ function MetadataPopover({
               cutNo: ""
             });
           }}
-          className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+          className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
         >
           <option value="">미지정</option>
           {missingScene ? (
@@ -3579,7 +3579,7 @@ function MetadataPopover({
           disabled={!selectedScene || maxCut < 1}
           value={value.cutNo}
           onChange={(event) => onChange({ ...value, cutNo: event.target.value })}
-          className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:bg-field-soft disabled:text-field-muted"
+          className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:bg-field-disabled/20 disabled:text-field-disabled"
         >
           <option value="">미지정</option>
           {invalidCut && value.cutNo ? (
@@ -3601,8 +3601,8 @@ function MetadataPopover({
       ) : null}
       {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-border bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-primary disabled:opacity-50">취소</button>
-        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-black transition hover:brightness-95 disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">취소</button>
+        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
       </div>
     </section>,
     document.body
@@ -3626,13 +3626,13 @@ function AssetRenameEditor({
 }) {
   return (
     <section
-      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[86] mx-auto grid max-w-sm gap-3 border border-field-border bg-field-panel p-3 sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
+      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[86] mx-auto grid max-w-sm gap-3 border border-field-divider bg-field-elevated p-3 sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
       role="dialog"
       aria-label="자료 이름 변경"
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-display text-base font-bold text-field-primary">이름 변경</h2>
-        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-border bg-field-panel text-field-text transition-colors hover:border-field-primary" aria-label="이름 변경 닫기">
+        <h2 className="font-display text-base font-bold text-field-text">이름 변경</h2>
+        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center border border-field-divider bg-field-panel text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover" aria-label="이름 변경 닫기">
           <X className="h-4 w-4" aria-hidden />
         </button>
       </div>
@@ -3643,13 +3643,13 @@ function AssetRenameEditor({
           value={value}
           maxLength={240}
           onChange={(event) => onChange(event.target.value)}
-          className="min-h-10 border border-field-border bg-field-panel px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+          className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
         />
       </label>
       {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-border bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-primary disabled:opacity-50">취소</button>
-        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-black transition hover:brightness-95 disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">취소</button>
+        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
       </div>
     </section>
   );
@@ -3657,11 +3657,11 @@ function AssetRenameEditor({
 
 function DiagramMetadataBar({ value, onChange }: { value: DiagramDraft; onChange: (value: DiagramDraft) => void }) {
   return (
-    <div className="fixed left-1/2 top-[max(0.5rem,env(safe-area-inset-top))] z-[90] flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap gap-1 border border-field-border bg-field-panel p-2">
-      <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-9 min-w-0 flex-[2] border border-field-border bg-field-panel px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="부감도 제목" />
-      <input value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-9 w-16 border border-field-border bg-field-panel px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="씬" />
-      <input value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-9 w-16 border border-field-border bg-field-panel px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="컷" />
-      <input value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} className="min-h-9 min-w-0 flex-[3] border border-field-border bg-field-panel px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="메모" />
+    <div className="fixed left-1/2 top-[max(0.5rem,env(safe-area-inset-top))] z-[90] flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap gap-1 border border-field-divider bg-field-elevated p-2">
+      <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-9 min-w-0 flex-[2] border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="부감도 제목" />
+      <input value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="씬" />
+      <input value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="컷" />
+      <input value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} className="min-h-9 min-w-0 flex-[3] border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="메모" />
     </div>
   );
 }
