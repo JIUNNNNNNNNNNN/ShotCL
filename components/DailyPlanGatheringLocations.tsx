@@ -72,7 +72,7 @@ export function DailyPlanGatheringLocations({
   const canManagePhotos = Boolean(canEdit && place && (place.persistedId || place.departmentIds.length > 0));
 
   return (
-    <section className="mb-3 border border-field-border bg-field-panel px-3 py-2.5" aria-labelledby="gathering-locations-title">
+    <section className="mb-3 border border-field-border bg-field-section px-3 py-2.5" aria-labelledby="gathering-locations-title">
       <div className="flex items-center justify-between gap-3 border-b border-field-border pb-2">
         <h2 id="gathering-locations-title" className="text-sm font-bold text-field-text">집합장소</h2>
         {message ? <p className="min-w-0 truncate text-[11px] font-normal text-field-muted">{message}</p> : null}
@@ -139,7 +139,7 @@ function GatheringPlaceRow({
             <button
               type="button"
               onClick={onManage}
-              className="shrink-0 border border-field-border bg-field-elevated px-2 py-1 text-[11px] font-bold text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
+              className="shrink-0 border border-field-border bg-field-input px-2 py-1 text-[11px] font-bold text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
             >
               사진 관리
             </button>
@@ -315,7 +315,7 @@ function GatheringPhotoEditor({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/70 p-0 md:items-center md:justify-center md:p-4" role="dialog" aria-modal="true" aria-label={`${point.locationName} 위치 사진 관리`}>
-      <div className="max-h-[88dvh] w-full overflow-y-auto border border-field-border bg-field-elevated p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:max-w-xl md:pb-4">
+      <div className="max-h-[88dvh] w-full overflow-y-auto border border-field-divider bg-field-dialog p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-dialog md:max-w-xl md:pb-4">
         <div className="flex items-start justify-between gap-3 border-b border-field-border pb-3">
           <div className="min-w-0">
             <h2 className="break-words text-base font-bold text-field-text">{point.locationName}</h2>

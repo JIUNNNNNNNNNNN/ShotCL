@@ -144,19 +144,51 @@
 
 :root {
   color-scheme: dark;
-  background: #0e1013;
-  --field-paper: #0e1013;
-  --field-panel: #14171b;
-  --field-soft: #191d22;
-  --field-elevated: #1d2127;
-  --field-hover: #232830;
-  --field-input: #121519;
-  --field-line: #2b3038;
-  --field-divider: #3a414b;
-  --field-text: #eceff3;
-  --field-secondary-text: #b4bac3;
-  --field-muted: #858d98;
-  --field-disabled: #626a74;
+  background: #121212;
+  --surface-00: #121212;
+  --surface-01: #1e1e1e;
+  --surface-02: #222222;
+  --surface-03: #252525;
+  --surface-04: #272727;
+  --surface-06: #2c2c2c;
+  --surface-08: #2d2d2d;
+  --surface-12: #333333;
+  --surface-16: #353535;
+  --surface-24: #383838;
+  --background: var(--surface-00);
+  --section: var(--surface-01);
+  --card: var(--surface-02);
+  --control: var(--surface-03);
+  --control-hover: var(--surface-04);
+  --toast: var(--surface-06);
+  --floating: var(--surface-08);
+  --floating-high: var(--surface-12);
+  --overlay-panel: var(--surface-16);
+  --dialog: var(--surface-24);
+  --text-primary: rgba(255, 255, 255, 0.87);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-disabled: rgba(255, 255, 255, 0.38);
+  --border-neutral: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.2);
+  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow-dialog: 0 12px 32px rgba(0, 0, 0, 0.32);
+  --field-paper: var(--background);
+  --field-section: var(--section);
+  --field-panel: var(--card);
+  --field-soft: var(--card);
+  --field-input: var(--control);
+  --field-hover: var(--control-hover);
+  --field-toast: var(--toast);
+  --field-elevated: var(--floating);
+  --field-floating: var(--floating-high);
+  --field-overlay: var(--overlay-panel);
+  --field-dialog: var(--dialog);
+  --field-line: var(--border-neutral);
+  --field-divider: var(--border-strong);
+  --field-text: var(--text-primary);
+  --field-secondary-text: var(--text-secondary);
+  --field-muted: var(--text-secondary);
+  --field-disabled: var(--text-disabled);
   --field-accent: #c8a951;
   --field-accent-hover: #d0b45a;
   --field-accent-soft: rgba(200, 169, 81, 0.12);
@@ -262,6 +294,23 @@ button {
   border-radius: 0;
 }
 
+/* role에 맞춘 surface 단계만 보정하며 modal scrim과 문서 preview에는 영향을 주지 않습니다. */
+.app-theme :where([role="menu"], [role="listbox"]),
+.app-theme :where([role="dialog"]:not([aria-modal="true"])):where(.bg-field-elevated, .bg-field-overlay, .bg-field-floating):not(.shadow-dialog) {
+  box-shadow: var(--shadow-floating);
+}
+
+.app-theme :where(
+  [role="dialog"][aria-modal="true"].bg-field-elevated,
+  [role="dialog"][aria-modal="true"].bg-field-panel,
+  [role="alertdialog"].bg-field-elevated,
+  [role="alertdialog"].bg-field-panel
+),
+.app-theme :where([role="dialog"][aria-modal="true"], [role="alertdialog"]) > :where(.bg-field-elevated, .bg-field-panel) {
+  background-color: var(--field-dialog);
+  box-shadow: var(--shadow-dialog);
+}
+
 .app-theme :where(input[type="checkbox"], input[type="radio"]) {
   accent-color: var(--field-accent);
 }
@@ -269,6 +318,17 @@ button {
 .app-theme :where(input, textarea, select)::placeholder {
   color: var(--field-muted);
   opacity: 1;
+}
+
+/* subtle은 글자에서는 secondary, 경계 hover에서는 strong border 역할을 유지합니다. */
+.app-theme .border-field-subtle {
+  border-color: var(--field-divider);
+}
+
+@media (hover: hover) {
+  .app-theme :where(input, textarea, select).bg-field-input:not(:disabled):hover {
+    background-color: var(--field-hover);
+  }
 }
 
 summary,
@@ -296,7 +356,7 @@ a[class*="min-h-"][class*="items-center"] {
   .field-section {
     border: 1px solid var(--field-line);
     border-radius: 0;
-    background: var(--field-panel);
+    background: var(--field-section);
   }
 
   .field-subsection {
@@ -305,11 +365,23 @@ a[class*="min-h-"][class*="items-center"] {
     background: var(--field-soft);
   }
 
+  .field-card {
+    border: 1px solid var(--field-line);
+    border-radius: 0;
+    background: var(--field-panel);
+  }
+
   .field-cell {
     min-width: 0;
     border: 1px solid var(--field-line);
     border-radius: 0;
     background: var(--field-panel);
+  }
+
+  .field-toast {
+    border: 1px solid var(--field-line);
+    border-radius: 0;
+    background: var(--field-toast);
   }
 }
 

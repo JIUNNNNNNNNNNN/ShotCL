@@ -168,7 +168,7 @@ export function DailyPlanLocationMenu({
                 <button
                   ref={cancelDeleteRef}
                   type="button"
-                  className="min-h-8 border border-field-divider bg-field-panel px-2 text-xs font-bold text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="min-h-8 border border-field-divider bg-field-input px-2 text-xs font-bold text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                   onClick={() => {
                     setIsDeleteConfirming(false);
                     window.requestAnimationFrame(updatePosition);

@@ -113,7 +113,7 @@ export function ShotArchivePicker({
 
   return (
     <div className="fixed inset-0 z-[75] flex items-end justify-center bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
-      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-elevated">
+      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
         <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
           <div className="min-w-0">
             <h2 className="font-display truncate text-lg font-bold text-field-text">아카이브에서 선택</h2>
@@ -139,7 +139,7 @@ export function ShotArchivePicker({
           </div>
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-muted/70 focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-disabled focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
           </label>
           {selected ? (
             <div className="flex items-center justify-between gap-2 border border-field-primary/70 bg-field-primary/10 px-3 py-2">

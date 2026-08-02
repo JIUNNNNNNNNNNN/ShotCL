@@ -89,7 +89,7 @@ export function ProgressScheduleEditorModal({
       <form
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
-        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-elevated p-3"
+        className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-dialog p-3 shadow-dialog"
       >
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="sr-only">{readOnly ? "기타일정 보기" : "기타일정 수정"}</span>

@@ -235,7 +235,7 @@ export function RememberedProjectActions({
           aria-modal="true"
           aria-labelledby="remembered-project-removal-title"
           aria-describedby="remembered-project-removal-description"
-          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-elevated p-4"
+          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-dialog p-4 shadow-dialog"
         >
           <h2 id="remembered-project-removal-title" className="text-sm font-black text-field-text">
             프로젝트 목록에서 지우기

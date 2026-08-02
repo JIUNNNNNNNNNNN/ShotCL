@@ -479,7 +479,7 @@ function EpisodeSelectionField({
               role="dialog"
               aria-modal="true"
               aria-label={`${member.name || member.role || "메인 스태프"} 참여 회차 선택`}
-              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden border border-field-border bg-field-panel"
+              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden border border-field-border bg-field-dialog shadow-dialog"
             >
               <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
                 <div className="min-w-0">

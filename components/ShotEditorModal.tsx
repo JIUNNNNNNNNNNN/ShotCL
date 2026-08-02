@@ -135,7 +135,7 @@ export function ShotEditorModal({
         onSubmit={handleSubmit}
         onPointerDown={(event) => event.stopPropagation()}
         className={cn(
-          "w-full overflow-y-auto border border-field-divider bg-field-elevated",
+          "w-full overflow-y-auto border border-field-divider bg-field-dialog shadow-dialog",
           mode === "add"
             ? "max-h-[92dvh] p-4 sm:mx-auto sm:max-w-3xl"
             : "mx-auto max-h-[72dvh] max-w-[26rem] p-3"

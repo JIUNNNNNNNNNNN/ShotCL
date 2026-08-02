@@ -68,7 +68,7 @@ export const ShotCard = memo(function ShotCard({
         className={cn(
           "min-w-0 overflow-hidden border border-l-[3px] transition-[background-color,border-color]",
           isOk
-            ? "border-field-primary/70 border-l-[#c8a951] bg-field-primary/10"
+            ? "border-field-primary/70 border-l-field-primary bg-field-primary/10"
             : "border-field-danger/70 border-l-field-danger bg-field-danger/10"
         )}
       >
@@ -172,7 +172,7 @@ export const ShotCard = memo(function ShotCard({
           <h2 className="min-w-0 truncate text-sm font-bold leading-5 text-field-text">
             {cutLabel}
           </h2>
-          <p className={cn("px-2 py-1 text-[10px] font-bold leading-[1.35]", isOk ? "border border-field-primary/70 bg-field-primary/10 text-field-primary" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-panel text-field-muted")}>
+          <p className={cn("px-2 py-1 text-[10px] font-bold leading-[1.35]", isOk ? "border border-field-primary/70 bg-field-primary/10 text-field-primary" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -184,7 +184,7 @@ export const ShotCard = memo(function ShotCard({
                   onToggleCollapsed(shot);
                 }}
                 data-no-drag="true"
-                className="inline-flex min-h-7 min-w-7 items-center justify-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="inline-flex min-h-7 min-w-7 items-center justify-center border border-field-divider bg-field-input text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
                 aria-label={`${statusLabel} 컷 접기`}
                 aria-expanded={true}
                 title="완료 컷 접기"
@@ -200,7 +200,7 @@ export const ShotCard = memo(function ShotCard({
               }}
               className={cn(
                 "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-                shot.storyboardImageUrl ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"
+                shot.storyboardImageUrl ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
             >
@@ -216,7 +216,7 @@ export const ShotCard = memo(function ShotCard({
               disabled={isOverheadLoading}
               className={cn(
                 "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55",
-                hasOverhead ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"
+                hasOverhead ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
             >
@@ -242,7 +242,7 @@ export const ShotCard = memo(function ShotCard({
             aria-pressed={isOk}
             className={cn(
               "min-h-[38px]  border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-              isOk ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"
+              isOk ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
             )}
           >
             <span className="font-display">OK</span>
@@ -254,7 +254,7 @@ export const ShotCard = memo(function ShotCard({
             aria-pressed={isOmit}
             className={cn(
               "min-h-[38px]  border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-              isOmit ? "border-field-danger bg-field-danger text-field-text" : "border-field-danger/60 bg-field-panel text-field-danger"
+              isOmit ? "border-field-danger bg-field-danger text-field-text" : "border-field-danger/60 bg-field-input text-field-danger"
             )}
           >
             <span className="font-display">OMIT</span>

@@ -20,7 +20,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
     <article
       onClick={() => onOpen(item)}
       className={cn(
-        "grid cursor-pointer gap-2 border border-field-border border-l-2 border-l-field-primary bg-field-elevated px-3 py-2.5 text-field-text transition-[background-color,border-color,transform] hover:bg-field-hover active:scale-[0.995]",
+        "grid cursor-pointer gap-2 border border-field-border border-l-2 border-l-field-primary bg-field-panel px-3 py-2.5 text-field-text transition-[background-color,border-color,transform] hover:bg-field-hover active:scale-[0.995]",
         item.imageUrl && "grid-cols-[4.5rem_minmax(0,1fr)]"
       )}
       aria-label={`${title} 기타일정 상세 보기`}

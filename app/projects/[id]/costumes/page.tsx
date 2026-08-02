@@ -1071,7 +1071,7 @@ function EditableMediaField({
               <button
                 type="button"
                 onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
-                className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-border bg-field-panel/95 text-field-danger"
+                className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-divider bg-field-elevated/95 text-field-danger"
                 aria-label={`저장 시 ${label} 이미지 삭제`}
               >
                 <X className="h-4 w-4" aria-hidden />
@@ -1137,7 +1137,7 @@ function PendingImagePreview({
       <button
         type="button"
         onClick={onRemove}
-        className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-border bg-field-panel/95 text-field-danger"
+        className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-divider bg-field-elevated/95 text-field-danger"
         aria-label="선택한 이미지 제외"
       >
         <X className="h-4 w-4" aria-hidden />
@@ -1278,8 +1278,8 @@ function SceneSeedSummary({
 
 function BottomSheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-[90] flex items-end bg-black/20 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="mx-auto max-h-[90dvh] w-full max-w-lg overflow-y-auto border border-field-border bg-field-panel p-4">
+    <div className="fixed inset-0 z-[90] flex items-end bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="mx-auto max-h-[90dvh] w-full max-w-lg overflow-y-auto border border-field-divider bg-field-elevated p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="font-display text-lg font-bold text-field-text">{title}</h2>
           <IconButton label="닫기" onClick={onClose}><X className="h-4 w-4" aria-hidden /></IconButton>

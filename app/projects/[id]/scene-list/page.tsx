@@ -1252,7 +1252,7 @@ export default function ProjectSceneListPage() {
         <div
           ref={headerHelpPopoverRef}
           role="tooltip"
-          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center border border-field-primary bg-field-panel px-3 py-2 text-center text-xs font-bold text-field-primary print:hidden"
+          className="fixed z-[90] flex min-h-9 w-[150px] items-center justify-center border border-field-primary bg-field-elevated px-3 py-2 text-center text-xs font-bold text-field-primary print:hidden"
           style={{ left: headerHelpPopover.left, top: headerHelpPopover.top }}
           onPointerDown={(event) => event.stopPropagation()}
         >

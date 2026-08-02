@@ -6,9 +6,9 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const variantClass: Record<ButtonVariant, string> = {
   primary: "border-field-primary bg-field-primary font-black text-field-accent-foreground hover:border-field-secondary hover:bg-field-secondary",
-  secondary: "border-field-border bg-field-soft text-field-text hover:border-field-divider hover:bg-field-hover",
-  ghost: "border-field-border bg-field-panel text-field-text hover:border-field-divider hover:bg-field-hover",
-  danger: "border-field-danger/70 bg-field-panel font-black text-field-danger hover:border-field-danger hover:bg-field-danger/10"
+  secondary: "border-field-border bg-field-input text-field-text hover:border-field-divider hover:bg-field-hover",
+  ghost: "border-field-border bg-field-input text-field-text hover:border-field-divider hover:bg-field-hover",
+  danger: "border-field-danger/70 bg-field-input font-black text-field-danger hover:border-field-danger hover:bg-field-danger/10"
 };
 
 type BaseProps = {

@@ -104,7 +104,7 @@ export function SupabaseDebugPanel() {
   return (
     <section className="mt-5 border border-field-border bg-field-soft p-4">
       <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-border bg-field-elevated text-field-subtle">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-border bg-field-input text-field-subtle">
           <Bug className="h-5 w-5" aria-hidden />
         </div>
         <div className="min-w-0">
@@ -128,7 +128,7 @@ export function SupabaseDebugPanel() {
       {results.length > 0 ? (
         <div className="mt-4 grid gap-2">
           {results.map((result) => (
-            <div key={result.label} className="border border-field-border bg-field-elevated p-3">
+            <div key={result.label} className="border border-field-border bg-field-panel p-3">
               <p className="text-sm font-black text-field-text">
                 {result.ok ? "OK" : "FAIL"} · {result.label}
               </p>

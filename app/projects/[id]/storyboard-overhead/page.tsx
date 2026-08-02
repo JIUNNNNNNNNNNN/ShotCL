@@ -2926,7 +2926,7 @@ export default function ProjectStoryboardOverheadPage() {
             ) : null}
           </div>
           {canEdit && selectedCount > 0 ? (
-            <div className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 border border-field-border bg-field-panel/95 px-3 py-2">
+            <div className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-40 mx-auto flex max-w-3xl flex-wrap items-center gap-2 border border-field-divider bg-field-floating px-3 py-2 shadow-floating">
               <span className="text-xs font-bold text-field-primary">
                 {selectedCount}개 선택
               </span>
@@ -3108,7 +3108,7 @@ export default function ProjectStoryboardOverheadPage() {
                           {pendingMetadataAssetIds.has(asset.id) ? (
                             <span className="pointer-events-none absolute left-1 top-1 z-20 h-2 w-2 bg-field-primary" title="정보 저장 중" aria-label="정보 저장 중" />
                           ) : null}
-                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center border border-field-divider bg-field-panel px-1 text-[11px] font-bold text-field-subtle">
+                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center border border-field-divider bg-field-elevated px-1 text-[11px] font-bold text-field-subtle">
                             {orderNumber}
                           </span>
                           <button
@@ -3579,7 +3579,7 @@ function MetadataPopover({
           disabled={!selectedScene || maxCut < 1}
           value={value.cutNo}
           onChange={(event) => onChange({ ...value, cutNo: event.target.value })}
-          className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:bg-field-disabled/20 disabled:text-field-disabled"
+          className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:bg-field-input disabled:text-field-disabled"
         >
           <option value="">미지정</option>
           {invalidCut && value.cutNo ? (
@@ -3626,7 +3626,7 @@ function AssetRenameEditor({
 }) {
   return (
     <section
-      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[86] mx-auto grid max-w-sm gap-3 border border-field-divider bg-field-elevated p-3 sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
+      className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[86] mx-auto grid max-w-sm gap-3 border border-field-divider bg-field-overlay p-3 shadow-dialog sm:inset-x-auto sm:left-1/2 sm:w-[19rem] sm:-translate-x-1/2"
       role="dialog"
       aria-label="자료 이름 변경"
     >
@@ -3657,7 +3657,7 @@ function AssetRenameEditor({
 
 function DiagramMetadataBar({ value, onChange }: { value: DiagramDraft; onChange: (value: DiagramDraft) => void }) {
   return (
-    <div className="fixed left-1/2 top-[max(0.5rem,env(safe-area-inset-top))] z-[90] flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap gap-1 border border-field-divider bg-field-elevated p-2">
+    <div className="fixed left-1/2 top-[max(0.5rem,env(safe-area-inset-top))] z-[90] flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap gap-1 border border-field-divider bg-field-floating p-2 shadow-floating">
       <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-9 min-w-0 flex-[2] border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="부감도 제목" />
       <input value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="씬" />
       <input value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="컷" />

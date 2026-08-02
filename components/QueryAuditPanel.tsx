@@ -31,10 +31,10 @@ export function QueryAuditPanel() {
 
   return (
     <aside className="fixed bottom-3 left-3 z-[120] w-[min(24rem,calc(100vw-1.5rem))] text-xs">
-      <details className="border border-field-divider bg-field-elevated">
+      <details className="border border-field-divider bg-field-floating shadow-floating">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 font-bold text-field-subtle marker:content-none">
           Query audit
-          <span className="ml-auto border border-field-border bg-field-soft px-2 py-0.5 text-field-text">
+          <span className="ml-auto border border-field-border bg-field-input px-2 py-0.5 text-field-text">
             {totalCalls} calls · {duplicateCalls} duplicates
           </span>
         </summary>
@@ -43,7 +43,7 @@ export function QueryAuditPanel() {
             <button
               type="button"
               onClick={clearQueryAudit}
-              className="min-h-7 border border-field-border bg-field-soft px-2 text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="min-h-7 border border-field-border bg-field-input px-2 text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               로그 초기화
             </button>

@@ -14,7 +14,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
   const progressMessage = getDailyProgressMessage(progressPercent);
 
   return (
-    <section className="mb-3 border border-field-border bg-field-panel p-3" aria-label="일일 촬영 진행률">
+    <section className="mb-3 border border-field-border bg-field-section p-3" aria-label="일일 촬영 진행률">
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="break-words text-sm font-bold leading-[1.35] text-field-text">

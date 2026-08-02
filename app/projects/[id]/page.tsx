@@ -544,7 +544,7 @@ export default function ProjectDetailPage() {
             <Ellipsis className="h-5 w-5" aria-hidden />
             <span className="sr-only">프로젝트 보조 기능</span>
           </summary>
-          <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2" aria-label="프로젝트 보조 기능">
+          <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-divider bg-field-elevated p-2 shadow-floating" aria-label="프로젝트 보조 기능">
             <div className="mb-1 min-w-0 border-b border-field-border px-2 pb-2">
               <p className="truncate text-xs font-black text-field-text">{project.name}</p>
               <p className="truncate text-[10px] text-field-muted">{project.shootDate || "촬영일 미정"}</p>
@@ -795,7 +795,7 @@ function EpisodeSelection({
               <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-text transition-[background-color,transform,border-color] marker:content-none hover:border-field-divider hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
                 <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
               </summary>
-              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-border bg-field-panel p-2">
+              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-divider bg-field-elevated p-2 shadow-floating">
                 <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-text hover:bg-field-hover">
                   <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
                 </Link>
@@ -833,8 +833,8 @@ function EpisodeSelection({
 
 function ModalLoadingFallback() {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/20">
-      <div className="border border-field-border bg-field-panel p-4">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-field-bg/80">
+      <div className="border border-field-divider bg-field-dialog p-4 shadow-dialog">
         <PixelDogLoader size="sm" compact />
       </div>
     </div>

@@ -57,8 +57,8 @@ export const shotStatusLabels: Record<ShotStatus, string> = {
 
 export const shotStatusStyles: Record<ShotStatus, string> = {
   pending: "border-field-border bg-field-soft text-field-muted",
-  ok: "border-field-primary bg-field-primary text-white",
-  omit: "border-field-danger bg-field-danger text-white"
+  ok: "border-field-primary bg-field-primary text-field-accent-foreground",
+  omit: "border-field-danger bg-field-danger text-field-text"
 };
 
 export type LegacyShotStatus = ShotStatus | "todo" | "shooting" | "done" | "hold" | "skipped";

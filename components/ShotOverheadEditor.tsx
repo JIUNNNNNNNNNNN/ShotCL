@@ -694,7 +694,7 @@ export function ShotOverheadEditor({
         role="dialog"
         aria-modal="true"
         aria-label={`${shot.title} 부감도 ${readOnly ? "보기" : "편집"}`}
-        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-6xl flex-col overflow-hidden border border-field-divider bg-field-elevated sm:max-h-[94dvh]"
+        className="flex max-h-[calc(100dvh-env(safe-area-inset-top))] w-full max-w-6xl flex-col overflow-hidden border border-field-divider bg-field-dialog shadow-dialog sm:max-h-[94dvh]"
       >
         <header className="flex items-center justify-between gap-3 border-b border-field-divider px-3 py-2.5 sm:px-4">
           <div className="min-w-0">

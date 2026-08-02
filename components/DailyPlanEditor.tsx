@@ -1346,15 +1346,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     <div className="print-daily-plan">
       <div className="daily-plan-editor no-print text-center text-[13px] md:text-sm">
         {message ? <div className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-bold text-field-text">{message}</div> : null}
-        {errorMessage ? <div className="mb-4 border border-field-danger bg-field-elevated p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
+        {errorMessage ? <div className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black">
-              <span className="max-w-[55vw] truncate border border-field-border bg-field-elevated px-3 py-1.5 text-field-text">{plan.title || "새 일촬표"}</span>
+              <span className="max-w-[55vw] truncate border border-field-border bg-field-input px-3 py-1.5 text-field-text">{plan.title || "새 일촬표"}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
-              className="inline-flex min-h-10 items-center justify-center border border-field-border bg-field-elevated px-4 text-sm font-black text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
+              className="inline-flex min-h-10 items-center justify-center border border-field-border bg-field-input px-4 text-sm font-black text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
             >
               목록으로 돌아가기
             </Link>
@@ -1438,12 +1438,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
             </div> : mainStaffSummary ? (
-              <p className="hidden border border-field-border bg-field-elevated px-3 py-2 text-center text-xs font-normal text-field-muted md:block">
+              <p className="hidden border border-field-border bg-field-panel px-3 py-2 text-center text-xs font-normal text-field-muted md:block">
                 {mainStaffSummary}
               </p>
             ) : null}
             {projectConstraintMessage ? (
-              <p className="border border-field-danger bg-field-elevated px-3 py-2 text-xs font-normal text-field-danger" role="status">
+              <p className="border border-field-danger bg-field-toast px-3 py-2 text-xs font-normal text-field-danger" role="status">
                 {projectConstraintMessage}
               </p>
             ) : null}
@@ -1560,7 +1560,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   return (
                     <div
-                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 border bg-field-elevated p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
+                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
                         isDragging ? "border-field-primary bg-field-primary/10" : "border-field-border"
                       }`}
                       role="group"
@@ -1685,7 +1685,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           </div>
 
           <div className="order-3 mt-3 grid grid-cols-2 gap-1.5 md:hidden">
-            <div className="min-w-0 border border-field-border bg-field-elevated p-1.5">
+            <div className="min-w-0 border border-field-border bg-field-panel p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-subtle">주의사항</span>
               <MemoPopoverField
                 value={plan.safetyNotice}
@@ -1694,7 +1694,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onChange={(value) => updatePlanField("safetyNotice", value)}
               />
             </div>
-            <div className="min-w-0 border border-field-border bg-field-elevated p-1.5">
+            <div className="min-w-0 border border-field-border bg-field-panel p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-subtle">Memo</span>
               <MemoPopoverField
                 value={printMeta.memoText}
@@ -1720,7 +1720,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 {[8, 7, 8, 10, 6, 7, 7, 13, 14, 10, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
               </colgroup>
               <thead className="max-lg:hidden">
-                <tr className="bg-field-elevated text-field-subtle">
+                <tr className="bg-field-panel text-field-subtle">
                   {["순서 / 삭제", "시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
                       {header}
@@ -1766,7 +1766,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const sceneIndex = row.sourceIndex;
                   const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
                   return (
-                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:bg-field-elevated max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
+                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
                       <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -1870,7 +1870,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </Button>
           </div>
           {isStaffOpen ? <div className="mt-5 grid gap-5 text-center lg:grid-cols-2">
-            <section className="border border-field-border bg-field-elevated p-4 text-center">
+            <section className="border border-field-border bg-field-panel p-4 text-center">
               <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
                   <h3 className="text-center text-base font-black text-field-text">배우</h3>
@@ -1906,7 +1906,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </div>
             </section>
 
-            <section className="border border-field-border bg-field-elevated p-4 text-center">
+            <section className="border border-field-border bg-field-panel p-4 text-center">
               <div>
                 <h3 className="text-center text-base font-black text-field-text">스태프 / 부서</h3>
                 <p className="mt-1 text-center text-sm font-normal text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
@@ -2168,7 +2168,7 @@ function EpisodeField({
 
   if (mobile) {
     return (
-      <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-elevated p-1">
+      <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
         <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">회차</span>
         {hasConstrainedOptions ? (
           <select
@@ -2253,7 +2253,7 @@ function MobileInfoField({
 }) {
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-elevated p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
       <DraftInput
         className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
@@ -2283,7 +2283,7 @@ function MobileTotalCrewField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-elevated p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">총 인원</span>
       <TotalCrewInput
         value={value}
@@ -2387,7 +2387,7 @@ function TeamCountInput({
 
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-elevated p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
@@ -2504,7 +2504,7 @@ function EditableWeatherCard({
   }
 
   return (
-    <button type="button" onClick={startEditing} className="grid min-h-12 content-center border border-field-border bg-field-elevated px-1.5 py-1 text-center transition-colors hover:border-field-divider hover:bg-field-hover">
+    <button type="button" onClick={startEditing} className="grid min-h-12 content-center border border-field-border bg-field-panel px-1.5 py-1 text-center transition-colors hover:border-field-divider hover:bg-field-hover">
       <span className="text-[10px] font-black text-field-muted">{label}</span>
       <span className="mt-0.5 truncate text-xs font-normal text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
@@ -2525,7 +2525,7 @@ function RoleContactGroup({
   onContactChange: (value: string) => void;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden border border-field-border bg-field-elevated p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden border border-field-border bg-field-panel p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="whitespace-nowrap text-xs font-black text-field-subtle">{role}</span>
       <DraftInput
         className={`${compactInputClass} min-w-0`}
@@ -2840,7 +2840,7 @@ function ShootingOrderField({
             role="dialog"
             aria-modal="true"
             aria-label={`${ariaLabel} 입력`}
-            className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto overscroll-contain border border-field-border bg-field-elevated p-3 sm:max-h-[calc(100dvh-2rem)]"
+            className="max-h-[calc(100dvh-1rem)] w-full max-w-sm overflow-y-auto overscroll-contain border border-field-divider bg-field-dialog p-3 shadow-dialog sm:max-h-[calc(100dvh-2rem)]"
             data-shooting-order-popover
             onPointerDown={(event) => event.stopPropagation()}
           >
@@ -2985,7 +2985,7 @@ function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragSta
       type="button"
       draggable
       onDragStart={onDragStart}
-      className="inline-flex h-9 w-9 cursor-grab items-center justify-center border border-field-border bg-field-elevated text-field-subtle transition-colors hover:bg-field-hover active:cursor-grabbing"
+      className="inline-flex h-9 w-9 cursor-grab items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover active:cursor-grabbing"
       aria-label={label}
       title={label}
       tabIndex={tabIndex}
@@ -3020,7 +3020,7 @@ function TimetableOrderControls({
         type="button"
         onClick={() => onMove(rowIndex, "up")}
         disabled={rowIndex === 0}
-        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-elevated text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
+        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
         aria-label={`${ariaLabel} 위로 이동`}
         title="위로 이동"
         tabIndex={-1}
@@ -3031,7 +3031,7 @@ function TimetableOrderControls({
         type="button"
         onClick={() => onMove(rowIndex, "down")}
         disabled={rowIndex === rowCount - 1}
-        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-elevated text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
+        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
         aria-label={`${ariaLabel} 아래로 이동`}
         title="아래로 이동"
         tabIndex={-1}
@@ -3177,7 +3177,7 @@ function TimetableLinkedFieldLabel({
       {canReset ? (
         <button
           type="button"
-          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center border border-field-border bg-field-elevated text-field-muted transition-colors hover:bg-field-hover hover:text-field-text"
+          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center border border-field-border bg-field-input text-field-muted transition-colors hover:bg-field-hover hover:text-field-text"
           onClick={onReset}
           aria-label={`${label} 씬리스트 원본값 사용`}
           title="씬리스트 원본값 사용"
@@ -3288,7 +3288,7 @@ function SceneCastSelector({
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
-            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden border border-field-border bg-field-elevated text-center max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)] max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
+            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden border border-field-divider bg-field-dialog text-center shadow-dialog max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)] max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
           >
             <div className="flex items-center justify-between border-b border-field-border px-3 py-2">
               <strong className="text-sm text-field-text">등장인물 선택</strong>
@@ -3342,7 +3342,7 @@ function CircularDeleteButton({ label, onClick, tabIndex }: { label: string; onC
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center border border-field-danger bg-field-elevated text-field-danger transition-colors hover:bg-field-danger hover:text-field-text"
+      className="inline-flex h-8 w-8 items-center justify-center border border-field-danger bg-field-input text-field-danger transition-colors hover:bg-field-danger hover:text-field-text"
       aria-label={label}
       title={label}
       tabIndex={tabIndex}
@@ -3456,7 +3456,7 @@ function IconButton({ children, label, onClick, disabled = false }: { children: 
   return (
     <button
       type="button"
-      className="inline-flex min-h-10 min-w-10 items-center justify-center border border-field-border bg-field-elevated px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel"
+      className="inline-flex min-h-10 min-w-10 items-center justify-center border border-field-border bg-field-input px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel"
       onClick={onClick}
       disabled={disabled}
       title={label}
@@ -3511,13 +3511,13 @@ function MoveMenu({
   return (
     <details className="relative">
       <summary
-        className="inline-flex min-h-10 min-w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-elevated px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
+        className="inline-flex min-h-10 min-w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-input px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
         title={label}
         aria-label={label}
       >
         <MoreHorizontal className="h-4 w-4" aria-hidden />
       </summary>
-      <div className="absolute right-0 z-20 mt-2 grid min-w-36 gap-1 border border-field-border bg-field-elevated p-2">
+      <div className="absolute right-0 z-20 mt-2 grid min-w-36 gap-1 border border-field-border bg-field-elevated p-2 shadow-floating">
         <MenuButton label="위로 이동" onClick={onMoveUp} disabled={upDisabled}>
           <ArrowUp className="h-4 w-4" aria-hidden />
         </MenuButton>
@@ -3532,7 +3532,7 @@ function MoveMenu({
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
-    <section className="mt-5 border border-field-border bg-field-panel p-2 md:p-5">
+    <section className="mt-5 border border-field-border bg-field-section p-2 md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-field-text">실시간 일촬표 미리보기</h2>
       </div>
@@ -3578,7 +3578,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   }, []);
 
   return (
-    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden bg-field-elevated md:block">
+    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden bg-[#eeeae1] md:block">
       <div
         className="relative mx-auto max-w-full"
         style={{ width: desktopPreviewDocumentWidth * scale, height: scaledHeight || undefined }}
@@ -3603,8 +3603,8 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
 
 function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewData; onClose: () => void; onPrint: () => void }) {
   return (
-    <div className="screen-only no-print fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4">
-      <div className="mx-auto max-w-6xl bg-field-elevated p-4">
+    <div className="screen-only no-print fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="PDF 미리보기">
+      <div className="mx-auto max-w-6xl border border-field-divider bg-field-dialog p-4 shadow-dialog">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-field-border pb-3">
           <div>
             <p className="text-xs font-black text-field-muted">PDF 미리보기</p>

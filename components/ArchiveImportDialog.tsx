@@ -351,7 +351,7 @@ export function ArchiveImportDialog({
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
-      <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col border border-field-divider bg-field-elevated">
+      <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
         <header className="flex items-center justify-between border-b border-field-border px-4 py-3">
           <div className="min-w-0">
             <h2 className="font-display truncate text-lg font-black text-field-text">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
@@ -513,7 +513,7 @@ function ArchiveImportProgressOverlay({
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-field-bg/90 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-5">
       <section
-        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-sm gap-3 overflow-y-auto border border-field-divider bg-field-elevated p-4"
+        className="grid max-h-[calc(100dvh-2rem)] w-full max-w-sm gap-3 overflow-y-auto border border-field-divider bg-field-dialog p-4 shadow-dialog"
         role="status"
         aria-live="polite"
         aria-label={`콘티 이미지 처리 중, ${phaseLabel}, ${percent}%`}

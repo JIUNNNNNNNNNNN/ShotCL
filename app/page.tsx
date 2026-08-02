@@ -826,7 +826,7 @@ export default function HomePage() {
         onKeyDown={handleProjectSpinnerKeyDown}
       >
         <div
-          className="functional-circle pointer-events-none absolute inset-[10%] border border-field-border/75 bg-field-panel/50"
+          className="functional-circle pointer-events-none absolute inset-[10%] border border-field-border bg-field-panel/50"
           aria-hidden
         />
         <div className="functional-circle pointer-events-none absolute inset-[14%] border border-dashed border-field-secondary/45" aria-hidden />
@@ -1251,7 +1251,7 @@ export default function HomePage() {
         {feedback ? (
           <p
             role="status"
-            className={`absolute z-30 whitespace-nowrap border border-field-border bg-field-panel px-3 py-1.5 text-[11px] font-bold text-field-subtle ${
+            className={`absolute z-30 whitespace-nowrap border border-field-divider bg-field-elevated px-3 py-1.5 text-[11px] font-bold text-field-subtle ${
               feedback.target === "progress"
                 ? "left-1/2 top-[calc(100%+0.5rem)] -translate-x-1/2"
                 : "right-[calc(100%+0.5rem)] top-1/3"

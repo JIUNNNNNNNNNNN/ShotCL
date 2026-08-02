@@ -22,13 +22,13 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#0E1013"
+  themeColor: "#121212"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
-      <body>
+      <body className="app-theme">
         <PwaRegister />
         <AppShell>{children}</AppShell>
       </body>

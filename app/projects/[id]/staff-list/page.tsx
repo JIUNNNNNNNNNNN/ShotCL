@@ -836,7 +836,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
         }}
       />
       {canEdit ? (
-        <div className="col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l border-field-border/80 p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
+        <div className="col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l border-field-border p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
