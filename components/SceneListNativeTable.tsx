@@ -1,0 +1,1373 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent
+} from "react";
+import { createPortal } from "react-dom";
+import { SceneReorderList } from "@/components/SceneReorderList";
+import {
+  buildSceneListMergeLayout,
+  createSceneListCellMergeFromRange,
+  getSceneListCellMergeState,
+  getSceneListMergesIntersectingRange,
+  listSceneListCellsInRange,
+  removeSceneListCellMergesInRange,
+  resolveSceneListCellRange,
+  validateSceneListCellMerges,
+  validateSceneListReorderWithMerges,
+  type SceneListMergeCell,
+  type SceneListMergeSelection,
+  type SceneListResolvedCellRange
+} from "@/lib/sceneListMergeModel";
+import { MAX_SCENE_CUT_COUNT, validateSceneCutCountInput } from "@/lib/sceneCutCount";
+import type {
+  ProjectSceneActorCell,
+  ProjectSceneCellMerge,
+  ProjectSceneItem,
+  ProjectSceneMergeColumn
+} from "@/lib/types";
+
+type SceneEditableColumn =
+  | "sceneNo"
+  | "location"
+  | "subLocation"
+  | "day"
+  | "time"
+  | "intExt"
+  | "content"
+  | `actor:${string}`
+  | "cut"
+  | "memo";
+
+type CellMenuState = { left: number; top: number };
+type ConfirmState = {
+  kind: "merge" | "clear";
+  title: string;
+  description: string;
+};
+
+type PendingSelectionDrag = {
+  pointerId: number;
+  pointerType: string;
+  start: SceneListMergeCell;
+  focus: SceneListMergeCell;
+  startX: number;
+  startY: number;
+  didDrag: boolean;
+  longPressTriggered: boolean;
+  captureTarget: HTMLTableCellElement;
+  timer: number | null;
+};
+
+type PaletteStyle = { background: string; color: string };
+
+const mergeColumnField: Record<ProjectSceneMergeColumn, keyof ProjectSceneItem> = {
+  location: "mainLocation",
+  subLocation: "subLocation",
+  day: "dayLabel",
+  time: "dayNight",
+  intExt: "interiorExterior"
+};
+
+const tableInputClass =
+  "h-full min-h-9 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944]";
+
+export function SceneListNativeTable({
+  items,
+  actorRoles,
+  cellMerges,
+  canEdit,
+  onUpdate,
+  onReorderLocal,
+  onReorderCommit,
+  onPersistMerges,
+  onClearCells,
+  onDelete,
+  onError,
+  onCutValidationChange
+}: {
+  items: ProjectSceneItem[];
+  actorRoles: string[];
+  cellMerges: ProjectSceneCellMerge[];
+  canEdit: boolean;
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onReorderLocal: (items: ProjectSceneItem[]) => void;
+  onReorderCommit: (items: ProjectSceneItem[], previous: ProjectSceneItem[]) => Promise<void>;
+  onPersistMerges: (merges: ProjectSceneCellMerge[]) => Promise<void>;
+  onClearCells: (cells: SceneListMergeCell[]) => Promise<void>;
+  onDelete: (item: ProjectSceneItem) => void;
+  onError: (message: string) => void;
+  onCutValidationChange: (id: string, message: string) => void;
+}) {
+  const orderedSceneIds = useMemo(() => items.map((item) => item.id), [items]);
+  const mergeLayout = useMemo(
+    () => buildSceneListMergeLayout(orderedSceneIds, cellMerges),
+    [cellMerges, orderedSceneIds]
+  );
+  const [selection, setSelection] = useState<SceneListMergeSelection | null>(null);
+  const [menu, setMenu] = useState<CellMenuState | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [editingCell, setEditingCell] = useState<{ sceneId: string; column: SceneEditableColumn } | null>(null);
+  const [sceneMenu, setSceneMenu] = useState<{ itemId: string; left: number; top: number } | null>(null);
+  const [actorTextEditor, setActorTextEditor] = useState<{ sceneId: string; role: string } | null>(null);
+  const [isMutating, setIsMutating] = useState(false);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const pointerCleanupRef = useRef<(() => void) | null>(null);
+  const actorPointerCleanupRef = useRef<(() => void) | null>(null);
+  const suppressClickRef = useRef(false);
+  const suppressActorClickRef = useRef(false);
+
+  const resolvedSelection = useMemo(() => (
+    selection
+      ? resolveSceneListCellRange(selection, orderedSceneIds, cellMerges, true)
+      : null
+  ), [cellMerges, orderedSceneIds, selection]);
+  const intersectingMerges = useMemo(() => (
+    resolvedSelection
+      ? getSceneListMergesIntersectingRange(resolvedSelection, orderedSceneIds, cellMerges)
+      : []
+  ), [cellMerges, orderedSceneIds, resolvedSelection]);
+  const selectionCellCount = resolvedSelection
+    ? resolvedSelection.sceneIds.length * resolvedSelection.columns.length
+    : 0;
+  const canMergeSelection = Boolean(
+    canEdit &&
+    resolvedSelection &&
+    selectionCellCount >= 2 &&
+    intersectingMerges.length === 0 &&
+    validateSceneListCellMerges(orderedSceneIds, [
+      createSceneListCellMergeFromRange("selection-check", resolvedSelection)
+    ]).ok
+  );
+
+  useEffect(() => {
+    if (!mergeLayout.errors.length) return;
+    onError(mergeLayout.errors[0]?.message ?? "저장된 셀 병합 범위가 올바르지 않습니다.");
+  }, [mergeLayout.errors, onError]);
+
+  useEffect(() => {
+    if (!selection && !menu && !sceneMenu) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSelection(null);
+      setMenu(null);
+      setSceneMenu(null);
+      setConfirmState(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [menu, sceneMenu, selection]);
+
+  useEffect(() => {
+    if (!selection && !menu && !sceneMenu && !confirmState && !actorTextEditor) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (
+        tableRef.current?.contains(event.target) ||
+        event.target.closest("[data-scene-floating-ui]")
+      ) {
+        return;
+      }
+      if (!isMutating) {
+        setSelection(null);
+        setMenu(null);
+        setSceneMenu(null);
+        setConfirmState(null);
+        setActorTextEditor(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [actorTextEditor, confirmState, isMutating, menu, sceneMenu, selection]);
+
+  useEffect(() => () => {
+    pointerCleanupRef.current?.();
+    actorPointerCleanupRef.current?.();
+    document.body.style.removeProperty("user-select");
+    document.body.style.removeProperty("cursor");
+  }, []);
+
+  const closeSelection = useCallback(() => {
+    if (isMutating) return;
+    setSelection(null);
+    setMenu(null);
+    setConfirmState(null);
+  }, [isMutating]);
+
+  const showMenuAt = useCallback((x: number, y: number) => {
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const width = 184;
+    const height = 128;
+    const navigationReserve = window.innerWidth >= 768 ? 76 : 8;
+    setMenu({
+      left: Math.max(
+        viewportLeft + 8,
+        Math.min(x, viewportLeft + viewportWidth - width - navigationReserve)
+      ),
+      top: Math.max(viewportTop + 8, Math.min(y + 8, viewportTop + viewportHeight - height - 8))
+    });
+  }, []);
+
+  const selectionFromCells = useCallback((
+    anchor: SceneListMergeCell,
+    focus: SceneListMergeCell
+  ): SceneListMergeSelection => {
+    const allowedFocus = isLocationMergeColumn(anchor.column)
+      ? {
+          ...focus,
+          column: isLocationMergeColumn(focus.column) ? focus.column : anchor.column
+        }
+      : { ...focus, column: anchor.column };
+    return { anchor, focus: allowedFocus };
+  }, []);
+
+  const findMergeCellAt = useCallback((clientX: number, clientY: number) => {
+    const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(
+      "[data-scene-merge-scene-id][data-scene-merge-column]"
+    );
+    const sceneId = target?.dataset.sceneMergeSceneId;
+    const column = target?.dataset.sceneMergeColumn as ProjectSceneMergeColumn | undefined;
+    return sceneId && column ? { sceneId, column } : null;
+  }, []);
+
+  const beginSelectionPointer = useCallback((
+    event: ReactPointerEvent<HTMLTableCellElement>,
+    cell: SceneListMergeCell
+  ) => {
+    if (!canEdit || event.button !== 0 || isMutating) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+    pointerCleanupRef.current?.();
+    setSceneMenu(null);
+    setMenu(null);
+    // A touch tap should remain a normal edit/scroll gesture. Selection starts
+    // only after the long-press threshold, while desktop keeps immediate focus.
+    setSelection(event.pointerType === "touch" ? null : selectionFromCells(cell, cell));
+
+    const pending: PendingSelectionDrag = {
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      start: cell,
+      focus: cell,
+      startX: event.clientX,
+      startY: event.clientY,
+      didDrag: false,
+      longPressTriggered: false,
+      captureTarget: event.currentTarget,
+      timer: null
+    };
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Window listeners below keep the interaction alive when capture is unavailable.
+    }
+
+    const cleanup = () => {
+      if (pending.timer !== null) window.clearTimeout(pending.timer);
+      pending.timer = null;
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      try {
+        if (pending.captureTarget.hasPointerCapture(pending.pointerId)) {
+          pending.captureTarget.releasePointerCapture(pending.pointerId);
+        }
+      } catch {
+        // Safari can release capture before pointercancel reaches the listener.
+      }
+      pointerCleanupRef.current = null;
+      document.body.style.removeProperty("user-select");
+      document.body.style.removeProperty("cursor");
+    };
+
+    const activateSelection = () => {
+      pending.didDrag = true;
+      suppressClickRef.current = true;
+      window.getSelection()?.removeAllRanges();
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "cell";
+      setEditingCell(null);
+      setMenu(null);
+      setSelection(selectionFromCells(pending.start, pending.focus));
+    };
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pending.pointerId) return;
+      const distance = Math.hypot(
+        moveEvent.clientX - pending.startX,
+        moveEvent.clientY - pending.startY
+      );
+
+      if (!pending.didDrag) {
+        if (pending.pointerType === "touch") {
+          if (!pending.longPressTriggered && distance > 9) cleanup();
+          return;
+        }
+        if (distance < 7) return;
+        activateSelection();
+      }
+
+      moveEvent.preventDefault();
+      const target = findMergeCellAt(moveEvent.clientX, moveEvent.clientY);
+      if (!target) return;
+      const nextSelection = selectionFromCells(pending.start, target);
+      pending.focus = nextSelection.focus;
+      setSelection(nextSelection);
+    };
+
+    const finish = (cancelled: boolean, endEvent: PointerEvent) => {
+      const wasSelecting = pending.didDrag;
+      cleanup();
+      if (cancelled) {
+        setSelection(null);
+        setMenu(null);
+      } else if (wasSelecting) {
+        setSelection(selectionFromCells(pending.start, pending.focus));
+        showMenuAt(endEvent.clientX, endEvent.clientY);
+      }
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    };
+
+    const handlePointerUp = (endEvent: PointerEvent) => {
+      if (endEvent.pointerId === pending.pointerId) finish(false, endEvent);
+    };
+    const handlePointerCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId === pending.pointerId) finish(true, cancelEvent);
+    };
+
+    if (event.pointerType === "touch") {
+      pending.timer = window.setTimeout(() => {
+        pending.longPressTriggered = true;
+        activateSelection();
+        if (navigator.vibrate) navigator.vibrate(8);
+      }, 520);
+    }
+    pointerCleanupRef.current = cleanup;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+  }, [canEdit, findMergeCellAt, isMutating, selectionFromCells, showMenuAt]);
+
+  const handleMergeCellContextMenu = useCallback((
+    event: React.MouseEvent<HTMLTableCellElement>,
+    cell: SceneListMergeCell
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canEdit || isMutating) return;
+    const activeRange = selection
+      ? resolveSceneListCellRange(selection, orderedSceneIds, cellMerges, true)
+      : null;
+    const isInside = Boolean(activeRange && activeRange.sceneIds.includes(cell.sceneId) &&
+      activeRange.columns.includes(cell.column));
+    if (!isInside) setSelection(selectionFromCells(cell, cell));
+    setEditingCell(null);
+    setSceneMenu(null);
+    showMenuAt(event.clientX, event.clientY);
+  }, [canEdit, cellMerges, isMutating, orderedSceneIds, selection, selectionFromCells, showMenuAt]);
+
+  const valuesInSelection = useCallback((range: SceneListResolvedCellRange) => {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return listSceneListCellsInRange(range)
+      .map((cell) => String(byId.get(cell.sceneId)?.[mergeColumnField[cell.column]] ?? "").trim())
+      .filter(Boolean);
+  }, [items]);
+
+  const executeMerge = useCallback(async () => {
+    if (!resolvedSelection || !canMergeSelection) return;
+    const validation = validateSceneListCellMerges(orderedSceneIds, [
+      ...cellMerges,
+      createSceneListCellMergeFromRange(createClientId(), resolvedSelection)
+    ]);
+    if (!validation.ok) {
+      onError(validation.errors[0]?.message ?? "선택한 범위를 병합할 수 없습니다.");
+      return;
+    }
+    setIsMutating(true);
+    try {
+      await onPersistMerges(validation.validMerges);
+      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    } catch (error) {
+      onError(getErrorMessage(error, "셀 병합 상태를 저장하지 못했습니다."));
+    } finally {
+      setIsMutating(false);
+    }
+  }, [canMergeSelection, cellMerges, onError, onPersistMerges, orderedSceneIds, resolvedSelection]);
+
+  const executeUnmerge = useCallback(async () => {
+    if (!canEdit || !resolvedSelection || intersectingMerges.length === 0) return;
+    const nextMerges = removeSceneListCellMergesInRange(
+      resolvedSelection,
+      orderedSceneIds,
+      cellMerges
+    );
+    setIsMutating(true);
+    try {
+      await onPersistMerges(nextMerges);
+      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    } catch (error) {
+      onError(getErrorMessage(error, "병합을 해제하지 못했습니다."));
+    } finally {
+      setIsMutating(false);
+    }
+  }, [canEdit, cellMerges, intersectingMerges.length, onError, onPersistMerges, orderedSceneIds, resolvedSelection]);
+
+  const executeClear = useCallback(async () => {
+    if (!canEdit || !resolvedSelection) return;
+    const cells = listSceneListCellsInRange(resolvedSelection);
+    setIsMutating(true);
+    try {
+      await onClearCells(cells);
+      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    } catch (error) {
+      onError(getErrorMessage(error, "선택 칸을 비우지 못했습니다."));
+    } finally {
+      setIsMutating(false);
+    }
+  }, [canEdit, onClearCells, onError, resolvedSelection]);
+
+  const actorStyles = useMemo(() => actorRoles.map((_, index) => getActorStyle(index)), [actorRoles]);
+  const locationStyles = useMemo(() => createLocationStyles(items), [items]);
+
+  return (
+    <>
+      <div
+        data-scene-table-scroller
+        className="workspace-surface relative max-h-[72dvh] min-w-0 overflow-auto overscroll-contain"
+        onContextMenu={(event) => event.preventDefault()}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) closeSelection();
+        }}
+      >
+        <table
+          ref={tableRef}
+          aria-label="프로젝트 씬리스트"
+          className="w-full min-w-[1080px] table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
+        >
+          <colgroup>
+            <col className="w-[70px]" />
+            <col className="w-[105px]" />
+            <col className="w-[128px]" />
+            <col className="w-[68px]" />
+            <col className="w-[54px]" />
+            <col className="w-[60px]" />
+            <col className="w-[380px]" />
+            {actorRoles.map((role) => <col key={role} className="w-[72px]" />)}
+            <col className="w-[66px]" />
+            <col className="w-[156px]" />
+          </colgroup>
+          <thead className="sticky top-0 z-50 bg-[#eeeeee] text-[11px] font-black leading-4">
+            <tr>
+              {[
+                ["Scene", "씬"],
+                ["Location", "대장소"],
+                ["Sub-Location", "세부장소"],
+                ["Day", ""],
+                ["Time", "D/N"],
+                ["Int/Ext", "I/E"],
+                ["Content", "씬 내용"]
+              ].map(([label, description]) => (
+                <SceneTableHeader key={label} label={label} description={description} />
+              ))}
+              {actorRoles.map((role, index) => (
+                <SceneTableHeader
+                  key={role}
+                  label={role}
+                  description="등장인물"
+                  style={{
+                    backgroundColor: actorStyles[index]?.headerBackground,
+                    color: actorStyles[index]?.color
+                  }}
+                />
+              ))}
+              <SceneTableHeader label="Cut" description="총 컷수" />
+              <SceneTableHeader label="Memo" description="소품&특이사항" />
+            </tr>
+          </thead>
+
+          <SceneReorderList
+            items={items}
+            disabled={!canEdit || Boolean(menu) || isMutating}
+            onReorder={onReorderLocal}
+            validateReorder={(next, previous) => {
+              const validation = validateSceneListReorderWithMerges(
+                next.map((item) => item.id),
+                cellMerges,
+                previous.map((item) => item.id)
+              );
+              if (!validation.ok) return { ok: false, message: validation.error ?? undefined };
+              return { ok: true };
+            }}
+            onCommit={async (next, previous) => {
+              await onReorderCommit(next, previous);
+              return { ok: true };
+            }}
+            onCommitError={onError}
+            renderRow={(item, index, { trProps }) => (
+              <SceneNativeRow
+                key={item.id}
+                trProps={trProps}
+                item={item}
+                index={index}
+                actorRoles={actorRoles}
+                actorStyles={actorStyles}
+                locationStyle={getLocationStyle(item, locationStyles)}
+                mergeLayout={mergeLayout}
+                resolvedSelection={resolvedSelection}
+                canEdit={canEdit}
+                editingCell={editingCell}
+                suppressClickRef={suppressClickRef}
+                suppressActorClickRef={suppressActorClickRef}
+                actorPointerCleanupRef={actorPointerCleanupRef}
+                onBeginSelection={beginSelectionPointer}
+                onMergeContextMenu={handleMergeCellContextMenu}
+                onEdit={(column) => setEditingCell({ sceneId: item.id, column })}
+                onEditEnd={() => setEditingCell(null)}
+                onUpdate={onUpdate}
+                onSceneContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!canEdit) return;
+                  setSelection(null);
+                  setMenu(null);
+                  setSceneMenu({
+                    itemId: item.id,
+                    ...clampFixedPosition(event.clientX, event.clientY, 112, 48)
+                  });
+                }}
+                onActorTextEdit={(role) => setActorTextEditor({ sceneId: item.id, role })}
+                onCutValidationChange={onCutValidationChange}
+              />
+            )}
+          />
+        </table>
+
+        {items.length === 0 ? (
+          <p className="border-x border-b border-[#d6d6d6] bg-white px-3 py-10 text-center text-xs font-semibold text-[#777]">
+            등록된 씬이 없습니다.
+          </p>
+        ) : null}
+      </div>
+
+      {menu && resolvedSelection && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              data-scene-floating-ui
+              className="light-workspace scene-workspace workspace-popup fixed z-[120] w-[184px] border p-1 shadow-lg"
+              style={{ left: menu.left, top: menu.top, paddingBottom: "max(.25rem, env(safe-area-inset-bottom))" }}
+              role="menu"
+              aria-label="선택 칸 기능"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <SceneMenuButton
+                disabled={!canMergeSelection || isMutating}
+                onClick={() => {
+                  const values = valuesInSelection(resolvedSelection);
+                  if (new Set(values).size > 1) {
+                    setConfirmState({
+                      kind: "merge",
+                      title: "선택 칸을 병합할까요?",
+                      description: "병합 후에는 왼쪽 위 칸의 값만 표시됩니다. 다른 칸의 값은 삭제되지 않으며 병합 해제 시 다시 표시됩니다."
+                    });
+                    return;
+                  }
+                  void executeMerge();
+                }}
+              >
+                선택 칸 병합
+              </SceneMenuButton>
+              <SceneMenuButton
+                disabled={!canEdit || intersectingMerges.length === 0 || isMutating}
+                onClick={() => void executeUnmerge()}
+              >
+                병합 해제
+              </SceneMenuButton>
+              <SceneMenuButton
+                disabled={!canEdit || isMutating}
+                onClick={() => {
+                  if (valuesInSelection(resolvedSelection).length > 0) {
+                    setConfirmState({
+                      kind: "clear",
+                      title: "선택 칸을 비울까요?",
+                      description: "선택한 칸의 실제 값이 삭제됩니다. 병합 상태는 그대로 유지됩니다."
+                    });
+                    return;
+                  }
+                  void executeClear();
+                }}
+              >
+                선택 칸 비우기
+              </SceneMenuButton>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {sceneMenu && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              data-scene-floating-ui
+              className="light-workspace scene-workspace workspace-popup workspace-popup-danger fixed z-[120] w-28 border p-1 shadow-lg"
+              style={{ left: sceneMenu.left, top: sceneMenu.top }}
+              role="menu"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <SceneMenuButton
+                disabled={!canEdit}
+                onClick={() => {
+                  if (!canEdit) return;
+                  const item = items.find((candidate) => candidate.id === sceneMenu.itemId);
+                  setSceneMenu(null);
+                  if (item) onDelete(item);
+                }}
+              >
+                씬 삭제
+              </SceneMenuButton>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {confirmState && typeof document !== "undefined"
+        ? createPortal(
+            <SceneConfirmDialog
+              state={confirmState}
+              busy={isMutating}
+              onCancel={() => setConfirmState(null)}
+              onConfirm={() => {
+                setConfirmState(null);
+                if (confirmState.kind === "merge") void executeMerge();
+                else void executeClear();
+              }}
+            />,
+            document.body
+          )
+        : null}
+
+      {actorTextEditor && typeof document !== "undefined"
+        ? createPortal(
+            <ActorTextDialog
+              item={items.find((item) => item.id === actorTextEditor.sceneId)}
+              role={actorTextEditor.role}
+              canEdit={canEdit}
+              onClose={() => setActorTextEditor(null)}
+              onChange={(text) => {
+                const item = items.find((candidate) => candidate.id === actorTextEditor.sceneId);
+                if (!item) return;
+                const next = setActorCellState(item, actorTextEditor.role, text
+                  ? { mode: "text", text }
+                  : { mode: "empty", text: "" });
+                onUpdate(item.id, { characters: next.characters, actorCells: next.actorCells });
+              }}
+            />,
+            document.body
+          )
+        : null}
+    </>
+  );
+}
+
+function SceneNativeRow({
+  trProps,
+  item,
+  index,
+  actorRoles,
+  actorStyles,
+  locationStyle,
+  mergeLayout,
+  resolvedSelection,
+  canEdit,
+  editingCell,
+  suppressClickRef,
+  suppressActorClickRef,
+  actorPointerCleanupRef,
+  onBeginSelection,
+  onMergeContextMenu,
+  onEdit,
+  onEditEnd,
+  onUpdate,
+  onSceneContextMenu,
+  onActorTextEdit,
+  onCutValidationChange
+}: {
+  trProps: React.HTMLAttributes<HTMLTableRowElement> & { ref?: React.Ref<HTMLTableRowElement> };
+  item: ProjectSceneItem;
+  index: number;
+  actorRoles: string[];
+  actorStyles: Array<ReturnType<typeof getActorStyle>>;
+  locationStyle: PaletteStyle;
+  mergeLayout: ReturnType<typeof buildSceneListMergeLayout>;
+  resolvedSelection: SceneListResolvedCellRange | null;
+  canEdit: boolean;
+  editingCell: { sceneId: string; column: SceneEditableColumn } | null;
+  suppressClickRef: React.MutableRefObject<boolean>;
+  suppressActorClickRef: React.MutableRefObject<boolean>;
+  actorPointerCleanupRef: React.MutableRefObject<(() => void) | null>;
+  onBeginSelection: (event: ReactPointerEvent<HTMLTableCellElement>, cell: SceneListMergeCell) => void;
+  onMergeContextMenu: (event: React.MouseEvent<HTMLTableCellElement>, cell: SceneListMergeCell) => void;
+  onEdit: (column: SceneEditableColumn) => void;
+  onEditEnd: () => void;
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
+  onSceneContextMenu: (event: React.MouseEvent<HTMLTableCellElement>) => void;
+  onActorTextEdit: (role: string) => void;
+  onCutValidationChange: (id: string, message: string) => void;
+}) {
+  const isEditing = (column: SceneEditableColumn) => (
+    editingCell?.sceneId === item.id && editingCell.column === column
+  );
+
+  const mergeCell = (
+    column: ProjectSceneMergeColumn,
+    value: string,
+    patchKey: keyof ProjectSceneItem,
+    style?: CSSProperties
+  ) => {
+    const state = getSceneListCellMergeState(mergeLayout, item.id, column);
+    if (state?.kind === "covered") return null;
+    const cell = { sceneId: item.id, column };
+    const selected = isCellInResolvedRange(cell, resolvedSelection);
+    const columnKey = column as SceneEditableColumn;
+    const editor = isEditing(columnKey);
+    return (
+      <td
+        key={column}
+        rowSpan={state?.kind === "anchor" ? state.rowSpan : undefined}
+        colSpan={state?.kind === "anchor" ? state.colSpan : undefined}
+        data-scene-merge-scene-id={item.id}
+        data-scene-merge-column={column}
+        aria-selected={selected || undefined}
+        tabIndex={0}
+        className="relative h-9 border-b border-r border-[#d6d6d6] bg-white p-0 align-middle outline-none"
+        style={{
+          ...style,
+          boxShadow: selected
+            ? "inset 0 0 0 2px rgba(122,105,60,.78), inset 0 0 0 9999px rgba(154,137,86,.07)"
+            : undefined
+        }}
+        onPointerDown={(event) => onBeginSelection(event, cell)}
+        onContextMenu={(event) => onMergeContextMenu(event, cell)}
+        onClick={() => {
+          if (!suppressClickRef.current && canEdit) onEdit(columnKey);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && canEdit) onEdit(columnKey);
+        }}
+      >
+        {editor ? renderMergeEditor(column, value, item, patchKey, onUpdate, onEditEnd) : (
+          <span className="block min-h-9 truncate px-1.5 py-2 text-center font-semibold" title={value}>
+            {value}
+          </span>
+        )}
+      </td>
+    );
+  };
+
+  return (
+    <tr {...trProps} className={`${trProps.className ?? ""} bg-white hover:bg-[#f7f7f7]`}>
+      <td
+        className={`relative h-9 border-b border-r border-[#d6d6d6] bg-white p-0 text-center align-middle ${
+          canEdit ? "cursor-grab active:cursor-grabbing" : ""
+        }`}
+        onContextMenu={onSceneContextMenu}
+        onClick={() => {
+          if (!suppressClickRef.current && canEdit) onEdit("sceneNo");
+        }}
+        title={canEdit ? "드래그하여 씬 순서 변경 · 우클릭하여 삭제" : undefined}
+      >
+        {isEditing("sceneNo") ? (
+          <input
+            autoFocus
+            value={item.sceneNo}
+            onChange={(event) => onUpdate(item.id, { sceneNo: event.target.value })}
+            onBlur={onEditEnd}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+            }}
+            aria-label={`${index + 1}번째 씬 번호`}
+            className={tableInputClass}
+          />
+        ) : (
+          <span
+            data-scene-reorder-handle={canEdit ? "" : undefined}
+            className="inline-flex min-h-9 min-w-9 items-center justify-center px-1 py-2 font-bold"
+          >
+            {item.sceneNo || index + 1}
+          </span>
+        )}
+      </td>
+
+      {mergeCell("location", item.mainLocation, "mainLocation", {
+        backgroundColor: locationStyle.background,
+        color: locationStyle.color
+      })}
+      {mergeCell("subLocation", item.subLocation, "subLocation", {
+        backgroundColor: locationStyle.background,
+        color: locationStyle.color
+      })}
+      {mergeCell("day", item.dayLabel, "dayLabel")}
+      {mergeCell("time", item.dayNight, "dayNight")}
+      {mergeCell("intExt", item.interiorExterior, "interiorExterior")}
+
+      <EditableTextCell
+        value={item.sceneContent}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Content`}
+        editing={isEditing("content")}
+        canEdit={canEdit}
+        multiline
+        onEdit={() => onEdit("content")}
+        onEditEnd={onEditEnd}
+        onChange={(sceneContent) => onUpdate(item.id, { sceneContent })}
+      />
+
+      {actorRoles.length > 0 ? (
+        <td
+          colSpan={actorRoles.length}
+          className="h-9 border-b border-r border-[#d6d6d6] bg-white p-0 align-middle"
+        >
+          <table className="h-full w-full table-fixed border-collapse" aria-label={`${item.sceneNo || index + 1} Scene Characters`}>
+            <tbody>
+              <tr>
+                {actorRoles.map((role, actorIndex) => {
+                  const state = getActorCellState(item, role);
+                  const actorStyle = actorStyles[actorIndex] ?? getActorStyle(actorIndex);
+                  return (
+                    <td
+                      key={role}
+                      className={`h-9 p-0 text-center align-middle ${
+                        actorIndex < actorRoles.length - 1 ? "border-r border-[#d6d6d6]" : ""
+                      } ${item.characterNotes ? "border-b border-[#e1e1e1]" : ""}`}
+                      style={{
+                        backgroundColor: state.mode === "color" ? actorStyle.background : "#ffffff",
+                        color: actorStyle.color
+                      }}
+                    >
+                      <button
+                        type="button"
+                        disabled={!canEdit}
+                        className="h-full min-h-9 w-full touch-pan-y overflow-hidden px-1 text-[10px] font-bold disabled:cursor-default"
+                        aria-label={`${item.sceneNo || index + 1} Scene ${role}`}
+                        onClick={() => {
+                          if (suppressActorClickRef.current) {
+                            suppressActorClickRef.current = false;
+                            return;
+                          }
+                          if (state.mode === "text") return;
+                          const next = setActorCellState(item, role, state.mode === "color"
+                            ? { mode: "empty", text: "" }
+                            : { mode: "color", text: "" });
+                          onUpdate(item.id, { characters: next.characters, actorCells: next.actorCells });
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onActorTextEdit(role);
+                        }}
+                        onPointerDown={(event) => {
+                          if (event.pointerType !== "touch" || !canEdit) return;
+                          actorPointerCleanupRef.current?.();
+                          const pointerId = event.pointerId;
+                          const startX = event.clientX;
+                          const startY = event.clientY;
+                          let didLongPress = false;
+                          let timer: number | null = window.setTimeout(() => {
+                            timer = null;
+                            didLongPress = true;
+                            suppressActorClickRef.current = true;
+                            onActorTextEdit(role);
+                            if (navigator.vibrate) navigator.vibrate(8);
+                          }, 540);
+                          const cleanup = () => {
+                            if (timer !== null) window.clearTimeout(timer);
+                            timer = null;
+                            window.removeEventListener("pointermove", handleMove);
+                            window.removeEventListener("pointerup", handlePointerUp);
+                            window.removeEventListener("pointercancel", handlePointerCancel);
+                            if (actorPointerCleanupRef.current === cleanup) {
+                              actorPointerCleanupRef.current = null;
+                            }
+                          };
+                          const handleMove = (moveEvent: PointerEvent) => {
+                            if (moveEvent.pointerId !== pointerId) return;
+                            if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 8) {
+                              cleanup();
+                            }
+                          };
+                          const handlePointerUp = (upEvent: PointerEvent) => {
+                            if (upEvent.pointerId !== pointerId) return;
+                            cleanup();
+                            if (didLongPress) {
+                              window.setTimeout(() => {
+                                suppressActorClickRef.current = false;
+                              }, 350);
+                            }
+                          };
+                          const handlePointerCancel = (cancelEvent: PointerEvent) => {
+                            if (cancelEvent.pointerId !== pointerId) return;
+                            cleanup();
+                            suppressActorClickRef.current = false;
+                          };
+                          actorPointerCleanupRef.current = cleanup;
+                          window.addEventListener("pointermove", handleMove);
+                          window.addEventListener("pointerup", handlePointerUp);
+                          window.addEventListener("pointercancel", handlePointerCancel);
+                        }}
+                        title={state.mode === "text" ? state.text : undefined}
+                      >
+                        {state.mode === "text" ? state.text : ""}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+              {item.characterNotes ? (
+                <tr>
+                  <td
+                    colSpan={actorRoles.length}
+                    data-scene-character-note-row-id={item.id}
+                    aria-label={`Characters 세부 메모: ${item.characterNotes}`}
+                    className="max-h-10 overflow-y-auto whitespace-pre-wrap bg-white px-1.5 py-1 text-left text-[9px] font-semibold leading-4 text-[#666] [overflow-wrap:anywhere]"
+                  >
+                    {item.characterNotes}
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </td>
+      ) : null}
+
+      <td className="h-9 border-b border-r border-[#d6d6d6] bg-white p-0 align-middle">
+        <SceneCutInput
+          item={item}
+          canEdit={canEdit}
+          onChange={(cutCount) => onUpdate(item.id, { cutCount })}
+          onValidationChange={(message) => onCutValidationChange(item.id, message)}
+        />
+      </td>
+      <EditableTextCell
+        value={item.props}
+        ariaLabel={`${item.sceneNo || index + 1} Scene Memo`}
+        editing={isEditing("memo")}
+        canEdit={canEdit}
+        multiline
+        onEdit={() => onEdit("memo")}
+        onEditEnd={onEditEnd}
+        onChange={(props) => onUpdate(item.id, { props })}
+      />
+    </tr>
+  );
+}
+
+function renderMergeEditor(
+  column: ProjectSceneMergeColumn,
+  value: string,
+  item: ProjectSceneItem,
+  patchKey: keyof ProjectSceneItem,
+  onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void,
+  onEditEnd: () => void
+) {
+  if (column === "time" || column === "intExt") {
+    const options = column === "time" ? ["D", "N"] : ["I", "E"];
+    return (
+      <select
+        autoFocus
+        value={value}
+        onChange={(event) => onUpdate(item.id, { [patchKey]: event.target.value })}
+        onBlur={onEditEnd}
+        className={`${tableInputClass} appearance-none`}
+        aria-label={`${item.sceneNo || "현재 씬"} ${column}`}
+      >
+        <option value="" />
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={value}
+      onChange={(event) => onUpdate(item.id, { [patchKey]: event.target.value })}
+      onBlur={onEditEnd}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+      }}
+      className={tableInputClass}
+      aria-label={`${item.sceneNo || "현재 씬"} ${column}`}
+    />
+  );
+}
+
+function EditableTextCell({
+  value,
+  ariaLabel,
+  editing,
+  canEdit,
+  multiline,
+  onEdit,
+  onEditEnd,
+  onChange
+}: {
+  value: string;
+  ariaLabel: string;
+  editing: boolean;
+  canEdit: boolean;
+  multiline?: boolean;
+  onEdit: () => void;
+  onEditEnd: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <td
+      className="h-9 border-b border-r border-[#d6d6d6] bg-white p-0 align-middle"
+      onClick={() => {
+        if (canEdit && !editing) onEdit();
+      }}
+    >
+      {editing && canEdit ? (
+        multiline ? (
+          <textarea
+            autoFocus
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onBlur={onEditEnd}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" || (event.key === "Enter" && !event.shiftKey)) {
+                event.preventDefault();
+                event.currentTarget.blur();
+              }
+            }}
+            rows={Math.max(1, Math.min(5, value.split("\n").length))}
+            aria-label={ariaLabel}
+            className="block min-h-9 w-full resize-none border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-medium leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944]"
+          />
+        ) : null
+      ) : (
+        <p className="min-h-9 whitespace-pre-wrap px-1.5 py-2 text-left font-medium leading-5 [overflow-wrap:anywhere]">
+          {value}
+        </p>
+      )}
+    </td>
+  );
+}
+
+function SceneTableHeader({
+  label,
+  description,
+  style
+}: {
+  label: string;
+  description?: string;
+  style?: CSSProperties;
+}) {
+  return (
+    <th
+      scope="col"
+      className="h-11 border-b border-r border-[#bebebe] px-1 py-1 text-center align-middle"
+      style={style}
+    >
+      <span className="block leading-4">{label}</span>
+      {description ? <span className="block text-[9px] font-semibold leading-3">{description}</span> : null}
+    </th>
+  );
+}
+
+function SceneMenuButton({
+  children,
+  disabled = false,
+  onClick
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className="workspace-button flex min-h-10 w-full items-center border-0 px-3 text-left text-xs font-bold transition-colors hover:bg-[#f0f0f0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944] disabled:cursor-not-allowed disabled:opacity-35"
+    >
+      {children}
+    </button>
+  );
+}
+
+function SceneConfirmDialog({
+  state,
+  busy,
+  onCancel,
+  onConfirm
+}: {
+  state: ConfirmState;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      data-scene-floating-ui
+      className="light-workspace scene-workspace fixed inset-0 z-[140] grid place-items-center bg-black/35 p-4"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget && !busy) onCancel();
+      }}
+    >
+      <div className="workspace-popup w-full max-w-sm border p-4 shadow-xl" role="alertdialog" aria-modal="true">
+        <h2 className="text-sm font-black text-[#151515]">{state.title}</h2>
+        <p className="mt-2 text-xs font-medium leading-5 text-[#555]">{state.description}</p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="workspace-button min-h-10 border px-3 text-xs font-bold"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="workspace-primary-action min-h-10 border px-3 text-xs font-bold"
+          >
+            확인
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActorTextDialog({
+  item,
+  role,
+  canEdit,
+  onClose,
+  onChange
+}: {
+  item: ProjectSceneItem | undefined;
+  role: string;
+  canEdit: boolean;
+  onClose: () => void;
+  onChange: (text: string) => void;
+}) {
+  const current = item ? getActorCellState(item, role) : { mode: "empty" as const, text: "" };
+  const text = current.mode === "text" ? current.text : "";
+  return (
+    <div data-scene-floating-ui className="light-workspace scene-workspace fixed inset-0 z-[130] grid place-items-center bg-black/25 p-4" onPointerDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <div className="workspace-popup w-full max-w-xs border p-3 shadow-xl" role="dialog" aria-modal="true">
+        <p className="text-xs font-black">{role} · Scene {item?.sceneNo || "—"}</p>
+        {canEdit ? (
+          <input
+            autoFocus
+            value={text}
+            maxLength={120}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder="V.O. / 실루엣 / 대역"
+            className="workspace-control mt-2 min-h-11 w-full border px-3 py-2 text-sm font-medium outline-none"
+          />
+        ) : <p className="mt-2 text-sm">{text || "등록된 메모가 없습니다."}</p>}
+        <button type="button" onClick={onClose} className="workspace-primary-action mt-3 min-h-10 w-full border px-3 text-xs font-bold">
+          완료
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SceneCutInput({
+  item,
+  canEdit,
+  onChange,
+  onValidationChange
+}: {
+  item: ProjectSceneItem;
+  canEdit: boolean;
+  onChange: (value: number | null) => void;
+  onValidationChange: (message: string) => void;
+}) {
+  const formattedValue = item.cutCount == null ? "" : String(item.cutCount);
+  const [draft, setDraft] = useState(formattedValue);
+  const [validationMessage, setValidationMessage] = useState("");
+  useEffect(() => {
+    setDraft(formattedValue);
+    setValidationMessage("");
+    onValidationChange("");
+  }, [formattedValue]);
+  if (!canEdit) return <span className="block px-1 py-2 text-center font-bold">{formattedValue}</span>;
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={String(MAX_SCENE_CUT_COUNT).length}
+        value={draft}
+        aria-label={`${item.sceneNo || "현재 씬"} 총 컷수`}
+        aria-invalid={Boolean(validationMessage)}
+        className={`${tableInputClass} ${validationMessage ? "text-red-700 ring-1 ring-inset ring-red-600" : ""}`}
+        onChange={(event) => {
+          const nextDraft = event.currentTarget.value;
+          const validation = validateSceneCutCountInput(nextDraft);
+          setDraft(nextDraft);
+          setValidationMessage(validation.error);
+          onValidationChange(validation.error);
+          if (!validation.error) onChange(validation.value);
+        }}
+      />
+      {validationMessage ? (
+        <span className="absolute inset-x-0 bottom-0 text-center text-[8px] font-bold leading-3 text-red-700">
+          0–{MAX_SCENE_CUT_COUNT}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function isCellInResolvedRange(
+  cell: SceneListMergeCell,
+  range: SceneListResolvedCellRange | null
+) {
+  return Boolean(range?.sceneIds.includes(cell.sceneId) && range.columns.includes(cell.column));
+}
+
+function isLocationMergeColumn(column: ProjectSceneMergeColumn) {
+  return column === "location" || column === "subLocation";
+}
+
+function createClientId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `merge-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function clampFixedPosition(x: number, y: number, width: number, height: number) {
+  const viewport = window.visualViewport;
+  const leftEdge = viewport?.offsetLeft ?? 0;
+  const topEdge = viewport?.offsetTop ?? 0;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  return {
+    left: Math.max(leftEdge + 8, Math.min(x, leftEdge + viewportWidth - width - 8)),
+    top: Math.max(topEdge + 8, Math.min(y + 8, topEdge + viewportHeight - height - 8))
+  };
+}
+
+function closeSelectionAfterMutation(
+  setSelection: React.Dispatch<React.SetStateAction<SceneListMergeSelection | null>>,
+  setMenu: React.Dispatch<React.SetStateAction<CellMenuState | null>>,
+  setConfirm: React.Dispatch<React.SetStateAction<ConfirmState | null>>
+) {
+  setSelection(null);
+  setMenu(null);
+  setConfirm(null);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+type ActorCellState =
+  | { mode: "empty"; text: "" }
+  | { mode: "color"; text: "" }
+  | { mode: "text"; text: string };
+
+function getActorCellState(item: ProjectSceneItem, role: string): ActorCellState {
+  const key = role.trim().toLocaleLowerCase();
+  const stored = Object.entries(item.actorCells ?? {}).find(
+    ([candidate]) => candidate.trim().toLocaleLowerCase() === key
+  )?.[1];
+  if (stored?.mode === "text" && String(stored.text ?? "").trim()) {
+    return { mode: "text", text: String(stored.text).slice(0, 120) };
+  }
+  if (stored?.mode === "color") return { mode: "color", text: "" };
+  const legacy = parseCharacters(item.characters).some(
+    (character) => character.toLocaleLowerCase() === key
+  );
+  return legacy ? { mode: "color", text: "" } : { mode: "empty", text: "" };
+}
+
+function setActorCellState(
+  item: ProjectSceneItem,
+  role: string,
+  state: ActorCellState
+): ProjectSceneItem {
+  const normalizedRole = role.trim();
+  const roleKey = normalizedRole.toLocaleLowerCase();
+  const actorCells: Record<string, ProjectSceneActorCell> = { ...(item.actorCells ?? {}) };
+  Object.keys(actorCells).forEach((key) => {
+    if (key.trim().toLocaleLowerCase() === roleKey) delete actorCells[key];
+  });
+  let characters = parseCharacters(item.characters).filter(
+    (character) => character.toLocaleLowerCase() !== roleKey
+  );
+  if (state.mode === "color") {
+    actorCells[normalizedRole] = { mode: "color" };
+    characters = [...characters, normalizedRole];
+  } else if (state.mode === "text" && state.text.trim()) {
+    actorCells[normalizedRole] = { mode: "text", text: state.text.slice(0, 120) };
+  }
+  return { ...item, actorCells, characters: characters.join(", ") };
+}
+
+function parseCharacters(value: string) {
+  return Array.from(new Set(
+    value.split(/[,，/|\n]+/).map((character) => character.trim()).filter(Boolean)
+  ));
+}
+
+const actorPalette = [
+  { background: "#fce4ec", headerBackground: "#f8bbd0", color: "#6b1835" },
+  { background: "#e3f2fd", headerBackground: "#bbdefb", color: "#17486b" },
+  { background: "#e8f5e9", headerBackground: "#c8e6c9", color: "#24532a" },
+  { background: "#fff8e1", headerBackground: "#ffecb3", color: "#66510b" },
+  { background: "#f3e5f5", headerBackground: "#e1bee7", color: "#53305d" },
+  { background: "#fff3e0", headerBackground: "#ffe0b2", color: "#6a3b10" }
+];
+
+const locationPalette: PaletteStyle[] = [
+  { background: "#fff4c7", color: "#584607" },
+  { background: "#dff1df", color: "#224d29" },
+  { background: "#f8dfd1", color: "#62311d" },
+  { background: "#dcedf2", color: "#204955" },
+  { background: "#e8e0f2", color: "#45325b" },
+  { background: "#f4dfe8", color: "#5e2b40" },
+  { background: "#e8efcf", color: "#41521c" },
+  { background: "#dce8fb", color: "#28466d" }
+];
+
+function getActorStyle(index: number) {
+  return actorPalette[index % actorPalette.length] ?? actorPalette[0];
+}
+
+function createLocationStyles(items: ProjectSceneItem[]) {
+  const locations = Array.from(new Set(
+    items.map((item) => item.mainLocation.trim() || item.subLocation.trim()).filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, "ko"));
+  return new Map(locations.map((location, index) => [
+    location.toLocaleLowerCase(),
+    locationPalette[index % locationPalette.length]
+  ]));
+}
+
+function getLocationStyle(item: ProjectSceneItem, styles: Map<string, PaletteStyle>) {
+  const key = (item.mainLocation.trim() || item.subLocation.trim()).toLocaleLowerCase();
+  return key ? styles.get(key) ?? { background: "#fff", color: "#151515" } : {
+    background: "#fff",
+    color: "#151515"
+  };
+}

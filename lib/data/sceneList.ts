@@ -1,10 +1,17 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeSceneCutCount } from "@/lib/sceneCutCount";
+import {
+  normalizeSceneListCellMerges,
+  SCENE_LIST_REORDER_MERGE_ERROR,
+  validateSceneListReorderWithMerges
+} from "@/lib/sceneListMergeModel";
 import type {
   ProjectSceneActorCell,
+  ProjectSceneCellMerge,
   ProjectSceneItem,
-  ProjectSceneList
+  ProjectSceneList,
+  ProjectSceneMergeColumn
 } from "@/lib/types";
 
 const LOCAL_SCENE_LIST_KEY = "today-storyboard-project-scene-lists";
@@ -13,11 +20,32 @@ type SceneListPayload = {
   items?: Record<string, unknown>[];
   scenarioReference?: unknown;
   actorRoles?: unknown;
+  cellMerges?: unknown;
+  cellMergesMaterialized?: unknown;
+  cellMergesUpdatedAt?: unknown;
+  orderedIds?: unknown;
   error?: string;
+};
+
+export type ProjectSceneClearCell = {
+  sceneId: string;
+  column: ProjectSceneMergeColumn;
 };
 
 export type ProjectSceneListResult = ProjectSceneList & {
   actorRoles: string[];
+};
+
+type ProjectSceneListSaveInput = Pick<ProjectSceneList, "items" | "scenarioReference"> &
+  Partial<Pick<
+    ProjectSceneList,
+    "cellMerges" | "cellMergesMaterialized" | "cellMergesUpdatedAt"
+  >>;
+
+type NormalizedProjectSceneListSave = Pick<ProjectSceneList, "items" | "scenarioReference"> & {
+  cellMerges?: ProjectSceneCellMerge[];
+  cellMergesMaterialized?: true;
+  expectedUpdatedAt?: string | null;
 };
 
 type LocalSceneListBuckets = Record<string, ProjectSceneList>;
@@ -60,6 +88,10 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
       return {
         items: sortSceneItems(payload.items.map(sceneItemFromRow)),
         scenarioReference: String(payload.scenarioReference ?? ""),
+        cellMerges: normalizeSceneListCellMerges(payload.cellMerges),
+        cellMergesMaterialized: payload.cellMergesMaterialized === true
+          || Array.isArray(payload.cellMerges),
+        cellMergesUpdatedAt: normalizeOptionalTimestamp(payload.cellMergesUpdatedAt),
         actorRoles: normalizeActorRoles(payload.actorRoles)
       };
     }
@@ -76,9 +108,9 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
 /** 저장 버튼을 누른 시점의 씬 행과 시나리오 참고만 한 번에 반영합니다. */
 export async function saveProjectSceneList(
   projectId: string,
-  sceneList: ProjectSceneList
+  sceneList: ProjectSceneListSaveInput
 ): Promise<ProjectSceneList> {
-  const normalized = normalizeSceneList(projectId, sceneList);
+  const normalized = normalizeSceneListContent(projectId, sceneList);
   try {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
@@ -92,7 +124,11 @@ export async function saveProjectSceneList(
     if (response.ok && Array.isArray(payload.items)) {
       return {
         items: sortSceneItems(payload.items.map(sceneItemFromRow)),
-        scenarioReference: String(payload.scenarioReference ?? "")
+        scenarioReference: String(payload.scenarioReference ?? ""),
+        cellMerges: normalizeSceneListCellMerges(payload.cellMerges),
+        cellMergesMaterialized: payload.cellMergesMaterialized === true
+          || Array.isArray(payload.cellMerges),
+        cellMergesUpdatedAt: normalizeOptionalTimestamp(payload.cellMergesUpdatedAt)
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
@@ -102,13 +138,23 @@ export async function saveProjectSceneList(
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
 
-  return writeLocalSceneList(projectId, normalized);
+  const current = readLocalSceneList(projectId);
+  return writeLocalSceneList(projectId, {
+    ...current,
+    items: normalized.items,
+    scenarioReference: normalized.scenarioReference,
+    ...(normalized.cellMergesMaterialized ? {
+      cellMerges: normalized.cellMerges ?? [],
+      cellMergesMaterialized: true,
+      cellMergesUpdatedAt: new Date().toISOString()
+    } : {})
+  });
 }
 
-function normalizeSceneList(
+function normalizeSceneListContent(
   projectId: string,
-  sceneList: ProjectSceneList
-): ProjectSceneList {
+  sceneList: ProjectSceneListSaveInput
+): NormalizedProjectSceneListSave {
   return {
     items: sceneList.items.map((item, index) => ({
       ...item,
@@ -128,8 +174,150 @@ function normalizeSceneList(
       sortOrder: index + 1,
       updatedAt: new Date().toISOString()
     })),
-    scenarioReference: sceneList.scenarioReference.slice(0, 50000)
+    scenarioReference: sceneList.scenarioReference.slice(0, 50000),
+    ...(sceneList.cellMergesMaterialized === true ? {
+      cellMerges: normalizeSceneListCellMerges(sceneList.cellMerges),
+      cellMergesMaterialized: true as const,
+      expectedUpdatedAt: sceneList.cellMergesUpdatedAt ?? null
+    } : {})
   };
+}
+
+/** 사용자가 병합/해제 메뉴를 확정한 시점에 병합 메타데이터만 저장합니다. */
+export async function saveProjectSceneCellMerges(
+  projectId: string,
+  cellMerges: ProjectSceneCellMerge[],
+  expectedUpdatedAt: string | null
+): Promise<{ cellMerges: ProjectSceneCellMerge[]; updatedAt: string | null }> {
+  const normalized = normalizeSceneListCellMerges(cellMerges);
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "cell-merges",
+          cellMerges: normalized,
+          expectedUpdatedAt
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload;
+    if (response.ok) {
+      return {
+        cellMerges: normalizeSceneListCellMerges(payload.cellMerges),
+        updatedAt: normalizeOptionalTimestamp(payload.cellMergesUpdatedAt)
+      };
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "셀 병합 상태를 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const current = readLocalSceneList(projectId);
+  const saved = writeLocalSceneList(projectId, {
+    ...current,
+    cellMerges: normalized,
+    cellMergesMaterialized: true,
+    cellMergesUpdatedAt: new Date().toISOString()
+  });
+  return { cellMerges: saved.cellMerges, updatedAt: saved.cellMergesUpdatedAt };
+}
+
+/** 선택 칸 비우기를 확정한 시점에 지정된 셀 값만 비웁니다. */
+export async function clearProjectSceneCells(
+  projectId: string,
+  cells: ProjectSceneClearCell[]
+): Promise<ProjectSceneClearCell[]> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clear-cells", cells })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload & {
+      clearedCells?: unknown;
+    };
+    if (response.ok) return normalizeClearCells(payload.clearedCells);
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "선택 칸을 비우지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const normalizedCells = normalizeClearCells(cells);
+  const clearBySceneId = new Map<string, Set<ProjectSceneMergeColumn>>();
+  for (const cell of normalizedCells) {
+    const columns = clearBySceneId.get(cell.sceneId) ?? new Set<ProjectSceneMergeColumn>();
+    columns.add(cell.column);
+    clearBySceneId.set(cell.sceneId, columns);
+  }
+  const current = readLocalSceneList(projectId);
+  writeLocalSceneList(projectId, {
+    ...current,
+    items: current.items.map((item) => clearLocalSceneItem(
+      item,
+      clearBySceneId.get(item.id)
+    ))
+  });
+  return normalizedCells;
+}
+
+/** Scene 드래그가 끝난 뒤 안정적인 ID 순서와 sort_order만 저장합니다. */
+export async function reorderProjectSceneItems(
+  projectId: string,
+  orderedIds: string[]
+): Promise<string[]> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reorder", orderedIds })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload;
+    if (response.ok && Array.isArray(payload.orderedIds)) {
+      return payload.orderedIds.map(String);
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "씬 순서를 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const current = readLocalSceneList(projectId);
+  const byId = new Map(current.items.map((item) => [item.id, item]));
+  if (orderedIds.length !== current.items.length ||
+    new Set(orderedIds).size !== orderedIds.length ||
+    orderedIds.some((id) => !byId.has(id))) {
+    throw new Error("씬 순서 데이터가 올바르지 않습니다.");
+  }
+  if (!validateSceneListReorderWithMerges(
+    orderedIds,
+    current.cellMerges,
+    current.items.map((item) => item.id)
+  ).ok) {
+    throw new Error(SCENE_LIST_REORDER_MERGE_ERROR);
+  }
+  writeLocalSceneList(projectId, {
+    ...current,
+    items: orderedIds.map((id, index) => ({
+      ...byId.get(id)!,
+      sortOrder: index + 1,
+      updatedAt: new Date().toISOString()
+    }))
+  });
+  return orderedIds;
 }
 
 function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
@@ -171,7 +359,7 @@ function normalizeActorRoles(value: unknown): string[] {
 }
 
 function readLocalSceneList(projectId: string): ProjectSceneList {
-  if (typeof window === "undefined") return { items: [], scenarioReference: "" };
+  if (typeof window === "undefined") return emptySceneList();
   try {
     const raw = window.localStorage.getItem(LOCAL_SCENE_LIST_KEY);
     const buckets = raw ? JSON.parse(raw) as LocalSceneListBuckets : {};
@@ -185,12 +373,15 @@ function readLocalSceneList(projectId: string): ProjectSceneList {
             props: String(item.props ?? ""),
             cutCount: normalizeSceneCutCount(item.cutCount)
           }))),
-          scenarioReference: current.scenarioReference ?? ""
+          scenarioReference: current.scenarioReference ?? "",
+          cellMerges: normalizeSceneListCellMerges(current.cellMerges),
+          cellMergesMaterialized: current.cellMergesMaterialized === true,
+          cellMergesUpdatedAt: normalizeOptionalTimestamp(current.cellMergesUpdatedAt)
         }
-      : { items: [], scenarioReference: "" };
+      : emptySceneList();
   } catch {
     window.localStorage.removeItem(LOCAL_SCENE_LIST_KEY);
-    return { items: [], scenarioReference: "" };
+    return emptySceneList();
   }
 }
 
@@ -233,6 +424,59 @@ function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCe
     }
   }
   return normalized;
+}
+
+function normalizeClearCells(value: unknown): ProjectSceneClearCell[] {
+  if (!Array.isArray(value)) return [];
+  const columns = new Set<ProjectSceneMergeColumn>([
+    "location",
+    "subLocation",
+    "day",
+    "time",
+    "intExt"
+  ]);
+  const seen = new Set<string>();
+  const cells: ProjectSceneClearCell[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const sceneId = String(record.sceneId ?? "").trim();
+    const column = String(record.column ?? "") as ProjectSceneMergeColumn;
+    const key = `${sceneId}:${column}`;
+    if (!sceneId || !columns.has(column) || seen.has(key)) continue;
+    seen.add(key);
+    cells.push({ sceneId, column });
+  }
+  return cells;
+}
+
+function clearLocalSceneItem(
+  item: ProjectSceneItem,
+  columns: Set<ProjectSceneMergeColumn> | undefined
+) {
+  if (!columns?.size) return item;
+  const next = { ...item, updatedAt: new Date().toISOString() };
+  if (columns.has("location")) next.mainLocation = "";
+  if (columns.has("subLocation")) next.subLocation = "";
+  if (columns.has("day")) next.dayLabel = "";
+  if (columns.has("time")) next.dayNight = "";
+  if (columns.has("intExt")) next.interiorExterior = "";
+  return next;
+}
+
+function emptySceneList(): ProjectSceneList {
+  return {
+    items: [],
+    scenarioReference: "",
+    cellMerges: [],
+    cellMergesUpdatedAt: null,
+    cellMergesMaterialized: false
+  };
+}
+
+function normalizeOptionalTimestamp(value: unknown): string | null {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
 }
 
 function isPresentMode(value: unknown) {

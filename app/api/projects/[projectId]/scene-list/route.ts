@@ -8,6 +8,13 @@ import {
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { validateSceneCutCountInput } from "@/lib/sceneCutCount";
+import {
+  parseSceneListCellMerges,
+  SCENE_LIST_REORDER_MERGE_ERROR,
+  validateSceneListCellMerges,
+  validateSceneListReorderWithMerges
+} from "@/lib/sceneListMergeModel";
+import type { ProjectSceneMergeColumn } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -66,7 +73,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         .order("created_at"),
       supabase
         .from("project_scene_notes")
-        .select("scenario_reference")
+        .select("scenario_reference,cell_merges,updated_at")
         .eq("project_id", projectId)
         .maybeSingle(),
       supabase
@@ -87,6 +94,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       items: rows ?? [],
       scenarioReference: note?.scenario_reference ?? "",
+      cellMerges: note?.cell_merges ?? null,
+      cellMergesMaterialized: Array.isArray(note?.cell_merges),
+      cellMergesUpdatedAt: note?.updated_at ?? null,
       actorRoles: extractActorRoles(basicInfo?.actors)
     });
   } catch (error) {
@@ -102,6 +112,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const body = (await request.json()) as {
       items?: SceneItemInput[];
       scenarioReference?: unknown;
+      cellMerges?: unknown;
+      cellMergesMaterialized?: unknown;
+      expectedUpdatedAt?: unknown;
     };
 
     if (!Array.isArray(body.items) || body.items.length > 1000) {
@@ -149,13 +162,21 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       }
     }
 
-    const { data: existingRows, error: existingError } = await supabase
-      .from("project_scene_items")
-      .select(SCENE_COLUMNS)
-      .eq("project_id", projectId);
-    if (existingError) throw existingError;
+    const [existingRowsResult, currentNoteResult] = await Promise.all([
+      supabase
+        .from("project_scene_items")
+        .select(SCENE_COLUMNS)
+        .eq("project_id", projectId),
+      supabase
+        .from("project_scene_notes")
+        .select("cell_merges,updated_at")
+        .eq("project_id", projectId)
+        .maybeSingle()
+    ]);
+    if (existingRowsResult.error) throw existingRowsResult.error;
+    if (currentNoteResult.error) throw currentNoteResult.error;
 
-    const typedExistingRows = (existingRows ?? []) as unknown as Array<Record<string, unknown>>;
+    const typedExistingRows = (existingRowsResult.data ?? []) as unknown as Array<Record<string, unknown>>;
     const existingRowsById = new Map(
       typedExistingRows.map((row) => [
         String(row.id),
@@ -165,6 +186,102 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const changedRows = normalizedRows.filter((row) => (
       hasSceneRowChanged(existingRowsById.get(row.id), row)
     ));
+    const submittedIds = new Set(ids);
+    const deletedIds = typedExistingRows
+      .map((row) => String(row.id))
+      .filter((id) => !submittedIds.has(id));
+    if (body.cellMergesMaterialized !== true && deletedIds.length > 0) {
+      const storedMerges = parseSceneListCellMerges(currentNoteResult.data?.cell_merges);
+      if (storedMerges.errors.length > 0 || storedMerges.merges.some((merge) => (
+        merge.sceneIds.some((sceneId) => deletedIds.includes(sceneId))
+      ))) {
+        return NextResponse.json(
+          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+          { status: 409 }
+        );
+      }
+    }
+
+    const scenarioReference = normalizeText(body.scenarioReference, 50000);
+    let savedNote: { scenario_reference: unknown; cell_merges: unknown; updated_at: unknown } | null = null;
+    if (body.cellMergesMaterialized === true) {
+      if (!Array.isArray(body.cellMerges)) {
+        return NextResponse.json({ error: "셀 병합 정보는 배열이어야 합니다." }, { status: 400 });
+      }
+      const parsedMerges = parseSceneListCellMerges(body.cellMerges);
+      if (parsedMerges.errors.length > 0) {
+        return NextResponse.json({ error: parsedMerges.errors[0].message }, { status: 400 });
+      }
+      const mergeValidation = validateSceneListCellMerges(ids, parsedMerges.merges);
+      if (!mergeValidation.ok) {
+        return NextResponse.json(
+          { error: mergeValidation.errors[0]?.message || "셀 병합 범위가 올바르지 않습니다." },
+          { status: 400 }
+        );
+      }
+      const expectedUpdatedAt = normalizeExpectedUpdatedAt(body.expectedUpdatedAt);
+      if (!expectedUpdatedAt.ok) {
+        return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+      }
+      const currentUpdatedAt = currentNoteResult.data?.updated_at
+        ? String(currentNoteResult.data.updated_at)
+        : null;
+      if (expectedUpdatedAt.value !== currentUpdatedAt) {
+        return NextResponse.json(
+          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+          { status: 409 }
+        );
+      }
+      if (currentUpdatedAt) {
+        const { data, error } = await supabase
+          .from("project_scene_notes")
+          .update({
+            scenario_reference: scenarioReference,
+            cell_merges: mergeValidation.validMerges
+          })
+          .eq("project_id", projectId)
+          .eq("updated_at", currentUpdatedAt)
+          .select("scenario_reference,cell_merges,updated_at")
+          .maybeSingle();
+        if (error) throw error;
+        savedNote = data;
+      } else {
+        const { data, error } = await supabase
+          .from("project_scene_notes")
+          .insert({
+            project_id: projectId,
+            scenario_reference: scenarioReference,
+            cell_merges: mergeValidation.validMerges
+          })
+          .select("scenario_reference,cell_merges,updated_at")
+          .single();
+        if (error?.code === "23505") {
+          return NextResponse.json(
+            { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+            { status: 409 }
+          );
+        }
+        if (error) throw error;
+        savedNote = data;
+      }
+      if (!savedNote) {
+        return NextResponse.json(
+          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+          { status: 409 }
+        );
+      }
+    } else {
+      const { data, error } = await supabase
+        .from("project_scene_notes")
+        .upsert(
+          { project_id: projectId, scenario_reference: scenarioReference },
+          { onConflict: "project_id" }
+        )
+        .select("scenario_reference,cell_merges,updated_at")
+        .single();
+      if (error) throw error;
+      savedNote = data;
+    }
 
     if (changedRows.length > 0) {
       const { error } = await supabase
@@ -173,10 +290,6 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       if (error) throw error;
     }
 
-    const submittedIds = new Set(ids);
-    const deletedIds = typedExistingRows
-      .map((row) => String(row.id))
-      .filter((id) => !submittedIds.has(id));
     if (deletedIds.length > 0) {
       const { error } = await supabase
         .from("project_scene_items")
@@ -185,15 +298,6 @@ export async function PUT(request: NextRequest, context: RouteContext) {
         .in("id", deletedIds);
       if (error) throw error;
     }
-
-    const scenarioReference = normalizeText(body.scenarioReference, 50000);
-    const { error: noteError } = await supabase
-      .from("project_scene_notes")
-      .upsert(
-        { project_id: projectId, scenario_reference: scenarioReference },
-        { onConflict: "project_id" }
-      );
-    if (noteError) throw noteError;
 
     const { data: savedRows, error: savedError } = await supabase
       .from("project_scene_items")
@@ -205,10 +309,223 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json({
       items: savedRows ?? [],
-      scenarioReference
+      scenarioReference,
+      cellMerges: savedNote?.cell_merges ?? null,
+      cellMergesMaterialized: Array.isArray(savedNote?.cell_merges),
+      cellMergesUpdatedAt: savedNote?.updated_at ?? null
     });
   } catch (error) {
     return sceneListError(error, "씬리스트를 저장하지 못했습니다.");
+  }
+}
+
+export async function PATCH(request: NextRequest, context: RouteContext) {
+  try {
+    const scope = await requireWriteScope(request, context);
+    if (scope instanceof NextResponse) return scope;
+    const { projectId, supabase } = scope;
+    const body = (await request.json()) as Record<string, unknown>;
+
+    if (body.action === "cell-merges") {
+      const [rowsResult, noteResult] = await Promise.all([
+        supabase
+          .from("project_scene_items")
+          .select("id")
+          .eq("project_id", projectId)
+          .order("sort_order")
+          .order("created_at"),
+        supabase
+          .from("project_scene_notes")
+          .select("updated_at")
+          .eq("project_id", projectId)
+          .maybeSingle()
+      ]);
+      if (rowsResult.error) throw rowsResult.error;
+      if (noteResult.error) throw noteResult.error;
+
+      const orderedIds = (rowsResult.data ?? []).map((row) => String(row.id));
+      if (!Array.isArray(body.cellMerges)) {
+        return NextResponse.json(
+          { error: "셀 병합 정보는 배열이어야 합니다." },
+          { status: 400 }
+        );
+      }
+      const parsedMerges = parseSceneListCellMerges(body.cellMerges);
+      if (parsedMerges.errors.length > 0) {
+        return NextResponse.json(
+          { error: parsedMerges.errors[0].message },
+          { status: 400 }
+        );
+      }
+      const validation = validateSceneListCellMerges(orderedIds, parsedMerges.merges);
+      if (!validation.ok) {
+        return NextResponse.json(
+          { error: validation.errors[0]?.message || "셀 병합 범위가 올바르지 않습니다." },
+          { status: 400 }
+        );
+      }
+
+      const expectedUpdatedAt = normalizeExpectedUpdatedAt(body.expectedUpdatedAt);
+      if (!expectedUpdatedAt.ok) {
+        return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+      }
+      const currentUpdatedAt = noteResult.data?.updated_at
+        ? String(noteResult.data.updated_at)
+        : null;
+      if (expectedUpdatedAt.value !== currentUpdatedAt) {
+        return NextResponse.json(
+          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+          { status: 409 }
+        );
+      }
+
+      let note: { cell_merges: unknown; updated_at: unknown } | null = null;
+      if (currentUpdatedAt) {
+        const { data, error } = await supabase
+          .from("project_scene_notes")
+          .update({ cell_merges: validation.validMerges })
+          .eq("project_id", projectId)
+          .eq("updated_at", currentUpdatedAt)
+          .select("cell_merges,updated_at")
+          .maybeSingle();
+        if (error) throw error;
+        note = data;
+      } else {
+        const { data, error } = await supabase
+          .from("project_scene_notes")
+          .insert({ project_id: projectId, cell_merges: validation.validMerges })
+          .select("cell_merges,updated_at")
+          .single();
+        if (error?.code === "23505") {
+          return NextResponse.json(
+            { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+            { status: 409 }
+          );
+        }
+        if (error) throw error;
+        note = data;
+      }
+      if (!note) {
+        return NextResponse.json(
+          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
+          { status: 409 }
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        cellMerges: note?.cell_merges ?? [],
+        cellMergesMaterialized: true,
+        cellMergesUpdatedAt: note?.updated_at ?? null
+      });
+    }
+
+    if (body.action === "clear-cells") {
+      const cells = normalizeClearCells(body.cells);
+      if (!Array.isArray(body.cells) || cells.length !== body.cells.length || cells.length > 5000) {
+        return NextResponse.json(
+          { error: "비울 셀 범위가 올바르지 않습니다." },
+          { status: 400 }
+        );
+      }
+      if (cells.length === 0) {
+        return NextResponse.json({ ok: true, clearedCells: [] });
+      }
+
+      const { data: clearedCount, error: clearError } = await supabase.rpc(
+        "clear_project_scene_list_cells",
+        { p_project_id: projectId, p_cells: cells }
+      );
+      if (clearError) throw clearError;
+      const expectedCount = new Set(cells.map((cell) => cell.sceneId)).size;
+      if (Number(clearedCount) !== expectedCount) {
+        return NextResponse.json(
+          { error: "선택한 씬을 찾을 수 없습니다." },
+          { status: 409 }
+        );
+      }
+
+      return NextResponse.json({ ok: true, clearedCells: cells });
+    }
+
+    if (body.action === "reorder") {
+      const orderedIds = normalizeOrderedSceneIds(body.orderedIds);
+      if (!orderedIds || orderedIds.length > 1000) {
+        return NextResponse.json(
+          { error: "씬 순서 데이터가 올바르지 않습니다." },
+          { status: 400 }
+        );
+      }
+
+      const [rowsResult, noteResult] = await Promise.all([
+        supabase
+          .from("project_scene_items")
+          .select("id")
+          .eq("project_id", projectId)
+          .order("sort_order")
+          .order("created_at"),
+        supabase
+          .from("project_scene_notes")
+          .select("cell_merges")
+          .eq("project_id", projectId)
+          .maybeSingle()
+      ]);
+      if (rowsResult.error) throw rowsResult.error;
+      if (noteResult.error) throw noteResult.error;
+
+      const currentIds = (rowsResult.data ?? []).map((row) => String(row.id));
+      if (!sameIdSet(currentIds, orderedIds)) {
+        return NextResponse.json(
+          { error: "현재 씬 목록과 순서 데이터가 일치하지 않습니다." },
+          { status: 409 }
+        );
+      }
+
+      const parsedStoredMerges = parseSceneListCellMerges(noteResult.data?.cell_merges);
+      if (parsedStoredMerges.errors.length > 0) {
+        return NextResponse.json(
+          { error: "저장된 셀 병합 범위가 올바르지 않습니다." },
+          { status: 409 }
+        );
+      }
+      const cellMerges = parsedStoredMerges.merges;
+      const mergeValidation = validateSceneListCellMerges(currentIds, cellMerges);
+      if (!mergeValidation.ok) {
+        return NextResponse.json(
+          { error: mergeValidation.errors[0]?.message || "저장된 셀 병합 범위가 올바르지 않습니다." },
+          { status: 409 }
+        );
+      }
+      const reorderValidation = validateSceneListReorderWithMerges(
+        orderedIds,
+        mergeValidation.validMerges,
+        currentIds
+      );
+      if (!reorderValidation.ok) {
+        return NextResponse.json(
+          { error: SCENE_LIST_REORDER_MERGE_ERROR },
+          { status: 409 }
+        );
+      }
+
+      const reorderedRows = orderedIds.map((id, index) => ({
+        id,
+        project_id: projectId,
+        sort_order: index + 1
+      }));
+      if (reorderedRows.length > 0) {
+        const { error } = await supabase
+          .from("project_scene_items")
+          .upsert(reorderedRows, { onConflict: "id" });
+        if (error) throw error;
+      }
+
+      return NextResponse.json({ ok: true, orderedIds });
+    }
+
+    return NextResponse.json({ error: "지원하지 않는 씬리스트 작업입니다." }, { status: 400 });
+  } catch (error) {
+    return sceneListError(error, "씬리스트 변경사항을 저장하지 못했습니다.");
   }
 }
 
@@ -308,6 +625,60 @@ function normalizeActorCells(value: unknown) {
     }
   }
   return normalized;
+}
+
+function normalizeClearCells(value: unknown): Array<{
+  sceneId: string;
+  column: ProjectSceneMergeColumn;
+}> {
+  if (!Array.isArray(value)) return [];
+  const supportedColumns = new Set<ProjectSceneMergeColumn>([
+    "location",
+    "subLocation",
+    "day",
+    "time",
+    "intExt"
+  ]);
+  const seen = new Set<string>();
+  const cells: Array<{ sceneId: string; column: ProjectSceneMergeColumn }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    const sceneId = normalizeText(record.sceneId, 36);
+    const column = normalizeText(record.column, 30) as ProjectSceneMergeColumn;
+    const key = `${sceneId}:${column}`;
+    if (!isUuid(sceneId) || !supportedColumns.has(column) || seen.has(key)) continue;
+    seen.add(key);
+    cells.push({ sceneId, column });
+  }
+  return cells;
+}
+
+function normalizeOrderedSceneIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.map((entry) => normalizeText(entry, 36));
+  if (ids.some((id) => !isUuid(id)) || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
+function normalizeExpectedUpdatedAt(value: unknown):
+  | { ok: true; value: string | null }
+  | { ok: false; error: string } {
+  if (value == null) return { ok: true, value: null };
+  if (typeof value !== "string") {
+    return { ok: false, error: "셀 병합 버전 정보가 올바르지 않습니다." };
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 80 || Number.isNaN(Date.parse(normalized))) {
+    return { ok: false, error: "셀 병합 버전 정보가 올바르지 않습니다." };
+  }
+  return { ok: true, value: normalized };
+}
+
+function sameIdSet(currentIds: string[], orderedIds: string[]) {
+  if (currentIds.length !== orderedIds.length) return false;
+  const expected = new Set(currentIds);
+  return orderedIds.every((id) => expected.has(id));
 }
 
 type NormalizedSceneRow = NonNullable<ReturnType<typeof normalizeItem>>;
@@ -414,6 +785,20 @@ function sceneListError(error: unknown, fallback: string) {
   if (actorCellsColumnMissing) {
     return NextResponse.json(
       { error: "씬리스트 배우칸 상태 migration을 먼저 적용해주세요." },
+      { status: 503 }
+    );
+  }
+  const cellMergesColumnMissing = (
+    code === "42703" ||
+    code === "PGRST204"
+  ) && /cell_merges/i.test(message);
+  const sceneListMergeRpcMissing = (
+    code === "42883" ||
+    code === "PGRST202"
+  ) && /clear_project_scene_list_cells/i.test(message);
+  if (cellMergesColumnMissing || sceneListMergeRpcMissing) {
+    return NextResponse.json(
+      { error: "씬리스트 셀 병합 migration을 먼저 적용해주세요." },
       { status: 503 }
     );
   }

@@ -508,6 +508,29 @@ export type ProjectSceneActorCell = {
   text?: string;
 };
 
+/**
+ * 씬리스트에서 사용자가 명시적으로 병합할 수 있는 열입니다.
+ * location/subLocation만 서로 가로 병합할 수 있고, 나머지 열은 같은 열 안에서만
+ * 세로 병합합니다.
+ */
+export type ProjectSceneMergeColumn =
+  | "location"
+  | "subLocation"
+  | "day"
+  | "time"
+  | "intExt";
+
+/**
+ * 병합된 셀의 값은 각 ProjectSceneItem에 그대로 남습니다. 이 구조는 표시할 범위만
+ * 저장하므로 병합 해제 시 원래 값이 손실되지 않습니다.
+ */
+export type ProjectSceneCellMerge = {
+  id: string;
+  sceneIds: string[];
+  startColumn: ProjectSceneMergeColumn;
+  endColumn: ProjectSceneMergeColumn;
+};
+
 export type ProjectSceneItem = {
   id: string;
   projectId: string;
@@ -531,4 +554,12 @@ export type ProjectSceneItem = {
 export type ProjectSceneList = {
   items: ProjectSceneItem[];
   scenarioReference: string;
+  cellMerges: ProjectSceneCellMerge[];
+  /** project_scene_notes.updated_at 기반 병합 metadata 충돌 검사값입니다. */
+  cellMergesUpdatedAt: string | null;
+  /**
+   * false는 migration 이전 데이터라 명시적 병합 정보가 아직 만들어지지 않았다는
+   * 뜻입니다. true + 빈 배열은 사용자가 모든 병합을 해제한 상태와 구분됩니다.
+   */
+  cellMergesMaterialized: boolean;
 };
