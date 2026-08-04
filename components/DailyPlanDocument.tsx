@@ -26,7 +26,10 @@ type DailyPlanDocumentProps = {
   meta: DailyPlanPrintMeta;
   timetableRows: DailyPlanPreviewTimetableRow[];
   totalCutCount: number;
+  orientation?: DailyPlanDocumentOrientation;
 };
+
+export type DailyPlanDocumentOrientation = "portrait" | "landscape";
 
 const sectionTableClass = "daily-plan-section-table mt-1 w-full table-fixed border-collapse border-2 border-black text-center";
 const halfTableClass = "daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center";
@@ -40,7 +43,14 @@ const timetableColumnCount = DAILY_PLAN_TIMETABLE_COLUMN_COUNT;
 const callSheetColumnCount = 8;
 
 /** 화면 미리보기와 PDF 출력이 함께 사용하는 canonical 일촬표 문서입니다. */
-export function DailyPlanDocument({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDocumentProps) {
+export function DailyPlanDocument({
+  plan,
+  locations,
+  meta,
+  timetableRows,
+  totalCutCount,
+  orientation = "landscape"
+}: DailyPlanDocumentProps) {
   const printableLocations = buildDailyPlanPreviewLocationRows(locations);
   const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
@@ -61,7 +71,11 @@ export function DailyPlanDocument({ plan, locations, meta, timetableRows, totalC
   ];
 
   return (
-    <article data-testid="daily-plan-document" className="daily-plan-template text-[11px] leading-[1.3] text-black">
+    <article
+      data-testid="daily-plan-document"
+      data-orientation={orientation}
+      className={`daily-plan-template daily-plan-document--${orientation} text-[11px] leading-[1.3] text-black`}
+    >
       <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
         <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <EqualColumns count={12} />
@@ -127,7 +141,7 @@ export function DailyPlanDocument({ plan, locations, meta, timetableRows, totalC
         <EqualColumns count={16} />
         <tbody>
           {printableLocations.length > 0 ? printableLocations.map((location, index) => (
-            <tr key={location.id || `landscape-location-${index}`}>
+            <tr key={location.id || `document-location-${index}`}>
               <td colSpan={2} className={`${cellClass} whitespace-nowrap font-black`}>LOCATION {index + 1}</td>
               <FixedCells fields={createLocationFields(location)} />
             </tr>
@@ -150,7 +164,7 @@ export function DailyPlanDocument({ plan, locations, meta, timetableRows, totalC
         </thead>
         <tbody>
           {printableTimetableRows.length > 0 ? printableTimetableRows.map((row, index) => (
-            <tr key={`landscape-row-${index}`} className={row.type === "additionalSchedule" ? eventRowClass : undefined}>
+            <tr key={`document-row-${index}`} className={row.type === "additionalSchedule" ? eventRowClass : undefined}>
               {row.type === "additionalSchedule" ? (
                 <AdditionalScheduleCells row={row} />
               ) : (

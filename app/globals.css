@@ -841,7 +841,6 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-template {
-  width: 277mm;
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
@@ -852,6 +851,14 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
   font-family: inherit;
+}
+
+.daily-plan-document--portrait {
+  width: 190mm;
+}
+
+.daily-plan-document--landscape {
+  width: 277mm;
 }
 
 .daily-plan-preview-header {
@@ -901,22 +908,24 @@ a[class*="min-h-"][class*="items-center"] {
   position: fixed;
   top: 0;
   left: -200vw;
-  width: 277mm;
   visibility: hidden;
   pointer-events: none;
 }
 
-.daily-plan-print-staging .daily-plan-template {
+.daily-plan-print-staging[data-orientation="portrait"] {
+  width: 190mm;
+}
+
+.daily-plan-print-staging[data-orientation="landscape"] {
   width: 277mm;
+}
+
+.daily-plan-print-staging .daily-plan-template {
+  width: 100%;
   margin: 0;
 }
 
 @media print {
-  @page {
-    size: A4 landscape;
-    margin: 10mm;
-  }
-
   body {
     background: #ffffff;
   }
