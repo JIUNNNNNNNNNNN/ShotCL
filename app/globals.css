@@ -984,99 +984,99 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-document--portrait[data-density="normal"] {
-  --daily-plan-font-size: 9px;
-  --daily-plan-line-height: 1.22;
-  --daily-plan-cell-height: 16px;
-  --daily-plan-cell-padding-block: 1.5px;
-  --daily-plan-cell-padding-inline: 2.5px;
-  --daily-plan-section-gap: 2.5px;
-  --daily-plan-title-size: 18px;
-  --daily-plan-title-line-height: 1.1;
+  --daily-plan-font-size: 10.5px;
+  --daily-plan-line-height: 1.28;
+  --daily-plan-cell-height: 21px;
+  --daily-plan-cell-padding-block: 2px;
+  --daily-plan-cell-padding-inline: 3px;
+  --daily-plan-section-gap: 6px;
+  --daily-plan-title-size: 24px;
+  --daily-plan-title-line-height: 1.08;
   --daily-plan-subtitle-size: 13px;
-  --daily-plan-subtitle-line-height: 1.15;
-  --daily-plan-stat-size: 14px;
-  --daily-plan-stat-line-height: 1.15;
-  --daily-plan-kicker-size: 7.5px;
+  --daily-plan-subtitle-line-height: 1.2;
+  --daily-plan-stat-size: 20px;
+  --daily-plan-stat-line-height: 1.12;
+  --daily-plan-kicker-size: 9px;
   --daily-plan-kicker-line-height: 1.2;
-  --daily-plan-day-size: 18px;
+  --daily-plan-day-size: 20px;
   --daily-plan-day-line-height: 1;
-  --daily-plan-staff-size: 8.2px;
-  --daily-plan-staff-line-height: 1.18;
-  --daily-plan-timetable-time-size: 8.5px;
-  --daily-plan-timetable-compact-size: 7.5px;
-  --daily-plan-memo-height: 52px;
-  --daily-plan-additional-min-height: 20px;
+  --daily-plan-staff-size: 9.5px;
+  --daily-plan-staff-line-height: 1.24;
+  --daily-plan-timetable-time-size: 10px;
+  --daily-plan-timetable-compact-size: 9px;
+  --daily-plan-memo-height: 100px;
+  --daily-plan-additional-min-height: 21px;
   --daily-plan-additional-padding-block: 2px;
-  --daily-plan-additional-padding-inline: 2.5px;
-  --daily-plan-weather-label-size: 7.5px;
-  --daily-plan-weather-value-size: 8.2px;
-  --daily-plan-weather-line-height: 1.15;
-  --daily-plan-weather-padding-block: 1.5px;
-  --daily-plan-weather-padding-inline: 2px;
+  --daily-plan-additional-padding-inline: 3px;
+  --daily-plan-weather-label-size: 9px;
+  --daily-plan-weather-value-size: 9.5px;
+  --daily-plan-weather-line-height: 1.22;
+  --daily-plan-weather-padding-block: 2px;
+  --daily-plan-weather-padding-inline: 3px;
 }
 
 .daily-plan-document--portrait[data-density="compact"] {
-  --daily-plan-font-size: 8.3px;
-  --daily-plan-line-height: 1.18;
-  --daily-plan-cell-height: 14px;
-  --daily-plan-cell-padding-block: 1px;
-  --daily-plan-cell-padding-inline: 2px;
-  --daily-plan-section-gap: 2px;
-  --daily-plan-title-size: 17px;
+  --daily-plan-font-size: 9.7px;
+  --daily-plan-line-height: 1.24;
+  --daily-plan-cell-height: 19px;
+  --daily-plan-cell-padding-block: 1.5px;
+  --daily-plan-cell-padding-inline: 2.5px;
+  --daily-plan-section-gap: 5px;
+  --daily-plan-title-size: 22px;
   --daily-plan-title-line-height: 1.08;
   --daily-plan-subtitle-size: 12px;
-  --daily-plan-subtitle-line-height: 1.12;
-  --daily-plan-stat-size: 13px;
-  --daily-plan-stat-line-height: 1.12;
-  --daily-plan-kicker-size: 7px;
-  --daily-plan-kicker-line-height: 1.16;
-  --daily-plan-day-size: 17px;
+  --daily-plan-subtitle-line-height: 1.16;
+  --daily-plan-stat-size: 18px;
+  --daily-plan-stat-line-height: 1.1;
+  --daily-plan-kicker-size: 8.3px;
+  --daily-plan-kicker-line-height: 1.18;
+  --daily-plan-day-size: 18px;
   --daily-plan-day-line-height: 1;
-  --daily-plan-staff-size: 7.7px;
-  --daily-plan-staff-line-height: 1.16;
-  --daily-plan-timetable-time-size: 8px;
-  --daily-plan-timetable-compact-size: 7px;
-  --daily-plan-memo-height: 44px;
-  --daily-plan-additional-min-height: 18px;
+  --daily-plan-staff-size: 8.8px;
+  --daily-plan-staff-line-height: 1.2;
+  --daily-plan-timetable-time-size: 9.3px;
+  --daily-plan-timetable-compact-size: 8.4px;
+  --daily-plan-memo-height: 88px;
+  --daily-plan-additional-min-height: 19px;
   --daily-plan-additional-padding-block: 1.5px;
-  --daily-plan-additional-padding-inline: 2px;
-  --daily-plan-weather-label-size: 7px;
-  --daily-plan-weather-value-size: 7.6px;
-  --daily-plan-weather-line-height: 1.12;
-  --daily-plan-weather-padding-block: 1px;
-  --daily-plan-weather-padding-inline: 1.5px;
+  --daily-plan-additional-padding-inline: 2.5px;
+  --daily-plan-weather-label-size: 8.3px;
+  --daily-plan-weather-value-size: 8.8px;
+  --daily-plan-weather-line-height: 1.18;
+  --daily-plan-weather-padding-block: 1.5px;
+  --daily-plan-weather-padding-inline: 2.5px;
 }
 
 .daily-plan-document--portrait[data-density="dense"] {
-  --daily-plan-font-size: 7.6px;
-  --daily-plan-line-height: 1.14;
-  --daily-plan-cell-height: 12px;
-  --daily-plan-cell-padding-block: 0.75px;
-  --daily-plan-cell-padding-inline: 1.25px;
-  --daily-plan-section-gap: 1.5px;
-  --daily-plan-title-size: 15px;
+  --daily-plan-font-size: 9px;
+  --daily-plan-line-height: 1.2;
+  --daily-plan-cell-height: 18px;
+  --daily-plan-cell-padding-block: 1px;
+  --daily-plan-cell-padding-inline: 2px;
+  --daily-plan-section-gap: 4px;
+  --daily-plan-title-size: 20px;
   --daily-plan-title-line-height: 1.06;
-  --daily-plan-subtitle-size: 10.5px;
-  --daily-plan-subtitle-line-height: 1.1;
-  --daily-plan-stat-size: 11.5px;
-  --daily-plan-stat-line-height: 1.1;
-  --daily-plan-kicker-size: 6.5px;
-  --daily-plan-kicker-line-height: 1.12;
-  --daily-plan-day-size: 15px;
+  --daily-plan-subtitle-size: 11px;
+  --daily-plan-subtitle-line-height: 1.12;
+  --daily-plan-stat-size: 16px;
+  --daily-plan-stat-line-height: 1.08;
+  --daily-plan-kicker-size: 7.6px;
+  --daily-plan-kicker-line-height: 1.15;
+  --daily-plan-day-size: 17px;
   --daily-plan-day-line-height: 1;
-  --daily-plan-staff-size: 7px;
-  --daily-plan-staff-line-height: 1.12;
-  --daily-plan-timetable-time-size: 7.3px;
-  --daily-plan-timetable-compact-size: 6.6px;
-  --daily-plan-memo-height: 36px;
-  --daily-plan-additional-min-height: 16px;
+  --daily-plan-staff-size: 8.2px;
+  --daily-plan-staff-line-height: 1.18;
+  --daily-plan-timetable-time-size: 8.7px;
+  --daily-plan-timetable-compact-size: 7.8px;
+  --daily-plan-memo-height: 78px;
+  --daily-plan-additional-min-height: 18px;
   --daily-plan-additional-padding-block: 1px;
-  --daily-plan-additional-padding-inline: 1.25px;
-  --daily-plan-weather-label-size: 6.5px;
-  --daily-plan-weather-value-size: 7px;
-  --daily-plan-weather-line-height: 1.1;
-  --daily-plan-weather-padding-block: 0.75px;
-  --daily-plan-weather-padding-inline: 1px;
+  --daily-plan-additional-padding-inline: 2px;
+  --daily-plan-weather-label-size: 7.8px;
+  --daily-plan-weather-value-size: 8.2px;
+  --daily-plan-weather-line-height: 1.16;
+  --daily-plan-weather-padding-block: 1px;
+  --daily-plan-weather-padding-inline: 2px;
 }
 
 .daily-plan-document-title {
@@ -1110,6 +1110,46 @@ a[class*="min-h-"][class*="items-center"] {
 
 .daily-plan-document--portrait .daily-plan-header-grid {
   grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.daily-plan-document--portrait .daily-plan-portrait-title-row > td {
+  height: calc(var(--daily-plan-cell-height) * 3);
+}
+
+.daily-plan-document--portrait .daily-plan-portrait-call-row > td {
+  height: calc(var(--daily-plan-cell-height) * 2);
+}
+
+.daily-plan-document--portrait .daily-plan-portrait-page-content > .daily-plan-section-table:first-child {
+  margin-top: 0 !important;
+}
+
+.daily-plan-document--portrait .daily-plan-portrait-memo-cell {
+  height: var(--daily-plan-memo-height);
+}
+
+@media screen {
+  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] {
+    background: transparent !important;
+    padding: 0 !important;
+  }
+
+  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-document--portrait {
+    width: 210mm;
+    background: transparent;
+  }
+
+  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-portrait-page {
+    box-sizing: border-box;
+    width: 210mm;
+    min-height: 297mm;
+    padding: 10mm;
+    background: #ffffff;
+  }
+
+  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-portrait-page--secondary {
+    margin-top: 8mm;
+  }
 }
 
 .daily-plan-weather-table--portrait .daily-plan-weather-cell {
@@ -1253,8 +1293,9 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 @media print {
+  html,
   body {
-    background: #ffffff;
+    background: #ffffff !important;
   }
 
   .app-theme {

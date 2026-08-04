@@ -3,6 +3,9 @@ export const APP_MOBILE_MEDIA_QUERY = `(max-width: ${APP_MOBILE_BREAKPOINT_PX - 
 
 export type DailyPlanDocumentOrientation = "portrait" | "landscape";
 
+/** 한 장 우선, 넘칠 때 Notice 직전에서만 두 장으로 나누는 문서 페이지 구성입니다. */
+export type DailyPlanPageLayout = "single" | "two";
+
 export const DAILY_PLAN_DOCUMENT_DENSITY_STEPS = [
   "normal",
   "compact",
@@ -11,19 +14,6 @@ export const DAILY_PLAN_DOCUMENT_DENSITY_STEPS = [
 
 export type DailyPlanDocumentDensity =
   (typeof DAILY_PLAN_DOCUMENT_DENSITY_STEPS)[number];
-
-/** 세로 문서에서 짧은 값 열을 줄이고 긴 정보 열에 폭을 배분한 상대 폭입니다. */
-export const DAILY_PLAN_TIMETABLE_PORTRAIT_COLUMN_WEIGHTS = [
-  38, 38, 38,
-  30, 30,
-  26,
-  34,
-  50,
-  70, 70, 70,
-  76,
-  46, 46,
-  57, 57
-] as const;
 
 export function getAutomaticDailyPlanOrientation(
   isMobile: boolean

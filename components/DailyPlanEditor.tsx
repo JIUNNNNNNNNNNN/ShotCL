@@ -61,7 +61,8 @@ import {
   DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
   getNextDailyPlanDocumentDensity,
   type DailyPlanDocumentDensity,
-  type DailyPlanDocumentOrientation
+  type DailyPlanDocumentOrientation,
+  type DailyPlanPageLayout
 } from "@/lib/dailyPlan/documentLayout";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
@@ -232,8 +233,6 @@ type LocationInputMode = "search" | "manual";
 type EditorTimetableRow =
   | { type: "scene"; sourceIndex: number; item: SceneBlockInput }
   | { type: "event"; sourceIndex: number; item: DailyPlanMealTime };
-
-type DailyPlanPrintLayout = "single" | "two";
 
 type DailyPlanPdfOrientation = DailyPlanDocumentOrientation;
 
@@ -412,7 +411,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
   const [printJob, setPrintJob] = useState<DailyPlanPrintJob | null>(null);
-  const [printLayout, setPrintLayout] = useState<DailyPlanPrintLayout>("single");
+  const [printLayout, setPrintLayout] = useState<DailyPlanPageLayout>("single");
   const [isPrinting, setIsPrinting] = useState(false);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
   const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
@@ -1522,7 +1521,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const style = document.createElement("style");
     style.dataset.dailyPlanPrintPage = orientation;
     style.media = "print";
-    style.textContent = `@page { size: A4 ${orientation}; margin: 10mm; }`;
+    style.textContent = `@page { size: A4 ${orientation}; margin: 10mm; background: #ffffff; }`;
     document.head.appendChild(style);
     printPageStyleRef.current = style;
   }, [clearPrintPageStyle]);
@@ -1560,7 +1559,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         if (!nextRoot) throw new Error("PDF 문서를 준비하지 못했습니다.");
         root = nextRoot;
 
-        if (orientation !== "portrait" || !hasDailyPlanDocumentOverflow(root)) break;
+        if (
+          orientation !== "portrait"
+          || (!hasDailyPlanDocumentOverflow(root) && !hasDailyPlanPortraitPageOverflow(root))
+        ) break;
         const nextDensity = getNextDailyPlanDocumentDensity(density);
         if (!nextDensity) {
           throw new Error("세로 PDF의 셀 내용이 출력 범위를 초과합니다. 긴 내용을 줄인 뒤 다시 시도해주세요.");
@@ -3785,6 +3787,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   const previewPageWidth = getDailyPlanPageWidthPixels(orientation);
   const previewPageHeight = getDailyPlanPageHeightPixels(orientation);
   const [density, setDensity] = useState<DailyPlanDocumentDensity>(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
+  const [pageLayout, setPageLayout] = useState<DailyPlanPageLayout>("single");
   const [measurement, setMeasurement] = useState(() => ({
     scale: 1,
     scaledWidth: previewPageWidth,
@@ -3793,6 +3796,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
 
   useEffect(() => {
     setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
+    setPageLayout("single");
   }, [data, orientation]);
 
   useLayoutEffect(() => {
@@ -3809,6 +3813,8 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       if (!currentContainer || !currentDocument) return;
       const availableWidth = currentContainer.getBoundingClientRect().width;
       if (!Number.isFinite(availableWidth) || availableWidth <= 0) return;
+      const nextPageLayout = resolveDailyPlanPreviewPageLayout(currentDocument, orientation);
+      setPageLayout((current) => current === nextPageLayout ? current : nextPageLayout);
       const measuredWidth = Math.max(previewPageWidth, currentDocument.scrollWidth);
       const measuredHeight = Math.max(previewPageHeight, currentDocument.scrollHeight);
       const nextScale = Math.min(1, availableWidth / measuredWidth);
@@ -3823,7 +3829,11 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
           : nextMeasurement
       ));
 
-      if (allowDensityChange && orientation === "portrait" && hasDailyPlanDocumentOverflow(currentDocument)) {
+      if (
+        allowDensityChange
+        && orientation === "portrait"
+        && (hasDailyPlanDocumentOverflow(currentDocument) || hasDailyPlanPortraitPageOverflow(currentDocument))
+      ) {
         const nextDensity = getNextDailyPlanDocumentDensity(density);
         if (nextDensity) setDensity(nextDensity);
       }
@@ -3872,7 +3882,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       window.removeEventListener("orientationchange", handleViewportResize);
       window.visualViewport?.removeEventListener("resize", handleViewportResize);
     };
-  }, [data, density, orientation, previewPageHeight, previewPageWidth]);
+  }, [data, density, orientation, pageLayout, previewPageHeight, previewPageWidth]);
 
   return (
     <div
@@ -3880,6 +3890,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       data-testid="daily-plan-scaled-preview"
       data-orientation={orientation}
       data-density={density}
+      data-page-layout={pageLayout}
       data-scale={measurement.scale.toFixed(4)}
       className="mt-4 w-full min-w-0 max-w-full bg-[#e8e8e5]"
     >
@@ -3889,6 +3900,8 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       >
         <div
           ref={documentRef}
+          data-orientation={orientation}
+          data-preview-layout={pageLayout}
           className="daily-plan-preview-sheet absolute left-0 top-0 box-border origin-top-left bg-white p-[10mm]"
           style={{
             width: previewPageWidth,
@@ -3904,6 +3917,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
             totalCutCount={data.totalCutCount}
             orientation={orientation}
             density={density}
+            pageLayout={pageLayout}
           />
         </div>
       </div>
@@ -3930,7 +3944,7 @@ function PrintDailyPlanView({
   data: DailyPlanPreviewData;
   orientation: DailyPlanPdfOrientation;
   density: DailyPlanDocumentDensity;
-  layout: DailyPlanPrintLayout;
+  layout: DailyPlanPageLayout;
   rootRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
@@ -3950,6 +3964,7 @@ function PrintDailyPlanView({
           totalCutCount={data.totalCutCount}
           orientation={orientation}
           density={density}
+          pageLayout={layout}
         />
       </div>
     </section>
@@ -3975,6 +3990,17 @@ function hasDailyPlanDocumentOverflow(root: HTMLElement) {
     cell.scrollWidth > cell.clientWidth + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
     || cell.scrollHeight > cell.clientHeight + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
   ));
+}
+
+function hasDailyPlanPortraitPageOverflow(root: HTMLElement) {
+  const primaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-primary-content]");
+  const secondaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-secondary-content]");
+  if (!primaryContent || !secondaryContent) return false;
+  const printableHeight = DAILY_PLAN_PRINT_PAGE.portrait.printableHeightMm
+    * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  const safePrintableHeight = printableHeight - PRINT_HEIGHT_SAFETY_PX;
+  return primaryContent.scrollHeight > safePrintableHeight
+    || secondaryContent.scrollHeight > safePrintableHeight;
 }
 
 async function waitForDailyPlanPrintDocument(rootRef: React.RefObject<HTMLDivElement | null>) {
@@ -4009,10 +4035,25 @@ async function waitForDailyPlanPrintDocument(rootRef: React.RefObject<HTMLDivEle
   await waitForAnimationFrames(2);
 }
 
+function resolveDailyPlanPreviewPageLayout(
+  root: HTMLDivElement,
+  orientation: DailyPlanPdfOrientation
+): DailyPlanPageLayout {
+  if (orientation !== "portrait") return "single";
+  const primaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-primary-content]");
+  const secondaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-secondary-content]");
+  if (!primaryContent || !secondaryContent) return "single";
+
+  const printableHeight = DAILY_PLAN_PRINT_PAGE.portrait.printableHeightMm
+    * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  const combinedContentHeight = primaryContent.scrollHeight + secondaryContent.scrollHeight + PRINT_HEIGHT_SAFETY_PX;
+  return combinedContentHeight <= printableHeight - PRINT_HEIGHT_SAFETY_PX ? "single" : "two";
+}
+
 function resolveDailyPlanPrintLayout(
   root: HTMLDivElement,
   orientation: DailyPlanPdfOrientation
-): DailyPlanPrintLayout {
+): DailyPlanPageLayout {
   const documentElement = root.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
   const notesSection = root.querySelector<HTMLElement>("[data-daily-plan-notes-boundary]");
   if (!documentElement || !notesSection) {
