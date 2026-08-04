@@ -282,6 +282,8 @@ const timetableFieldLabelBaseClass = "mb-1 min-h-6 select-none items-center just
 const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden max-lg:flex`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-subtle max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5  max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
+const staffDepartmentGridClass =
+  "grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
 
 const maxRuntimeMinutes = 1440;
 const CSS_PIXELS_PER_INCH = 96;
@@ -2121,8 +2123,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               {isStaffOpen ? "스태프&배우 접기" : "스태프&배우 열기"}
             </Button>
           </div>
-          {isStaffOpen ? <div className="mt-5 grid gap-5 text-center lg:grid-cols-2">
-            <section className="border border-field-border bg-field-panel p-4 text-center">
+          {isStaffOpen ? <div className="mt-5 grid min-w-0 gap-5 text-center lg:grid-cols-2">
+            <section className="min-w-0 border border-field-border bg-field-panel p-4 text-center">
               <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
                   <h3 className="text-center text-base font-black text-field-text">배우</h3>
@@ -2142,7 +2144,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <div
                       key={person.id}
                       ref={actorInteraction.registerRow(rowKey) as React.Ref<HTMLDivElement>}
-                      className={`grid items-center gap-2 border p-2 text-center transition-colors md:grid-cols-[1fr_1fr_1fr_1.2fr_1.2fr] ${
+                      className={`grid w-full min-w-0 max-w-full items-center gap-2 border p-2 text-center transition-colors md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] ${
                         isSelected
                           ? "border-field-primary bg-field-primary/10"
                           : "border-field-border bg-field-panel"
@@ -2174,14 +2176,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </div>
             </section>
 
-            <section className="border border-field-border bg-field-panel p-4 text-center">
+            <section
+              className="min-w-0 border border-field-border bg-field-panel p-2 text-center sm:p-4"
+              data-testid="daily-plan-staff-department-section"
+            >
               <div>
                 <h3 className="text-center text-base font-black text-field-text">스태프 / 부서</h3>
                 <p className="mt-1 text-center text-sm font-normal text-field-muted">부서별 인원과 이 일촬표의 집합시간·집합장소·주의사항을 입력합니다.</p>
               </div>
-              <div className="mt-4 grid gap-2">
+              <div className="mt-4 grid min-w-0 max-w-full gap-2">
                 {effectivePrintMeta.teams.length > 0 ? (
-                  <div className="hidden grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)] items-center gap-2 px-2 text-[11px] font-black text-field-subtle md:grid">
+                  <div
+                    className={`${staffDepartmentGridClass} border border-transparent px-0.5 text-[8px] font-black leading-[1.25] text-field-subtle sm:px-1 sm:text-[9px] md:px-2 md:text-[11px]`}
+                    data-testid="daily-plan-staff-department-header"
+                  >
                     <span>부서</span>
                     <span>인원</span>
                     <span>집합시간</span>
@@ -2196,9 +2204,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 {effectivePrintMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className="grid grid-cols-2 items-center gap-2  border border-field-border bg-field-panel p-2 text-center md:grid-cols-[minmax(4.5rem,0.9fr)_3.5rem_minmax(5.5rem,0.8fr)_minmax(7rem,1.2fr)_minmax(8rem,1.4fr)]"
+                    className={`${staffDepartmentGridClass} border border-field-border bg-field-panel p-0.5 text-center sm:p-1 md:p-2 max-md:[&_button]:min-h-[32px] max-md:[&_button]:px-0.5 max-md:[&_button]:py-1 max-md:[&_button]:!text-[9px] max-md:[&_input]:min-h-[32px] max-md:[&_input]:px-0.5 max-md:[&_input]:py-1 max-md:[&_input]:!text-[9px]`}
+                    data-testid="daily-plan-staff-department-row"
                   >
-                    <div className="flex min-h-[38px] items-center justify-center bg-field-soft px-2 text-sm font-black text-field-text">
+                    <div className="flex min-h-[32px] min-w-0 max-w-full items-center justify-center whitespace-nowrap bg-field-soft px-0.5 text-[8px] font-black tracking-[-0.03em] text-field-text sm:text-[10px] md:min-h-[38px] md:px-2 md:text-sm">
                       {team.team || "미분류"}
                     </div>
                     <TeamCountInput
@@ -2207,12 +2216,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       ariaLabel={`${team.team || "미분류"} 인원`}
                       onChange={(value) => updateTeamCount(index, value)}
                     />
-                    <div>
-                      <span className={mobileTimetableLabelClass}>집합시간</span>
+                    <div className="min-w-0 max-w-full">
                       <TimeWheelPicker label={`${team.team || "미분류"} 집합시간`} value={team.callTime} onChange={(value) => updateTeam(index, { callTime: value })} compact showLabel={false} />
                     </div>
-                    <div>
-                      <span className={mobileTimetableLabelClass}>집합장소</span>
+                    <div className="min-w-0 max-w-full">
                       <CallLocationSelect
                         ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
                         value={team.callLocation}
@@ -2223,8 +2230,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         })}
                       />
                     </div>
-                    <div className="col-span-2 md:col-span-1">
-                      <span className={mobileTimetableLabelClass}>주의사항</span>
+                    <div className="min-w-0 max-w-full">
                       <MemoPopoverField value={team.notes} placeholder="주의사항" ariaLabel={`${team.team || `부서 ${index + 1}`} 주의사항 수정`} onChange={(value) => updateTeam(index, { notes: value })} />
                     </div>
                   </div>
@@ -2742,10 +2748,10 @@ function TeamCountInput({
   }, [isFocused, value]);
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 max-w-full">
       <input
         type="text"
-        className={`${compactInputClass} px-5 ${isAutomatic ? "bg-field-soft" : "bg-field-input"}`}
+        className={`${compactInputClass} px-1.5 pr-4 max-md:!pl-0.5 max-md:!pr-2.5 ${isAutomatic ? "bg-field-soft" : "bg-field-input"}`}
         value={draft}
         inputMode="numeric"
         pattern="[0-9]*"
@@ -2760,7 +2766,7 @@ function TeamCountInput({
         }}
         onBlur={() => setIsFocused(false)}
       />
-      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-normal text-field-muted">명</span>
+      <span className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 text-[8px] font-normal text-field-muted md:right-1.5 md:text-[10px]">명</span>
     </div>
   );
 }
@@ -3697,7 +3703,7 @@ function TimeWheelPicker({
   }
 
   return (
-    <div className={inline ? "grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "grid gap-1"}>
+    <div className={inline ? "grid min-w-0 max-w-full grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-2" : "grid min-w-0 max-w-full gap-1"}>
       {showLabel ? <span className={compact ? "text-xs font-black text-field-subtle" : "text-sm font-black text-field-subtle"}>{label}</span> : null}
       <input
         ref={inputRef}
