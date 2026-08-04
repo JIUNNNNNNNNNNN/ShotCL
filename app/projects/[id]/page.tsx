@@ -2,11 +2,14 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CalendarPlus, Ellipsis, FolderOpen, Plus, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { DailyPlanCoverflow, type DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import {
+  useProjectPageActionMenu,
+  type ProjectPageActionMenuRegistration
+} from "@/components/ProjectPageActions";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
@@ -353,6 +356,32 @@ export default function ProjectDetailPage() {
     [selectedPlan, shots]
   );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
+  const progressActionMenu = useMemo<ProjectPageActionMenuRegistration | null>(() => {
+    if (
+      !project
+      || !projectId
+      || project.id !== projectId
+      || !isProgressView
+      || !dailyPlanId
+      || !selectedPlan
+      || selectedPlan.projectId !== project.id
+    ) return null;
+    return {
+      key: "progressDetail",
+      scopeKey: `progress-detail:${project.id}:${dailyPlanId}`,
+      actions: {
+        progressRounds: {
+          href: `/projects/${project.id}?view=progress`
+        },
+        progressAddCut: {
+          onSelect: () => setIsAddOpen(true),
+          hidden: progressOnly,
+          disabled: isSaving
+        }
+      }
+    };
+  }, [dailyPlanId, isProgressView, isSaving, progressOnly, project, projectId, selectedPlan]);
+  useProjectPageActionMenu(progressActionMenu);
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
   }, []);
@@ -391,6 +420,7 @@ export default function ProjectDetailPage() {
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
 
     setIsSaving(true);
     setErrorMessage("");
@@ -411,11 +441,27 @@ export default function ProjectDetailPage() {
         }
       ];
 
-      await createShotsFromDrafts(projectId, drafts, dailyPlanId);
+      const createdShots = await createShotsFromDrafts(projectId, drafts, dailyPlanId);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+
+      const currentShots = shotsRef.current;
+      const currentById = new Map(currentShots.map((shot) => [shot.id, shot]));
+      const createdIds = new Set(createdShots.map((shot) => shot.id));
+      const nextShots = [
+        ...currentShots.filter((shot) => !createdIds.has(shot.id)),
+        ...createdShots.map((shot) => preserveShotMedia(shot, currentById.get(shot.id)))
+      ].sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt));
+
+      shotsRef.current = nextShots;
+      setShots(nextShots);
+      commitSessionBuckets(reconcileSessionBuckets(
+        nextShots,
+        sessionBucketByShotIdRef.current,
+        false
+      ));
 
       setIsAddOpen(false);
       setSuccessMessage("새 컷을 추가했습니다.");
-      await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷을 추가하지 못했습니다.");
     } finally {
@@ -642,7 +688,6 @@ export default function ProjectDetailPage() {
         project={project}
         plans={dailyPlans}
         invalidSelection={Boolean(dailyPlanId)}
-        canEdit={role === "admin"}
       />
     );
   }
@@ -653,32 +698,8 @@ export default function ProjectDetailPage() {
         projectName={project.name}
         episodeLabel={formatEpisodeLabel(selectedPlan, 0)}
         shootingDate={selectedPlan.shootingDate}
-        action={!progressOnly ? <details className="group relative">
-          <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-panel text-field-muted transition-[background-color,transform,border-color] marker:content-none hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
-            <Ellipsis className="h-5 w-5" aria-hidden />
-            <span className="sr-only">프로젝트 보조 기능</span>
-          </summary>
-          <nav className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-divider bg-field-elevated p-2 shadow-floating" aria-label="프로젝트 보조 기능">
-            <div className="mb-1 min-w-0 border-b border-field-border px-2 pb-2">
-              <p className="truncate text-xs font-black text-field-text">{project.name}</p>
-              <p className="truncate text-[10px] text-field-muted">{project.shootDate || "촬영일 미정"}</p>
-            </div>
-            <button type="button" onClick={() => setIsAddOpen(true)} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-left text-xs font-bold leading-[1.35] text-field-text hover:bg-field-hover">
-              <span className="font-display"><span className="inline-flex items-center gap-2"><Plus className="h-4 w-4" aria-hidden /> 새 컷 추가</span></span>
-            </button>
-            <Link href={`/projects/${project.id}/daily-plans/new`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-hover hover:text-field-text">
-              <span className="font-display"><span className="inline-flex items-center gap-2"><CalendarPlus className="h-4 w-4" aria-hidden /> 새 일촬표</span></span>
-            </Link>
-            <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted hover:bg-field-hover hover:text-field-text">
-              <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 목록</span></span>
-            </Link>
-          </nav>
-        </details> : <span className="border border-field-border bg-field-panel px-3 py-2 text-xs font-bold text-field-muted">진행도</span>}
+        action={null}
       />
-
-      <Link href={`/projects/${project.id}?view=progress`} className="mb-3 inline-flex min-h-[38px] items-center gap-1 border border-field-border bg-field-panel px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text">
-        <span className="font-display"><span className="inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" aria-hidden /> 회차 선택</span></span>
-      </Link>
 
       <DailyProgressSummary progress={dailyProgress} />
 
@@ -709,13 +730,7 @@ export default function ProjectDetailPage() {
         {shots.length === 0 && scheduleRowCount === 0 ? (
           <Card>
             <h2 className="text-xl font-black text-field-text">아직 등록된 컷이 없습니다</h2>
-            <p className="mt-2 text-base leading-6 text-field-muted">필요하면 아래의 새 컷 추가 버튼으로 직접 컷을 만들 수 있습니다.</p>
-            <div className="mt-5 max-w-xs">
-              {!progressOnly ? <Button onClick={() => setIsAddOpen(true)}>
-                <Plus className="h-5 w-5" aria-hidden />
-                새 컷 추가
-              </Button> : null}
-            </div>
+            <p className="mt-2 text-base leading-6 text-field-muted">필요하면 새 컷을 추가해 진행을 시작할 수 있습니다.</p>
           </Card>
         ) : (
           <div className="grid gap-3">
@@ -796,16 +811,6 @@ export default function ProjectDetailPage() {
           </div>
         </details>
       ) : null}
-
-      {!progressOnly ? <button
-        type="button"
-        onClick={() => setIsAddOpen(true)}
-        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 flex h-14 w-14 items-center justify-center border border-field-primary bg-field-primary text-field-accent-foreground transition-[background-color,border-color,transform] hover:border-field-secondary hover:bg-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:right-8"
-        aria-label="새 컷 추가"
-        title="새 컷 추가"
-      >
-        <Plus className="h-6 w-6" aria-hidden />
-      </button> : null}
 
       {!progressOnly && isAddOpen ? <ShotEditorModal
         mode="add"
@@ -968,13 +973,11 @@ function preserveShotMedia(next: Shot, previous: Shot | undefined): Shot {
 function EpisodeSelection({
   project,
   plans,
-  invalidSelection,
-  canEdit
+  invalidSelection
 }: {
   project: Project;
   plans: DailyPlanListItem[];
   invalidSelection: boolean;
-  canEdit: boolean;
 }) {
   const router = useRouter();
   const navigationLockedRef = useRef(false);
@@ -1022,33 +1025,10 @@ function EpisodeSelection({
   return (
     <main className="flex min-h-[calc(100dvh-8rem)] min-w-0 items-start justify-center overflow-x-clip pb-12 pt-4 md:pt-7">
       <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
-        <div className="relative flex w-full min-w-0 items-start justify-center px-14">
+        <div className="relative flex w-full min-w-0 items-start justify-center px-4">
           <h1 className="max-w-full truncate text-center text-xl font-black leading-[1.35] text-field-text md:text-2xl" title={project.name}>
             {project.name}
           </h1>
-          {canEdit ? (
-            <details className="group absolute right-1 top-0 shrink-0 md:right-3">
-              <summary className="flex min-h-10 cursor-pointer list-none items-center gap-1.5 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-text transition-[background-color,transform,border-color] marker:content-none hover:border-field-divider hover:bg-field-hover active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
-                <span className="font-display"><span className="inline-flex items-center gap-1.5"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 수정</span></span>
-              </summary>
-              <div className="absolute right-0 top-[calc(100%+0.4rem)] z-40 grid w-56 gap-1 border border-field-divider bg-field-elevated p-2 shadow-floating">
-                <Link href={`/projects/${project.id}/daily-plans`} className="flex min-h-[38px] items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-text hover:bg-field-hover">
-                  <span className="font-display"><span className="inline-flex items-center gap-2"><FolderOpen className="h-4 w-4" aria-hidden /> 일촬표 수정</span></span>
-                </Link>
-                <details className="group/settings">
-                  <summary className="flex min-h-[38px] cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-xs font-bold leading-[1.35] text-field-muted marker:content-none hover:bg-field-hover hover:text-field-text">
-                    <span className="font-display"><span className="inline-flex items-center gap-2"><Ellipsis className="h-4 w-4" aria-hidden /> 프로젝트 설정</span></span>
-                  </summary>
-                  <div className="mx-2 mt-1 border border-field-border bg-field-soft/60 px-3 py-2 text-[10px] leading-5 text-field-muted">
-                    <p className="truncate text-xs font-black text-field-subtle">{project.name}</p>
-                    <p>현재 권한: admin</p>
-                    <p>프로젝트 ID: {project.id.slice(0, 8)}…</p>
-                    <p>실제 삭제는 아직 지원하지 않습니다.</p>
-                  </div>
-                </details>
-              </div>
-            </details>
-          ) : null}
         </div>
 
         {invalidSelection ? <p className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}

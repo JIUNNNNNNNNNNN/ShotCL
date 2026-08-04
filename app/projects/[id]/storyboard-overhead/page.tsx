@@ -40,6 +40,10 @@ import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import {
+  useProjectPageActionMenu,
+  type ProjectPageActionMenuRegistration
+} from "@/components/ProjectPageActions";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { Card } from "@/components/ui/Card";
 import {
@@ -198,6 +202,7 @@ type ArchiveReorderSession = {
   allowReorder: boolean;
   originalIds: string[];
   currentIds: string[];
+  completeOriginalIds: string[];
   visualTargetId: string | null;
   moved: boolean;
   validDrop: boolean;
@@ -258,6 +263,7 @@ type ArchivePointerSession = {
   sceneId: string | null;
   cutNumber: number | null;
   orderedAssetIds: string[];
+  completeOrderedAssetIds: string[];
   allowReorder: boolean;
   pointerId: number;
   startX: number;
@@ -283,7 +289,7 @@ export default function ProjectStoryboardOverheadPage() {
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const [projectName, setProjectName] = useState("");
-  const [activeType, setActiveType] = useState<ArchiveViewType>("all");
+  const [activeType, setActiveType] = useState<ArchiveViewType>("overhead");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
   const [storyboards, setStoryboards] = useState<ProjectReferenceAsset[]>([]);
   const [sceneItems, setSceneItems] = useState<ProjectSceneItem[]>([]);
@@ -326,6 +332,21 @@ export default function ProjectStoryboardOverheadPage() {
   const [reorderOverlay, setReorderOverlay] = useState<ArchiveReorderOverlay | null>(null);
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
+  const archiveActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
+    key: "archive",
+    scopeKey: `archive:${projectId ?? "unknown"}`,
+    actions: {
+      archiveDiagram: {
+        active: activeType === "overhead",
+        onSelect: () => setActiveType("overhead")
+      },
+      archiveStoryboard: {
+        active: activeType === "storyboard",
+        onSelect: () => setActiveType("storyboard")
+      }
+    }
+  }), [activeType, projectId]);
+  useProjectPageActionMenu(archiveActionMenu);
   const preparingRef = useRef(false);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
   const assetPressCleanupRef = useRef<(() => void) | null>(null);
@@ -676,6 +697,22 @@ export default function ProjectStoryboardOverheadPage() {
     ),
     [diagramArchives, overheads, sceneItems, storyboards]
   );
+  const completeArchiveOrderByGroupKey = useMemo(() => {
+    const assetsByGroup = new Map<string, ProjectReferenceAsset[]>();
+    for (const asset of dedupeArchiveAssets([...overheads, ...storyboards])) {
+      if (!isOrderableArchiveAsset(asset)) continue;
+      const groupKey = archiveAssetOrderGroupKey(asset);
+      const groupedAssets = assetsByGroup.get(groupKey);
+      if (groupedAssets) groupedAssets.push(asset);
+      else assetsByGroup.set(groupKey, [asset]);
+    }
+    return new Map(
+      [...assetsByGroup.entries()].map(([groupKey, assets]) => [
+        groupKey,
+        assets.sort(compareArchiveAssetsForOrder).map((asset) => asset.id)
+      ])
+    );
+  }, [overheads, storyboards]);
 
   useLayoutEffect(() => {
     if (!projectId || loadedArchiveProjectId !== projectId) return;
@@ -2154,7 +2191,7 @@ export default function ProjectStoryboardOverheadPage() {
     if (current.moved) {
       setCombinedArchiveAssets(reorderArchiveAssetsByIds(
         archiveAssetsRef.current,
-        current.originalIds
+        current.completeOriginalIds
       ));
     }
     setReorderVisual(null);
@@ -2168,6 +2205,7 @@ export default function ProjectStoryboardOverheadPage() {
     sceneId: string | null,
     cutNumber: number | null,
     orderedAssetIds: string[],
+    completeOrderedAssetIds: string[],
     allowReorder: boolean,
     event: ReactPointerEvent<HTMLButtonElement>
   ) {
@@ -2197,6 +2235,7 @@ export default function ProjectStoryboardOverheadPage() {
       sceneId,
       cutNumber,
       orderedAssetIds: [...orderedAssetIds],
+      completeOrderedAssetIds: [...completeOrderedAssetIds],
       allowReorder,
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -2278,6 +2317,7 @@ export default function ProjectStoryboardOverheadPage() {
       allowReorder: press.allowReorder,
       originalIds: [...press.orderedAssetIds],
       currentIds: [...press.orderedAssetIds],
+      completeOriginalIds: [...press.completeOrderedAssetIds],
       visualTargetId: press.assetId,
       moved: false,
       validDrop: true,
@@ -2351,7 +2391,10 @@ export default function ProjectStoryboardOverheadPage() {
       current.currentIds = nextIds;
       current.moved = true;
       current.visualTargetId = targetId;
-      setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, nextIds));
+      setCombinedArchiveAssets(reorderArchiveAssetsByIds(
+        archiveAssetsRef.current,
+        mergeVisibleArchiveOrderIntoCompleteGroup(current.completeOriginalIds, nextIds)
+      ));
       animateArchiveGridReflow(current.groupKey, previousRects, current.assetId);
       setReorderVisual({ assetId: current.assetId, targetId });
     };
@@ -2431,7 +2474,16 @@ export default function ProjectStoryboardOverheadPage() {
         && pointerEvent.type === "pointerup"
         && current.validDrop
         && current.moved;
-      const snapshot = { ...current, originalIds: [...current.originalIds], currentIds: [...current.currentIds] };
+      const snapshot = {
+        ...current,
+        originalIds: [...current.originalIds],
+        currentIds: [...current.currentIds],
+        completeOriginalIds: [...current.completeOriginalIds],
+        completeCurrentIds: mergeVisibleArchiveOrderIntoCompleteGroup(
+          current.completeOriginalIds,
+          current.currentIds
+        )
+      };
       reorderSessionRef.current = null;
       reorderPointerCleanupRef.current?.();
       try {
@@ -2449,7 +2501,10 @@ export default function ProjectStoryboardOverheadPage() {
       scheduleArchiveClickSuppressionRelease(current.assetId);
       if (droppedOnDeleteZone) {
         if (snapshot.moved) {
-          setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
+          setCombinedArchiveAssets(reorderArchiveAssetsByIds(
+            archiveAssetsRef.current,
+            snapshot.completeOriginalIds
+          ));
         }
         exitReorderMode(snapshot.groupKey);
         void requestDraggedAssetDelete(snapshot.assetId);
@@ -2457,7 +2512,10 @@ export default function ProjectStoryboardOverheadPage() {
       }
       if (!shouldSave) {
         if (snapshot.moved) {
-          setCombinedArchiveAssets(reorderArchiveAssetsByIds(archiveAssetsRef.current, snapshot.originalIds));
+          setCombinedArchiveAssets(reorderArchiveAssetsByIds(
+            archiveAssetsRef.current,
+            snapshot.completeOriginalIds
+          ));
         }
         if (!snapshot.allowReorder) exitReorderMode(snapshot.groupKey);
         return;
@@ -2468,12 +2526,12 @@ export default function ProjectStoryboardOverheadPage() {
       void archiveMutationQueueRef.current.enqueue(
         [
           archiveGroupMutationKey(operationProjectId, snapshot.groupKey),
-          ...snapshot.currentIds.map((assetId) => archiveAssetMutationKey(operationProjectId, assetId))
+          ...snapshot.completeCurrentIds.map((assetId) => archiveAssetMutationKey(operationProjectId, assetId))
         ],
         async () => {
           try {
             let expectedUpdatedAtById = archiveExpectedUpdatedAtById(
-              snapshot.currentIds,
+              snapshot.completeCurrentIds,
               committedPlacementByAssetIdRef.current,
               archiveAssetsRef.current
             );
@@ -2483,7 +2541,7 @@ export default function ProjectStoryboardOverheadPage() {
                 orders = await reorderProjectReferenceAssets(operationProjectId, {
                   sceneId: snapshot.sceneId,
                   cutNumber: snapshot.cutNumber,
-                  orderedAssetIds: snapshot.currentIds,
+                  orderedAssetIds: snapshot.completeCurrentIds,
                   expectedUpdatedAtById
                 });
                 break;
@@ -2493,7 +2551,7 @@ export default function ProjectStoryboardOverheadPage() {
                   commitOrderUpdates(error.orders);
                 }
                 const retryTimestamps = error instanceof ProjectReferenceAssetReorderError
-                  ? archiveRetryTimestamps(snapshot.currentIds, error)
+                  ? archiveRetryTimestamps(snapshot.completeCurrentIds, error)
                   : null;
                 if (
                   attempt === 0
@@ -2926,14 +2984,7 @@ export default function ProjectStoryboardOverheadPage() {
         ) : null}
 
         <Card className="grid gap-3">
-          <div className="grid gap-2 sm:grid-cols-[auto_minmax(12rem,1fr)_auto] sm:items-center">
-            <div className="grid grid-cols-3 gap-2">
-              {(["all", "overhead", "storyboard"] as const).map((type) => (
-                <button key={type} type="button" onClick={() => setActiveType(type)} className={`min-h-10 border px-4 text-sm font-bold transition-colors ${activeType === type ? "border-field-primary bg-field-primary/15 text-field-text" : "border-field-divider bg-field-panel text-field-muted hover:border-field-subtle hover:bg-field-hover hover:text-field-text"}`}>
-                  {type === "all" ? "전체" : type === "overhead" ? "부감도" : "콘티"}
-                </button>
-              ))}
-            </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(12rem,1fr)_auto] sm:items-center">
             <label className="relative block min-w-0">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
               <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="제목, 메모, 씬, 컷 검색" />
@@ -3076,9 +3127,9 @@ export default function ProjectStoryboardOverheadPage() {
                     const orderedAssets = cutGroup.items.flatMap((item) => item.kind === "asset" ? [item.asset] : []);
                     const orderedAssetIds = orderedAssets.map((asset) => asset.id);
                     const orderGroupKey = archiveOrderGroupKey(group.sceneId, cutGroup.cutNumber);
+                    const completeOrderedAssetIds = completeArchiveOrderByGroupKey.get(orderGroupKey) ?? orderedAssetIds;
                     const groupInReorderMode = reorderModeGroupKey === orderGroupKey;
                     const groupReorderEnabled = canEdit
-                      && activeType === "all"
                       && !query.trim()
                       && !selectionMode
                       && selectedKeys.size === 0
@@ -3088,6 +3139,7 @@ export default function ProjectStoryboardOverheadPage() {
                       && !(group.sceneId && !group.scene)
                       && !(group.sceneId === null && cutGroup.cutNumber !== null)
                       && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
+                      && orderedAssetIds.every((assetId) => completeOrderedAssetIds.includes(assetId))
                       && orderedAssetIds.length > 1;
                     return (
                       <div
@@ -3194,6 +3246,7 @@ export default function ProjectStoryboardOverheadPage() {
                                 group.sceneId,
                                 cutGroup.cutNumber,
                                 orderedAssetIds,
+                                completeOrderedAssetIds,
                                 assetReorderEnabled,
                                 event
                               );
@@ -4152,6 +4205,22 @@ function reorderArchiveAssetsByIds(assets: ProjectReferenceAsset[], orderedIds: 
     const sortOrder = orderById.get(asset.id);
     return sortOrder === undefined ? asset : { ...asset, sortOrder };
   });
+}
+
+function mergeVisibleArchiveOrderIntoCompleteGroup(
+  completeIds: string[],
+  visibleIds: string[]
+) {
+  const visibleIdSet = new Set(visibleIds);
+  if (
+    visibleIdSet.size !== visibleIds.length
+    || visibleIds.some((id) => !completeIds.includes(id))
+  ) return completeIds;
+
+  let visibleIndex = 0;
+  return completeIds.map((id) => (
+    visibleIdSet.has(id) ? visibleIds[visibleIndex++] : id
+  ));
 }
 
 function moveArchiveId(ids: string[], fromIndex: number, toIndex: number) {

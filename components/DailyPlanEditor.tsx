@@ -3,14 +3,13 @@
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { ListChecks, Plus, Printer, RotateCcw, Save, Search } from "lucide-react";
+import { Plus, RotateCcw, Search } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
   DailyPlanDuplicateError,
   dailyPlanShotToDraft,
   dailyPlanShotsToShotDrafts,
-  normalizeDailyPlanShotDrafts,
   saveDailyPlanWithShots,
   type SaveDailyPlanResult
 } from "@/lib/data/dailyPlans";
@@ -91,6 +90,10 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import {
+  useProjectPageActionMenu,
+  type ProjectPageActionMenuRegistration
+} from "@/components/ProjectPageActions";
 import { WeatherRegionPicker } from "@/components/weather/WeatherRegionPicker";
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
@@ -446,8 +449,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     new Set(initialPrintMeta.automaticTimetableRowIds)
   );
 
-  const flattenedShots = useMemo(() => scenesToShotDrafts(scenes, locations), [locations, scenes]);
-  const meaningfulShotCount = useMemo(() => normalizeDailyPlanShotDrafts(flattenedShots).length, [flattenedShots]);
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
     [mealTimes, printMeta.timetableRowOrder, scenes]
@@ -580,7 +581,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           : { ...event, startTime: "", endTime: "" };
     }));
   }, [timetableRows]);
-  const canPrint = previewData.scenes.length > 0 || previewData.mealTimes.length > 0;
+  const canPrint = previewData.scenes.length > 0;
   const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
   const weatherCards: EditableWeatherCardConfig[] = [
     { field: "weather", label: "날씨", value: printMeta.weather },
@@ -1478,16 +1479,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     void saveCurrentPlan();
   };
 
-  async function startApplyToShotBoard() {
-    const result = await saveCurrentPlan(false);
-    if (result?.didSyncShots) {
-      const count = dailyPlanShotsToShotDrafts(result.saved.plan, result.saved.shots.map(dailyPlanShotToDraft)).length;
-      setMessage(`${count}개 컷을 진행표와 동기화했습니다.`);
-    } else if (result) {
-      setMessage(formatProgressSyncFailure(result.saved));
-    }
-  }
-
   function getCurrentPreviewData() {
     const currentMeta = deriveDailyPlanHeadcount({
       ...printMeta,
@@ -1593,14 +1584,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   };
 
   useEffect(() => {
-    const handleSidebarPrintRequest = () => sidebarPrintRequestRef.current();
-    const handleSidebarSaveRequest = () => sidebarSaveRequestRef.current();
     const printMedia = window.matchMedia("print");
     const handlePrintMediaChange = (event: MediaQueryListEvent) => {
       if (!event.matches && isPrintingRef.current) releasePrintView();
     };
-    window.addEventListener("daily-plan:request-print", handleSidebarPrintRequest);
-    window.addEventListener("daily-plan:request-save", handleSidebarSaveRequest);
     window.addEventListener("afterprint", releasePrintView);
     if (typeof printMedia.addEventListener === "function") {
       printMedia.addEventListener("change", handlePrintMediaChange);
@@ -1608,8 +1595,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       printMedia.addListener(handlePrintMediaChange);
     }
     return () => {
-      window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
-      window.removeEventListener("daily-plan:request-save", handleSidebarSaveRequest);
       window.removeEventListener("afterprint", releasePrintView);
       if (typeof printMedia.removeEventListener === "function") {
         printMedia.removeEventListener("change", handlePrintMediaChange);
@@ -1621,6 +1606,27 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       isPrintingRef.current = false;
     };
   }, [clearPrintCleanupTimeout, clearPrintPageStyle, releasePrintView]);
+
+  const dailyPlanActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
+    key: "dailyPlan",
+    scopeKey: `daily-plan:${dailyPlanId ?? "new"}`,
+    actions: {
+      dailyPlanPdf: {
+        onSelect: () => sidebarPrintRequestRef.current(),
+        disabled: !canPrint || !documentOrientation || isPrinting,
+        pending: isPrinting
+      },
+      dailyPlanSave: {
+        onSelect: () => sidebarSaveRequestRef.current(),
+        disabled: !canManageTimetable || isSaving,
+        pending: isSaving
+      },
+      dailyPlanRounds: {
+        href: `/projects/${project.id}/daily-plans`
+      }
+    }
+  }), [canManageTimetable, canPrint, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
+  useProjectPageActionMenu(dailyPlanActionMenu);
 
   const isActorCardDragging = actorInteraction.isDragging;
   const activeCardInteraction = isActorCardDragging ? actorInteraction : timetableInteraction;
@@ -2267,29 +2273,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
         <DailyPlanLivePreview data={previewData} orientation={documentOrientation} />
 
-      <section className="field-section mt-5 p-5">
-        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-          <p className="text-sm font-normal text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
-          <div className="grid min-w-0 gap-2 sm:grid-cols-3">
-            <Button onClick={() => saveCurrentPlan()} disabled={isSaving}>
-              <Save className="h-5 w-5" aria-hidden />
-              일촬표 저장
-            </Button>
-            <Button onClick={startApplyToShotBoard} disabled={isSaving || meaningfulShotCount === 0}>
-              <ListChecks className="h-5 w-5" aria-hidden />
-              저장 후 컷 진행표로 반영
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void handlePrint()}
-              disabled={!canPrint || !documentOrientation || isPrinting}
-            >
-              <Printer className="h-5 w-5" aria-hidden />
-              {isPrinting ? "PDF 준비 중" : "PDF 출력"}
-            </Button>
-          </div>
-        </div>
-      </section>
       </div>
 
       {printJob ? (
