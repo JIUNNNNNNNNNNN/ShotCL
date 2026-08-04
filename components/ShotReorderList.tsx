@@ -15,6 +15,7 @@ type DragState = {
 type ShotReorderListProps = {
   allShots: Shot[];
   visibleShots: Shot[];
+  className?: string;
   disabled?: boolean;
   onReorder: (shots: Shot[]) => Promise<void> | void;
   renderShot: (shot: Shot) => ReactNode;
@@ -30,26 +31,32 @@ function isDragExcludedTarget(target: EventTarget | null) {
     && Boolean(target.closest("input, textarea, select, [contenteditable='true'], [data-no-drag]"));
 }
 
-function reorderShots(
-  shots: Shot[],
+function reorderVisibleShots(
+  allShots: Shot[],
+  visibleShots: Shot[],
   draggedId: string,
   targetId: string,
   insertAfter: boolean
 ) {
-  if (draggedId === targetId) return shots;
+  if (draggedId === targetId) return allShots;
 
-  const draggedShot = shots.find((shot) => shot.id === draggedId);
-  if (!draggedShot) return shots;
+  const draggedShot = visibleShots.find((shot) => shot.id === draggedId);
+  if (!draggedShot) return allShots;
 
-  const remaining = shots.filter((shot) => shot.id !== draggedId);
+  const remaining = visibleShots.filter((shot) => shot.id !== draggedId);
   const targetIndex = remaining.findIndex((shot) => shot.id === targetId);
-  if (targetIndex < 0) return shots;
+  if (targetIndex < 0) return allShots;
 
   const insertIndex = targetIndex + (insertAfter ? 1 : 0);
-  const nextShots = [...remaining];
-  nextShots.splice(insertIndex, 0, draggedShot);
-  if (nextShots.every((shot, index) => shots[index]?.id === shot.id)) return shots;
-  return nextShots.map((shot, index) => ({ ...shot, orderIndex: index + 1 }));
+  const nextVisibleShots = [...remaining];
+  nextVisibleShots.splice(insertIndex, 0, draggedShot);
+  if (nextVisibleShots.every((shot, index) => visibleShots[index]?.id === shot.id)) return allShots;
+
+  const visibleIds = new Set(visibleShots.map((shot) => shot.id));
+  let visibleIndex = 0;
+  return allShots.map((shot) => (
+    visibleIds.has(shot.id) ? nextVisibleShots[visibleIndex++] : shot
+  )).map((shot, index) => ({ ...shot, orderIndex: index + 1 }));
 }
 
 /**
@@ -59,6 +66,7 @@ function reorderShots(
 export function ShotReorderList({
   allShots,
   visibleShots,
+  className,
   disabled = false,
   onReorder,
   renderShot,
@@ -226,7 +234,7 @@ export function ShotReorderList({
       findDropTarget(pointerEvent.clientY);
       const targetId = latestTargetId;
       const nextShots = targetId
-        ? reorderShots(allShots, shotId, targetId, latestInsertAfter)
+        ? reorderVisibleShots(allShots, visibleShots, shotId, targetId, latestInsertAfter)
         : allShots;
       cleanup();
       if (nextShots !== allShots) void onReorder(nextShots);
@@ -260,7 +268,7 @@ export function ShotReorderList({
   }
 
   return (
-    <div ref={listRef} className="grid gap-2 pb-24">
+    <div ref={listRef} className={cn("grid gap-2", className)}>
       {visibleShots.map((shot, index) => {
         const isDragging = dragState?.shotId === shot.id;
         const isDropTarget = dragState?.targetId === shot.id && !isDragging;

@@ -15,6 +15,11 @@ import {
   type GatheringPhotoPreview
 } from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
+import {
+  ProgressSceneDurationEditor,
+  type ProgressSceneDurationSaveInput
+} from "@/components/ProgressSceneDurationEditor";
+import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import { ShotCard } from "@/components/ShotCard";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
@@ -23,8 +28,19 @@ import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
 import { getShotDiagramKey, loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
-import { applyShotMediaLinks, loadShotMediaLinks } from "@/lib/data/shotMediaArchive";
-import { listDailyPlans, updateDailyPlanScheduleItem, type DailyPlanListItem } from "@/lib/data/dailyPlans";
+import {
+  applyShotMediaLinks,
+  buildProgressArchiveMediaByShotId,
+  loadProgressArchiveMediaAssets,
+  loadShotMediaLinks,
+  type ProgressArchiveMediaAsset
+} from "@/lib/data/shotMediaArchive";
+import {
+  listDailyPlans,
+  updateDailyPlanSceneDuration,
+  updateDailyPlanScheduleItem,
+  type DailyPlanListItem
+} from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
@@ -32,9 +48,12 @@ import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dail
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
-import { calculateDailyProgress, calculateProgressPercent, isProcessedCutStatus } from "@/lib/progress/dailyProgress";
+import { calculateDailyProgress, calculateProgressPercent } from "@/lib/progress/dailyProgress";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
+
+type ProgressVisualBucket = "active" | "ok" | "omit";
 
 const ShotEditorModal = dynamic(
   () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
@@ -75,7 +94,7 @@ function placeScheduleRows(
   rowOrder: Array<"scene" | "event">
 ) {
   const placements = new Map<number, DailyPlanMealTime[]>();
-  const scheduleRows = rows.filter(isMeaningfulScheduleRow);
+  const scheduleRows = rows;
   const sceneOrder = [...new Set(shots.map((shot) => shot.sceneNumber.trim()))];
   const sceneCounts = new Map<string, number>();
   shots.forEach((shot) => {
@@ -96,12 +115,12 @@ function placeScheduleRows(
 
     const schedule = scheduleRows[scheduleIndex];
     scheduleIndex += 1;
-    if (!schedule) return;
+    if (!schedule || !isMeaningfulScheduleRow(schedule)) return;
     const targetIndex = Math.min(shotIndex, shots.length);
     placements.set(targetIndex, [...(placements.get(targetIndex) ?? []), schedule]);
   });
 
-  scheduleRows.slice(scheduleIndex).forEach((schedule) => {
+  scheduleRows.slice(scheduleIndex).filter(isMeaningfulScheduleRow).forEach((schedule) => {
     placements.set(shots.length, [...(placements.get(shots.length) ?? []), schedule]);
   });
   return placements;
@@ -132,7 +151,10 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
-  const [collapsedCutIds, setCollapsedCutIds] = useState<Set<string>>(() => new Set());
+  const [sessionBucketByShotId, setSessionBucketByShotId] = useState<Map<string, ProgressVisualBucket>>(() => new Map());
+  const [archiveMediaByShotId, setArchiveMediaByShotId] = useState<Map<string, ProgressArchiveMediaAsset[]>>(() => new Map());
+  const [okExpanded, setOkExpanded] = useState(false);
+  const [omitExpanded, setOmitExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
@@ -149,25 +171,30 @@ export default function ProjectDetailPage() {
   } | null>(null);
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
   const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
-  const collapsedCutIdsRef = useRef(collapsedCutIds);
-  const initializedCollapseEntryRef = useRef("");
+  const shotsRef = useRef(shots);
+  const sessionBucketByShotIdRef = useRef(sessionBucketByShotId);
+  const initializedBucketEntryRef = useRef("");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
-  activeProgressEntryKeyRef.current = progressEntryKey;
 
-  const updateCollapsedCutIds = useCallback((update: (current: Set<string>) => Set<string>) => {
-    setCollapsedCutIds((current) => {
-      const next = update(current);
-      collapsedCutIdsRef.current = next;
-      return next;
-    });
+  const commitSessionBuckets = useCallback((next: Map<string, ProgressVisualBucket>) => {
+    sessionBucketByShotIdRef.current = next;
+    setSessionBucketByShotId(next);
   }, []);
+
+  useEffect(() => {
+    activeProgressEntryKeyRef.current = progressEntryKey;
+  }, [progressEntryKey]);
+
+  useEffect(() => {
+    shotsRef.current = shots;
+  }, [shots]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
     const requestedEntryKey = progressEntryKey;
 
     try {
-      const [projectData, planData, selectedShots] = await Promise.all([
+      const [projectData, planData, selectedShots, archiveAssets] = await Promise.all([
         auditQuery(
           "progress.loadProject",
           "app/projects/[id]/page.tsx:refresh",
@@ -184,13 +211,22 @@ export default function ProjectDetailPage() {
               "app/projects/[id]/page.tsx:refresh",
               () => listShots(projectId, dailyPlanId)
             )
-          : Promise.resolve([])
+          : Promise.resolve([]),
+        dailyPlanId
+          ? auditQuery(
+              "progress.loadArchiveMedia",
+              "app/projects/[id]/page.tsx:refresh",
+              () => loadProgressArchiveMediaAssets(projectId)
+            ).catch(() => [] as ProgressArchiveMediaAsset[])
+          : Promise.resolve([] as ProgressArchiveMediaAsset[])
       ]);
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setProject(projectData);
       if (!projectData) {
         setDailyPlans([]);
         setShots([]);
+        setArchiveMediaByShotId(new Map());
+        commitSessionBuckets(new Map());
         setErrorMessage("");
         return;
       }
@@ -221,18 +257,26 @@ export default function ProjectDetailPage() {
       } else {
         setMediaLinksByShotId(new Map());
       }
+      const selectedPlanForAssets = planData.find((plan) => plan.id === dailyPlanId) ?? null;
+      setArchiveMediaByShotId(selectedPlanForAssets
+        ? buildProgressArchiveMediaByShotId({
+            shots: shotsWithDiagrams,
+            assets: archiveAssets,
+            timetableScenes: decodeDailyPlanMemo(selectedPlanForAssets.memo).timetableScenes,
+            dailyPlanId: selectedPlanForAssets.id,
+            episodeNumber: parseEpisodeNumber(selectedPlanForAssets.episode)
+          })
+        : new Map());
       setDailyPlans(planData);
       setShots(shotsWithDiagrams);
-      if (initializedCollapseEntryRef.current !== requestedEntryKey) {
-        const initiallyCollapsedIds = new Set(
-          shotsWithDiagrams
-            .filter((shot) => isProcessedCutStatus(shot.status))
-            .map((shot) => shot.id)
-        );
-        initializedCollapseEntryRef.current = requestedEntryKey;
-        collapsedCutIdsRef.current = initiallyCollapsedIds;
-        setCollapsedCutIds(initiallyCollapsedIds);
-      }
+      const shouldInitializeBuckets = initializedBucketEntryRef.current !== requestedEntryKey;
+      const nextBuckets = reconcileSessionBuckets(
+        shotsWithDiagrams,
+        shouldInitializeBuckets ? new Map() : sessionBucketByShotIdRef.current,
+        shouldInitializeBuckets
+      );
+      initializedBucketEntryRef.current = requestedEntryKey;
+      commitSessionBuckets(nextBuckets);
       setErrorMessage("");
     } catch (error) {
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
@@ -240,14 +284,16 @@ export default function ProjectDetailPage() {
     } finally {
       if (activeProgressEntryKeyRef.current === requestedEntryKey) setIsLoading(false);
     }
-  }, [dailyPlanId, progressEntryKey, projectId]);
+  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId]);
 
   useEffect(() => {
-    initializedCollapseEntryRef.current = "";
-    const emptySet = new Set<string>();
-    collapsedCutIdsRef.current = emptySet;
-    setCollapsedCutIds(emptySet);
-  }, [progressEntryKey]);
+    initializedBucketEntryRef.current = "";
+    commitSessionBuckets(new Map());
+    setArchiveMediaByShotId(new Map());
+    setOkExpanded(false);
+    setOmitExpanded(false);
+    setIsLoading(true);
+  }, [commitSessionBuckets, progressEntryKey]);
 
   useEffect(() => {
     refresh();
@@ -255,17 +301,24 @@ export default function ProjectDetailPage() {
 
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
+    const requestedEntryKey = progressEntryKey;
     try {
       const refreshedShots = await auditQuery(
         "progress.realtime.reloadCuts",
         "app/projects/[id]/page.tsx:refreshSelectedShots",
         () => listShots(projectId, dailyPlanId)
       );
-      setShots((current) => refreshedShots.map((shot) => preserveShotMedia(shot, current.find((item) => item.id === shot.id))));
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      const nextShots = refreshedShots.map((shot) => (
+        preserveShotMedia(shot, shotsRef.current.find((item) => item.id === shot.id))
+      ));
+      setShots(nextShots);
+      commitSessionBuckets(reconcileSessionBuckets(nextShots, sessionBucketByShotIdRef.current, false));
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
     }
-  }, [dailyPlanId, projectId]);
+  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId]);
 
   useEffect(() => {
     if (!projectId || !dailyPlanId) return undefined;
@@ -275,8 +328,28 @@ export default function ProjectDetailPage() {
   const nextOrderIndex = shots.length + 1;
   const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
   const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
+  const activeShots = useMemo(
+    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "active"),
+    [sessionBucketByShotId, shots]
+  );
+  const okShots = useMemo(
+    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "ok"),
+    [sessionBucketByShotId, shots]
+  );
+  const omitShots = useMemo(
+    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "omit"),
+    [sessionBucketByShotId, shots]
+  );
   const scheduleRowsByIndex = useMemo(
     () => selectedPlan ? placeScheduleRows(shots, selectedPlan.mealTimes, decodeDailyPlanMemo(selectedPlan.memo).timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
+    [selectedPlan, shots]
+  );
+  const activeScheduleRowsByIndex = useMemo(
+    () => remapScheduleRowsForVisibleShots(shots, activeShots, scheduleRowsByIndex),
+    [activeShots, scheduleRowsByIndex, shots]
+  );
+  const sceneDurationRowByShotId = useMemo(
+    () => buildProgressSceneDurationRowsByFirstShot(selectedPlan, shots),
     [selectedPlan, shots]
   );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
@@ -288,46 +361,33 @@ export default function ProjectDetailPage() {
     if (!target) return;
     setPreview({ url: target.url, title: target.title, images, index });
   }, []);
-  const handleDailyPlanMetadataChange = useCallback((patch: Pick<DailyPlan, "memo" | "updatedAt">) => {
+  const handleDailyPlanMetadataChange = useCallback((
+    patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
+  ) => {
     setDailyPlans((current) => current.map((item) => (
       item.id === dailyPlanId ? { ...item, ...patch } : item
     )));
   }, [dailyPlanId]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
-    const wasProcessed = isProcessedCutStatus(targetShot.status);
-    const willBeProcessed = isProcessedCutStatus(status);
-    const wasCollapsed = collapsedCutIdsRef.current.has(targetShot.id);
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
     setErrorMessage("");
-    if (wasProcessed && !willBeProcessed) {
-      updateCollapsedCutIds((current) => withCollapsedCut(current, targetShot.id, false));
-    }
     setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
 
     try {
       const savedShot = await updateShotStatus(targetShot, status);
-      const savedIsProcessed = isProcessedCutStatus(savedShot.status);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setShots((current) => current.map((shot) => (
         shot.id === savedShot.id
           ? preserveShotMedia(savedShot, shot)
           : shot
       )));
-      if (!wasProcessed && savedIsProcessed) {
-        updateCollapsedCutIds((current) => withCollapsedCut(current, savedShot.id, true));
-      } else if (!savedIsProcessed) {
-        updateCollapsedCutIds((current) => withCollapsedCut(current, savedShot.id, false));
-      }
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setShots((current) => current.map((shot) => (shot.id === targetShot.id ? targetShot : shot)));
-      updateCollapsedCutIds((current) => withCollapsedCut(current, targetShot.id, wasCollapsed));
       setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
     }
-  }, [updateCollapsedCutIds]);
-
-  const handleToggleShotCollapsed = useCallback((shot: Shot) => {
-    if (!isProcessedCutStatus(shot.status)) return;
-    updateCollapsedCutIds((current) => withCollapsedCut(current, shot.id, !current.has(shot.id)));
-  }, [updateCollapsedCutIds]);
+  }, []);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -419,6 +479,43 @@ export default function ProjectDetailPage() {
     }
   }
 
+  const handleSaveSceneDuration = useCallback(async ({
+    rowId,
+    runtimeMinutes
+  }: ProgressSceneDurationSaveInput) => {
+    if (!projectId || !dailyPlanId || role !== "admin") {
+      throw new Error("씬 예정 소요시간을 수정할 권한이 없습니다.");
+    }
+    const currentPlan = dailyPlans.find((plan) => plan.id === dailyPlanId);
+    if (!currentPlan) throw new Error("일촬표를 찾을 수 없습니다.");
+
+    const result = await updateDailyPlanSceneDuration({
+      projectId,
+      dailyPlanId,
+      rowId,
+      runtimeMinutes,
+      expectedUpdatedAt: currentPlan.updatedAt
+    });
+    setDailyPlans((current) => current.map((plan) => (
+      plan.id === dailyPlanId
+        ? { ...plan, memo: result.memo, updatedAt: result.updatedAt }
+        : plan
+    )));
+  }, [dailyPlanId, dailyPlans, projectId, role]);
+
+  const renderSceneDurationBeforeIndex = useCallback((visibleShots: Shot[], index: number) => {
+    const shot = visibleShots[index];
+    const row = shot ? sceneDurationRowByShotId.get(shot.id) : null;
+    return row ? (
+      <ProgressSceneDurationEditor
+        rows={[row]}
+        canEdit={role === "admin"}
+        onSave={handleSaveSceneDuration}
+        showTitle={false}
+      />
+    ) : null;
+  }, [handleSaveSceneDuration, role, sceneDurationRowByShotId]);
+
   async function handleDeleteShot(shot: Shot) {
     const shouldDelete = window.confirm(`"${shot.title}" 컷을 삭제할까요?`);
     if (!shouldDelete) return;
@@ -443,18 +540,35 @@ export default function ProjectDetailPage() {
     setMediaPicker({ shot, type });
   }, []);
 
+  const handleArchivePreview = useCallback((
+    asset: ProgressArchiveMediaAsset,
+    assets: ProgressArchiveMediaAsset[]
+  ) => {
+    const images = assets.map((item) => ({
+      url: item.publicUrl,
+      title: item.title || (item.mediaType === "storyboard" ? "콘티" : "부감도")
+    }));
+    const index = Math.max(0, assets.findIndex((item) => item.id === asset.id));
+    setPreview({
+      url: asset.publicUrl,
+      title: asset.title || (asset.mediaType === "storyboard" ? "콘티" : "부감도"),
+      images,
+      index
+    });
+  }, []);
+
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
       onOpen={setEditingShot}
       onOpenMedia={handleOpenMedia}
       onImagePreview={handleImagePreview}
+      archiveMedia={archiveMediaByShotId.get(shot.id) ?? []}
+      onArchivePreview={handleArchivePreview}
       onStatusChange={handleStatusChange}
-      collapsed={collapsedCutIds.has(shot.id)}
-      onToggleCollapsed={handleToggleShotCollapsed}
       progressOnly={progressOnly}
     />
-  ), [collapsedCutIds, handleImagePreview, handleOpenMedia, handleStatusChange, handleToggleShotCollapsed, progressOnly]);
+  ), [archiveMediaByShotId, handleArchivePreview, handleImagePreview, handleOpenMedia, handleStatusChange, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -588,7 +702,7 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      <div id="cut-board" className="scroll-mt-28">
+      <div id="cut-board" className="scroll-mt-28 pb-24">
         <div className="mb-2 px-1">
           <h2 className="text-lg font-black text-field-text">오늘 컷</h2>
         </div>
@@ -604,21 +718,70 @@ export default function ProjectDetailPage() {
             </div>
           </Card>
         ) : (
-          <ShotReorderList
-            allShots={shots}
-            visibleShots={shots}
-            disabled={role !== "admin" || isReordering}
-            onReorder={handleReorderShots}
-            renderShot={renderShot}
-            renderRowsBeforeIndex={(index) => scheduleRowsByIndex.get(index)?.map((item) => (
-              <ProgressScheduleCard
-                key={item.id}
-                item={item}
-                onOpen={setEditingSchedule}
-                onImagePreview={handleImagePreview}
+          <div className="grid gap-3">
+            <section aria-labelledby="active-progress-shots-title" className="grid gap-2">
+              <div className="flex min-h-10 items-center gap-2 border border-field-border bg-field-section px-3 py-2">
+                <h3 id="active-progress-shots-title" className="text-sm font-bold text-field-text">미촬영·촬영중</h3>
+                <span className="tabular-nums text-xs font-bold text-field-subtle">{activeShots.length}</span>
+              </div>
+              <ShotReorderList
+                allShots={shots}
+                visibleShots={activeShots}
+                disabled={role !== "admin" || isReordering}
+                onReorder={handleReorderShots}
+                renderShot={renderShot}
+                renderRowsBeforeIndex={(index) => (
+                  <>
+                    {activeScheduleRowsByIndex.get(index)?.map((item) => (
+                      <ProgressScheduleCard
+                        key={item.id}
+                        item={item}
+                        onOpen={setEditingSchedule}
+                        onImagePreview={handleImagePreview}
+                      />
+                    ))}
+                    {renderSceneDurationBeforeIndex(activeShots, index)}
+                  </>
+                )}
               />
-            ))}
-          />
+            </section>
+
+            <ProgressStatusSection
+              kind="ok"
+              count={okShots.length}
+              expanded={okExpanded}
+              onExpandedChange={setOkExpanded}
+            >
+              {okShots.length > 0 ? (
+                <ShotReorderList
+                  allShots={shots}
+                  visibleShots={okShots}
+                  disabled={role !== "admin" || isReordering}
+                  onReorder={handleReorderShots}
+                  renderShot={renderShot}
+                  renderRowsBeforeIndex={(index) => renderSceneDurationBeforeIndex(okShots, index)}
+                />
+              ) : <p className="px-1 py-2 text-xs text-field-muted">OK 컷이 없습니다.</p>}
+            </ProgressStatusSection>
+
+            <ProgressStatusSection
+              kind="omit"
+              count={omitShots.length}
+              expanded={omitExpanded}
+              onExpandedChange={setOmitExpanded}
+            >
+              {omitShots.length > 0 ? (
+                <ShotReorderList
+                  allShots={shots}
+                  visibleShots={omitShots}
+                  disabled={role !== "admin" || isReordering}
+                  onReorder={handleReorderShots}
+                  renderShot={renderShot}
+                  renderRowsBeforeIndex={(index) => renderSceneDurationBeforeIndex(omitShots, index)}
+                />
+              ) : <p className="px-1 py-2 text-xs text-field-muted">OMIT 컷이 없습니다.</p>}
+            </ProgressStatusSection>
+          </div>
         )}
       </div>
 
@@ -711,12 +874,85 @@ export default function ProjectDetailPage() {
   );
 }
 
-function withCollapsedCut(current: Set<string>, shotId: string, shouldCollapse: boolean) {
-  if (current.has(shotId) === shouldCollapse) return current;
-  const next = new Set(current);
-  if (shouldCollapse) next.add(shotId);
-  else next.delete(shotId);
+function reconcileSessionBuckets(
+  shots: Shot[],
+  current: Map<string, ProgressVisualBucket>,
+  initialize: boolean
+) {
+  const next = new Map<string, ProgressVisualBucket>();
+  shots.forEach((shot) => {
+    next.set(shot.id, initialize
+      ? getPersistedStatusBucket(shot.status)
+      : current.get(shot.id) ?? getPersistedStatusBucket(shot.status));
+  });
   return next;
+}
+
+function getPersistedStatusBucket(status: ShotStatus): ProgressVisualBucket {
+  if (status === "ok") return "ok";
+  if (status === "omit") return "omit";
+  return "active";
+}
+
+function remapScheduleRowsForVisibleShots(
+  allShots: Shot[],
+  visibleShots: Shot[],
+  rowsByIndex: Map<number, DailyPlanMealTime[]>
+) {
+  const visibleIds = new Set(visibleShots.map((shot) => shot.id));
+  const result = new Map<number, DailyPlanMealTime[]>();
+  let visibleIndex = 0;
+
+  for (let allIndex = 0; allIndex <= allShots.length; allIndex += 1) {
+    const rows = rowsByIndex.get(allIndex);
+    if (rows?.length) {
+      result.set(visibleIndex, [...(result.get(visibleIndex) ?? []), ...rows]);
+    }
+    const shot = allShots[allIndex];
+    if (shot && visibleIds.has(shot.id)) visibleIndex += 1;
+  }
+  return result;
+}
+
+function buildProgressSceneDurationRowsByFirstShot(plan: DailyPlan | null, shots: Shot[]) {
+  const result = new Map<string, {
+    rowId: string;
+    sceneLabel: string;
+    runtimeMinutes: number | null;
+  }>();
+  if (!plan) return result;
+
+  const firstShotByScene = new Map<string, string>();
+  shots.forEach((shot) => {
+    const sceneNumber = normalizeSceneNumber(shot.sceneNumber);
+    if (sceneNumber && !firstShotByScene.has(sceneNumber)) {
+      firstShotByScene.set(sceneNumber, shot.id);
+    }
+  });
+
+  const assignedScenes = new Set<string>();
+  decodeDailyPlanMemo(plan.memo).timetableScenes.forEach((scene) => {
+    const sceneNumber = normalizeSceneNumber(
+      scene.rowSnapshot.sceneNumber || scene.sourceSnapshot?.sceneNumber
+    );
+    const rowId = scene.rowId.trim();
+    const shotId = firstShotByScene.get(sceneNumber);
+    if (!sceneNumber || !rowId || !shotId || assignedScenes.has(sceneNumber)) return;
+    assignedScenes.add(sceneNumber);
+    result.set(shotId, {
+      rowId,
+      sceneLabel: `S#${sceneNumber}`,
+      runtimeMinutes: scene.rowSnapshot.runtimeMinutes
+    });
+  });
+  return result;
+}
+
+function parseEpisodeNumber(value: string) {
+  const match = value.match(/\d+/);
+  if (!match) return null;
+  const parsed = Number.parseInt(match[0], 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function preserveShotMedia(next: Shot, previous: Shot | undefined): Shot {

@@ -87,22 +87,31 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "프로젝트 자료를 볼 권한이 없습니다." }, { status: 403 });
     }
 
+    const progressMedia = request.nextUrl.searchParams.get("media") === "1";
     const assetType = normalizeAssetType(request.nextUrl.searchParams.get("type"));
-    if (!assetType) return NextResponse.json({ error: "자료 종류가 올바르지 않습니다." }, { status: 400 });
+    if (!progressMedia && !assetType) {
+      return NextResponse.json({ error: "자료 종류가 올바르지 않습니다." }, { status: 400 });
+    }
 
     const supabase = requireProjectAccessDb();
     let query = supabase
       .from("project_reference_assets")
       .select(SELECT_COLUMNS)
       .eq("project_id", projectId)
-      .eq("asset_type", assetType)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false });
+    query = progressMedia
+      ? query.in("asset_type", ["storyboard", "overhead"])
+      : query.eq("asset_type", assetType as AssetType);
     const dailyPlanId = cleanText(request.nextUrl.searchParams.get("dailyPlanId"), 500);
     if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
     const { data, error } = await query;
     if (error) throw error;
-    return NextResponse.json({ ok: true, assets: (data ?? []).map(mapAssetRow) });
+    const assets = (data ?? []).map(mapAssetRow);
+    return NextResponse.json({
+      ok: true,
+      assets: progressMedia ? assets.filter(isProgressArchiveMediaAsset) : assets
+    });
   } catch (error) {
     return materialError(error, "프로젝트 자료를 불러오지 못했습니다.");
   }
@@ -1935,6 +1944,12 @@ async function getMaterialRole(request: NextRequest, projectId: string) {
 
 function normalizeAssetType(value: unknown): AssetType | null {
   return value === "scenario" || value === "storyboard" || value === "overhead" ? value : null;
+}
+
+function isProgressArchiveMediaAsset(asset: ReturnType<typeof mapAssetRow>) {
+  if (asset.assetType !== "storyboard" && asset.assetType !== "overhead") return false;
+  if (asset.groupId?.startsWith("source:")) return false;
+  return asset.mimeType.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(asset.filename);
 }
 
 function validateFile(assetType: AssetType, file: File) {

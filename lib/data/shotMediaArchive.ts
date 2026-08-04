@@ -1,7 +1,11 @@
 import { getShotDiagramKey } from "@/lib/data/shotDiagrams";
+import type { DailyPlanTimetableSceneMeta } from "@/lib/dailyPlan/printMeta";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
 import type {
+  ArchiveMediaAssetType,
   OverheadDiagramArchiveItem,
+  ProjectReferenceAsset,
   Shot,
   ShotMediaLink,
   ShotMediaType,
@@ -9,6 +13,95 @@ import type {
 } from "@/lib/types";
 
 type ApiError = { error?: string; detail?: string };
+
+/** 진행표가 자동으로 연결해 보여주는 아카이브 이미지 한 건입니다. */
+export type ProgressArchiveMediaAsset = {
+  id: string;
+  mediaType: ArchiveMediaAssetType;
+  title: string;
+  publicUrl: string;
+  thumbnailUrl: string;
+  dailyPlanId: string | null;
+  episodeNumber: number | null;
+  sceneId: string | null;
+  sceneNumber: string;
+  cutNumber: number;
+  sortOrder: number;
+  createdAt: string;
+};
+
+export type BuildProgressArchiveMediaMapInput = {
+  shots: Shot[];
+  assets: ProgressArchiveMediaAsset[];
+  timetableScenes: DailyPlanTimetableSceneMeta[];
+  dailyPlanId: string;
+  episodeNumber?: number | null;
+};
+
+/** 콘티·부감도 아카이브 이미지를 한 요청으로 불러옵니다. */
+export async function loadProgressArchiveMediaAssets(
+  projectId: string
+): Promise<ProgressArchiveMediaAsset[]> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/reference-assets?media=1`,
+    { cache: "no-store" }
+  );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    assets?: ProjectReferenceAsset[];
+  };
+  if (!response.ok) throw new Error(payload.error || "진행표용 콘티·부감도를 불러오지 못했습니다.");
+  return (payload.assets ?? []).flatMap(normalizeProgressArchiveMediaAsset);
+}
+
+/**
+ * 일촬표의 stable scene id를 최우선으로 사용해 컷별 아카이브 이미지를 연결합니다.
+ * 예전 자료의 scene number 연결은 같은 회차 또는 같은 일촬표임이 확인될 때만 허용합니다.
+ */
+export function buildProgressArchiveMediaByShotId({
+  shots,
+  assets,
+  timetableScenes,
+  dailyPlanId,
+  episodeNumber = null
+}: BuildProgressArchiveMediaMapInput): Map<string, ProgressArchiveMediaAsset[]> {
+  const sceneIdByNumber = buildUniqueSceneIdByNumber(timetableScenes);
+  const stableAssets = new Map<string, ProgressArchiveMediaAsset[]>();
+  const legacyAssets = new Map<string, ProgressArchiveMediaAsset[]>();
+
+  assets.forEach((asset) => {
+    if (asset.sceneId) appendMedia(stableAssets, mediaLookupKey(asset.sceneId, asset.cutNumber), asset);
+
+    const hasDailyPlanScope = Boolean(asset.dailyPlanId && asset.dailyPlanId === dailyPlanId);
+    const hasEpisodeScope = Boolean(
+      asset.episodeNumber !== null
+      && episodeNumber !== null
+      && asset.episodeNumber === episodeNumber
+    );
+    if (!asset.sceneId && asset.sceneNumber && (hasDailyPlanScope || hasEpisodeScope)) {
+      appendMedia(legacyAssets, mediaLookupKey(asset.sceneNumber, asset.cutNumber), asset);
+    }
+  });
+
+  const result = new Map<string, ProgressArchiveMediaAsset[]>();
+  shots.forEach((shot) => {
+    const cutNumber = positiveInteger(shot.cutNumber);
+    const sceneNumber = normalizeSceneNumber(shot.sceneNumber);
+    if (cutNumber === null || !sceneNumber) return;
+
+    const sourceSceneId = sceneIdByNumber.get(sceneNumber) ?? null;
+    const stableMatch = sourceSceneId
+      ? stableAssets.get(mediaLookupKey(sourceSceneId, cutNumber))
+      : undefined;
+    const legacyMatch = legacyAssets.get(mediaLookupKey(sceneNumber, cutNumber));
+    const matched = stableMatch?.length && legacyMatch?.length
+      ? [...stableMatch, ...legacyMatch]
+      : stableMatch?.length
+        ? stableMatch
+        : legacyMatch;
+    if (matched?.length) result.set(shot.id, matched);
+  });
+  return result;
+}
 
 export async function listOverheadDiagramArchive(projectId: string): Promise<OverheadDiagramArchiveItem[]> {
   const response = await fetch(
@@ -134,4 +227,76 @@ export function applyShotMediaLinks(
       overheadDiagram: overhead?.diagram || legacyDiagrams.get(shot.id) || null
     };
   });
+}
+
+function normalizeProgressArchiveMediaAsset(
+  asset: ProjectReferenceAsset
+): ProgressArchiveMediaAsset[] {
+  if (asset.assetType !== "storyboard" && asset.assetType !== "overhead") return [];
+  if (asset.groupId?.startsWith("source:")) return [];
+  const publicUrl = asset.publicUrl.trim();
+  const cutNumber = positiveInteger(asset.crop.cutNumber ?? asset.cutNo);
+  const sceneId = cleanText(asset.crop.sceneId);
+  const sceneNumber = normalizeSceneNumber(asset.crop.sceneNumber ?? asset.sceneNo);
+  if (!publicUrl || cutNumber === null || (!sceneId && !sceneNumber)) return [];
+
+  return [{
+    id: asset.id,
+    mediaType: asset.assetType,
+    title: cleanText(asset.crop.displayName) || cleanText(asset.crop.title) || asset.filename,
+    publicUrl,
+    thumbnailUrl: cleanText(asset.crop.thumbnailUrl) || publicUrl,
+    dailyPlanId: cleanText(asset.dailyPlanId) || null,
+    episodeNumber: positiveInteger(asset.crop.episodeNumber),
+    sceneId,
+    sceneNumber,
+    cutNumber,
+    sortOrder: Number.isFinite(asset.sortOrder) ? asset.sortOrder : 0,
+    createdAt: asset.createdAt
+  }];
+}
+
+function buildUniqueSceneIdByNumber(
+  timetableScenes: DailyPlanTimetableSceneMeta[]
+): Map<string, string> {
+  const candidates = new Map<string, Set<string>>();
+  timetableScenes.forEach((scene) => {
+    const sceneNumber = normalizeSceneNumber(
+      scene.rowSnapshot.sceneNumber || scene.sourceSnapshot?.sceneNumber
+    );
+    const sourceSceneId = cleanText(scene.sourceSceneId);
+    if (!sceneNumber || !sourceSceneId) return;
+    const ids = candidates.get(sceneNumber) ?? new Set<string>();
+    ids.add(sourceSceneId);
+    candidates.set(sceneNumber, ids);
+  });
+
+  const result = new Map<string, string>();
+  candidates.forEach((ids, sceneNumber) => {
+    if (ids.size === 1) result.set(sceneNumber, Array.from(ids)[0]);
+  });
+  return result;
+}
+
+function appendMedia(
+  target: Map<string, ProgressArchiveMediaAsset[]>,
+  key: string,
+  asset: ProgressArchiveMediaAsset
+) {
+  const current = target.get(key);
+  if (current) current.push(asset);
+  else target.set(key, [asset]);
+}
+
+function mediaLookupKey(sceneKey: string, cutNumber: number) {
+  return `${sceneKey}\u0000${cutNumber}`;
+}
+
+function positiveInteger(value: unknown): number | null {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function cleanText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }

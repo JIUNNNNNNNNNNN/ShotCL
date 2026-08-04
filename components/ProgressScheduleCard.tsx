@@ -44,18 +44,18 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
         </button>
       ) : null}
 
-      <div className="grid min-w-0 gap-1.5 sm:grid-cols-[8rem_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="shrink-0 border border-field-primary/70 bg-field-primary/10 px-2 py-1 text-[10px] font-bold text-field-primary">
-          기타일정
-        </span>
-        {time ? (
-          <span className="inline-flex min-w-0 items-center gap-1 truncate text-xs font-bold text-field-subtle">
-            <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {time}
+      <div className="grid min-w-0 gap-1.5 sm:grid-cols-[max-content_minmax(0,1fr)] sm:items-center sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
+          <span className="shrink-0 border border-field-primary/70 bg-field-primary/10 px-2 py-1 text-[10px] font-bold text-field-primary">
+            기타일정
           </span>
-        ) : null}
-      </div>
+          {time ? (
+            <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-bold text-field-subtle">
+              <Clock3 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {time}
+            </span>
+          ) : null}
+        </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold leading-5 text-field-text">{title}</p>
           {item.progressMemo?.trim() ? (

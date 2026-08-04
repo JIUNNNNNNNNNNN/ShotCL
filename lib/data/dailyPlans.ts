@@ -9,6 +9,16 @@ import {
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
+import {
+  createGatheringPointId,
+  normalizeGatheringLocationName,
+  reconcileDailyPlanGatheringPoints
+} from "@/lib/dailyPlan/gatheringPoints";
+import {
+  decodeDailyPlanMemo,
+  encodeDailyPlanMemo,
+  normalizeDailyPlanPrintMeta
+} from "@/lib/dailyPlan/printMeta";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
@@ -17,6 +27,7 @@ import type {
   DailyPlan,
   DailyPlanDraft,
   DailyPlanMealTime,
+  DailyPlanLocation,
   DailyPlanShot,
   DailyPlanShotDraft,
   DailyPlanSourceType,
@@ -41,7 +52,40 @@ export type DailyPlanListItem = DailyPlan & {
 };
 
 const dailyPlanListRequests = new Map<string, Promise<DailyPlanListItem[]>>();
-const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,shooting_locations,meal_times,memo,created_at,updated_at";
+const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,call_time,meeting_location,shooting_locations,meal_times,memo,created_at,updated_at";
+
+export type UpdateDailyPlanGatheringAddressInput = {
+  projectId: string;
+  dailyPlanId: string;
+  gatheringPointId: string | null;
+  locationId: string | null;
+  locationName: string;
+  departmentIds: string[];
+  address: string;
+  expectedUpdatedAt: string;
+};
+
+export type DailyPlanGatheringAddressMutationResult = {
+  memo: string;
+  shootingLocations: DailyPlanLocation[];
+  updatedAt: string;
+  gatheringPointId: string;
+};
+
+export type UpdateDailyPlanSceneDurationInput = {
+  projectId: string;
+  dailyPlanId: string;
+  rowId: string;
+  runtimeMinutes: number | null;
+  expectedUpdatedAt: string;
+};
+
+export type DailyPlanSceneDurationMutationResult = {
+  memo: string;
+  updatedAt: string;
+  rowId: string;
+  runtimeMinutes: number | null;
+};
 
 export type SaveDailyPlanResult = DailyPlanWithShots & {
   saveStatus: "saved" | "duplicate";
@@ -401,6 +445,343 @@ export async function updateDailyPlanScheduleItem(
     ))
   }, projectId);
   return mealTimes;
+}
+
+/** 진행도 화면에서 canonical 집합장소 주소를 명시적으로 저장합니다. */
+export async function updateDailyPlanGatheringAddress(
+  input: UpdateDailyPlanGatheringAddressInput
+): Promise<DailyPlanGatheringAddressMutationResult> {
+  if (!isValidDatabaseProjectId(input.projectId)) return updateLocalDailyPlanGatheringAddress(input);
+
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(input.projectId)}/daily-plans/${encodeURIComponent(input.dailyPlanId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gatheringAddress: {
+          gatheringPointId: input.gatheringPointId,
+          locationId: input.locationId,
+          locationName: input.locationName,
+          departmentIds: input.departmentIds,
+          address: input.address,
+          expectedUpdatedAt: input.expectedUpdatedAt
+        }
+      })
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    memo?: unknown;
+    shootingLocations?: unknown;
+    updatedAt?: unknown;
+    gatheringPointId?: unknown;
+    error?: string;
+  };
+  if (
+    !response.ok
+    || typeof payload.memo !== "string"
+    || !Array.isArray(payload.shootingLocations)
+    || typeof payload.updatedAt !== "string"
+    || typeof payload.gatheringPointId !== "string"
+  ) {
+    throw new Error(payload.error || "집합장소 주소를 저장하지 못했습니다.");
+  }
+  return {
+    memo: payload.memo,
+    shootingLocations: payload.shootingLocations as DailyPlanLocation[],
+    updatedAt: payload.updatedAt,
+    gatheringPointId: payload.gatheringPointId
+  };
+}
+
+/** 진행도 화면에서 daily plan timetable scene row의 예정 소요시간을 저장합니다. */
+export async function updateDailyPlanSceneDuration(
+  input: UpdateDailyPlanSceneDurationInput
+): Promise<DailyPlanSceneDurationMutationResult> {
+  validateSceneRuntimeMinutes(input.runtimeMinutes);
+  if (!isValidDatabaseProjectId(input.projectId)) return updateLocalDailyPlanSceneDuration(input);
+
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(input.projectId)}/daily-plans/${encodeURIComponent(input.dailyPlanId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sceneDuration: {
+          rowId: input.rowId,
+          runtimeMinutes: input.runtimeMinutes,
+          expectedUpdatedAt: input.expectedUpdatedAt
+        }
+      })
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as {
+    memo?: unknown;
+    updatedAt?: unknown;
+    rowId?: unknown;
+    runtimeMinutes?: unknown;
+    error?: string;
+  };
+  const runtimeMinutes = payload.runtimeMinutes === null
+    ? null
+    : typeof payload.runtimeMinutes === "number"
+      ? payload.runtimeMinutes
+      : undefined;
+  if (
+    !response.ok
+    || typeof payload.memo !== "string"
+    || typeof payload.updatedAt !== "string"
+    || typeof payload.rowId !== "string"
+    || runtimeMinutes === undefined
+  ) {
+    throw new Error(payload.error || "씬 예정 소요시간을 저장하지 못했습니다.");
+  }
+  return {
+    memo: payload.memo,
+    updatedAt: payload.updatedAt,
+    rowId: payload.rowId,
+    runtimeMinutes
+  };
+}
+
+function updateLocalDailyPlanGatheringAddress(
+  input: UpdateDailyPlanGatheringAddressInput
+): Promise<DailyPlanGatheringAddressMutationResult> {
+  const address = normalizeAddressInput(input.address);
+  const buckets = readLocalBuckets();
+  const planIndex = buckets.dailyPlans.findIndex((plan) => (
+    plan.projectId === input.projectId && plan.id === input.dailyPlanId
+  ));
+  if (planIndex < 0) throw new Error("일촬표를 찾을 수 없습니다.");
+  const plan = buckets.dailyPlans[planIndex];
+  if (input.expectedUpdatedAt && plan.updatedAt !== input.expectedUpdatedAt) {
+    throw new Error("일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인한 뒤 다시 저장해주세요.");
+  }
+
+  const requestedLocationId = cleanReferenceId(input.locationId);
+  const requestedPointId = cleanReferenceId(input.gatheringPointId);
+  const requestedDepartmentIds = uniqueReferenceIds(input.departmentIds);
+  const locationName = normalizeGatheringLocationName(input.locationName).slice(0, 500);
+  const location = requestedLocationId
+    ? plan.shootingLocations.find((item) => item.id === requestedLocationId) ?? null
+    : null;
+  if (requestedLocationId && !location) throw new Error("집합장소 위치 정보를 찾을 수 없습니다.");
+
+  let meta = reconcileDailyPlanGatheringPoints(decodeDailyPlanMemo(plan.memo), plan.shootingLocations);
+  if (requestedDepartmentIds.some((id) => !meta.teams.some((team) => team.id === id))) {
+    throw new Error("집합장소와 연결된 부서 정보를 찾을 수 없습니다.");
+  }
+  let point = resolveGatheringPointForMutation(meta, {
+    requestedPointId,
+    requestedLocationId,
+    requestedDepartmentIds,
+    locationName
+  });
+  if (requestedPointId && !point) throw new Error("집합장소 정보를 찾을 수 없습니다.");
+  if (point?.locationId && requestedLocationId && point.locationId !== requestedLocationId) {
+    throw new Error("집합장소와 위치 정보가 일치하지 않습니다.");
+  }
+
+  const pointId = point?.id ?? createGatheringPointId();
+  if (!point) {
+    meta = ensureGatheringPointForMutation(meta, {
+      pointId,
+      requestedLocationId,
+      requestedDepartmentIds,
+      locationName,
+      address
+    }, plan.shootingLocations);
+    point = meta.gatheringPoints.find((item) => item.id === pointId) ?? null;
+  }
+  if (!point) throw new Error("집합장소 정보를 만들지 못했습니다.");
+
+  const effectiveLocationId = requestedLocationId || point.locationId || "";
+  const shootingLocations = plan.shootingLocations.map((item) => (
+    item.id === effectiveLocationId
+      ? { ...item, inputMode: "manual" as const, manualAddress: address }
+      : item
+  ));
+  meta = reconcileDailyPlanGatheringPoints(meta, shootingLocations);
+  if (!meta.gatheringPoints.some((item) => item.id === pointId)) {
+    meta = ensureGatheringPointForMutation(meta, {
+      pointId,
+      requestedLocationId: effectiveLocationId,
+      requestedDepartmentIds,
+      locationName: locationName || point.locationName,
+      address
+    }, shootingLocations);
+  }
+  meta = normalizeDailyPlanPrintMeta({
+    ...meta,
+    gatheringPoints: meta.gatheringPoints.map((item) => (
+      item.id === pointId ? { ...item, address: address || undefined } : item
+    ))
+  });
+
+  const now = new Date().toISOString();
+  const memo = encodeDailyPlanMemo(meta);
+  writeLocalBuckets({
+    dailyPlans: buckets.dailyPlans.map((item, index) => (
+      index === planIndex ? { ...item, shootingLocations, memo, updatedAt: now } : item
+    ))
+  }, input.projectId);
+  return Promise.resolve({ memo, shootingLocations, updatedAt: now, gatheringPointId: pointId });
+}
+
+function updateLocalDailyPlanSceneDuration(
+  input: UpdateDailyPlanSceneDurationInput
+): Promise<DailyPlanSceneDurationMutationResult> {
+  validateSceneRuntimeMinutes(input.runtimeMinutes);
+  const rowId = cleanReferenceId(input.rowId);
+  if (!rowId) throw new Error("수정할 씬 행 정보가 없습니다.");
+  const buckets = readLocalBuckets();
+  const planIndex = buckets.dailyPlans.findIndex((plan) => (
+    plan.projectId === input.projectId && plan.id === input.dailyPlanId
+  ));
+  if (planIndex < 0) throw new Error("일촬표를 찾을 수 없습니다.");
+  const plan = buckets.dailyPlans[planIndex];
+  if (input.expectedUpdatedAt && plan.updatedAt !== input.expectedUpdatedAt) {
+    throw new Error("일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인한 뒤 다시 저장해주세요.");
+  }
+  const meta = decodeDailyPlanMemo(plan.memo);
+  if (!meta.timetableScenes.some((scene) => scene.rowId === rowId)) {
+    throw new Error("씬 촬영 행을 찾을 수 없습니다.");
+  }
+  const nextMeta = normalizeDailyPlanPrintMeta({
+    ...meta,
+    timetableScenes: meta.timetableScenes.map((scene) => (
+      scene.rowId === rowId
+        ? {
+            ...scene,
+            rowSnapshot: {
+              ...scene.rowSnapshot,
+              runtimeMinutes: input.runtimeMinutes,
+              runtime: formatRuntimeMinutes(input.runtimeMinutes)
+            }
+          }
+        : scene
+    ))
+  });
+  const memo = encodeDailyPlanMemo(nextMeta);
+  const now = new Date().toISOString();
+  writeLocalBuckets({
+    dailyPlans: buckets.dailyPlans.map((item, index) => (
+      index === planIndex ? { ...item, memo, updatedAt: now } : item
+    ))
+  }, input.projectId);
+  return Promise.resolve({ memo, updatedAt: now, rowId, runtimeMinutes: input.runtimeMinutes });
+}
+
+function resolveGatheringPointForMutation(
+  meta: ReturnType<typeof decodeDailyPlanMemo>,
+  input: {
+    requestedPointId: string;
+    requestedLocationId: string;
+    requestedDepartmentIds: string[];
+    locationName: string;
+  }
+) {
+  if (input.requestedPointId) {
+    return meta.gatheringPoints.find((point) => point.id === input.requestedPointId) ?? null;
+  }
+  if (input.requestedDepartmentIds.length > 0) {
+    const departmentMatch = meta.gatheringPoints.find((point) => (
+      input.requestedDepartmentIds.some((id) => point.departmentIds.includes(id))
+    ));
+    if (departmentMatch) return departmentMatch;
+  }
+  if (input.requestedLocationId) {
+    const locationMatch = meta.gatheringPoints.find((point) => point.locationId === input.requestedLocationId);
+    if (locationMatch) return locationMatch;
+  }
+  const normalizedName = normalizeGatheringLocationName(input.locationName).toLocaleLowerCase("ko-KR");
+  if (!normalizedName) return null;
+  return meta.gatheringPoints.find((point) => (
+    normalizeGatheringLocationName(point.locationName).toLocaleLowerCase("ko-KR") === normalizedName
+  )) ?? null;
+}
+
+function ensureGatheringPointForMutation(
+  meta: ReturnType<typeof decodeDailyPlanMemo>,
+  input: {
+    pointId: string;
+    requestedLocationId: string;
+    requestedDepartmentIds: string[];
+    locationName: string;
+    address: string;
+  },
+  locations: DailyPlanLocation[]
+) {
+  const normalizedName = normalizeGatheringLocationName(input.locationName);
+  const matchingTeams = meta.teams.filter((team) => (
+    input.requestedDepartmentIds.includes(team.id)
+    || Boolean(input.requestedLocationId && team.callLocationId === input.requestedLocationId)
+    || Boolean(normalizedName && normalizeGatheringLocationName(team.callLocation) === normalizedName)
+  ));
+  const departmentIds = matchingTeams.map((team) => team.id);
+  const seeded = normalizeDailyPlanPrintMeta({
+    ...meta,
+    teams: meta.teams.map((team) => (
+      departmentIds.includes(team.id) ? { ...team, gatheringPointId: input.pointId } : team
+    )),
+    gatheringPoints: [
+      ...meta.gatheringPoints.filter((point) => point.id !== input.pointId),
+      {
+        id: input.pointId,
+        locationName: normalizedName,
+        locationId: input.requestedLocationId || undefined,
+        address: input.address || undefined,
+        departmentIds,
+        departmentTimes: matchingTeams.map((team) => ({
+          departmentId: team.id,
+          time: String(team.callTime ?? "").trim()
+        })),
+        photos: []
+      }
+    ]
+  });
+  const reconciled = reconcileDailyPlanGatheringPoints(seeded, locations);
+  if (reconciled.gatheringPoints.some((point) => point.id === input.pointId)) return reconciled;
+  // 부서 metadata가 없는 과거 일촬표에서도 주소 자체는 잃지 않도록 orphan point를 보존합니다.
+  return normalizeDailyPlanPrintMeta({
+    ...reconciled,
+    gatheringPoints: [
+      ...reconciled.gatheringPoints,
+      seeded.gatheringPoints.find((point) => point.id === input.pointId)!
+    ]
+  });
+}
+
+function validateSceneRuntimeMinutes(value: number | null) {
+  if (value === null) return;
+  if (!Number.isInteger(value) || value < 0 || value > 1440) {
+    throw new Error("예정 소요시간은 0~1440분 사이의 정수로 입력해주세요.");
+  }
+}
+
+function formatRuntimeMinutes(value: number | null) {
+  if (value === null) return "";
+  if (value === 0) return "0M";
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  if (minutes === 0) return `${hours}H`;
+  if (hours === 0) return `${minutes}M`;
+  return `${hours}H${minutes}M`;
+}
+
+function normalizeAddressInput(value: unknown) {
+  const address = String(value ?? "").trim();
+  if (address.length > 1000) throw new Error("집합장소 주소는 1000자 이내로 입력해주세요.");
+  return address;
+}
+
+function cleanReferenceId(value: unknown) {
+  const id = String(value ?? "").trim();
+  return id && id.length <= 180 && !/[\u0000-\u001f\u007f]/.test(id) ? id : "";
+}
+
+function uniqueReferenceIds(values: unknown[]) {
+  return [...new Set(values.map(cleanReferenceId).filter(Boolean))].slice(0, 200);
 }
 
 /** 새 일촬표를 만들거나 기존 일촬표를 저장합니다. */

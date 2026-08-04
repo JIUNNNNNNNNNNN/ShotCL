@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ImagePlus, Save, Trash2, X } from "lucide-react";
 import { optimizeArchiveImage } from "@/lib/client/archiveMedia";
 import { saveDailyPlanGatheringPhotoDraft } from "@/lib/data/dailyPlanGatheringPhotos";
+import { updateDailyPlanGatheringAddress } from "@/lib/data/dailyPlans";
 import {
   createGatheringPhotoId,
-  normalizeGatheringLocationName
+  normalizeGatheringLocationName,
+  selectDailyPlanGatheringPoints
 } from "@/lib/dailyPlan/gatheringPoints";
 import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
 import { getDailyPlanLocationDisplayName } from "@/lib/dailyPlan/sceneLocations";
@@ -22,7 +24,9 @@ type DailyPlanGatheringLocationsProps = {
   projectId: string;
   plan: DailyPlan;
   canEdit: boolean;
-  onPlanMetadataChange: (patch: Pick<DailyPlan, "memo" | "updatedAt">) => void;
+  onPlanMetadataChange: (
+    patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
+  ) => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
 };
 
@@ -49,7 +53,9 @@ type DraftPhoto = ExistingDraftPhoto | PendingDraftPhoto;
 type ProgressGatheringPlace = {
   id: string;
   persistedId: string | null;
+  locationId: string | null;
   locationName: string;
+  address: string;
   departmentIds: string[];
   photos: DailyPlanGatheringPhoto[];
 };
@@ -66,10 +72,44 @@ export function DailyPlanGatheringLocations({
     [plan.meetingLocation, plan.memo, plan.shootingLocations]
   );
   const [isEditingPhotos, setIsEditingPhotos] = useState(false);
+  const [isEditingAddress, setIsEditingAddress] = useState(false);
+  const [addressDraft, setAddressDraft] = useState("");
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [addressError, setAddressError] = useState("");
   const [message, setMessage] = useState("");
   const callTime = plan.callTime.trim();
-  const hasContent = Boolean(callTime || place?.locationName || place?.photos.length);
+  const hasContent = Boolean(callTime || place?.locationName || place?.address || place?.photos.length);
   const canManagePhotos = Boolean(canEdit && place && (place.persistedId || place.departmentIds.length > 0));
+
+  async function saveAddress() {
+    if (!place || isSavingAddress) return;
+    setIsSavingAddress(true);
+    setAddressError("");
+    setMessage("");
+    try {
+      const result = await updateDailyPlanGatheringAddress({
+        projectId,
+        dailyPlanId: plan.id,
+        gatheringPointId: place.persistedId,
+        locationId: place.locationId,
+        locationName: place.locationName,
+        departmentIds: place.departmentIds,
+        address: addressDraft,
+        expectedUpdatedAt: plan.updatedAt
+      });
+      onPlanMetadataChange({
+        memo: result.memo,
+        shootingLocations: result.shootingLocations,
+        updatedAt: result.updatedAt
+      });
+      setIsEditingAddress(false);
+      setMessage("주소를 저장했습니다.");
+    } catch (error) {
+      setAddressError(error instanceof Error ? error.message : "주소를 저장하지 못했습니다.");
+    } finally {
+      setIsSavingAddress(false);
+    }
+  }
 
   return (
     <section className="mb-3 border border-field-border bg-field-section px-3 py-2.5" aria-labelledby="gathering-locations-title">
@@ -84,7 +124,28 @@ export function DailyPlanGatheringLocations({
         <GatheringPlaceRow
           callTime={callTime}
           place={place}
+          canEditAddress={Boolean(canEdit && place)}
           canManagePhotos={canManagePhotos}
+          isEditingAddress={isEditingAddress}
+          addressDraft={addressDraft}
+          isSavingAddress={isSavingAddress}
+          addressError={addressError}
+          onAddressDraftChange={(value) => {
+            setAddressDraft(value);
+            setAddressError("");
+          }}
+          onStartAddressEdit={() => {
+            setMessage("");
+            setAddressError("");
+            setAddressDraft(place?.address ?? "");
+            setIsEditingAddress(true);
+          }}
+          onCancelAddressEdit={() => {
+            setAddressError("");
+            setAddressDraft(place?.address ?? "");
+            setIsEditingAddress(false);
+          }}
+          onSaveAddress={() => void saveAddress()}
           onManage={() => {
             setMessage("");
             setIsEditingPhotos(true);
@@ -113,13 +174,31 @@ export function DailyPlanGatheringLocations({
 function GatheringPlaceRow({
   callTime,
   place,
+  canEditAddress,
   canManagePhotos,
+  isEditingAddress,
+  addressDraft,
+  isSavingAddress,
+  addressError,
+  onAddressDraftChange,
+  onStartAddressEdit,
+  onCancelAddressEdit,
+  onSaveAddress,
   onManage,
   onPreview
 }: {
   callTime: string;
   place: ProgressGatheringPlace | null;
+  canEditAddress: boolean;
   canManagePhotos: boolean;
+  isEditingAddress: boolean;
+  addressDraft: string;
+  isSavingAddress: boolean;
+  addressError: string;
+  onAddressDraftChange: (value: string) => void;
+  onStartAddressEdit: () => void;
+  onCancelAddressEdit: () => void;
+  onSaveAddress: () => void;
   onManage: () => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
 }) {
@@ -134,17 +213,50 @@ function GatheringPlaceRow({
           <div className="min-w-0">
             {callTime ? <p className="text-[15px] font-bold leading-5 text-field-text">{callTime}</p> : null}
             {place?.locationName ? <h3 className="mt-0.5 min-w-0 break-words text-[14px] font-bold leading-5 text-field-text">{place.locationName}</h3> : null}
+            {!isEditingAddress && place?.address ? (
+              <p className="mt-0.5 break-words text-xs font-normal leading-5 text-field-muted">{place.address}</p>
+            ) : null}
           </div>
-          {canManagePhotos ? (
-            <button
-              type="button"
-              onClick={onManage}
-              className="shrink-0 border border-field-border bg-field-input px-2 py-1 text-[11px] font-bold text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
-            >
-              사진 관리
-            </button>
-          ) : null}
+          <div className="flex shrink-0 gap-1.5">
+            {canEditAddress && !isEditingAddress ? (
+              <button
+                type="button"
+                onClick={onStartAddressEdit}
+                className="border border-field-border bg-field-input px-2 py-1 text-[11px] font-bold text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
+              >
+                주소 {place?.address ? "수정" : "입력"}
+              </button>
+            ) : null}
+            {canManagePhotos ? (
+              <button
+                type="button"
+                onClick={onManage}
+                className="border border-field-border bg-field-input px-2 py-1 text-[11px] font-bold text-field-subtle transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
+              >
+                {place?.photos.length ? "사진 관리" : "사진 추가"}
+              </button>
+            ) : null}
+          </div>
         </div>
+        {isEditingAddress ? (
+          <div className="mt-2 grid gap-1.5">
+            <input
+              type="text"
+              value={addressDraft}
+              maxLength={1000}
+              disabled={isSavingAddress}
+              onChange={(event) => onAddressDraftChange(event.currentTarget.value)}
+              className="min-h-[40px] w-full border border-field-border bg-field-input px-3 py-2 text-sm font-normal leading-5 text-field-text outline-none transition-colors placeholder:text-field-muted focus:border-field-primary disabled:bg-field-disabled"
+              placeholder="집합장소 주소"
+              aria-label="집합장소 주소"
+            />
+            <div className="flex justify-end gap-1.5">
+              <button type="button" onClick={onCancelAddressEdit} disabled={isSavingAddress} className="min-h-[34px] border border-field-border bg-field-input px-3 py-1.5 text-xs font-bold text-field-subtle hover:bg-field-hover disabled:bg-field-disabled">취소</button>
+              <button type="button" onClick={onSaveAddress} disabled={isSavingAddress} className="min-h-[34px] border border-field-primary bg-field-primary px-3 py-1.5 text-xs font-bold text-field-accent-foreground hover:bg-field-secondary disabled:border-field-disabled disabled:bg-field-disabled">{isSavingAddress ? "저장 중" : "저장"}</button>
+            </div>
+            {addressError ? <p className="break-words text-xs font-normal leading-5 text-field-danger" role="alert">{addressError}</p> : null}
+          </div>
+        ) : null}
       </div>
       {place && place.photos.length > 0 ? (
         <GatheringPhotoStrip
@@ -361,7 +473,7 @@ function GatheringPhotoEditor({
           ref={inputRef}
           type="file"
           multiple
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
+          accept="image/*"
           className="sr-only"
           onChange={(event) => void handleFiles(event.currentTarget.files)}
         />
@@ -403,6 +515,20 @@ function toExistingDraftPhoto(photo: DailyPlanGatheringPhoto): ExistingDraftPhot
 }
 
 function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace | null {
+  const canonicalPoint = selectDailyPlanGatheringPoints(plan)[0] ?? null;
+  if (canonicalPoint) {
+    return {
+      id: canonicalPoint.id,
+      persistedId: canonicalPoint.persistedId,
+      locationId: canonicalPoint.locationId,
+      locationName: canonicalPoint.locationName,
+      address: canonicalPoint.address,
+      departmentIds: canonicalPoint.departments.map((department) => department.id),
+      photos: canonicalPoint.photos
+    };
+  }
+
+  // metadata가 생기기 전의 오래된 일촬표만 읽기 호환합니다. 새 저장은 canonical point를 생성합니다.
   const primaryLocation = plan.shootingLocations.find((location) => location.isPrimary) ?? null;
   const fallbackLocationName = primaryLocation
     ? getPrimaryLocationName(primaryLocation)
@@ -424,7 +550,11 @@ function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace |
   return {
     id: point?.id ?? `primary:${primaryLocation?.id || "legacy"}`,
     persistedId: point?.id ?? null,
+    locationId: point?.locationId ?? primaryLocation?.id ?? null,
     locationName,
+    address: primaryLocation
+      ? getDailyPlanLocationAddress(primaryLocation)
+      : String(point?.address ?? "").trim(),
     departmentIds: point?.departmentIds ?? [],
     photos: point?.photos ?? []
   };
