@@ -4,7 +4,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef,
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, GripVertical, ListChecks, Plus, Printer, RotateCcw, Save, Search, X } from "lucide-react";
+import { GripVertical, ListChecks, Plus, Printer, RotateCcw, Save, Search, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -58,6 +58,12 @@ import {
   normalizeDailyPlanLocationAssignments
 } from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
+import {
+  DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
+  getNextDailyPlanDocumentDensity,
+  type DailyPlanDocumentDensity,
+  type DailyPlanDocumentOrientation
+} from "@/lib/dailyPlan/documentLayout";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
@@ -75,10 +81,7 @@ import {
   sumSceneCutCounts
 } from "@/lib/sceneCutCount";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
-import {
-  DailyPlanDocument,
-  type DailyPlanDocumentOrientation
-} from "@/components/DailyPlanDocument";
+import { DailyPlanDocument } from "@/components/DailyPlanDocument";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
 import { DailyPlanLocationReorderList } from "@/components/DailyPlanLocationReorderList";
@@ -92,6 +95,7 @@ import { WeatherRegionPicker } from "@/components/weather/WeatherRegionPicker";
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { useDailyPlanDocumentOrientation } from "@/hooks/useDailyPlanDocumentOrientation";
 
 const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 
@@ -231,6 +235,7 @@ type DailyPlanPdfOrientation = DailyPlanDocumentOrientation;
 type DailyPlanPrintJob = {
   data: DailyPlanPreviewData;
   orientation: DailyPlanPdfOrientation;
+  density: DailyPlanDocumentDensity;
 };
 
 type TimetableMutationSnapshot = {
@@ -299,7 +304,6 @@ const DAILY_PLAN_PRINT_PAGE = {
   printableWidthMm: number;
   printableHeightMm: number;
 }>;
-const DEFAULT_DAILY_PLAN_PDF_ORIENTATION: DailyPlanPdfOrientation = "landscape";
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
 const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
@@ -309,6 +313,7 @@ let daumPostcodeScriptPromise: Promise<void> | null = null;
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
 export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneListItems = emptySceneListItems, notice }: DailyPlanEditorProps) {
   const router = useRouter();
+  const documentOrientation = useDailyPlanDocumentOrientation();
   const { role: projectAccessRole } = useProjectAccess();
   const canManageTimetable = projectAccessRole !== "progress" && project.accessRole !== "progress";
   const initialEditorState = useMemo(() => {
@@ -400,10 +405,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
-  const [pdfOrientation, setPdfOrientation] = useState<DailyPlanPdfOrientation>(
-    DEFAULT_DAILY_PLAN_PDF_ORIENTATION
-  );
-  const [printPreviewData, setPrintPreviewData] = useState<DailyPlanPreviewData | null>(null);
   const [printJob, setPrintJob] = useState<DailyPlanPrintJob | null>(null);
   const [printLayout, setPrintLayout] = useState<DailyPlanPrintLayout>("single");
   const [isPrinting, setIsPrinting] = useState(false);
@@ -1426,26 +1427,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     printPageStyleRef.current = style;
   }, [clearPrintPageStyle]);
 
-  function handleOpenPrintPreview() {
-    const timetableValidationMessage = getTimetableValidationMessage(scenes);
-    if (timetableValidationMessage) {
-      setErrorMessage(timetableValidationMessage);
-      return;
-    }
-    const currentPreviewData = getCurrentPreviewData();
-    if (currentPreviewData.scenes.length === 0) {
-      setErrorMessage("출력할 씬이 없습니다.");
-      return;
-    }
-    setErrorMessage("");
-    setPrintPreviewData(currentPreviewData);
-  }
-
-  async function handlePrint(
-    orientation: DailyPlanPdfOrientation,
-    previewDataSnapshot?: DailyPlanPreviewData
-  ) {
+  async function handlePrint(previewDataSnapshot?: DailyPlanPreviewData) {
     if (isPrintingRef.current) return;
+    const orientation = documentOrientation;
+    if (!orientation) {
+      setErrorMessage("화면 방향을 확인한 후 다시 시도해주세요.");
+      return;
+    }
     const timetableValidationMessage = getTimetableValidationMessage(scenes);
     if (timetableValidationMessage) {
       setErrorMessage(timetableValidationMessage);
@@ -1459,14 +1447,27 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setErrorMessage("");
     isPrintingRef.current = true;
     setIsPrinting(true);
-    setPdfOrientation(orientation);
     setPrintLayout("single");
     installPrintPageStyle(orientation);
-    setPrintJob({ data: currentPreviewData, orientation });
     try {
-      await waitForDailyPlanPrintDocument(printDocumentRef);
-      const root = printDocumentRef.current;
-      if (!root) throw new Error("PDF 문서를 준비하지 못했습니다.");
+      let density: DailyPlanDocumentDensity = DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
+      let root: HTMLDivElement;
+
+      while (true) {
+        setPrintJob({ data: currentPreviewData, orientation, density });
+        await waitForDailyPlanPrintDocument(printDocumentRef);
+        const nextRoot = printDocumentRef.current;
+        if (!nextRoot) throw new Error("PDF 문서를 준비하지 못했습니다.");
+        root = nextRoot;
+
+        if (orientation !== "portrait" || !hasDailyPlanDocumentOverflow(root)) break;
+        const nextDensity = getNextDailyPlanDocumentDensity(density);
+        if (!nextDensity) {
+          throw new Error("세로 PDF의 셀 내용이 출력 범위를 초과합니다. 긴 내용을 줄인 뒤 다시 시도해주세요.");
+        }
+        density = nextDensity;
+      }
+
       const nextLayout = resolveDailyPlanPrintLayout(root, orientation);
       setPrintLayout(nextLayout);
       await waitForAnimationFrames(2);
@@ -1478,13 +1479,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         }, 120_000);
       }
     } catch (error) {
-      setPrintPreviewData(null);
       releasePrintView();
       setErrorMessage(error instanceof Error ? error.message : "PDF 내보내기를 준비하지 못했습니다.");
     }
   }
 
-  sidebarPrintRequestRef.current = handleOpenPrintPreview;
+  sidebarPrintRequestRef.current = () => {
+    void handlePrint();
+  };
 
   useEffect(() => {
     const handleSidebarPrintRequest = () => sidebarPrintRequestRef.current();
@@ -2193,12 +2195,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
         </div>
 
-        <DailyPlanLivePreview data={previewData} orientation={pdfOrientation} />
+        <DailyPlanLivePreview data={previewData} orientation={documentOrientation} />
 
       <section className="field-section mt-5 p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
           <p className="text-sm font-normal text-field-muted">저장 대상 컷 수: {meaningfulShotCount}개</p>
-          <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(11rem,1.25fr)_minmax(11rem,1.25fr)]">
+          <div className="grid min-w-0 gap-2 sm:grid-cols-3">
             <Button onClick={() => saveCurrentPlan()} disabled={isSaving}>
               <Save className="h-5 w-5" aria-hidden />
               일촬표 저장
@@ -2207,44 +2209,24 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               <ListChecks className="h-5 w-5" aria-hidden />
               저장 후 컷 진행표로 반영
             </Button>
-            <Button variant="secondary" onClick={() => handleOpenPrintPreview()} disabled={!canPrint}>
-              <Eye className="h-5 w-5" aria-hidden />
-              PDF 미리보기
-            </Button>
-            <PdfOrientationControl
-              value={pdfOrientation}
-              disabled={isPrinting}
-              onChange={setPdfOrientation}
-            />
             <Button
               variant="secondary"
-              onClick={() => void handlePrint(pdfOrientation)}
-              disabled={!canPrint || isPrinting}
+              onClick={() => void handlePrint()}
+              disabled={!canPrint || !documentOrientation || isPrinting}
             >
               <Printer className="h-5 w-5" aria-hidden />
-              {isPrinting
-                ? `${DAILY_PLAN_PRINT_PAGE[pdfOrientation].label} PDF 준비 중`
-                : `PDF ${DAILY_PLAN_PRINT_PAGE[pdfOrientation].label}로 저장`}
+              {isPrinting ? "PDF 준비 중" : "PDF 출력"}
             </Button>
           </div>
         </div>
       </section>
       </div>
 
-      {printPreviewData ? (
-        <PrintPreviewModal
-          data={printPreviewData}
-          orientation={pdfOrientation}
-          isPrinting={isPrinting}
-          onOrientationChange={setPdfOrientation}
-          onClose={() => setPrintPreviewData(null)}
-          onPrint={(orientation) => void handlePrint(orientation, printPreviewData)}
-        />
-      ) : null}
       {printJob ? (
         <PrintDailyPlanView
           data={printJob.data}
           orientation={printJob.orientation}
+          density={printJob.density}
           layout={printLayout}
           rootRef={printDocumentRef}
         />
@@ -3701,72 +3683,23 @@ function TextAreaField({ label, value, onChange, className = "" }: { label: stri
   );
 }
 
-function IconButton({ children, label, onClick, disabled = false }: { children: React.ReactNode; label: string; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      className="inline-flex min-h-10 min-w-10 items-center justify-center border border-field-border bg-field-input px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-    >
-      {children}
-    </button>
-  );
-}
-
-function PdfOrientationControl({
-  value,
-  disabled,
-  onChange
-}: {
-  value: DailyPlanPdfOrientation;
-  disabled: boolean;
-  onChange: (orientation: DailyPlanPdfOrientation) => void;
-}) {
-  return (
-    <div
-      className="grid min-w-0 grid-cols-2 gap-1"
-      role="group"
-      aria-label="PDF 출력 방향"
-    >
-      {(["portrait", "landscape"] as const).map((orientation) => {
-        const isSelected = value === orientation;
-        return (
-          <button
-            key={orientation}
-            type="button"
-            aria-pressed={isSelected}
-            disabled={disabled}
-            onClick={() => onChange(orientation)}
-            className={`inline-flex min-h-10 min-w-0 items-center justify-center border px-2 py-2 text-sm font-black transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-              isSelected
-                ? "border-field-primary/70 bg-field-primary/10 text-field-primary"
-                : "border-field-border bg-field-input text-field-muted hover:border-field-divider hover:bg-field-hover hover:text-field-text"
-            }`}
-          >
-            PDF {DAILY_PLAN_PRINT_PAGE[orientation].label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
   data,
   orientation
 }: {
   data: DailyPlanPreviewData;
-  orientation: DailyPlanPdfOrientation;
+  orientation: DailyPlanPdfOrientation | null;
 }) {
   return (
     <section className="mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
-      <ScaledDailyPlanPreview data={data} orientation={orientation} />
+      {orientation ? (
+        <ScaledDailyPlanPreview data={data} orientation={orientation} />
+      ) : (
+        <PixelDogLoader size="sm" />
+      )}
     </section>
   );
 });
@@ -3780,22 +3713,39 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
+  const [density, setDensity] = useState<DailyPlanDocumentDensity>(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
   const [scale, setScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState(0);
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
-  const documentWidth = getDailyPlanPrintableWidthPixels(orientation);
+  const previewPageWidth = getDailyPlanPageWidthPixels(orientation);
+  const previewPageHeight = getDailyPlanPageHeightPixels(orientation);
+
+  useEffect(() => {
+    setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
+  }, [data, orientation]);
 
   useEffect(() => {
     const container = containerRef.current;
     const documentElement = documentRef.current;
     if (!container || !documentElement || typeof ResizeObserver === "undefined") return;
+    let isCancelled = false;
+    let isFontReady = !("fonts" in document);
 
     function updateSize() {
+      if (!isFontReady) return;
       const currentContainer = containerRef.current;
       const currentDocument = documentRef.current;
       if (!currentContainer || !currentDocument) return;
+      if (orientation === "portrait" && hasDailyPlanDocumentOverflow(currentDocument)) {
+        const nextDensity = getNextDailyPlanDocumentDensity(density);
+        if (nextDensity) {
+          setDensity(nextDensity);
+          return;
+        }
+      }
       const availableWidth = currentContainer.clientWidth;
-      const nextScale = Math.min(1, availableWidth / documentWidth);
+      const measuredWidth = Math.max(previewPageWidth, currentDocument.scrollWidth);
+      const nextScale = Math.min(1, availableWidth / measuredWidth);
       setScale(nextScale);
       setScaledHeight(currentDocument.scrollHeight * nextScale);
     }
@@ -3803,20 +3753,39 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
     observer.observe(documentElement);
-    updateSize();
-    return () => observer.disconnect();
-  }, [documentWidth]);
+    const canonicalDocument = documentElement.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
+    if (canonicalDocument) observer.observe(canonicalDocument);
+    void (async () => {
+      if ("fonts" in document) await document.fonts.ready;
+      isFontReady = true;
+      if (!isCancelled) updateSize();
+    })();
+    return () => {
+      isCancelled = true;
+      observer.disconnect();
+    };
+  }, [data, density, orientation, previewPageWidth]);
 
   return (
-    <div ref={containerRef} className="mt-4 w-full min-w-0 max-w-full overflow-hidden bg-[#e8e8e5]">
+    <div
+      ref={containerRef}
+      data-testid="daily-plan-scaled-preview"
+      data-orientation={orientation}
+      data-density={density}
+      className="mt-4 w-full min-w-0 max-w-full bg-[#e8e8e5]"
+    >
       <div
         className="relative mx-auto max-w-full"
-        style={{ width: documentWidth * scale, height: scaledHeight || undefined }}
+        style={{ width: previewPageWidth * scale, height: scaledHeight || undefined }}
       >
         <div
           ref={documentRef}
-          className="absolute left-0 top-0 origin-top-left"
-          style={{ width: documentWidth, transform: `scale(${scale})` }}
+          className="daily-plan-preview-sheet absolute left-0 top-0 box-border origin-top-left bg-white p-[10mm]"
+          style={{
+            width: previewPageWidth,
+            minHeight: previewPageHeight,
+            transform: `scale(${scale})`
+          }}
         >
           <DailyPlanDocument
             plan={data.plan}
@@ -3825,6 +3794,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
             timetableRows={timetableRows}
             totalCutCount={data.totalCutCount}
             orientation={orientation}
+            density={density}
           />
         </div>
       </div>
@@ -3832,60 +3802,16 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   );
 });
 
-function PrintPreviewModal({
-  data,
-  orientation,
-  isPrinting,
-  onOrientationChange,
-  onClose,
-  onPrint
-}: {
-  data: DailyPlanPreviewData;
-  orientation: DailyPlanPdfOrientation;
-  isPrinting: boolean;
-  onOrientationChange: (orientation: DailyPlanPdfOrientation) => void;
-  onClose: () => void;
-  onPrint: (orientation: DailyPlanPdfOrientation) => void;
-}) {
-  return (
-    <div className="screen-only no-print fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="PDF 미리보기">
-      <div className="mx-auto max-w-6xl border border-field-divider bg-field-dialog p-4 shadow-dialog">
-        <div className="mb-4 grid min-w-0 gap-3 border-b border-field-border pb-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-          <div>
-            <p className="text-xs font-black text-field-muted">PDF 미리보기</p>
-            <h2 className="text-xl font-black text-field-text">A4 {DAILY_PLAN_PRINT_PAGE[orientation].label} 방향</h2>
-          </div>
-          <div className="grid min-w-0 gap-2 sm:min-w-[19rem]">
-            <PdfOrientationControl
-              value={orientation}
-              disabled={isPrinting}
-              onChange={onOrientationChange}
-            />
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
-              <Button variant="secondary" onClick={() => onPrint(orientation)} disabled={isPrinting}>
-                <Printer className="h-5 w-5" aria-hidden />
-                {isPrinting ? "PDF 준비 중" : `PDF ${DAILY_PLAN_PRINT_PAGE[orientation].label}로 저장`}
-              </Button>
-              <IconButton label="미리보기 닫기" onClick={onClose}>
-                <X className="h-4 w-4" aria-hidden />
-              </IconButton>
-            </div>
-          </div>
-        </div>
-        <ScaledDailyPlanPreview data={data} orientation={orientation} />
-      </div>
-    </div>
-  );
-}
-
 function PrintDailyPlanView({
   data,
   orientation,
+  density,
   layout,
   rootRef
 }: {
   data: DailyPlanPreviewData;
   orientation: DailyPlanPdfOrientation;
+  density: DailyPlanDocumentDensity;
   layout: DailyPlanPrintLayout;
   rootRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -3905,6 +3831,7 @@ function PrintDailyPlanView({
           timetableRows={timetableRows}
           totalCutCount={data.totalCutCount}
           orientation={orientation}
+          density={density}
         />
       </div>
     </section>
@@ -3912,6 +3839,25 @@ function PrintDailyPlanView({
 }
 
 const PRINT_HEIGHT_SAFETY_PX = 8;
+const DAILY_PLAN_OVERFLOW_TOLERANCE_PX = 1;
+
+function hasDailyPlanDocumentOverflow(root: HTMLElement) {
+  const documentElement = root.matches("[data-testid='daily-plan-document']")
+    ? root
+    : root.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
+  if (!documentElement) return true;
+
+  if (
+    documentElement.scrollWidth > documentElement.clientWidth + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
+  ) {
+    return true;
+  }
+
+  return Array.from(documentElement.querySelectorAll<HTMLElement>("th, td")).some((cell) => (
+    cell.scrollWidth > cell.clientWidth + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
+    || cell.scrollHeight > cell.clientHeight + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
+  ));
+}
 
 async function waitForDailyPlanPrintDocument(rootRef: React.RefObject<HTMLDivElement | null>) {
   await waitForAnimationFrames(2);
@@ -3983,6 +3929,14 @@ function resolveDailyPlanPrintLayout(
 
 function getDailyPlanPrintableWidthPixels(orientation: DailyPlanPdfOrientation) {
   return DAILY_PLAN_PRINT_PAGE[orientation].printableWidthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+}
+
+function getDailyPlanPageWidthPixels(orientation: DailyPlanPdfOrientation) {
+  return DAILY_PLAN_PRINT_PAGE[orientation].pageWidthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+}
+
+function getDailyPlanPageHeightPixels(orientation: DailyPlanPdfOrientation) {
+  return DAILY_PLAN_PRINT_PAGE[orientation].pageHeightMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
 }
 
 function waitForAnimationFrames(count: number) {

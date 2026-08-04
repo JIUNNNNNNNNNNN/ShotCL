@@ -850,7 +850,33 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
   --daily-plan-event-fill: #fffaf0;
+  --daily-plan-font-size: 11px;
+  --daily-plan-line-height: 1.3;
+  --daily-plan-cell-height: 20px;
+  --daily-plan-cell-padding-block: 3px;
+  --daily-plan-cell-padding-inline: 5px;
+  --daily-plan-section-gap: 4px;
+  --daily-plan-title-size: 24px;
+  --daily-plan-title-line-height: 32px;
+  --daily-plan-subtitle-size: 18px;
+  --daily-plan-subtitle-line-height: 28px;
+  --daily-plan-stat-size: 18px;
+  --daily-plan-stat-line-height: 28px;
+  --daily-plan-kicker-size: 9px;
+  --daily-plan-kicker-line-height: 1.3;
+  --daily-plan-day-size: 24px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 10px;
+  --daily-plan-staff-line-height: 1.25;
+  --daily-plan-timetable-time-size: 11px;
+  --daily-plan-timetable-compact-size: 9px;
+  --daily-plan-memo-height: 80px;
+  --daily-plan-additional-min-height: 28px;
+  --daily-plan-additional-padding-block: 4px;
+  --daily-plan-additional-padding-inline: 6px;
   font-family: inherit;
+  font-size: var(--daily-plan-font-size);
+  line-height: var(--daily-plan-line-height);
 }
 
 .daily-plan-document--portrait {
@@ -859,6 +885,125 @@ a[class*="min-h-"][class*="items-center"] {
 
 .daily-plan-document--landscape {
   width: 277mm;
+}
+
+.daily-plan-document--portrait[data-density="normal"] {
+  --daily-plan-font-size: 9px;
+  --daily-plan-line-height: 1.22;
+  --daily-plan-cell-height: 16px;
+  --daily-plan-cell-padding-block: 1.5px;
+  --daily-plan-cell-padding-inline: 2.5px;
+  --daily-plan-section-gap: 2.5px;
+  --daily-plan-title-size: 18px;
+  --daily-plan-title-line-height: 1.1;
+  --daily-plan-subtitle-size: 13px;
+  --daily-plan-subtitle-line-height: 1.15;
+  --daily-plan-stat-size: 14px;
+  --daily-plan-stat-line-height: 1.15;
+  --daily-plan-kicker-size: 7.5px;
+  --daily-plan-kicker-line-height: 1.2;
+  --daily-plan-day-size: 18px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 8.2px;
+  --daily-plan-staff-line-height: 1.18;
+  --daily-plan-timetable-time-size: 8.5px;
+  --daily-plan-timetable-compact-size: 7.5px;
+  --daily-plan-memo-height: 52px;
+  --daily-plan-additional-min-height: 20px;
+  --daily-plan-additional-padding-block: 2px;
+  --daily-plan-additional-padding-inline: 2.5px;
+}
+
+.daily-plan-document--portrait[data-density="compact"] {
+  --daily-plan-font-size: 8.3px;
+  --daily-plan-line-height: 1.18;
+  --daily-plan-cell-height: 14px;
+  --daily-plan-cell-padding-block: 1px;
+  --daily-plan-cell-padding-inline: 2px;
+  --daily-plan-section-gap: 2px;
+  --daily-plan-title-size: 17px;
+  --daily-plan-title-line-height: 1.08;
+  --daily-plan-subtitle-size: 12px;
+  --daily-plan-subtitle-line-height: 1.12;
+  --daily-plan-stat-size: 13px;
+  --daily-plan-stat-line-height: 1.12;
+  --daily-plan-kicker-size: 7px;
+  --daily-plan-kicker-line-height: 1.16;
+  --daily-plan-day-size: 17px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 7.7px;
+  --daily-plan-staff-line-height: 1.16;
+  --daily-plan-timetable-time-size: 8px;
+  --daily-plan-timetable-compact-size: 7px;
+  --daily-plan-memo-height: 44px;
+  --daily-plan-additional-min-height: 18px;
+  --daily-plan-additional-padding-block: 1.5px;
+  --daily-plan-additional-padding-inline: 2px;
+}
+
+.daily-plan-document--portrait[data-density="dense"] {
+  --daily-plan-font-size: 7.6px;
+  --daily-plan-line-height: 1.14;
+  --daily-plan-cell-height: 12px;
+  --daily-plan-cell-padding-block: 0.75px;
+  --daily-plan-cell-padding-inline: 1.25px;
+  --daily-plan-section-gap: 1.5px;
+  --daily-plan-title-size: 15px;
+  --daily-plan-title-line-height: 1.06;
+  --daily-plan-subtitle-size: 10.5px;
+  --daily-plan-subtitle-line-height: 1.1;
+  --daily-plan-stat-size: 11.5px;
+  --daily-plan-stat-line-height: 1.1;
+  --daily-plan-kicker-size: 6.5px;
+  --daily-plan-kicker-line-height: 1.12;
+  --daily-plan-day-size: 15px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 7px;
+  --daily-plan-staff-line-height: 1.12;
+  --daily-plan-timetable-time-size: 7.3px;
+  --daily-plan-timetable-compact-size: 6.6px;
+  --daily-plan-memo-height: 36px;
+  --daily-plan-additional-min-height: 16px;
+  --daily-plan-additional-padding-block: 1px;
+  --daily-plan-additional-padding-inline: 1.25px;
+}
+
+.daily-plan-document-title {
+  font-size: var(--daily-plan-title-size);
+  line-height: var(--daily-plan-title-line-height);
+}
+
+.daily-plan-document-subtitle {
+  font-size: var(--daily-plan-subtitle-size);
+  line-height: var(--daily-plan-subtitle-line-height);
+}
+
+.daily-plan-document-stat {
+  font-size: var(--daily-plan-stat-size);
+  line-height: var(--daily-plan-stat-line-height);
+}
+
+.daily-plan-document-kicker {
+  font-size: var(--daily-plan-kicker-size);
+  line-height: var(--daily-plan-kicker-line-height);
+}
+
+.daily-plan-document-day {
+  font-size: var(--daily-plan-day-size);
+  line-height: var(--daily-plan-day-line-height);
+}
+
+.daily-plan-template .daily-plan-header-grid {
+  gap: var(--daily-plan-section-gap) !important;
+}
+
+.daily-plan-template .daily-plan-section-table.mt-1,
+.daily-plan-template .daily-plan-notes-grid.mt-1 {
+  margin-top: var(--daily-plan-section-gap) !important;
+}
+
+.daily-plan-template .daily-plan-notes-grid {
+  gap: var(--daily-plan-section-gap) !important;
 }
 
 .daily-plan-preview-header {
@@ -880,6 +1025,7 @@ a[class*="min-h-"][class*="items-center"] {
 .daily-plan-template table,
 .daily-plan-template .daily-plan-grid {
   table-layout: fixed;
+  max-width: 100%;
 }
 
 .daily-plan-template .daily-plan-section-table {
@@ -893,14 +1039,59 @@ a[class*="min-h-"][class*="items-center"] {
 
 .daily-plan-template td,
 .daily-plan-template th {
-  height: 20px;
-  padding: 3px 5px;
+  box-sizing: border-box;
+  height: var(--daily-plan-cell-height);
+  padding: var(--daily-plan-cell-padding-block) var(--daily-plan-cell-padding-inline);
   vertical-align: middle;
+  white-space: normal;
   word-break: keep-all;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .daily-plan-template th {
   font-weight: 700;
+}
+
+.daily-plan-template .daily-plan-cell--wrap {
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.daily-plan-template .daily-plan-cell--nowrap {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.daily-plan-template .daily-plan-cell--wrap.whitespace-pre-wrap {
+  white-space: pre-wrap;
+}
+
+.daily-plan-template .daily-plan-main-staff-cell {
+  font-size: var(--daily-plan-staff-size);
+  line-height: var(--daily-plan-staff-line-height);
+}
+
+.daily-plan-template .daily-plan-timetable-cell--time {
+  font-size: var(--daily-plan-timetable-time-size);
+}
+
+.daily-plan-template .daily-plan-timetable-cell--compact {
+  font-size: var(--daily-plan-timetable-compact-size);
+}
+
+.daily-plan-template .daily-plan-memo-cell {
+  height: var(--daily-plan-memo-height);
+}
+
+.daily-plan-template .daily-plan-additional-grid {
+  min-height: var(--daily-plan-additional-min-height) !important;
+}
+
+.daily-plan-template .daily-plan-additional-cell {
+  padding: var(--daily-plan-additional-padding-block) var(--daily-plan-additional-padding-inline);
 }
 
 .daily-plan-print-staging {
