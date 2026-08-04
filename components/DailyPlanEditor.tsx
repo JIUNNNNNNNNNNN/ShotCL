@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -3660,7 +3660,7 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
         <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
       {orientation ? (
-        <ScaledDailyPlanPreview data={data} orientation={orientation} />
+        <ScaledDailyPlanPreview key={orientation} data={data} orientation={orientation} />
       ) : (
         <PixelDogLoader size="sm" />
       )}
@@ -3677,58 +3677,98 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
-  const [density, setDensity] = useState<DailyPlanDocumentDensity>(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
-  const [scale, setScale] = useState(1);
-  const [scaledHeight, setScaledHeight] = useState(0);
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   const previewPageWidth = getDailyPlanPageWidthPixels(orientation);
   const previewPageHeight = getDailyPlanPageHeightPixels(orientation);
+  const [density, setDensity] = useState<DailyPlanDocumentDensity>(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
+  const [measurement, setMeasurement] = useState(() => ({
+    scale: 1,
+    scaledWidth: previewPageWidth,
+    scaledHeight: previewPageHeight
+  }));
 
   useEffect(() => {
     setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
   }, [data, orientation]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     const documentElement = documentRef.current;
-    if (!container || !documentElement || typeof ResizeObserver === "undefined") return;
+    if (!container || !documentElement) return;
     let isCancelled = false;
-    let isFontReady = !("fonts" in document);
+    let resizeFrame: number | null = null;
+    let shouldCheckDensity = !("fonts" in document) || document.fonts.status === "loaded";
 
-    function updateSize() {
-      if (!isFontReady) return;
+    function updateSize(allowDensityChange: boolean) {
       const currentContainer = containerRef.current;
       const currentDocument = documentRef.current;
       if (!currentContainer || !currentDocument) return;
-      if (orientation === "portrait" && hasDailyPlanDocumentOverflow(currentDocument)) {
-        const nextDensity = getNextDailyPlanDocumentDensity(density);
-        if (nextDensity) {
-          setDensity(nextDensity);
-          return;
-        }
-      }
-      const availableWidth = currentContainer.clientWidth;
+      const availableWidth = currentContainer.getBoundingClientRect().width;
+      if (!Number.isFinite(availableWidth) || availableWidth <= 0) return;
       const measuredWidth = Math.max(previewPageWidth, currentDocument.scrollWidth);
+      const measuredHeight = Math.max(previewPageHeight, currentDocument.scrollHeight);
       const nextScale = Math.min(1, availableWidth / measuredWidth);
-      setScale(nextScale);
-      setScaledHeight(currentDocument.scrollHeight * nextScale);
+      const nextMeasurement = {
+        scale: nextScale,
+        scaledWidth: measuredWidth * nextScale,
+        scaledHeight: measuredHeight * nextScale
+      };
+      setMeasurement((current) => (
+        areDailyPlanPreviewMeasurementsEqual(current, nextMeasurement)
+          ? current
+          : nextMeasurement
+      ));
+
+      if (allowDensityChange && orientation === "portrait" && hasDailyPlanDocumentOverflow(currentDocument)) {
+        const nextDensity = getNextDailyPlanDocumentDensity(density);
+        if (nextDensity) setDensity(nextDensity);
+      }
     }
 
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(container);
-    observer.observe(documentElement);
-    const canonicalDocument = documentElement.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
-    if (canonicalDocument) observer.observe(canonicalDocument);
-    void (async () => {
-      if ("fonts" in document) await document.fonts.ready;
-      isFontReady = true;
-      if (!isCancelled) updateSize();
-    })();
+    function scheduleSizeUpdate(allowDensityChange = shouldCheckDensity) {
+      shouldCheckDensity = shouldCheckDensity || allowDensityChange;
+      if (resizeFrame !== null) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        if (!isCancelled) updateSize(shouldCheckDensity);
+      });
+    }
+
+    const handleViewportResize = () => scheduleSizeUpdate();
+
+    // 폰트가 늦게 로드되더라도 첫 paint 전에 A4 sheet의 scale과 높이를 확보합니다.
+    updateSize(shouldCheckDensity);
+
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(() => scheduleSizeUpdate());
+    observer?.observe(container);
+    window.addEventListener("resize", handleViewportResize);
+    window.addEventListener("orientationchange", handleViewportResize);
+    window.visualViewport?.addEventListener("resize", handleViewportResize);
+
+    if ("fonts" in document) {
+      void document.fonts.ready.then(
+        () => {
+          shouldCheckDensity = true;
+          scheduleSizeUpdate(true);
+        },
+        () => {
+          shouldCheckDensity = true;
+          scheduleSizeUpdate(true);
+        }
+      );
+    }
+
     return () => {
       isCancelled = true;
-      observer.disconnect();
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
+      observer?.disconnect();
+      window.removeEventListener("resize", handleViewportResize);
+      window.removeEventListener("orientationchange", handleViewportResize);
+      window.visualViewport?.removeEventListener("resize", handleViewportResize);
     };
-  }, [data, density, orientation, previewPageWidth]);
+  }, [data, density, orientation, previewPageHeight, previewPageWidth]);
 
   return (
     <div
@@ -3736,11 +3776,12 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       data-testid="daily-plan-scaled-preview"
       data-orientation={orientation}
       data-density={density}
+      data-scale={measurement.scale.toFixed(4)}
       className="mt-4 w-full min-w-0 max-w-full bg-[#e8e8e5]"
     >
       <div
         className="relative mx-auto max-w-full"
-        style={{ width: previewPageWidth * scale, height: scaledHeight || undefined }}
+        style={{ width: measurement.scaledWidth, height: measurement.scaledHeight }}
       >
         <div
           ref={documentRef}
@@ -3748,7 +3789,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
           style={{
             width: previewPageWidth,
             minHeight: previewPageHeight,
-            transform: `scale(${scale})`
+            transform: `scale(${measurement.scale})`
           }}
         >
           <DailyPlanDocument
@@ -3765,6 +3806,15 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
     </div>
   );
 });
+
+function areDailyPlanPreviewMeasurementsEqual(
+  current: { scale: number; scaledWidth: number; scaledHeight: number },
+  next: { scale: number; scaledWidth: number; scaledHeight: number }
+) {
+  return Math.abs(current.scale - next.scale) < 0.0005
+    && Math.abs(current.scaledWidth - next.scaledWidth) < 0.5
+    && Math.abs(current.scaledHeight - next.scaledHeight) < 0.5;
+}
 
 function PrintDailyPlanView({
   data,
