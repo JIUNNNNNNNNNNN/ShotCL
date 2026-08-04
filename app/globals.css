@@ -795,6 +795,68 @@ a[class*="min-h-"][class*="items-center"] {
   font-size: 13px;
 }
 
+.daily-plan-weather-card-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-auto-rows: 1fr;
+  gap: 0.5rem;
+}
+
+.daily-plan-weather-card {
+  width: 100%;
+  min-width: 0;
+  min-height: 3rem;
+  height: 100%;
+  padding: 0.25rem 0.375rem;
+  overflow-wrap: anywhere;
+}
+
+.daily-plan-weather-card-label {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.daily-plan-weather-card-value {
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.daily-plan-editor .daily-plan-weather-card-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.125rem;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+@media (max-width: 767px) {
+  .daily-plan-weather-card-row {
+    gap: 2px;
+  }
+
+  .daily-plan-weather-card {
+    min-height: 44px;
+    padding: 2px 1px;
+  }
+
+  .daily-plan-weather-card-label {
+    font-size: 8px;
+    line-height: 1.1;
+  }
+
+  .daily-plan-weather-card-value,
+  .daily-plan-editor .daily-plan-weather-card-input {
+    font-size: 9px;
+    line-height: 1.15;
+  }
+}
+
 .daily-plan-timetable-row[data-selected="true"] > td {
   box-shadow:
     inset 0 1px rgba(172, 147, 82, 0.78),
@@ -874,6 +936,11 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-additional-min-height: 28px;
   --daily-plan-additional-padding-block: 4px;
   --daily-plan-additional-padding-inline: 6px;
+  --daily-plan-weather-label-size: 9px;
+  --daily-plan-weather-value-size: 10px;
+  --daily-plan-weather-line-height: 1.2;
+  --daily-plan-weather-padding-block: 2px;
+  --daily-plan-weather-padding-inline: 3px;
   font-family: inherit;
   font-size: var(--daily-plan-font-size);
   line-height: var(--daily-plan-line-height);
@@ -912,6 +979,11 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-additional-min-height: 20px;
   --daily-plan-additional-padding-block: 2px;
   --daily-plan-additional-padding-inline: 2.5px;
+  --daily-plan-weather-label-size: 7.5px;
+  --daily-plan-weather-value-size: 8.2px;
+  --daily-plan-weather-line-height: 1.15;
+  --daily-plan-weather-padding-block: 1.5px;
+  --daily-plan-weather-padding-inline: 2px;
 }
 
 .daily-plan-document--portrait[data-density="compact"] {
@@ -939,6 +1011,11 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-additional-min-height: 18px;
   --daily-plan-additional-padding-block: 1.5px;
   --daily-plan-additional-padding-inline: 2px;
+  --daily-plan-weather-label-size: 7px;
+  --daily-plan-weather-value-size: 7.6px;
+  --daily-plan-weather-line-height: 1.12;
+  --daily-plan-weather-padding-block: 1px;
+  --daily-plan-weather-padding-inline: 1.5px;
 }
 
 .daily-plan-document--portrait[data-density="dense"] {
@@ -966,6 +1043,11 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-additional-min-height: 16px;
   --daily-plan-additional-padding-block: 1px;
   --daily-plan-additional-padding-inline: 1.25px;
+  --daily-plan-weather-label-size: 6.5px;
+  --daily-plan-weather-value-size: 7px;
+  --daily-plan-weather-line-height: 1.1;
+  --daily-plan-weather-padding-block: 0.75px;
+  --daily-plan-weather-padding-inline: 1px;
 }
 
 .daily-plan-document-title {
@@ -995,6 +1077,31 @@ a[class*="min-h-"][class*="items-center"] {
 
 .daily-plan-template .daily-plan-header-grid {
   gap: var(--daily-plan-section-gap) !important;
+}
+
+.daily-plan-document--portrait .daily-plan-header-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.daily-plan-weather-table--portrait .daily-plan-weather-cell {
+  min-width: 0;
+  padding: var(--daily-plan-weather-padding-block) var(--daily-plan-weather-padding-inline);
+}
+
+.daily-plan-weather-label {
+  min-width: 0;
+  font-size: var(--daily-plan-weather-label-size);
+  line-height: var(--daily-plan-weather-line-height);
+  white-space: nowrap;
+}
+
+.daily-plan-weather-value {
+  min-width: 0;
+  font-size: var(--daily-plan-weather-value-size);
+  line-height: var(--daily-plan-weather-line-height);
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .daily-plan-template .daily-plan-section-table.mt-1,

@@ -70,7 +70,8 @@ export function DailyPlanDocument({
   const compactMainStaffRows = Array.from({ length: 3 }, (_, index) => (
     printableMainStaffRows[index] ?? { id: `empty-main-staff-${index}`, role: "", name: "", contact: "" }
   ));
-  const weatherFields = filterRenderablePreviewRows(createWeatherFields(meta), (field) => field.value);
+  const allWeatherFields = createWeatherFields(meta);
+  const weatherFields = filterRenderablePreviewRows(allWeatherFields, (field) => field.value);
   const timetableFields = createTimetableFields(printableTimetableRows);
   const memoFields: PreviewDisplayField[] = [
     { key: "notice", label: "Notice", span: 1, value: plan.safetyNotice },
@@ -130,19 +131,10 @@ export function DailyPlanDocument({
           </tbody>
         </table>
 
-        <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
-          <EqualColumns count={2} />
-          <tbody>
-            {weatherFields.length > 0 ? weatherFields.map((field) => (
-              <tr key={field.key}>
-                <td className={`${cellClass} font-bold`}>{field.label}</td>
-                <td className={cellClass}>{getPreviewCellText(field.value)}</td>
-              </tr>
-            )) : (
-              <tr><td colSpan={2} className={cellClass}>날씨 정보가 없습니다.</td></tr>
-            )}
-          </tbody>
-        </table>
+        <DailyPlanWeatherTable
+          fields={orientation === "portrait" ? allWeatherFields : weatherFields}
+          orientation={orientation}
+        />
       </div>
 
       <table className={sectionTableClass}>
@@ -247,6 +239,54 @@ export function DailyPlanDocument({
         </div>
       </section>
     </article>
+  );
+}
+
+function DailyPlanWeatherTable({
+  fields,
+  orientation
+}: {
+  fields: PreviewDisplayField[];
+  orientation: DailyPlanDocumentOrientation;
+}) {
+  if (orientation === "portrait") {
+    return (
+      <table
+        data-testid="daily-plan-document-weather-row"
+        className="daily-plan-weather-table daily-plan-weather-table--portrait daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center"
+      >
+        <EqualColumns count={fields.length} />
+        <tbody>
+          <tr>
+            {fields.map((field) => (
+              <td key={field.key} data-weather-card className={`${cellClass} daily-plan-weather-cell`}>
+                <span className="daily-plan-weather-label block font-bold">{field.label}</span>
+                <span className="daily-plan-weather-value block">{getPreviewCellText(field.value) || "-"}</span>
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+    );
+  }
+
+  return (
+    <table
+      data-testid="daily-plan-document-weather-table"
+      className="daily-plan-weather-table daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center"
+    >
+      <EqualColumns count={2} />
+      <tbody>
+        {fields.length > 0 ? fields.map((field) => (
+          <tr key={field.key}>
+            <td className={`${cellClass} font-bold`}>{field.label}</td>
+            <td className={cellClass}>{getPreviewCellText(field.value)}</td>
+          </tr>
+        )) : (
+          <tr><td colSpan={2} className={cellClass}>날씨 정보가 없습니다.</td></tr>
+        )}
+      </tbody>
+    </table>
   );
 }
 
@@ -411,12 +451,12 @@ function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta)
 
 function createWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
   return [
+    { key: "weather", label: "날씨", span: 1, value: formatDailyPlanWeatherSummary(meta) },
     { key: "sunrise", label: "일출", span: 1, value: meta.sunrise },
     { key: "sunset", label: "일몰", span: 1, value: meta.sunset },
-    { key: "weather", label: "날씨", span: 1, value: formatDailyPlanWeatherSummary(meta) },
-    { key: "rainProbability", label: "강수 확률", span: 1, value: meta.rainProbability },
     { key: "minTemperature", label: "최저 기온", span: 1, value: meta.minTemperature },
-    { key: "maxTemperature", label: "최고 기온", span: 1, value: meta.maxTemperature }
+    { key: "maxTemperature", label: "최고 기온", span: 1, value: meta.maxTemperature },
+    { key: "rainProbability", label: "강수 확률", span: 1, value: meta.rainProbability }
   ];
 }
 

@@ -110,7 +110,8 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       const duplicate = buildDailyPlanDuplicateDraft({
         plan: dailyPlanFromRow(sourcePlanRow),
         shots: (sourceShotRows ?? []).map(dailyPlanShotFromRow),
-        existingEpisodes: (episodeRows ?? []).map((row) => row.episode)
+        existingEpisodes: (episodeRows ?? []).map((row) => row.episode),
+        canonicalProjectTitle: grant.projectName
       });
       body = {
         plan: duplicate.plan,

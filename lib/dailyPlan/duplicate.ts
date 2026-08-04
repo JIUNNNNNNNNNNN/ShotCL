@@ -16,6 +16,7 @@ type DailyPlanDuplicateInput = {
   plan: DailyPlan;
   shots: DailyPlanShot[];
   existingEpisodes: unknown[];
+  canonicalProjectTitle?: string;
 };
 
 type DailyPlanDuplicateDraft = {
@@ -72,7 +73,9 @@ export function buildDailyPlanDuplicateDraft(input: DailyPlanDuplicateInput): Da
 
   return {
     plan: {
-      title: `${input.plan.title || "일촬표"} 복사본`,
+      // 일촬표만 새 레코드로 복제하며 작품명은 원본 값을 그대로 유지합니다.
+      // 프로젝트명은 별도의 canonical project 레코드에서 표시하므로 복사 접미사를 만들지 않습니다.
+      title: input.canonicalProjectTitle?.trim() || input.plan.title || "일촬표",
       sourceType: "web_editor",
       sourceFileName: input.plan.sourceFileName,
       shootingDate: input.plan.shootingDate,

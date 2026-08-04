@@ -986,11 +986,14 @@ export async function duplicateDailyPlan(projectId: string, dailyPlanId: string)
 
   const existing = await getDailyPlanWithShots(projectId, dailyPlanId);
   if (!existing) throw new Error("복사할 일촬표를 찾을 수 없습니다.");
-  const localPlans = readLocalBuckets().dailyPlans.filter((plan) => plan.projectId === projectId);
+  const localBuckets = readLocalBuckets();
+  const localPlans = localBuckets.dailyPlans.filter((plan) => plan.projectId === projectId);
+  const canonicalProjectTitle = localBuckets.projects.find((project) => project.id === projectId)?.name;
   const duplicate = buildDailyPlanDuplicateDraft({
     plan: existing.plan,
     shots: existing.shots,
-    existingEpisodes: localPlans.map((plan) => plan.episode)
+    existingEpisodes: localPlans.map((plan) => plan.episode),
+    canonicalProjectTitle
   });
   return saveDailyPlanWithShots({
     projectId,

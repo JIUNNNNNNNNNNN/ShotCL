@@ -160,6 +160,14 @@ type DailyPlanPrintMetaTextField = {
 
 type EditableWeatherField = "weather" | "sunrise" | "sunset" | "minTemperature" | "maxTemperature" | "rainProbability";
 
+type EditableWeatherCardConfig = {
+  field: EditableWeatherField;
+  label: string;
+  value: string;
+  placeholder?: string;
+  timeValue?: boolean;
+};
+
 type DailyPlanPreviewCut = {
   id: string;
   cutNumber: string;
@@ -532,6 +540,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }, [timetableRows]);
   const canPrint = previewData.scenes.length > 0 || previewData.mealTimes.length > 0;
   const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
+  const weatherCards: EditableWeatherCardConfig[] = [
+    { field: "weather", label: "날씨", value: printMeta.weather },
+    { field: "sunrise", label: "일출", value: printMeta.sunrise, placeholder: "HHMM", timeValue: true },
+    { field: "sunset", label: "일몰", value: printMeta.sunset, placeholder: "HHMM", timeValue: true },
+    { field: "minTemperature", label: "최저 기온", value: printMeta.minTemperature },
+    { field: "maxTemperature", label: "최고 기온", value: printMeta.maxTemperature },
+    { field: "rainProbability", label: "강수 확률", value: printMeta.rainProbability }
+  ];
   const episodeOptions = activeProjectBasicInfo
     ? Array.from({ length: activeProjectBasicInfo.totalEpisodes }, (_, index) => String(index + 1))
     : [];
@@ -1532,7 +1548,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-xs font-black">
-              <span className="max-w-[55vw] truncate border border-field-border bg-field-input px-3 py-1.5 text-field-text">{plan.title || "새 일촬표"}</span>
+              <span className="max-w-[55vw] truncate border border-field-border bg-field-input px-3 py-1.5 text-field-text">{project.name}</span>
             </div>
             <Link
               href={`/projects/${project.id}/daily-plans`}
@@ -1651,79 +1667,27 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </Button>
             </div>
 
-            <div className="mt-3 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden">
-              <div className="grid min-w-[39rem] grid-cols-6 gap-1.5 md:min-w-0 md:gap-2">
+            <div
+              data-testid="daily-plan-editor-weather-row"
+              className="daily-plan-weather-card-row mt-3"
+              style={{ gridTemplateColumns: `repeat(${weatherCards.length}, minmax(0, 1fr))` }}
+            >
+              {weatherCards.map((weatherCard) => (
                 <EditableWeatherCard
-                label="날씨"
-                value={printMeta.weather}
-                isEditing={editingWeatherField === "weather"}
-                onEdit={() => setEditingWeatherField("weather")}
-                onSave={(value) => {
-                  updatePrintMetaField("weather", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
-              />
-                <EditableWeatherCard
-                label="일출"
-                value={printMeta.sunrise}
-                placeholder="HHMM"
-                timeValue
-                isEditing={editingWeatherField === "sunrise"}
-                onEdit={() => setEditingWeatherField("sunrise")}
-                onSave={(value) => {
-                  updatePrintMetaField("sunrise", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
-              />
-                <EditableWeatherCard
-                label="일몰"
-                value={printMeta.sunset}
-                placeholder="HHMM"
-                timeValue
-                isEditing={editingWeatherField === "sunset"}
-                onEdit={() => setEditingWeatherField("sunset")}
-                onSave={(value) => {
-                  updatePrintMetaField("sunset", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
-              />
-                <EditableWeatherCard
-                label="최저 기온"
-                value={printMeta.minTemperature}
-                isEditing={editingWeatherField === "minTemperature"}
-                onEdit={() => setEditingWeatherField("minTemperature")}
-                onSave={(value) => {
-                  updatePrintMetaField("minTemperature", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
-              />
-                <EditableWeatherCard
-                label="최고 기온"
-                value={printMeta.maxTemperature}
-                isEditing={editingWeatherField === "maxTemperature"}
-                onEdit={() => setEditingWeatherField("maxTemperature")}
-                onSave={(value) => {
-                  updatePrintMetaField("maxTemperature", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
-              />
-                <EditableWeatherCard
-                label="강수 확률"
-                value={printMeta.rainProbability}
-                isEditing={editingWeatherField === "rainProbability"}
-                onEdit={() => setEditingWeatherField("rainProbability")}
-                onSave={(value) => {
-                  updatePrintMetaField("rainProbability", value);
-                  setEditingWeatherField(null);
-                }}
-                onCancel={() => setEditingWeatherField(null)}
+                  key={weatherCard.field}
+                  label={weatherCard.label}
+                  value={weatherCard.value}
+                  placeholder={weatherCard.placeholder}
+                  timeValue={weatherCard.timeValue}
+                  isEditing={editingWeatherField === weatherCard.field}
+                  onEdit={() => setEditingWeatherField(weatherCard.field)}
+                  onSave={(value) => {
+                    updatePrintMetaField(weatherCard.field, value);
+                    setEditingWeatherField(null);
+                  }}
+                  onCancel={() => setEditingWeatherField(null)}
                 />
-              </div>
+              ))}
             </div>
 
             {weatherStatus ? <p className="mt-3 hidden text-xs font-normal text-field-muted md:block" aria-live="polite">{weatherStatus}</p> : null}
@@ -2740,12 +2704,12 @@ function EditableWeatherCard({
 
   if (isEditing) {
     return (
-      <label ref={cardRef} className="grid min-h-12 content-center border border-field-primary bg-field-input px-1.5 py-1 text-center ring-1 ring-field-primary/20">
-        <span className="text-[10px] font-black text-field-muted">{label}</span>
+      <label ref={cardRef} data-weather-card className="daily-plan-weather-card grid content-center border border-field-primary bg-field-input text-center ring-1 ring-field-primary/20">
+        <span className="daily-plan-weather-card-label font-black text-field-muted">{label}</span>
         <input
           autoFocus
           aria-label={`${label} 수정`}
-          className={`mt-0.5 min-w-0 border bg-field-input px-1 py-0.5 text-center text-xs font-normal text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
+          className={`daily-plan-weather-card-input mt-0.5 min-w-0 max-w-full border bg-field-input text-center font-normal text-field-text outline-none ${isInvalidTime ? "border-field-danger" : "border-field-border focus:border-field-primary"}`}
           type="text"
           inputMode={timeValue ? "numeric" : undefined}
           pattern={timeValue ? "[0-9]*" : undefined}
@@ -2783,9 +2747,9 @@ function EditableWeatherCard({
   }
 
   return (
-    <button type="button" onClick={startEditing} className="grid min-h-12 content-center border border-field-border bg-field-panel px-1.5 py-1 text-center transition-colors hover:border-field-divider hover:bg-field-hover">
-      <span className="text-[10px] font-black text-field-muted">{label}</span>
-      <span className="mt-0.5 truncate text-xs font-normal text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
+    <button type="button" data-weather-card onClick={startEditing} className="daily-plan-weather-card grid content-center border border-field-border bg-field-panel text-center transition-colors hover:border-field-divider hover:bg-field-hover">
+      <span className="daily-plan-weather-card-label font-black text-field-muted">{label}</span>
+      <span className="daily-plan-weather-card-value mt-0.5 min-w-0 font-normal text-field-text">{(timeValue ? formatTimeDisplay(value) : value) || "-"}</span>
     </button>
   );
 }
