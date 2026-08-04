@@ -269,6 +269,8 @@ const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden tex
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
+const timetableFieldLabelBaseClass = "mb-1 min-h-6 select-none items-center justify-center whitespace-nowrap text-[11px] font-black leading-4 text-field-subtle max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
+const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden max-lg:flex`;
 const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-subtle max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5  max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
@@ -1926,10 +1928,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
                         onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
                       >
-                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
-                        <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
+                        <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
-                          <span className={mobileTimetableLabelClass}>장소</span>
+                          <span className={timetableFieldLabelClass}>장소</span>
                           <select className={centeredSelectClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
                             <option value="">빈칸</option>
                             {locations.filter(isMeaningfulDailyPlanLocationCard).map((location, locationIndex) => (
@@ -1939,7 +1941,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         </td>
                         <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-12`}>
                           <div className="min-w-0">
-                            <span className={mobileTimetableLabelClass}>메모</span>
+                            <span className={timetableFieldLabelClass}>메모</span>
                             <MemoPopoverField
                               value={meal.memo}
                               placeholder="메모"
@@ -1967,10 +1969,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
                       onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
                     >
-                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
-                      <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
+                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
+                      <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
-                        <div className="flex min-h-[38px] min-w-0 items-center justify-center">
+                        <span className={timetableFieldLabelClass}>장소</span>
+                        <div className="flex min-h-[38px] min-w-0 items-center justify-center max-md:min-h-[34px]">
                           <DraftInput
                             className={timetableInputClass}
                             value={scene.subLocation}
@@ -1979,9 +1982,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           />
                         </div>
                       </td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
-                        <span className={mobileTimetableLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
+                        <span className={timetableFieldLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
                         <SceneSourceSelector
                           ariaLabel={`촬영 행 ${sceneIndex + 1} SCENE`}
                           value={scene.sourceSceneId}
@@ -1992,7 +1995,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         />
                       </td>
                       <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-2`}>
-                        <span className={mobileTimetableLabelClass}>Cut</span>
+                        <span className={timetableFieldLabelClass}>Cut</span>
                         <SceneCutCountField
                           value={scene.cutCount}
                           sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
@@ -2029,7 +2032,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         />
                       </td>
                       <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
-                        <span className={mobileTimetableLabelClass}><span className="md:hidden">순서</span><span className="hidden md:inline">촬영 순서</span></span>
+                        <span className={timetableFieldLabelClass}><span className="md:hidden">순서</span><span className="hidden md:inline">촬영 순서</span></span>
                         <ShootingOrderField
                           value={scene.shootingOrder}
                           totalCut={scene.cutCount}
@@ -2037,7 +2040,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           ariaLabel={`촬영 행 ${sceneIndex + 1} 촬영 순서`}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-md:hidden`}><span className={mobileTimetableLabelClass}>비고</span><MemoPopoverField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
+                      <td className={`${timetableTextCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>비고</span><MemoPopoverField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
                     </tr>
                   );
                 })}
@@ -3418,7 +3421,7 @@ function TimetableLinkedFieldLabel({
   onReset: () => void;
 }) {
   return (
-    <span className="mb-1 flex min-h-6 items-center justify-center text-[11px] font-black text-field-subtle max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25] lg:mb-0 lg:min-h-0 lg:justify-end">
+    <span className={`${timetableFieldLabelBaseClass} flex lg:mb-0 lg:min-h-0 lg:justify-end`}>
       <span className="lg:hidden">{label}</span>
       {canReset ? (
         <button
