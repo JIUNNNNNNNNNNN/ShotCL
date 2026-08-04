@@ -20,7 +20,7 @@ import {
 } from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
 
-type DailyPlanDesktopLandscapePreviewProps = {
+type DailyPlanDocumentProps = {
   plan: DailyPlanDraft;
   locations: DailyPlanLocation[];
   meta: DailyPlanPrintMeta;
@@ -39,8 +39,8 @@ const eventRowClass = "daily-plan-preview-event";
 const timetableColumnCount = DAILY_PLAN_TIMETABLE_COLUMN_COUNT;
 const callSheetColumnCount = 8;
 
-/** 앱 화면에서만 사용하는 Google Sheet 기반 가로형 미리보기입니다. */
-export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDesktopLandscapePreviewProps) {
+/** 화면 미리보기와 PDF 출력이 함께 사용하는 canonical 일촬표 문서입니다. */
+export function DailyPlanDocument({ plan, locations, meta, timetableRows, totalCutCount }: DailyPlanDocumentProps) {
   const printableLocations = buildDailyPlanPreviewLocationRows(locations);
   const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
   const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
@@ -61,7 +61,7 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
   ];
 
   return (
-    <article data-testid="daily-plan-desktop-landscape-preview" className="daily-plan-template text-[11px] leading-[1.3] text-black">
+    <article data-testid="daily-plan-document" className="daily-plan-template text-[11px] leading-[1.3] text-black">
       <div className="grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
         <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <EqualColumns count={12} />
@@ -173,55 +173,57 @@ export function DailyPlanDesktopLandscapePreview({ plan, locations, meta, timeta
         </tbody>
       </table>
 
-      <div className="mt-1 grid grid-cols-2 gap-1">
-        {memoFields.map((field) => (
-          <table key={field.key} className={halfTableClass}>
-            <tbody>
-              <tr><td className={`${headerCellClass} font-black`}>{field.label}</td></tr>
-              <tr><td className={`${cellClass} min-h-20 whitespace-pre-wrap align-top`}>{getPreviewCellText(field.value)}</td></tr>
-            </tbody>
-          </table>
-        ))}
-      </div>
+      <section data-daily-plan-notes-boundary className="daily-plan-notes-section">
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          {memoFields.map((field) => (
+            <table key={field.key} className={halfTableClass}>
+              <tbody>
+                <tr><td className={`${headerCellClass} font-black`}>{field.label}</td></tr>
+                <tr><td className={`${cellClass} min-h-20 whitespace-pre-wrap align-top`}>{getPreviewCellText(field.value)}</td></tr>
+              </tbody>
+            </table>
+          ))}
+        </div>
 
-      <div className="mt-1 grid grid-cols-2 gap-1">
-        <FixedCallSheetTable
-          title="Starring"
-          emptyMessage="등록된 배우가 없습니다."
-          fields={[
-            { key: "name", label: "Starring", span: 2 },
-            { key: "role", label: "Actor", span: 2 },
-            { key: "callTime", label: "CALL", span: 1 },
-            { key: "callLocation", label: "Call Location", span: 2 },
-            { key: "notes", label: "Notes", span: 1 }
-          ]}
-          rows={starringRows.map((person) => ({
-            name: person.name,
-            role: person.role,
-            callTime: person.callTime,
-            callLocation: person.callLocation,
-            notes: person.notes
-          }))}
-        />
-        <FixedCallSheetTable
-          title="Team"
-          emptyMessage="등록된 스태프 부서가 없습니다."
-          fields={[
-            { key: "team", label: "Team", span: 2 },
-            { key: "total", label: "Total", span: 1 },
-            { key: "callTime", label: "CALL", span: 1 },
-            { key: "callLocation", label: "Call Location", span: 2 },
-            { key: "notes", label: "Notes", span: 2 }
-          ]}
-          rows={teamRows.map((team) => ({
-            team: team.team,
-            total: team.total,
-            callTime: team.callTime,
-            callLocation: team.callLocation,
-            notes: team.notes
-          }))}
-        />
-      </div>
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          <FixedCallSheetTable
+            title="Starring"
+            emptyMessage="등록된 배우가 없습니다."
+            fields={[
+              { key: "name", label: "Starring", span: 2 },
+              { key: "role", label: "Actor", span: 2 },
+              { key: "callTime", label: "CALL", span: 1 },
+              { key: "callLocation", label: "Call Location", span: 2 },
+              { key: "notes", label: "Notes", span: 1 }
+            ]}
+            rows={starringRows.map((person) => ({
+              name: person.name,
+              role: person.role,
+              callTime: person.callTime,
+              callLocation: person.callLocation,
+              notes: person.notes
+            }))}
+          />
+          <FixedCallSheetTable
+            title="Team"
+            emptyMessage="등록된 스태프 부서가 없습니다."
+            fields={[
+              { key: "team", label: "Team", span: 2 },
+              { key: "total", label: "Total", span: 1 },
+              { key: "callTime", label: "CALL", span: 1 },
+              { key: "callLocation", label: "Call Location", span: 2 },
+              { key: "notes", label: "Notes", span: 2 }
+            ]}
+            rows={teamRows.map((team) => ({
+              team: team.team,
+              total: team.total,
+              callTime: team.callTime,
+              callLocation: team.callLocation,
+              notes: team.notes
+            }))}
+          />
+        </div>
+      </section>
     </article>
   );
 }

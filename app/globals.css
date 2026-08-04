@@ -795,6 +795,43 @@ a[class*="min-h-"][class*="items-center"] {
   font-size: 13px;
 }
 
+.daily-plan-timetable-row[data-selected="true"] > td {
+  box-shadow:
+    inset 0 1px rgba(172, 147, 82, 0.78),
+    inset 0 -1px rgba(172, 147, 82, 0.78);
+  background-image: linear-gradient(rgba(172, 147, 82, 0.06), rgba(172, 147, 82, 0.06));
+}
+
+.daily-plan-timetable-row[data-selected="true"] > td:first-child {
+  box-shadow:
+    inset 1px 0 rgba(172, 147, 82, 0.78),
+    inset 0 1px rgba(172, 147, 82, 0.78),
+    inset 0 -1px rgba(172, 147, 82, 0.78);
+}
+
+.daily-plan-timetable-row[data-selected="true"] > td:last-child {
+  box-shadow:
+    inset -1px 0 rgba(172, 147, 82, 0.78),
+    inset 0 1px rgba(172, 147, 82, 0.78),
+    inset 0 -1px rgba(172, 147, 82, 0.78);
+}
+
+.daily-plan-timetable-row[data-dragging="true"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (max-width: 1023px) {
+  .daily-plan-timetable-row[data-selected="true"] {
+    outline: 1px solid rgba(172, 147, 82, 0.78);
+    outline-offset: -1px;
+  }
+
+  .daily-plan-timetable-row[data-selected="true"] > td {
+    box-shadow: none;
+  }
+}
+
 .print-only {
   display: none;
 }
@@ -804,33 +841,12 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-template {
-  width: 1120px;
+  width: 277mm;
   margin: 0 auto;
   background: #ffffff;
   color: #000000;
   --daily-plan-section-line: rgba(28, 28, 28, 0.82);
   --daily-plan-card-line: rgba(78, 78, 78, 0.68);
-  --daily-plan-header-fill: #f2f2f2;
-  --daily-plan-accent-fill: #fbf5f5;
-  --daily-plan-summary-fill: #f3f8f1;
-  --daily-plan-event-fill: #fffaf0;
-  font-family: inherit;
-}
-
-.daily-plan-print-document {
-  background: #ffffff;
-  color: #000000;
-  --daily-plan-section-line: rgba(28, 28, 28, 0.82);
-  --daily-plan-card-line: rgba(78, 78, 78, 0.68);
-  --daily-plan-header-fill: #f2f2f2;
-  --daily-plan-accent-fill: #fbf5f5;
-  --daily-plan-summary-fill: #f3f8f1;
-  --daily-plan-event-fill: #fffaf0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
-}
-
-.daily-plan-preview-surface {
-  color: #000000;
   --daily-plan-header-fill: #f2f2f2;
   --daily-plan-accent-fill: #fbf5f5;
   --daily-plan-summary-fill: #f3f8f1;
@@ -855,48 +871,44 @@ a[class*="min-h-"][class*="items-center"] {
 }
 
 .daily-plan-template table,
-.daily-plan-template .daily-plan-grid,
-.daily-plan-print-document .daily-plan-grid {
+.daily-plan-template .daily-plan-grid {
   table-layout: fixed;
 }
 
-.daily-plan-template .daily-plan-section-table,
-.daily-plan-print-document .daily-plan-export-table {
+.daily-plan-template .daily-plan-section-table {
   border: 2.5px solid var(--daily-plan-section-line) !important;
 }
 
 .daily-plan-template td,
-.daily-plan-template th,
-.daily-plan-print-document td,
-.daily-plan-print-document th {
+.daily-plan-template th {
   border-color: var(--daily-plan-card-line) !important;
 }
 
 .daily-plan-template td,
-.daily-plan-template th,
-.daily-plan-print-document td,
-.daily-plan-print-document th {
+.daily-plan-template th {
   height: 20px;
   padding: 3px 5px;
   vertical-align: middle;
   word-break: keep-all;
 }
 
-.daily-plan-print-document td {
-  font-weight: 400;
-}
-
-.daily-plan-template th,
-.daily-plan-print-document th {
+.daily-plan-template th {
   font-weight: 700;
 }
 
-.daily-plan-print-document tr.pdf-section-start > :is(td, th) {
-  border-top: 2.5px solid var(--daily-plan-section-line) !important;
+.daily-plan-print-staging {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: -200vw;
+  width: 277mm;
+  visibility: hidden;
+  pointer-events: none;
 }
 
-.daily-plan-print-document tr.pdf-section-end > :is(td, th) {
-  border-bottom: 2.5px solid var(--daily-plan-section-line) !important;
+.daily-plan-print-staging .daily-plan-template {
+  width: 277mm;
+  margin: 0;
 }
 
 @media print {
@@ -907,6 +919,17 @@ a[class*="min-h-"][class*="items-center"] {
 
   body {
     background: #ffffff;
+  }
+
+  .app-theme {
+    min-height: 0 !important;
+    background: #ffffff !important;
+    color: #111111 !important;
+  }
+
+  .app-theme > aside,
+  .app-theme > main > aside[role="alert"] {
+    display: none !important;
   }
 
   header,
@@ -929,31 +952,30 @@ a[class*="min-h-"][class*="items-center"] {
     display: block !important;
   }
 
-  .daily-plan-print-document {
-    break-after: auto;
+  .daily-plan-print-staging {
+    position: static;
+    width: auto;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .daily-plan-template {
     width: 100% !important;
     margin: 0 !important;
-    font-size: 8.5px !important;
   }
 
-  .daily-plan-template,
-  .daily-plan-print-document {
+  .daily-plan-template {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-    --daily-plan-section-line: #262626;
-    --daily-plan-card-line: #737373;
   }
 
-  .daily-plan-template td,
-  .daily-plan-template th {
-    height: 16px;
-    padding: 2px 4px;
+  .daily-plan-print-layout[data-print-layout="two"] .daily-plan-notes-section {
+    break-before: page;
+    page-break-before: always;
   }
 
-  .daily-plan-print-scene {
+  .daily-plan-template tr,
+  .daily-plan-notes-section {
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -961,7 +983,6 @@ a[class*="min-h-"][class*="items-center"] {
   .print-daily-plan table {
     min-width: 0 !important;
     width: 100% !important;
-    font-size: 9px;
   }
 
   .print-daily-plan input,

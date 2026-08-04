@@ -82,7 +82,7 @@ export function RightProjectSidebar({
     <aside
       ref={sidebarRef}
       aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
-      className="fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] md:right-5"
+      className="no-print fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] md:right-5"
     >
       <button
         type="button"

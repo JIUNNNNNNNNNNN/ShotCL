@@ -4,7 +4,7 @@ import { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Copy, Eye, GripVertical, ListChecks, MoreHorizontal, Plus, Printer, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { Eye, GripVertical, ListChecks, Plus, Printer, RotateCcw, Save, Search, X } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -50,27 +50,14 @@ import {
   hasDailyPlanLocationSearchMetadata
 } from "@/lib/dailyPlan/location";
 import {
-  buildDailyPlanPreviewLocationRows,
   buildSceneLocationOptions,
   createSceneLocationKey,
   formatDailyPlanTimetableLocation,
   getDailyPlanLocationDisplayName,
   migrateLegacySceneLocationsToLocationCards,
-  normalizeDailyPlanLocationAssignments,
-  type DailyPlanPreviewLocationRow
+  normalizeDailyPlanLocationAssignments
 } from "@/lib/dailyPlan/sceneLocations";
-import {
-  filterRenderablePreviewRows,
-  getPreviewCellText,
-  hasMeaningfulRowValue,
-  type PreviewDisplayField
-} from "@/lib/dailyPlan/previewDisplay";
-import {
-  DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
-  DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS,
-  DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
-  type DailyPlanPreviewTimetableRow
-} from "@/lib/dailyPlan/previewTimetable";
+import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
 import { applyProjectStaffDefaults } from "@/lib/dailyPlan/staffDefaults";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
@@ -88,8 +75,8 @@ import {
   sumSceneCutCounts
 } from "@/lib/sceneCutCount";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
-import { DailyPlanMobilePortraitPreview } from "@/components/DailyPlanMobilePortraitPreview";
-import { DailyPlanDesktopLandscapePreview } from "@/components/DailyPlanDesktopLandscapePreview";
+import { DailyPlanDocument } from "@/components/DailyPlanDocument";
+import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
 import { DailyPlanLocationReorderList } from "@/components/DailyPlanLocationReorderList";
 import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
@@ -97,8 +84,10 @@ import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { WeatherRegionPicker } from "@/components/weather/WeatherRegionPicker";
 import { Button } from "@/components/ui/Button";
+import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
@@ -224,13 +213,22 @@ type WindowWithDaumPostcode = Window & {
   };
 };
 
-type ReorderCollection = "meals" | "scenes" | "timetable" | "starring";
+type ReorderCollection = "starring";
 
 type LocationInputMode = "search" | "manual";
 
 type EditorTimetableRow =
   | { type: "scene"; sourceIndex: number; item: SceneBlockInput }
   | { type: "event"; sourceIndex: number; item: DailyPlanMealTime };
+
+type DailyPlanPrintLayout = "single" | "two";
+
+type TimetableMutationSnapshot = {
+  scenes: SceneBlockInput[];
+  mealTimes: DailyPlanMealTime[];
+  printMeta: DailyPlanPrintMeta;
+  automaticStartRowIds: Set<string>;
+};
 
 type OpenMeteoResponse = {
   provider?: "open-meteo";
@@ -265,7 +263,7 @@ const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5  max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 
 const maxRuntimeMinutes = 1440;
-const desktopPreviewDocumentWidth = 1120;
+const desktopPreviewDocumentWidth = 277 * 96 / 25.4;
 const showDailyPlanMainStaffInputs = false;
 const emptyInitialShots: DailyPlanShot[] = [];
 const emptyProjectStaffDepartments: ProjectStaffDepartment[] = [];
@@ -275,6 +273,8 @@ let daumPostcodeScriptPromise: Promise<void> | null = null;
 /** 일촬표를 현장용 씬 블록 방식으로 빠르게 작성하는 편집기입니다. */
 export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneListItems = emptySceneListItems, notice }: DailyPlanEditorProps) {
   const router = useRouter();
+  const { role: projectAccessRole } = useProjectAccess();
+  const canManageTimetable = projectAccessRole !== "progress" && project.accessRole !== "progress";
   const initialEditorState = useMemo(() => {
     const isNewDailyPlan = !initialPlan && !initialDraft;
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
@@ -366,6 +366,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [errorMessage, setErrorMessage] = useState("");
   const [printPreviewData, setPrintPreviewData] = useState<DailyPlanPreviewData | null>(null);
   const [printData, setPrintData] = useState<DailyPlanPreviewData | null>(null);
+  const [printLayout, setPrintLayout] = useState<DailyPlanPrintLayout>("single");
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
+  const [isTimetableMutationPending, setIsTimetableMutationPending] = useState(false);
   const [gatheringPhotoPreview, setGatheringPhotoPreview] = useState<{
     images: Array<{ url: string; title: string }>;
     index: number;
@@ -380,9 +384,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("");
   const isSavingRef = useRef(false);
+  const isPrintingRef = useRef(false);
+  const editorInteractionRootRef = useRef<HTMLDivElement | null>(null);
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
-  const printFrameRef = useRef<number | null>(null);
+  const printDocumentRef = useRef<HTMLDivElement | null>(null);
+  const timetableTrashRef = useRef<HTMLDivElement | null>(null);
   const automaticStartRowIdsRef = useRef<Set<string>>(
     new Set(initialPrintMeta.automaticTimetableRowIds)
   );
@@ -393,6 +400,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
     [mealTimes, printMeta.timetableRowOrder, scenes]
   );
+  const timetableRowKeys = useMemo(
+    () => timetableRows.map(getEditorTimetableRowKey),
+    [timetableRows]
+  );
+  const timetableInteraction = useDailyPlanTimetableInteraction({
+    rowKeys: timetableRowKeys,
+    disabled: !canManageTimetable || isSaving || isTimetableMutationPending || pendingTimetableDeleteKey !== null,
+    trashRef: timetableTrashRef,
+    onReorder: ({ orderedRowKeys }) => {
+      void persistTimetableReorder(orderedRowKeys);
+    },
+    onTrashDrop: (rowKey) => {
+      setPendingTimetableDeleteKey(rowKey);
+    }
+  });
   const sceneLocationOptions = useMemo(
     () => buildSceneLocationOptions(sceneListItems),
     [sceneListItems]
@@ -422,6 +444,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     [locations, mealTimes, plan, printMeta, scenes]
   );
   useUnsavedChangesGuard(currentEditorFingerprint !== savedEditorFingerprint);
+  useEffect(() => {
+    const root = editorInteractionRootRef.current;
+    if (!root) return;
+    const shouldLock = isSaving || isTimetableMutationPending;
+    root.inert = shouldLock;
+    if (shouldLock && document.activeElement instanceof HTMLElement && root.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    return () => {
+      root.inert = false;
+    };
+  }, [isSaving, isTimetableMutationPending]);
   const previewData = useMemo(() => {
     const printablePlan = buildPlanForSave(
       deferredPreviewSource.plan,
@@ -767,16 +801,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setMealTimes((current) => current.map((meal, mealIndex) => (mealIndex === index ? { ...meal, ...patch } : meal)));
   }
 
-  function deleteMealTime(index: number) {
-    setMealTimes((current) => current.filter((_, mealIndex) => mealIndex !== index));
-    setPrintMeta((current) => ({
-      ...current,
-      timetableRowOrder: current.timetableRowOrder.length > 0
-        ? timetableRows.filter((row) => !(row.type === "event" && row.sourceIndex === index)).map((row) => row.type)
-        : []
-    }));
-  }
-
   function updateMealTimeField(index: number, field: "startTime" | "endTime" | "runtimeMinutes", value: string | number | null) {
     if (field === "startTime") {
       setStartTimeSource(
@@ -820,21 +844,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         timetableRowOrder: current.timetableRowOrder.length > 0 ? nextOrder : []
       }));
     }
-  }
-
-  function deleteScene(sceneIndex: number) {
-    if (scenes.length > 1) {
-      setPrintMeta((current) => ({
-        ...current,
-        timetableRowOrder: current.timetableRowOrder.length > 0
-          ? timetableRows.filter((row) => !(row.type === "scene" && row.sourceIndex === sceneIndex)).map((row) => row.type)
-          : []
-      }));
-    }
-    setScenes((current) => {
-      if (current.length <= 1) return [createBlankScene()];
-      return current.filter((_, index) => index !== sceneIndex);
-    });
   }
 
   function updateScene(sceneIndex: number, patch: Partial<SceneBlockInput>) {
@@ -976,6 +985,73 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setScenes((current) => current.map((scene, index) => (index === sceneIndex ? applyTimeFieldEdit(scene, field, value) : scene)));
   }
 
+  function captureTimetableMutationSnapshot(): TimetableMutationSnapshot {
+    return {
+      scenes,
+      mealTimes,
+      printMeta,
+      automaticStartRowIds: new Set(automaticStartRowIdsRef.current)
+    };
+  }
+
+  function applyTimetableMutationSnapshot(snapshot: TimetableMutationSnapshot) {
+    automaticStartRowIdsRef.current = new Set(snapshot.automaticStartRowIds);
+    setScenes(snapshot.scenes);
+    setMealTimes(snapshot.mealTimes);
+    setPrintMeta(snapshot.printMeta);
+  }
+
+  async function persistTimetableMutation(
+    nextSnapshot: TimetableMutationSnapshot,
+    rollbackSnapshot: TimetableMutationSnapshot,
+    successMessage: string
+  ) {
+    applyTimetableMutationSnapshot(nextSnapshot);
+    setIsTimetableMutationPending(true);
+    setErrorMessage("");
+    try {
+      const result = await saveCurrentPlan(false, nextSnapshot);
+      if (!result) {
+        applyTimetableMutationSnapshot(rollbackSnapshot);
+        return;
+      }
+      setMessage(result.didSyncShots ? successMessage : formatProgressSyncFailure(result.saved));
+    } finally {
+      setIsTimetableMutationPending(false);
+    }
+  }
+
+  async function persistTimetableReorder(orderedRowKeys: string[]) {
+    if (!canManageTimetable || isSavingRef.current || isTimetableMutationPending) return;
+    const nextRows = orderEditorTimetableRowsByStableKeys(timetableRows, orderedRowKeys);
+    if (nextRows === timetableRows) return;
+    const rollbackSnapshot = captureTimetableMutationSnapshot();
+    const nextSnapshot = createTimetableMutationSnapshot(
+      nextRows,
+      printMeta,
+      automaticStartRowIdsRef.current
+    );
+    await persistTimetableMutation(nextSnapshot, rollbackSnapshot, "타임테이블 순서를 저장했습니다.");
+  }
+
+  async function confirmTimetableDelete() {
+    const rowKey = pendingTimetableDeleteKey;
+    if (!rowKey || !canManageTimetable || isSavingRef.current || isTimetableMutationPending) return;
+    const nextRows = timetableRows.filter((row) => getEditorTimetableRowKey(row) !== rowKey);
+    if (nextRows.length === timetableRows.length) {
+      setPendingTimetableDeleteKey(null);
+      return;
+    }
+    const rollbackSnapshot = captureTimetableMutationSnapshot();
+    const nextSnapshot = createTimetableMutationSnapshot(
+      nextRows,
+      printMeta,
+      automaticStartRowIdsRef.current
+    );
+    setPendingTimetableDeleteKey(null);
+    await persistTimetableMutation(nextSnapshot, rollbackSnapshot, "타임테이블 행을 삭제했습니다.");
+  }
+
   function startReorder(event: React.DragEvent<HTMLElement>, collection: ReorderCollection, index: number) {
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", `${collection}:${index}`);
@@ -987,28 +1063,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const sourceIndex = Number(sourceIndexValue);
     if (sourceCollection !== collection || !Number.isInteger(sourceIndex) || sourceIndex === targetIndex) return;
 
-    if (collection === "timetable") {
-      const nextRows = moveArrayItemToIndex(timetableRows, sourceIndex, targetIndex);
-      setScenes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene").map((row) => row.item));
-      setMealTimes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event").map((row) => row.item));
-      setPrintMeta((current) => ({ ...current, timetableRowOrder: nextRows.map((row) => row.type) }));
-      return;
-    }
-
-    if (collection === "meals") setMealTimes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
-    if (collection === "scenes") setScenes((current) => moveArrayItemToIndex(current, sourceIndex, targetIndex));
     if (collection === "starring") {
       setPrintMeta((current) => ({ ...current, starring: moveArrayItemToIndex(current.starring, sourceIndex, targetIndex) }));
     }
-  }
-
-  function moveTimetableRow(rowIndex: number, direction: "up" | "down") {
-    const targetIndex = direction === "up" ? rowIndex - 1 : rowIndex + 1;
-    if (targetIndex < 0 || targetIndex >= timetableRows.length) return;
-    const nextRows = moveArrayItemToIndex(timetableRows, rowIndex, targetIndex);
-    setScenes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene").map((row) => row.item));
-    setMealTimes(nextRows.filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event").map((row) => row.item));
-    setPrintMeta((current) => ({ ...current, timetableRowOrder: nextRows.map((row) => row.type) }));
   }
 
   function updateSceneLocation(sceneIndex: number, locationId: string) {
@@ -1149,15 +1206,24 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
   }
 
-  async function saveCurrentPlan(showMessage = true) {
+  async function saveCurrentPlan(showMessage = true, snapshot?: TimetableMutationSnapshot) {
     if (isSavingRef.current) return null;
-    const constraintMessage = getProjectConstraintMessage(plan, printMeta, activeProjectBasicInfo);
+    const sourceScenes = snapshot?.scenes ?? scenes;
+    const sourceMealTimes = snapshot?.mealTimes ?? mealTimes;
+    const sourcePrintMeta = snapshot?.printMeta ?? printMeta;
+    const sourceAutomaticRowIds = snapshot?.automaticStartRowIds ?? automaticStartRowIdsRef.current;
+    const sourceTimetableRows = buildEditorTimetableRows(
+      sourceScenes,
+      sourceMealTimes,
+      sourcePrintMeta.timetableRowOrder
+    );
+    const constraintMessage = getProjectConstraintMessage(plan, sourcePrintMeta, activeProjectBasicInfo);
     if (constraintMessage) {
       setMessage("");
       setErrorMessage(constraintMessage);
       return null;
     }
-    const timetableValidationMessage = getTimetableValidationMessage(scenes);
+    const timetableValidationMessage = getTimetableValidationMessage(sourceScenes);
     if (timetableValidationMessage) {
       setMessage("");
       setErrorMessage(timetableValidationMessage);
@@ -1170,33 +1236,33 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setMessage("");
 
     try {
-      const persistedTimetableRows = getPersistedEditorTimetableRows(timetableRows);
+      const persistedTimetableRows = getPersistedEditorTimetableRows(sourceTimetableRows);
       const persistedAutomaticRowIds = persistedTimetableRows
         .map(getEditorTimetableRowKey)
-        .filter((rowKey) => automaticStartRowIdsRef.current.has(rowKey));
+        .filter((rowKey) => sourceAutomaticRowIds.has(rowKey));
       const printMetaForSave = deriveDailyPlanHeadcount({
-        ...printMeta,
-        timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder),
+        ...sourcePrintMeta,
+        timetableRowOrder: getPersistedTimetableRowOrder(sourceTimetableRows, sourcePrintMeta.timetableRowOrder),
         automaticTimetableRowIds: persistedAutomaticRowIds,
-        timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
+        timetableScenes: serializeTimetableScenes(sourceScenes, sceneListItems)
       });
       const planForSave = buildPlanForSave(
         plan,
         locations,
-        mealTimes,
+        sourceMealTimes,
         printMetaForSave,
-        scenes,
+        sourceScenes,
         sceneListItems
       );
       const automaticRowPositions = captureAutomaticTimetableRowPositions(
         persistedTimetableRows,
-        automaticStartRowIdsRef.current
+        sourceAutomaticRowIds
       );
       const saved = await saveDailyPlanWithShots({
         projectId: project.id,
         dailyPlanId,
         plan: planForSave,
-        shots: scenesToShotDrafts(scenes, locations)
+        shots: scenesToShotDrafts(sourceScenes, locations)
       });
       if (saved.saveStatus === "duplicate") {
         setMessage(saved.message);
@@ -1304,7 +1370,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setPrintPreviewData(currentPreviewData);
   }
 
-  function handlePrint() {
+  async function handlePrint() {
+    if (isPrintingRef.current) return;
     const timetableValidationMessage = getTimetableValidationMessage(scenes);
     if (timetableValidationMessage) {
       setErrorMessage(timetableValidationMessage);
@@ -1316,14 +1383,26 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       return;
     }
     setErrorMessage("");
+    isPrintingRef.current = true;
+    setIsPrinting(true);
+    setPrintLayout("single");
     setPrintData(currentPreviewData);
-    if (printFrameRef.current !== null) window.cancelAnimationFrame(printFrameRef.current);
-    printFrameRef.current = window.requestAnimationFrame(() => {
-      printFrameRef.current = window.requestAnimationFrame(() => {
-        printFrameRef.current = null;
-        window.print();
-      });
-    });
+    try {
+      await waitForDailyPlanPrintDocument(printDocumentRef);
+      const root = printDocumentRef.current;
+      if (!root) throw new Error("PDF 문서를 준비하지 못했습니다.");
+      const nextLayout = resolveDailyPlanPrintLayout(root);
+      setPrintLayout(nextLayout);
+      await waitForAnimationFrames(2);
+      window.print();
+    } catch (error) {
+      setPrintData(null);
+      setPrintPreviewData(null);
+      setPrintLayout("single");
+      isPrintingRef.current = false;
+      setIsPrinting(false);
+      setErrorMessage(error instanceof Error ? error.message : "PDF 내보내기를 준비하지 못했습니다.");
+    }
   }
 
   sidebarPrintRequestRef.current = handlePrint;
@@ -1331,7 +1410,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   useEffect(() => {
     const handleSidebarPrintRequest = () => sidebarPrintRequestRef.current();
     const handleSidebarSaveRequest = () => sidebarSaveRequestRef.current();
-    const releasePrintView = () => setPrintData(null);
+    const releasePrintView = () => {
+      setPrintData(null);
+      setPrintLayout("single");
+      isPrintingRef.current = false;
+      setIsPrinting(false);
+    };
     window.addEventListener("daily-plan:request-print", handleSidebarPrintRequest);
     window.addEventListener("daily-plan:request-save", handleSidebarSaveRequest);
     window.addEventListener("afterprint", releasePrintView);
@@ -1339,13 +1423,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       window.removeEventListener("daily-plan:request-print", handleSidebarPrintRequest);
       window.removeEventListener("daily-plan:request-save", handleSidebarSaveRequest);
       window.removeEventListener("afterprint", releasePrintView);
-      if (printFrameRef.current !== null) window.cancelAnimationFrame(printFrameRef.current);
     };
   }, []);
 
   return (
     <div className="print-daily-plan">
-      <div className="daily-plan-editor no-print text-center text-[13px] md:text-sm">
+      <div
+        ref={editorInteractionRootRef}
+        aria-busy={isSaving || isTimetableMutationPending}
+        className={`daily-plan-editor no-print text-center text-[13px] md:text-sm ${
+          isSaving || isTimetableMutationPending ? "pointer-events-none select-none" : ""
+        }`}
+      >
         {message ? <div className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-bold text-field-text">{message}</div> : null}
         {errorMessage ? <div className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
@@ -1718,11 +1807,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           <div className="mt-1.5 w-full md:mt-5">
             <table className="w-full table-fixed border-collapse text-xs max-lg:block">
               <colgroup className="max-lg:hidden">
-                {[8, 7, 8, 10, 6, 7, 7, 13, 14, 10, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+                {[8, 9, 11, 6, 8, 8, 14, 15, 11, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
               </colgroup>
               <thead className="max-lg:hidden">
                 <tr className="bg-field-panel text-field-subtle">
-                  {["순서 / 삭제", "시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
+                  {["시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
                     <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
                       {header}
                     </th>
@@ -1730,13 +1819,25 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 </tr>
               </thead>
               <tbody className="max-lg:grid max-lg:gap-3 max-md:gap-1">
-                {timetableRows.map((row, rowIndex) => {
+                {timetableRows.map((row) => {
+                  const rowKey = getEditorTimetableRowKey(row);
+                  const isSelected = timetableInteraction.selectedRowKey === rowKey;
+                  const isDragging = timetableInteraction.draggingRowKey === rowKey;
                   if (row.type === "event") {
                     const meal = row.item;
                     const mealIndex = row.sourceIndex;
                     return (
-                      <tr key={meal.id} className={`bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2  max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                        <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="기타 일정" ariaLabel={`기타 일정 ${mealIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteMealTime(mealIndex)} /></td>
+                      <tr
+                        key={meal.id}
+                        ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
+                        className={`daily-plan-timetable-row bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                        data-selected={isSelected ? "true" : undefined}
+                        data-dragging={isDragging ? "true" : undefined}
+                        style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
+                        onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
+                        onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
+                        onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
+                      >
                         <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
@@ -1767,8 +1868,17 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const sceneIndex = row.sourceIndex;
                   const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
                   return (
-                    <tr key={scene.id} className={`align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => finishReorder(event, "timetable", rowIndex)}>
-                      <td className={`${timetableCellClass} max-lg:col-span-2 max-md:order-1 max-md:col-span-12`}><TimetableOrderControls label="촬영 행" ariaLabel={`촬영 행 ${sceneIndex + 1}`} rowIndex={rowIndex} rowCount={timetableRows.length} onMove={moveTimetableRow} onDragStart={(event) => startReorder(event, "timetable", rowIndex)} onDelete={() => deleteScene(sceneIndex)} /></td>
+                    <tr
+                      key={scene.id}
+                      ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
+                      className={`daily-plan-timetable-row align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                      data-selected={isSelected ? "true" : undefined}
+                      data-dragging={isDragging ? "true" : undefined}
+                      style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
+                      onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
+                      onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
+                      onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
+                    >
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={mobileTimetableLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
@@ -2010,17 +2120,85 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               <Eye className="h-5 w-5" aria-hidden />
               PDF 미리보기
             </Button>
-            <Button variant="secondary" onClick={handlePrint} disabled={!canPrint}>
+            <Button variant="secondary" onClick={handlePrint} disabled={!canPrint || isPrinting}>
               <Printer className="h-5 w-5" aria-hidden />
-              PDF로 저장 / 인쇄
+              {isPrinting ? "PDF 준비 중" : "PDF로 저장 / 인쇄"}
             </Button>
           </div>
         </div>
       </section>
       </div>
 
-      {printPreviewData ? <PrintPreviewModal data={printPreviewData} onClose={() => setPrintPreviewData(null)} onPrint={handlePrint} /> : null}
-      {printData ? <PrintDailyPlanView data={printData} /> : null}
+      {printPreviewData ? <PrintPreviewModal data={printPreviewData} isPrinting={isPrinting} onClose={() => setPrintPreviewData(null)} onPrint={handlePrint} /> : null}
+      {printData ? <PrintDailyPlanView data={printData} layout={printLayout} rootRef={printDocumentRef} /> : null}
+      {typeof document !== "undefined" && timetableInteraction.isDragging ? createPortal(
+        <>
+          {timetableInteraction.insertion ? (
+            <div
+              className="pointer-events-none fixed z-[128] h-0.5 bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              style={{
+                left: timetableInteraction.insertion.left,
+                top: timetableInteraction.insertion.top,
+                width: timetableInteraction.insertion.width
+              }}
+              aria-hidden
+            />
+          ) : null}
+          {timetableInteraction.ghost ? (
+            <div
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-black text-field-text shadow-floating"
+              style={{
+                left: timetableInteraction.ghost.left,
+                top: timetableInteraction.ghost.top,
+                width: Math.min(timetableInteraction.ghost.width, 420),
+                height: Math.min(timetableInteraction.ghost.height, 112)
+              }}
+              aria-hidden
+            >
+              {getTimetableRowLabel(timetableRows, timetableInteraction.ghost.rowKey)} 이동 중
+            </div>
+          ) : null}
+          <ArchiveDeleteDropZone ref={timetableTrashRef} isActive={timetableInteraction.isOverTrash} />
+        </>,
+        document.body
+      ) : null}
+      {typeof document !== "undefined" && pendingTimetableDeleteKey ? createPortal(
+        <div className="fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center" role="presentation">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="timetable-delete-title"
+            className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
+          >
+            <h2 id="timetable-delete-title" className="text-base font-black text-field-text">
+              {getTimetableRowLabel(timetableRows, pendingTimetableDeleteKey)} 삭제
+            </h2>
+            <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
+              선택한 타임테이블 카드를 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                disabled={isTimetableMutationPending}
+                onClick={() => {
+                  setPendingTimetableDeleteKey(null);
+                  timetableInteraction.clearSelection();
+                }}
+              >
+                취소
+              </Button>
+              <Button
+                variant="danger"
+                disabled={isTimetableMutationPending}
+                onClick={() => void confirmTimetableDelete()}
+              >
+                삭제
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
       {gatheringPhotoPreview ? (
         <ImagePreviewModal
           imageUrl={gatheringPhotoPreview.images[gatheringPhotoPreview.index]?.url ?? null}
@@ -2996,54 +3174,6 @@ function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragSta
   );
 }
 
-function TimetableOrderControls({
-  label,
-  ariaLabel = label,
-  rowIndex,
-  rowCount,
-  onMove,
-  onDragStart,
-  onDelete
-}: {
-  label: string;
-  ariaLabel?: string;
-  rowIndex: number;
-  rowCount: number;
-  onMove: (rowIndex: number, direction: "up" | "down") => void;
-  onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-1 max-lg:border-b max-lg:border-field-border max-lg:pb-2 max-md:gap-0.5 max-md:border-b-0 max-md:pb-0 max-md:[&_button]:h-7 max-md:[&_button]:w-7">
-      <span className="mr-auto text-[11px] font-black text-field-subtle lg:hidden max-md:text-[9px]">{label} 순서</span>
-      <DragHandle label={`${ariaLabel} 드래그로 순서 변경`} onDragStart={onDragStart} tabIndex={-1} />
-      <button
-        type="button"
-        onClick={() => onMove(rowIndex, "up")}
-        disabled={rowIndex === 0}
-        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
-        aria-label={`${ariaLabel} 위로 이동`}
-        title="위로 이동"
-        tabIndex={-1}
-      >
-        <ArrowUp className="h-4 w-4" aria-hidden />
-      </button>
-      <button
-        type="button"
-        onClick={() => onMove(rowIndex, "down")}
-        disabled={rowIndex === rowCount - 1}
-        className="hidden h-10 w-10 items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel max-lg:inline-flex"
-        aria-label={`${ariaLabel} 아래로 이동`}
-        title="아래로 이동"
-        tabIndex={-1}
-      >
-        <ArrowDown className="h-4 w-4" aria-hidden />
-      </button>
-      <CircularDeleteButton label={`${ariaLabel} 삭제`} onClick={onDelete} tabIndex={-1} />
-    </div>
-  );
-}
-
 function SceneSourceSelector({
   value,
   legacySceneNumber,
@@ -3468,83 +3598,13 @@ function IconButton({ children, label, onClick, disabled = false }: { children: 
   );
 }
 
-function MenuButton({
-  children,
-  label,
-  onClick,
-  disabled = false,
-  danger = false
-}: {
-  children: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      className={`flex min-h-10 items-center justify-center gap-2  px-3 text-center text-sm font-black disabled:cursor-not-allowed disabled:opacity-40 ${
-        danger ? "text-field-danger hover:bg-field-danger hover:text-field-text" : "text-field-subtle hover:bg-field-hover hover:text-field-text"
-      }`}
-      onClick={onClick}
-      disabled={disabled}
-    >
-      {children}
-      {label}
-    </button>
-  );
-}
-
-function MoveMenu({
-  label,
-  upDisabled,
-  downDisabled,
-  onMoveUp,
-  onMoveDown
-}: {
-  label: string;
-  upDisabled: boolean;
-  downDisabled: boolean;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-}) {
-  return (
-    <details className="relative">
-      <summary
-        className="inline-flex min-h-10 min-w-10 cursor-pointer list-none items-center justify-center border border-field-border bg-field-input px-2 text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
-        title={label}
-        aria-label={label}
-      >
-        <MoreHorizontal className="h-4 w-4" aria-hidden />
-      </summary>
-      <div className="absolute right-0 z-20 mt-2 grid min-w-36 gap-1 border border-field-border bg-field-elevated p-2 shadow-floating">
-        <MenuButton label="위로 이동" onClick={onMoveUp} disabled={upDisabled}>
-          <ArrowUp className="h-4 w-4" aria-hidden />
-        </MenuButton>
-        <MenuButton label="아래로 이동" onClick={onMoveDown} disabled={downDisabled}>
-          <ArrowDown className="h-4 w-4" aria-hidden />
-        </MenuButton>
-      </div>
-    </details>
-  );
-}
-
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({ data }: { data: DailyPlanPreviewData }) {
-  const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
     <section className="mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
       <ScaledDailyPlanPreview data={data} />
-      <DailyPlanMobilePortraitPreview
-        plan={data.plan}
-        locations={data.locations}
-        meta={data.meta}
-        timetableRows={timetableRows}
-        totalCutCount={data.totalCutCount}
-      />
     </section>
   );
 });
@@ -3579,7 +3639,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   }, []);
 
   return (
-    <div ref={containerRef} className="mt-4 hidden w-full min-w-0 max-w-full overflow-hidden bg-[#e8e8e5] md:block">
+    <div ref={containerRef} className="mt-4 w-full min-w-0 max-w-full overflow-hidden bg-[#e8e8e5]">
       <div
         className="relative mx-auto max-w-full"
         style={{ width: desktopPreviewDocumentWidth * scale, height: scaledHeight || undefined }}
@@ -3589,7 +3649,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
           className="absolute left-0 top-0 origin-top-left"
           style={{ width: desktopPreviewDocumentWidth, transform: `scale(${scale})` }}
         >
-          <DailyPlanDesktopLandscapePreview
+          <DailyPlanDocument
             plan={data.plan}
             locations={data.locations}
             meta={data.meta}
@@ -3602,7 +3662,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({ data }: { 
   );
 });
 
-function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewData; onClose: () => void; onPrint: () => void }) {
+function PrintPreviewModal({ data, isPrinting, onClose, onPrint }: { data: DailyPlanPreviewData; isPrinting: boolean; onClose: () => void; onPrint: () => void }) {
   return (
     <div className="screen-only no-print fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="PDF 미리보기">
       <div className="mx-auto max-w-6xl border border-field-divider bg-field-dialog p-4 shadow-dialog">
@@ -3612,457 +3672,120 @@ function PrintPreviewModal({ data, onClose, onPrint }: { data: DailyPlanPreviewD
             <h2 className="text-xl font-black text-field-text">인쇄하면 아래 형태로 저장됩니다.</h2>
           </div>
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={onPrint}>
+            <Button variant="secondary" onClick={onPrint} disabled={isPrinting}>
               <Printer className="h-5 w-5" aria-hidden />
-              PDF로 저장 / 인쇄
+              {isPrinting ? "PDF 준비 중" : "PDF로 저장 / 인쇄"}
             </Button>
             <IconButton label="미리보기 닫기" onClick={onClose}>
               <X className="h-4 w-4" aria-hidden />
             </IconButton>
           </div>
         </div>
-        <DailyPlanPrintDocument data={data} className="border border-field-border bg-white p-5 text-[12px] leading-6 text-black" />
+        <ScaledDailyPlanPreview data={data} />
       </div>
     </div>
   );
 }
 
-function PrintDailyPlanView({ data }: { data: DailyPlanPreviewData }) {
+function PrintDailyPlanView({
+  data,
+  layout,
+  rootRef
+}: {
+  data: DailyPlanPreviewData;
+  layout: DailyPlanPrintLayout;
+  rootRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
-    <section className="print-only">
-      <DailyPlanPrintDocument data={data} className="daily-plan-print-document text-[10px] leading-5 text-black" />
+    <section className="print-only daily-plan-print-staging">
+      <div ref={rootRef} className="daily-plan-print-layout" data-print-layout={layout}>
+        <DailyPlanDocument
+          plan={data.plan}
+          locations={data.locations}
+          meta={data.meta}
+          timetableRows={timetableRows}
+          totalCutCount={data.totalCutCount}
+        />
+      </div>
     </section>
   );
 }
 
-const PRINT_GRID_COLUMN_COUNT = DAILY_PLAN_TIMETABLE_COLUMN_COUNT;
-const printCellClass = "border border-black px-1.5 py-1 text-center align-middle";
-const printHeaderCellClass = `${printCellClass} daily-plan-preview-header font-black`;
+const A4_LANDSCAPE_PRINTABLE_HEIGHT_MM = 190;
+const CSS_PIXELS_PER_INCH = 96;
+const MILLIMETERS_PER_INCH = 25.4;
+const PRINT_HEIGHT_SAFETY_PX = 4;
 
-function DailyPlanPrintDocument({ data, className }: { data: DailyPlanPreviewData; className: string }) {
-  const locations = buildDailyPlanPreviewLocationRows(data.locations);
-  const timetableRows = filterRenderablePreviewRows(getPrintTimetableRows(data), getPrintTimetableRowDisplayValues);
-  const starringRows = filterRenderablePreviewRows(data.meta.starring, getPrintPersonDisplayValues);
-  const teamRows = filterRenderablePreviewRows(data.meta.teams, getPrintTeamDisplayValues);
-  const mainStaffRows = filterRenderablePreviewRows(getDailyPlanMainStaffRows(data.plan, data.meta), (member) => [
-    member.role,
-    member.name,
-    member.contact
-  ]);
-  const weatherFields = filterRenderablePreviewRows(createPrintWeatherFields(data.meta), (field) => field.value);
-  const timetableFields = createPrintTimetableFields(timetableRows);
-  const memoFields: PreviewDisplayField[] = [
-    { key: "notice", label: "Notice", span: 8, value: data.plan.safetyNotice },
-    { key: "memo", label: "Memo", span: 8, value: data.meta.memoText }
-  ];
+async function waitForDailyPlanPrintDocument(rootRef: React.RefObject<HTMLDivElement | null>) {
+  await waitForAnimationFrames(2);
+  const root = rootRef.current;
+  if (!root) throw new Error("PDF 문서를 준비하지 못했습니다.");
 
-  return (
-    <article className={`daily-plan-print-document ${className}`}>
-      <table className="daily-plan-grid daily-plan-export-table w-full border-collapse border-2 border-black text-center">
-        <tbody>
-          <tr className="pdf-section-start daily-plan-preview-accent">
-            <td colSpan={2} className={`${printCellClass} font-black`}>
-              <span className="text-[10px]">DAY</span>
-              <span className="ml-1 text-2xl">{getPreviewCellText(data.meta.day)}</span>
-            </td>
-            <td colSpan={12} className={`${printCellClass} text-2xl font-black`}>
-              {hasMeaningfulRowValue(data.plan.title) ? data.plan.title : "기본정보가 없습니다."} TIME TABLE
-            </td>
-            <td colSpan={2} className={`${printCellClass} daily-plan-preview-summary`}>
-              <span className="block text-[9px] font-bold">Total Crew</span>
-              <span className="text-lg font-black">{getPreviewCellText(data.meta.totalCrew)}</span>
-            </td>
-          </tr>
-          {hasMeaningfulRowValue([data.plan.shootingDate, data.plan.callTime]) ? (
-            <tr className="daily-plan-preview-accent">
-              <td colSpan={2} className={`${printCellClass} font-black`}>CALL TIME</td>
-              <td colSpan={14} className={`${printCellClass} text-base`}>
-                {hasMeaningfulRowValue(data.plan.shootingDate) ? (
-                  <>
-                    <span className="mr-1 text-[9px] font-bold">Day</span>
-                    <span className="font-black">{formatDateForPreview(data.plan.shootingDate)}</span>
-                  </>
-                ) : null}
-                {hasMeaningfulRowValue(data.plan.callTime) ? (
-                  <>
-                    <span className="ml-3 mr-1 text-[9px] font-bold">Time</span>
-                    <span className="font-black">{data.plan.callTime}</span>
-                  </>
-                ) : null}
-              </td>
-            </tr>
-          ) : null}
-          {mainStaffRows.length > 0 ? mainStaffRows.map((member) => (
-            <tr key={member.id}>
-              <PrintFixedCells fields={createPrintMainStaffFields(member)} />
-            </tr>
-          )) : (
-            <tr><td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 메인 스태프가 없습니다.</td></tr>
-          )}
-          {weatherFields.length > 0 ? weatherFields.map((field, index) => (
-            <tr
-              key={field.key}
-              className={index === weatherFields.length - 1 ? "pdf-section-end" : undefined}
-            >
-              <td colSpan={4} className={printHeaderCellClass}>{field.label}</td>
-              <td colSpan={12} className={printCellClass}>{getPreviewCellText(field.value)}</td>
-            </tr>
-          )) : (
-            <tr className="pdf-section-end">
-              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>날씨 정보가 없습니다.</td>
-            </tr>
-          )}
-          {locations.length > 0 ? locations.map((location, index) => (
-            <tr
-              key={`print-location-${location.id ?? index}`}
-              className={`${index === 0 ? "pdf-section-start" : ""} ${index === locations.length - 1 ? "pdf-section-end" : ""}`}
-            >
-              <td colSpan={2} className={`${printCellClass} whitespace-nowrap text-left font-black`}>LOCATION {index + 1}</td>
-              <PrintFixedCells fields={createPrintLocationFields(location)} />
-            </tr>
-          )) : (
-            <tr className="pdf-section-start pdf-section-end">
-              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 장소가 없습니다.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      <table className="daily-plan-grid daily-plan-export-table -mt-[2.5px] w-full border-collapse border-2 border-black text-center">
-        <PrintDocumentColumns />
-        <tbody>
-          <tr className="pdf-section-start daily-plan-preview-header font-black">
-            {timetableFields.map((field) => (
-              <td key={field.key} colSpan={field.span} className={`${printCellClass} ${getPrintTimetableCompactClass(field.key)}`}>
-                <PrintTimetableHeaderLabel field={field} />
-              </td>
-            ))}
-          </tr>
-          {timetableRows.length > 0 ? timetableRows.map((row, index) => (
-            <tr
-              key={`time-row-${index}`}
-              className={`daily-plan-print-scene ${row.type === "additionalSchedule" ? "daily-plan-preview-event" : ""}`}
-            >
-              {row.type === "additionalSchedule" ? (
-                <PrintAdditionalScheduleCells row={row} />
-              ) : (
-                <PrintTimetableCells
-                  fields={timetableFields.map((field) => ({
-                    ...field,
-                    value: getPrintTimetableFieldValue(row, field.key)
-                  }))}
-                />
-              )}
-            </tr>
-          )) : (
-            <tr className="pdf-section-start">
-              <td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>등록된 일정이 없습니다.</td>
-            </tr>
-          )}
-          <tr className="pdf-section-end">
-            <td
-              colSpan={PRINT_GRID_COLUMN_COUNT}
-              className={`${printCellClass} daily-plan-preview-summary py-1 text-center font-black`}
-            >
-              총 컷수 {data.totalCutCount}컷
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <table className="daily-plan-grid daily-plan-export-table -mt-[2.5px] w-full border-collapse border-2 border-black text-center">
-        <tbody>
-          <tr className="pdf-section-start daily-plan-preview-header font-black">
-            {memoFields.map((field) => (
-              <td key={field.key} colSpan={field.span} className={printCellClass}>{field.label}</td>
-            ))}
-          </tr>
-          <tr className="pdf-section-end">
-            {memoFields.map((field) => (
-              <td
-                key={field.key}
-                colSpan={field.span}
-                className={`${printCellClass} min-h-24 whitespace-pre-wrap align-top text-left`}
-              >
-                {getPreviewCellText(field.value)}
-              </td>
-            ))}
-          </tr>
-          <tr>
-            <td colSpan={PRINT_GRID_COLUMN_COUNT} className="border-0 p-0 align-top">
-              <div className="grid grid-cols-2 gap-1">
-                <PrintCallSheetTable
-                  title="Actor"
-                  emptyMessage="등록된 배우가 없습니다."
-                  fields={[
-                    { key: "name", label: "Starring", span: 4 },
-                    { key: "role", label: "Actor", span: 4 },
-                    { key: "callTime", label: "CALL", span: 2 },
-                    { key: "callLocation", label: "Call Location", span: 3 },
-                    { key: "notes", label: "Notes", span: 3 }
-                  ]}
-                  rows={starringRows.map((person) => ({
-                    name: person.name,
-                    role: person.role,
-                    callTime: person.callTime,
-                    callLocation: person.callLocation,
-                    notes: person.notes
-                  }))}
-                />
-                <PrintCallSheetTable
-                  title="Team"
-                  emptyMessage="등록된 스태프 부서가 없습니다."
-                  fields={[
-                    { key: "team", label: "Team", span: 4 },
-                    { key: "total", label: "Total", span: 2 },
-                    { key: "callTime", label: "CALL", span: 2 },
-                    { key: "callLocation", label: "Call Location", span: 4 },
-                    { key: "notes", label: "Notes", span: 4 }
-                  ]}
-                  rows={teamRows.map((team) => ({
-                    team: team.team,
-                    total: team.total,
-                    callTime: team.callTime,
-                    callLocation: team.callLocation,
-                    notes: team.notes
-                  }))}
-                />
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </article>
-  );
-}
-
-function PrintFixedCells({ fields }: { fields: PreviewDisplayField[] }) {
-  return fields.map((cell) => (
-    <td
-      key={cell.key}
-      colSpan={cell.span}
-      className={`${printCellClass} ${cell.key === "contact" ? "whitespace-nowrap [word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
-    >
-      {getPreviewCellText(cell.value)}
-    </td>
-  ));
-}
-
-function PrintDocumentColumns() {
-  const totalWeight = DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
-  return (
-    <colgroup>
-      {DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS.map((weight, index) => (
-        <col key={index} style={{ width: `${(weight / totalWeight) * 100}%` }} />
-      ))}
-    </colgroup>
-  );
-}
-
-function PrintTimetableCells({ fields }: { fields: PreviewDisplayField[] }) {
-  return fields.map((field) => (
-    <td
-      key={field.key}
-      colSpan={field.span}
-      className={`${printCellClass} ${getPrintTimetableCompactClass(field.key)} ${field.key === "location" ? "[word-break:keep-all] [overflow-wrap:normal]" : "break-words [overflow-wrap:anywhere]"}`}
-    >
-      <span className={field.key === "location" ? "line-clamp-2" : undefined}>
-        {getPreviewCellText(field.value)}
-      </span>
-    </td>
-  ));
-}
-
-function PrintTimetableHeaderLabel({ field }: { field: PreviewDisplayField }) {
-  if (field.key === "totalCut") {
-    return <><span className="block">Total</span><span className="block">Cut</span></>;
+  if ("fonts" in document) {
+    await document.fonts.ready;
   }
-  return <>{field.label}</>;
-}
 
-function getPrintTimetableCompactClass(key: string) {
-  return ["dayNight", "sceneNumber", "totalCut"].includes(key)
-    ? "whitespace-nowrap px-0.5 text-[9px] [word-break:keep-all] [overflow-wrap:normal]"
-    : "";
-}
-
-function PrintAdditionalScheduleCells({
-  row
-}: {
-  row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
-}) {
-  return (
-    <>
-      {[row.start, row.end, row.runtime].map((value, index) => (
-        <td key={`additional-time-${index}`} className={printCellClass}>
-          {getPreviewCellText(value)}
-        </td>
-      ))}
-      <td
-        colSpan={DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN}
-        className="border border-black !p-0 align-middle"
-      >
-        <div className="grid min-h-7 grid-cols-2">
-          <div className="flex min-w-0 items-center justify-center border-r border-black px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 장소">
-            {getPreviewCellText(row.location)}
-          </div>
-          <div className="flex min-w-0 items-center justify-center px-1.5 py-1 text-center break-words [overflow-wrap:anywhere]" aria-label="기타 일정 메모">
-            {getPreviewCellText(row.memo)}
-          </div>
-        </div>
-      </td>
-    </>
-  );
-}
-
-function PrintCallSheetTable({
-  title,
-  emptyMessage,
-  fields,
-  rows
-}: {
-  title: string;
-  emptyMessage: string;
-  fields: Array<Omit<PreviewDisplayField, "value">>;
-  rows: Array<Record<string, string>>;
-}) {
-  return (
-    <table className="daily-plan-export-table w-full table-fixed border-collapse border-2 border-black text-center">
-      <thead>
-        <tr className="daily-plan-preview-header">
-          {fields.map((field) => (
-            <th key={field.key} colSpan={field.span} className={printHeaderCellClass}>{field.label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length > 0 ? rows.map((row, index) => (
-          <tr key={`${title}-${index}`}>
-            <PrintFixedCells
-              fields={fields.map((field) => ({
-                ...field,
-                value: row[field.key]
-              }))}
-            />
-          </tr>
-        )) : (
-          <tr><td colSpan={PRINT_GRID_COLUMN_COUNT} className={printCellClass}>{emptyMessage}</td></tr>
-        )}
-      </tbody>
-    </table>
-  );
-}
-
-function createPrintMainStaffFields(member: DailyPlanMainStaffRow): PreviewDisplayField[] {
-  return [
-    { key: "role", label: "역할", span: 3, value: member.role },
-    { key: "name", label: "이름", span: 5, value: member.name },
-    { key: "contact", label: "연락처", span: 8, value: member.contact }
-  ];
-}
-
-function createPrintWeatherFields(meta: DailyPlanPrintMeta): PreviewDisplayField[] {
-  return [
-    { key: "sunrise", label: "일출", span: 1, value: meta.sunrise },
-    { key: "sunset", label: "일몰", span: 1, value: meta.sunset },
-    { key: "weather", label: "날씨", span: 1, value: formatDailyPlanWeatherSummary(meta) },
-    { key: "rainProbability", label: "강수 확률", span: 1, value: meta.rainProbability },
-    { key: "minTemperature", label: "최저 기온", span: 1, value: meta.minTemperature },
-    { key: "maxTemperature", label: "최고 기온", span: 1, value: meta.maxTemperature }
-  ];
-}
-
-function createPrintLocationFields(location: DailyPlanPreviewLocationRow): PreviewDisplayField[] {
-  return [
-    { key: "name", label: "장소명", span: 6, value: location.name },
-    { key: "address", label: "주소", span: 8, value: location.address }
-  ];
-}
-
-function createPrintTimetableFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDisplayField[] {
-  return [
-    { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
-    { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
-    { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
-    {
-      key: "dayNight",
-      label: "D/N",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.dayNight : "")
-    },
-    {
-      key: "sceneNumber",
-      label: "SCENE",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.sceneNumber : "")
-    },
-    {
-      key: "totalCut",
-      label: "Total CUT",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
-    },
-    { key: "description", label: "Description", span: 3, value: rows.map((row) => row.type === "scene" ? row.description : "") },
-    {
-      key: "cast",
-      label: "Actor",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.cast : "")
-    },
-    {
-      key: "shootingOrder",
-      label: "Shooting order",
-      span: 2,
-      value: rows.map((row) => row.type === "scene" ? row.shootingOrder : "")
-    },
-    {
-      key: "notes",
-      label: "Notes",
-      span: 2,
-      value: rows.map((row) => row.type === "scene" ? row.notes : "")
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+  await Promise.all(images.map(async (image) => {
+    if (!image.complete) {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => reject(new Error("PDF 이미지 로딩 시간이 초과되었습니다.")), 10_000);
+        const finish = (callback: () => void) => {
+          window.clearTimeout(timeoutId);
+          image.removeEventListener("load", handleLoad);
+          image.removeEventListener("error", handleError);
+          callback();
+        };
+        const handleLoad = () => finish(resolve);
+        const handleError = () => finish(() => reject(new Error("PDF에 포함할 이미지를 불러오지 못했습니다.")));
+        image.addEventListener("load", handleLoad, { once: true });
+        image.addEventListener("error", handleError, { once: true });
+      });
     }
-  ];
+    if (typeof image.decode === "function") await image.decode();
+  }));
+
+  await waitForAnimationFrames(2);
 }
 
-function getPrintTimetableFieldValue(row: DailyPlanPreviewTimetableRow, key: string) {
-  if (key === "start") return row.start;
-  if (key === "end") return row.end;
-  if (key === "runtime") return row.runtime;
-  if (key === "location") return row.location;
-  if (row.type === "additionalSchedule") return key === "notes" ? row.memo : "";
-  if (key === "description") return row.description;
-  if (key === "dayNight") return row.dayNight;
-  if (key === "sceneNumber") return row.sceneNumber;
-  if (key === "totalCut") return row.totalCut;
-  if (key === "cast") return row.cast;
-  if (key === "shootingOrder") return row.shootingOrder;
-  if (key === "notes") return row.notes;
-  return "";
+function resolveDailyPlanPrintLayout(root: HTMLDivElement): DailyPlanPrintLayout {
+  const documentElement = root.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
+  const notesSection = root.querySelector<HTMLElement>("[data-daily-plan-notes-boundary]");
+  if (!documentElement || !notesSection) {
+    throw new Error("PDF 페이지 구분 기준을 찾지 못했습니다.");
+  }
+
+  const documentRect = documentElement.getBoundingClientRect();
+  const notesRect = notesSection.getBoundingClientRect();
+  const printableHeight = A4_LANDSCAPE_PRINTABLE_HEIGHT_MM * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  const safePrintableHeight = printableHeight - PRINT_HEIGHT_SAFETY_PX;
+  const fullHeight = Math.max(documentElement.scrollHeight, documentRect.height);
+  const firstPageHeight = Math.max(0, notesRect.top - documentRect.top);
+  const secondPageHeight = Math.max(notesSection.scrollHeight, documentRect.bottom - notesRect.top);
+
+  if (fullHeight <= safePrintableHeight) return "single";
+  if (
+    firstPageHeight <= safePrintableHeight
+    && secondPageHeight <= safePrintableHeight
+  ) {
+    return "two";
+  }
+
+  throw new Error("현재 내용은 A4 가로 2페이지 출력 범위를 초과합니다. Notes 또는 타임테이블 내용을 줄인 뒤 다시 시도해주세요.");
 }
 
-function getPrintTimetableRowDisplayValues(row: DailyPlanPreviewTimetableRow) {
-  return row.type === "additionalSchedule"
-    ? [row.start, row.end, row.runtime, row.location, row.memo]
-    : [
-        row.start,
-        row.end,
-        row.runtime,
-        row.location,
-        row.dayNight,
-        row.sceneNumber,
-        row.totalCut,
-        row.description,
-        row.cast,
-        row.shootingOrder,
-        row.notes
-      ];
-}
-
-function getPrintPersonDisplayValues(person: CallSheetPerson) {
-  return [person.name, person.role, person.callTime, person.callLocation, person.notes];
-}
-
-function getPrintTeamDisplayValues(team: TeamCallSheetRow) {
-  return [team.team, team.total, team.callTime, team.callLocation, team.notes];
+function waitForAnimationFrames(count: number) {
+  return new Promise<void>((resolve) => {
+    function next(remaining: number) {
+      if (remaining <= 0) {
+        resolve();
+        return;
+      }
+      window.requestAnimationFrame(() => next(remaining - 1));
+    }
+    next(count);
+  });
 }
 
 function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTimetableRow[] {
@@ -4442,7 +4165,10 @@ function buildPlanForSave(
       .filter(isMeaningfulDailyPlanLocationCard)
       .map(sanitizeManualLocation)
   );
-  const nextMeals = mealTimes.filter(isMeaningfulTimetableEvent);
+  // 편집기 카드의 stable ID와 명시적인 혼합 순서를 보존하기 위해 빈 카드도
+  // 구조화 데이터에는 남깁니다. 화면/PDF에서는 canonical row filter가 완전히
+  // 빈 행만 제외합니다.
+  const nextMeals = mealTimes;
 
   return {
     ...plan,
@@ -4670,9 +4396,7 @@ function serializeTimetableScenes(
 ): DailyPlanTimetableSceneMeta[] {
   const sourcesById = new Map(sceneListItems.map((item) => [item.id, item]));
 
-  return scenes
-    .filter(isMeaningfulTimetableScene)
-    .map((scene) => {
+  return scenes.map((scene) => {
       const currentSource = scene.sourceSceneId ? sourcesById.get(scene.sourceSceneId) : undefined;
       const metadata: DailyPlanTimetableSceneMeta = {
         version: 1,
@@ -5005,8 +4729,69 @@ function buildEditorTimetableRows(
   return mergeDailyPlanTimetableRows(sceneRows, eventRows, order);
 }
 
+function orderEditorTimetableRowsByStableKeys(
+  rows: EditorTimetableRow[],
+  orderedRowKeys: string[]
+) {
+  if (rows.length !== orderedRowKeys.length) return rows;
+  const rowsByKey = new Map(rows.map((row) => [getEditorTimetableRowKey(row), row]));
+  const orderedRows = orderedRowKeys.flatMap((rowKey) => {
+    const row = rowsByKey.get(rowKey);
+    return row ? [row] : [];
+  });
+  if (orderedRows.length !== rows.length) return rows;
+  const unchanged = orderedRows.every((row, index) => row === rows[index]);
+  return unchanged ? rows : orderedRows;
+}
+
+function createTimetableMutationSnapshot(
+  rows: EditorTimetableRow[],
+  sourcePrintMeta: DailyPlanPrintMeta,
+  sourceAutomaticRowIds: Set<string>
+): TimetableMutationSnapshot {
+  const survivingRowKeys = new Set(rows.map(getEditorTimetableRowKey));
+  const automaticStartRowIds = new Set(
+    Array.from(sourceAutomaticRowIds).filter((rowKey) => survivingRowKeys.has(rowKey))
+  );
+  const updates = getAutomaticTimetableStartUpdates(rows, automaticStartRowIds);
+  const chainedRows = rows.map((row): EditorTimetableRow => {
+    const nextStartTime = updates.get(getEditorTimetableRowKey(row));
+    if (nextStartTime === undefined || nextStartTime === row.item.startTime) return row;
+    const nextItem = nextStartTime
+      ? applyTimeFieldEdit(row.item, "startTime", nextStartTime)
+      : { ...row.item, startTime: "", endTime: "" };
+    return row.type === "scene"
+      ? { ...row, item: nextItem as SceneBlockInput }
+      : { ...row, item: nextItem as DailyPlanMealTime };
+  });
+  const scenes = chainedRows
+    .filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene")
+    .map((row) => row.item);
+  const mealTimes = chainedRows
+    .filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event")
+    .map((row) => row.item);
+
+  return {
+    scenes,
+    mealTimes,
+    automaticStartRowIds,
+    printMeta: {
+      ...sourcePrintMeta,
+      timetableRowOrder: chainedRows.map((row) => row.type),
+      automaticTimetableRowIds: Array.from(automaticStartRowIds)
+    }
+  };
+}
+
 function getEditorTimetableRowKey(row: EditorTimetableRow) {
   return `${row.type}:${row.item.id}`;
+}
+
+function getTimetableRowLabel(rows: EditorTimetableRow[], rowKey: string) {
+  const row = rows.find((candidate) => getEditorTimetableRowKey(candidate) === rowKey);
+  if (!row) return "타임테이블 카드";
+  if (row.type === "event") return "기타 일정";
+  return formatSceneNumber(row.item.sceneNumber) || "촬영 행";
 }
 
 function setStartTimeSource(automaticRowIds: Set<string>, rowKey: string, value: string | number | null) {
@@ -5086,12 +4871,7 @@ function hasRenderableAdditionalScheduleValue(event: DailyPlanMealTime) {
 }
 
 function getPersistedEditorTimetableRows(rows: EditorTimetableRow[]) {
-  return rows.filter((row) => (
-    row.type === "event"
-      ? isMeaningfulTimetableEvent(row.item)
-      : isMeaningfulTimetableScene(row.item)
-        && (row.item.sourceSceneId !== null || row.item.sceneNumber.trim())
-  ));
+  return rows;
 }
 
 function getPersistedTimetableRowOrder(
@@ -5297,7 +5077,8 @@ function calculateRuntimeMinutes(startTime: string, endTime: string) {
 }
 
 function formatRuntimeMinutes(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value) || value <= 0) return "";
+  if (value == null || !Number.isFinite(value) || value < 0) return "";
+  if (value === 0) return "0M";
   const hours = Math.floor(value / 60);
   const minutes = value % 60;
   if (minutes === 0) return `${hours}H`;
@@ -5306,7 +5087,7 @@ function formatRuntimeMinutes(value: number | null | undefined) {
 }
 
 function getRuntimeMinutes(runtimeMinutes: number | null | undefined, legacyRuntime: string | undefined, startTime: string, endTime: string) {
-  if (runtimeMinutes != null && Number.isFinite(runtimeMinutes) && runtimeMinutes > 0) return runtimeMinutes;
+  if (runtimeMinutes != null && Number.isFinite(runtimeMinutes) && runtimeMinutes >= 0) return runtimeMinutes;
   return parseRuntimeMinutes(legacyRuntime ?? "") ?? calculateRuntimeMinutes(startTime, endTime);
 }
 
@@ -5324,7 +5105,7 @@ function applyTimeFieldEdit<T extends { startTime: string; endTime: string; runt
     next[field] = String(value ?? "");
   }
   const selectedRuntimeMinutes =
-    next.runtimeMinutes != null && Number.isFinite(next.runtimeMinutes) && next.runtimeMinutes > 0
+    next.runtimeMinutes != null && Number.isFinite(next.runtimeMinutes) && next.runtimeMinutes >= 0
       ? next.runtimeMinutes
       : parseRuntimeMinutes(next.runtime ?? "");
 
@@ -5356,7 +5137,7 @@ function parseRuntimeMinutes(value: string) {
   const numericMinutes = normalized.match(/^(\d+)(?:분)?$/);
   if (numericMinutes) {
     const minutes = Number(numericMinutes[1]);
-    return Number.isFinite(minutes) && minutes > 0 && minutes <= maxRuntimeMinutes
+    return Number.isFinite(minutes) && minutes >= 0 && minutes <= maxRuntimeMinutes
       ? minutes
       : null;
   }
@@ -5367,7 +5148,7 @@ function parseRuntimeMinutes(value: string) {
   const minutes = Number(match[2] || 0);
   if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
   const totalMinutes = hours * 60 + minutes;
-  return totalMinutes > 0 && totalMinutes <= maxRuntimeMinutes ? totalMinutes : null;
+  return totalMinutes >= 0 && totalMinutes <= maxRuntimeMinutes ? totalMinutes : null;
 }
 
 function shiftTime(value: string, offsetMinutes: number) {
@@ -5569,7 +5350,7 @@ function createDailyPlanEditorFingerprint(
 function parseDurationMinutes(value: string) {
   if (!/^\d{1,4}$/.test(value)) return null;
   const minutes = Number(value);
-  return Number.isInteger(minutes) && minutes >= 1 && minutes <= maxRuntimeMinutes ? minutes : null;
+  return Number.isInteger(minutes) && minutes >= 0 && minutes <= maxRuntimeMinutes ? minutes : null;
 }
 
 function loadDaumPostcodeScript() {
@@ -5615,10 +5396,6 @@ function loadDaumPostcodeScript() {
   });
 
   return daumPostcodeScriptPromise;
-}
-
-function formatDateForPreview(value: string) {
-  return value ? value.replace(/-/g, ".") : "";
 }
 
 function makeLocalId(prefix: string) {
