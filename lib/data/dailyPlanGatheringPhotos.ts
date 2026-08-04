@@ -1,25 +1,41 @@
-import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
-import {
-  appendGatheringPhoto,
-  reconcileDailyPlanGatheringPoints,
-  removeGatheringPhoto,
-  reorderGatheringPhotos
-} from "@/lib/dailyPlan/gatheringPoints";
-import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+
+export type GatheringPhotoFailure = {
+  photoId: string;
+  error: string;
+};
+
+export class GatheringPhotoMutationError extends Error {
+  readonly status: number;
+  readonly latestMemo: string;
+  readonly latestUpdatedAt: string;
+
+  constructor(message: string, options: { status: number; latestMemo?: string; latestUpdatedAt?: string }) {
+    super(message);
+    this.name = "GatheringPhotoMutationError";
+    this.status = options.status;
+    this.latestMemo = options.latestMemo ?? "";
+    this.latestUpdatedAt = options.latestUpdatedAt ?? "";
+  }
+}
 
 export type GatheringPhotoMutationResult = {
   memo: string;
   updatedAt: string;
   gatheringPointId?: string;
   cleanupWarning?: string;
+  appliedPhotoIds: string[];
+  failedPhotos: GatheringPhotoFailure[];
 };
 
 type UploadGatheringPhotoInput = {
   projectId: string;
   dailyPlanId: string;
   gatheringPointId: string | null;
+  locationId?: string | null;
+  locationName?: string;
+  address?: string;
   departmentIds: string[];
   photoId: string;
   displayFile: File;
@@ -48,6 +64,9 @@ export type SaveGatheringPhotoDraftInput = {
   projectId: string;
   dailyPlanId: string;
   gatheringPointId: string | null;
+  locationId?: string | null;
+  locationName?: string;
+  address?: string;
   departmentIds: string[];
   deletedPhotoIds: string[];
   orderedPhotoIds: string[];
@@ -63,7 +82,7 @@ export type SaveGatheringPhotoDraftInput = {
 export async function saveDailyPlanGatheringPhotoDraft(
   input: SaveGatheringPhotoDraftInput
 ): Promise<GatheringPhotoMutationResult> {
-  if (!isValidDatabaseProjectId(input.projectId)) return saveLocalPhotoDraft(input);
+  requireDatabaseProject(input.projectId);
   const formData = new FormData();
   formData.set("departmentIds", JSON.stringify(input.departmentIds));
   formData.set("deletedPhotoIds", JSON.stringify(input.deletedPhotoIds));
@@ -74,6 +93,9 @@ export async function saveDailyPlanGatheringPhotoDraft(
   }))));
   formData.set("expectedUpdatedAt", input.expectedUpdatedAt);
   if (input.gatheringPointId) formData.set("gatheringPointId", input.gatheringPointId);
+  if (input.locationId) formData.set("locationId", input.locationId);
+  if (input.locationName) formData.set("locationName", input.locationName);
+  if (input.address) formData.set("address", input.address);
   input.pendingPhotos.forEach((photo) => {
     formData.set(`display:${photo.photoId}`, photo.displayFile);
     formData.set(`thumbnail:${photo.photoId}`, photo.thumbnailFile);
@@ -88,7 +110,7 @@ export async function saveDailyPlanGatheringPhotoDraft(
 export async function uploadDailyPlanGatheringPhoto(
   input: UploadGatheringPhotoInput
 ): Promise<GatheringPhotoMutationResult> {
-  if (!isValidDatabaseProjectId(input.projectId)) return uploadLocalPhoto(input);
+  requireDatabaseProject(input.projectId);
   const formData = new FormData();
   formData.set("file", input.displayFile);
   formData.set("thumbnail", input.thumbnailFile);
@@ -97,6 +119,9 @@ export async function uploadDailyPlanGatheringPhoto(
   formData.set("originalFilename", input.originalFilename);
   formData.set("expectedUpdatedAt", input.expectedUpdatedAt);
   if (input.gatheringPointId) formData.set("gatheringPointId", input.gatheringPointId);
+  if (input.locationId) formData.set("locationId", input.locationId);
+  if (input.locationName) formData.set("locationName", input.locationName);
+  if (input.address) formData.set("address", input.address);
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "POST",
     body: formData
@@ -107,7 +132,7 @@ export async function uploadDailyPlanGatheringPhoto(
 export async function deleteDailyPlanGatheringPhoto(
   input: DeleteGatheringPhotoInput
 ): Promise<GatheringPhotoMutationResult> {
-  if (!isValidDatabaseProjectId(input.projectId)) return deleteLocalPhoto(input);
+  requireDatabaseProject(input.projectId);
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
@@ -123,7 +148,7 @@ export async function deleteDailyPlanGatheringPhoto(
 export async function saveDailyPlanGatheringPhotoOrder(
   input: ReorderGatheringPhotosInput
 ): Promise<GatheringPhotoMutationResult> {
-  if (!isValidDatabaseProjectId(input.projectId)) return reorderLocalPhotos(input);
+  requireDatabaseProject(input.projectId);
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -156,143 +181,50 @@ async function readMutationResponse(response: Response, fallbackMessage: string)
     updatedAt?: string;
     gatheringPointId?: string;
     cleanupWarning?: string;
+    appliedPhotoIds?: unknown;
+    failedPhotos?: unknown;
     error?: string;
     detail?: string;
   };
   if (!response.ok || !payload.memo || !payload.updatedAt) {
-    throw new Error(payload.error || payload.detail || fallbackMessage);
+    throw new GatheringPhotoMutationError(
+      payload.error || payload.detail || fallbackMessage,
+      {
+        status: response.status,
+        latestMemo: payload.memo,
+        latestUpdatedAt: payload.updatedAt
+      }
+    );
   }
   return {
     memo: payload.memo,
     updatedAt: payload.updatedAt,
     gatheringPointId: payload.gatheringPointId,
-    cleanupWarning: payload.cleanupWarning
+    cleanupWarning: payload.cleanupWarning,
+    appliedPhotoIds: normalizeAppliedPhotoIds(payload.appliedPhotoIds),
+    failedPhotos: normalizePhotoFailures(payload.failedPhotos)
   };
 }
 
-async function uploadLocalPhoto(input: UploadGatheringPhotoInput): Promise<GatheringPhotoMutationResult> {
-  const buckets = readLocalBuckets();
-  const index = buckets.dailyPlans.findIndex((plan) => (
-    plan.projectId === input.projectId && plan.id === input.dailyPlanId
-  ));
-  if (index < 0) throw new Error("일촬표를 찾을 수 없습니다.");
-  const plan = buckets.dailyPlans[index];
-  let meta = reconcileDailyPlanGatheringPoints(decodeDailyPlanMemo(plan.memo), plan.shootingLocations);
-  const point = meta.gatheringPoints.find((item) => item.id === input.gatheringPointId)
-    ?? meta.gatheringPoints.find((item) => input.departmentIds.some((id) => item.departmentIds.includes(id)));
-  if (!point) throw new Error("사진을 연결할 집합장소를 찾을 수 없습니다.");
-  const [url, thumbnailUrl] = await Promise.all([
-    readFileAsDataUrl(input.displayFile),
-    readFileAsDataUrl(input.thumbnailFile)
-  ]);
-  meta = appendGatheringPhoto(meta, point.id, {
-    id: input.photoId,
-    url,
-    thumbnailUrl,
-    storagePath: "",
-    thumbnailPath: "",
-    sortOrder: point.photos.length,
-    originalFilename: input.originalFilename
-  });
-  return saveLocalMeta(input.projectId, index, buckets, meta, point.id);
-}
-
-async function deleteLocalPhoto(input: DeleteGatheringPhotoInput): Promise<GatheringPhotoMutationResult> {
-  const buckets = readLocalBuckets();
-  const index = buckets.dailyPlans.findIndex((plan) => (
-    plan.projectId === input.projectId && plan.id === input.dailyPlanId
-  ));
-  if (index < 0) throw new Error("일촬표를 찾을 수 없습니다.");
-  const plan = buckets.dailyPlans[index];
-  const meta = reconcileDailyPlanGatheringPoints(decodeDailyPlanMemo(plan.memo), plan.shootingLocations);
-  if (!meta.gatheringPoints.some((point) => point.id === input.gatheringPointId)) {
-    throw new Error("집합장소를 찾을 수 없습니다.");
+function requireDatabaseProject(projectId: string) {
+  if (!isValidDatabaseProjectId(projectId)) {
+    throw new Error("집합장소 사진은 Supabase에 연결된 프로젝트에서만 저장할 수 있습니다.");
   }
-  return saveLocalMeta(
-    input.projectId,
-    index,
-    buckets,
-    removeGatheringPhoto(meta, input.gatheringPointId, input.photoId)
-  );
 }
 
-async function reorderLocalPhotos(input: ReorderGatheringPhotosInput): Promise<GatheringPhotoMutationResult> {
-  const buckets = readLocalBuckets();
-  const index = buckets.dailyPlans.findIndex((plan) => (
-    plan.projectId === input.projectId && plan.id === input.dailyPlanId
-  ));
-  if (index < 0) throw new Error("일촬표를 찾을 수 없습니다.");
-  const plan = buckets.dailyPlans[index];
-  const meta = reconcileDailyPlanGatheringPoints(decodeDailyPlanMemo(plan.memo), plan.shootingLocations);
-  return saveLocalMeta(
-    input.projectId,
-    index,
-    buckets,
-    reorderGatheringPhotos(meta, input.gatheringPointId, input.orderedPhotoIds)
-  );
+function normalizeAppliedPhotoIds(value: unknown) {
+  return Array.isArray(value)
+    ? value.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
 }
 
-function saveLocalMeta(
-  projectId: string,
-  planIndex: number,
-  buckets: ReturnType<typeof readLocalBuckets>,
-  meta: ReturnType<typeof decodeDailyPlanMemo>,
-  gatheringPointId?: string
-) {
-  const now = new Date().toISOString();
-  const memo = encodeDailyPlanMemo(meta);
-  const dailyPlans = buckets.dailyPlans.map((plan, index) => (
-    index === planIndex ? { ...plan, memo, updatedAt: now } : plan
-  ));
-  writeLocalBuckets({ dailyPlans }, projectId);
-  return Promise.resolve({ memo, updatedAt: now, gatheringPointId });
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("선택한 사진을 읽지 못했습니다."));
-    reader.readAsDataURL(file);
+function normalizePhotoFailures(value: unknown): GatheringPhotoFailure[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as { photoId?: unknown; error?: unknown };
+    const photoId = String(source.photoId ?? "").trim();
+    const error = String(source.error ?? "").trim();
+    return photoId && error ? [{ photoId, error }] : [];
   });
-}
-
-async function saveLocalPhotoDraft(
-  input: SaveGatheringPhotoDraftInput
-): Promise<GatheringPhotoMutationResult> {
-  const buckets = readLocalBuckets();
-  const index = buckets.dailyPlans.findIndex((plan) => (
-    plan.projectId === input.projectId && plan.id === input.dailyPlanId
-  ));
-  if (index < 0) throw new Error("일촬표를 찾을 수 없습니다.");
-  const plan = buckets.dailyPlans[index];
-  if (input.expectedUpdatedAt && plan.updatedAt !== input.expectedUpdatedAt) {
-    throw new Error("일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인한 뒤 다시 저장해주세요.");
-  }
-  let meta = reconcileDailyPlanGatheringPoints(decodeDailyPlanMemo(plan.memo), plan.shootingLocations);
-  const point = meta.gatheringPoints.find((item) => item.id === input.gatheringPointId)
-    ?? meta.gatheringPoints.find((item) => input.departmentIds.some((id) => item.departmentIds.includes(id)));
-  if (!point) throw new Error("사진을 연결할 집합장소를 찾을 수 없습니다.");
-
-  const localPhotos = await Promise.all(input.pendingPhotos.map(async (photo, photoIndex) => {
-    // localStorage fallback은 용량을 제한하기 위해 420px thumbnail 하나만 원본/썸네일로 함께 사용합니다.
-    const url = await readFileAsDataUrl(photo.thumbnailFile);
-    return {
-      id: photo.photoId,
-      url,
-      thumbnailUrl: url,
-      storagePath: "",
-      thumbnailPath: "",
-      sortOrder: point.photos.length + photoIndex,
-      originalFilename: photo.originalFilename
-    };
-  }));
-  input.deletedPhotoIds.forEach((photoId) => {
-    meta = removeGatheringPhoto(meta, point.id, photoId);
-  });
-  localPhotos.forEach((photo) => {
-    meta = appendGatheringPhoto(meta, point.id, photo);
-  });
-  meta = reorderGatheringPhotos(meta, point.id, input.orderedPhotoIds);
-  return saveLocalMeta(input.projectId, index, buckets, meta, point.id);
 }
