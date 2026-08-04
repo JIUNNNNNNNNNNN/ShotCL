@@ -18,6 +18,7 @@ import {
   Users,
   X
 } from "lucide-react";
+import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 
 type RightProjectSidebarProps = {
@@ -54,6 +55,14 @@ export function RightProjectSidebar({
   }, [pathname, currentPlanId]);
 
   useEffect(() => {
+    window.dispatchEvent(new Event("project-sidebar-layout"));
+    const frame = window.requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("project-sidebar-layout"));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return undefined;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (
@@ -82,6 +91,8 @@ export function RightProjectSidebar({
     <aside
       ref={sidebarRef}
       aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
+      data-project-sidebar-root
+      data-project-sidebar-open={isOpen ? "true" : "false"}
       className="no-print fixed right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] md:right-5"
     >
       <button
@@ -103,6 +114,8 @@ export function RightProjectSidebar({
 
       <div
         id="right-project-menu"
+        data-project-sidebar-panel
+        data-project-sidebar-open={isOpen ? "true" : "false"}
         role="dialog"
         aria-modal="false"
         aria-label={progressOnly ? "진행도 이동" : "프로젝트 관리"}
@@ -327,6 +340,9 @@ function SideActionLink({
   return (
     <Link
       href={href}
+      onClick={(event) => {
+        if (!confirmUnsavedChangesNavigation()) event.preventDefault();
+      }}
       className="flex min-h-10 items-center gap-2 border border-field-divider bg-transparent px-3 py-2 text-sm font-black text-field-text transition hover:border-field-subtle hover:bg-field-input active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
     >
       <Icon className="h-4 w-4 shrink-0" aria-hidden />

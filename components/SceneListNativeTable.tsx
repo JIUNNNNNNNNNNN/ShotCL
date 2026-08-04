@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,7 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { createPortal } from "react-dom";
-import { SceneReorderList } from "@/components/SceneReorderList";
+import { SceneReorderList, type SceneReorderRowProps } from "@/components/SceneReorderList";
 import {
   buildSceneListMergeLayout,
   createSceneListCellMergeFromRange,
@@ -77,12 +79,15 @@ const mergeColumnField: Record<ProjectSceneMergeColumn, keyof ProjectSceneItem> 
 
 const tableInputClass =
   "h-full min-h-9 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944]";
+const sceneTableBaseWidth = 1087;
+const sceneActorColumnWidth = 72;
 
 export function SceneListNativeTable({
   items,
   actorRoles,
   cellMerges,
   canEdit,
+  hasPendingMutation,
   onUpdate,
   onReorderLocal,
   onReorderCommit,
@@ -96,6 +101,7 @@ export function SceneListNativeTable({
   actorRoles: string[];
   cellMerges: ProjectSceneCellMerge[];
   canEdit: boolean;
+  hasPendingMutation: boolean;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
   onReorderLocal: (items: ProjectSceneItem[]) => void;
   onReorderCommit: (items: ProjectSceneItem[], previous: ProjectSceneItem[]) => Promise<void>;
@@ -105,7 +111,12 @@ export function SceneListNativeTable({
   onError: (message: string) => void;
   onCutValidationChange: (id: string, message: string) => void;
 }) {
-  const orderedSceneIds = useMemo(() => items.map((item) => item.id), [items]);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const fitShellRef = useRef<HTMLDivElement | null>(null);
+  const fitStageRef = useRef<HTMLDivElement | null>(null);
+  const tableNaturalWidth = sceneTableBaseWidth + actorRoles.length * sceneActorColumnWidth;
+  const fit = useSceneTableFit(fitShellRef, fitStageRef, tableRef, tableNaturalWidth);
+  const orderedSceneIds = useStableSceneIds(items);
   const mergeLayout = useMemo(
     () => buildSceneListMergeLayout(orderedSceneIds, cellMerges),
     [cellMerges, orderedSceneIds]
@@ -116,8 +127,6 @@ export function SceneListNativeTable({
   const [editingCell, setEditingCell] = useState<{ sceneId: string; column: SceneEditableColumn } | null>(null);
   const [sceneMenu, setSceneMenu] = useState<{ itemId: string; left: number; top: number } | null>(null);
   const [actorTextEditor, setActorTextEditor] = useState<{ sceneId: string; role: string } | null>(null);
-  const [isMutating, setIsMutating] = useState(false);
-  const tableRef = useRef<HTMLTableElement | null>(null);
   const pointerCleanupRef = useRef<(() => void) | null>(null);
   const actorPointerCleanupRef = useRef<(() => void) | null>(null);
   const suppressClickRef = useRef(false);
@@ -174,17 +183,15 @@ export function SceneListNativeTable({
       ) {
         return;
       }
-      if (!isMutating) {
-        setSelection(null);
-        setMenu(null);
-        setSceneMenu(null);
-        setConfirmState(null);
-        setActorTextEditor(null);
-      }
+      setSelection(null);
+      setMenu(null);
+      setSceneMenu(null);
+      setConfirmState(null);
+      setActorTextEditor(null);
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [actorTextEditor, confirmState, isMutating, menu, sceneMenu, selection]);
+  }, [actorTextEditor, confirmState, menu, sceneMenu, selection]);
 
   useEffect(() => () => {
     pointerCleanupRef.current?.();
@@ -194,11 +201,10 @@ export function SceneListNativeTable({
   }, []);
 
   const closeSelection = useCallback(() => {
-    if (isMutating) return;
     setSelection(null);
     setMenu(null);
     setConfirmState(null);
-  }, [isMutating]);
+  }, []);
 
   const showMenuAt = useCallback((x: number, y: number) => {
     const viewport = window.visualViewport;
@@ -235,6 +241,7 @@ export function SceneListNativeTable({
     const target = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>(
       "[data-scene-merge-scene-id][data-scene-merge-column]"
     );
+    if (!target || !tableRef.current?.contains(target)) return null;
     const sceneId = target?.dataset.sceneMergeSceneId;
     const column = target?.dataset.sceneMergeColumn as ProjectSceneMergeColumn | undefined;
     return sceneId && column ? { sceneId, column } : null;
@@ -244,7 +251,7 @@ export function SceneListNativeTable({
     event: ReactPointerEvent<HTMLTableCellElement>,
     cell: SceneListMergeCell
   ) => {
-    if (!canEdit || event.button !== 0 || isMutating) return;
+    if (!canEdit || event.button !== 0) return;
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
     pointerCleanupRef.current?.();
     setSceneMenu(null);
@@ -358,7 +365,7 @@ export function SceneListNativeTable({
     window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);
-  }, [canEdit, findMergeCellAt, isMutating, selectionFromCells, showMenuAt]);
+  }, [canEdit, findMergeCellAt, selectionFromCells, showMenuAt]);
 
   const handleMergeCellContextMenu = useCallback((
     event: React.MouseEvent<HTMLTableCellElement>,
@@ -366,7 +373,7 @@ export function SceneListNativeTable({
   ) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!canEdit || isMutating) return;
+    if (!canEdit) return;
     const activeRange = selection
       ? resolveSceneListCellRange(selection, orderedSceneIds, cellMerges, true)
       : null;
@@ -376,7 +383,7 @@ export function SceneListNativeTable({
     setEditingCell(null);
     setSceneMenu(null);
     showMenuAt(event.clientX, event.clientY);
-  }, [canEdit, cellMerges, isMutating, orderedSceneIds, selection, selectionFromCells, showMenuAt]);
+  }, [canEdit, cellMerges, orderedSceneIds, selection, selectionFromCells, showMenuAt]);
 
   const valuesInSelection = useCallback((range: SceneListResolvedCellRange) => {
     const byId = new Map(items.map((item) => [item.id, item]));
@@ -385,7 +392,7 @@ export function SceneListNativeTable({
       .filter(Boolean);
   }, [items]);
 
-  const executeMerge = useCallback(async () => {
+  const executeMerge = useCallback(() => {
     if (!resolvedSelection || !canMergeSelection) return;
     const validation = validateSceneListCellMerges(orderedSceneIds, [
       ...cellMerges,
@@ -395,47 +402,32 @@ export function SceneListNativeTable({
       onError(validation.errors[0]?.message ?? "선택한 범위를 병합할 수 없습니다.");
       return;
     }
-    setIsMutating(true);
-    try {
-      await onPersistMerges(validation.validMerges);
-      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
-    } catch (error) {
+    closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    void onPersistMerges(validation.validMerges).catch((error) => {
       onError(getErrorMessage(error, "셀 병합 상태를 저장하지 못했습니다."));
-    } finally {
-      setIsMutating(false);
-    }
+    });
   }, [canMergeSelection, cellMerges, onError, onPersistMerges, orderedSceneIds, resolvedSelection]);
 
-  const executeUnmerge = useCallback(async () => {
+  const executeUnmerge = useCallback(() => {
     if (!canEdit || !resolvedSelection || intersectingMerges.length === 0) return;
     const nextMerges = removeSceneListCellMergesInRange(
       resolvedSelection,
       orderedSceneIds,
       cellMerges
     );
-    setIsMutating(true);
-    try {
-      await onPersistMerges(nextMerges);
-      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
-    } catch (error) {
+    closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    void onPersistMerges(nextMerges).catch((error) => {
       onError(getErrorMessage(error, "병합을 해제하지 못했습니다."));
-    } finally {
-      setIsMutating(false);
-    }
+    });
   }, [canEdit, cellMerges, intersectingMerges.length, onError, onPersistMerges, orderedSceneIds, resolvedSelection]);
 
-  const executeClear = useCallback(async () => {
+  const executeClear = useCallback(() => {
     if (!canEdit || !resolvedSelection) return;
     const cells = listSceneListCellsInRange(resolvedSelection);
-    setIsMutating(true);
-    try {
-      await onClearCells(cells);
-      closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
-    } catch (error) {
+    closeSelectionAfterMutation(setSelection, setMenu, setConfirmState);
+    void onClearCells(cells).catch((error) => {
       onError(getErrorMessage(error, "선택 칸을 비우지 못했습니다."));
-    } finally {
-      setIsMutating(false);
-    }
+    });
   }, [canEdit, onClearCells, onError, resolvedSelection]);
 
   const actorStyles = useMemo(() => actorRoles.map((_, index) => getActorStyle(index)), [actorRoles]);
@@ -444,121 +436,142 @@ export function SceneListNativeTable({
   return (
     <>
       <div
+        ref={fitShellRef}
         data-scene-table-scroller
-        className="workspace-surface relative max-h-[72dvh] min-w-0 overflow-auto overscroll-contain"
+        data-scene-table-fit-shell
+        data-scene-table-scale={fit.scale.toFixed(4)}
+        className="workspace-surface relative w-full max-w-full min-w-0 overflow-clip"
+        style={fit.ready ? { height: `${fit.scaledHeight}px` } : undefined}
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) closeSelection();
         }}
       >
-        <table
-          ref={tableRef}
-          aria-label="프로젝트 씬리스트"
-          className="w-full min-w-[1080px] table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
-        >
-          <colgroup>
-            <col className="w-[70px]" />
-            <col className="w-[105px]" />
-            <col className="w-[128px]" />
-            <col className="w-[68px]" />
-            <col className="w-[54px]" />
-            <col className="w-[60px]" />
-            <col className="w-[380px]" />
-            {actorRoles.map((role) => <col key={role} className="w-[72px]" />)}
-            <col className="w-[66px]" />
-            <col className="w-[156px]" />
-          </colgroup>
-          <thead className="sticky top-0 z-50 bg-[#eeeeee] text-[11px] font-black leading-4">
-            <tr>
-              {[
-                ["Scene", "씬"],
-                ["Location", "대장소"],
-                ["Sub-Location", "세부장소"],
-                ["Day", ""],
-                ["Time", "D/N"],
-                ["Int/Ext", "I/E"],
-                ["Content", "씬 내용"]
-              ].map(([label, description]) => (
-                <SceneTableHeader key={label} label={label} description={description} />
-              ))}
-              {actorRoles.map((role, index) => (
-                <SceneTableHeader
-                  key={role}
-                  label={role}
-                  description="등장인물"
-                  style={{
-                    backgroundColor: actorStyles[index]?.headerBackground,
-                    color: actorStyles[index]?.color
-                  }}
-                />
-              ))}
-              <SceneTableHeader label="Cut" description="총 컷수" />
-              <SceneTableHeader label="Memo" description="소품&특이사항" />
-            </tr>
-          </thead>
-
-          <SceneReorderList
-            items={items}
-            disabled={!canEdit || Boolean(menu) || isMutating}
-            onReorder={onReorderLocal}
-            validateReorder={(next, previous) => {
-              const validation = validateSceneListReorderWithMerges(
-                next.map((item) => item.id),
-                cellMerges,
-                previous.map((item) => item.id)
-              );
-              if (!validation.ok) return { ok: false, message: validation.error ?? undefined };
-              return { ok: true };
+        {fit.ready ? (
+          <div
+            data-scene-table-sticky-header
+            aria-hidden="true"
+            className="pointer-events-auto sticky top-0 z-[60] overflow-visible"
+            style={{
+              height: `${fit.headerHeight * fit.scale}px`,
+              marginBottom: `${-fit.headerHeight * fit.scale}px`
             }}
-            onCommit={async (next, previous) => {
-              await onReorderCommit(next, previous);
-              return { ok: true };
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
             }}
-            onCommitError={onError}
-            renderRow={(item, index, { trProps }) => (
-              <SceneNativeRow
-                key={item.id}
-                trProps={trProps}
-                item={item}
-                index={index}
-                actorRoles={actorRoles}
-                actorStyles={actorStyles}
-                locationStyle={getLocationStyle(item, locationStyles)}
-                mergeLayout={mergeLayout}
-                resolvedSelection={resolvedSelection}
-                canEdit={canEdit}
-                editingCell={editingCell}
-                suppressClickRef={suppressClickRef}
-                suppressActorClickRef={suppressActorClickRef}
-                actorPointerCleanupRef={actorPointerCleanupRef}
-                onBeginSelection={beginSelectionPointer}
-                onMergeContextMenu={handleMergeCellContextMenu}
-                onEdit={(column) => setEditingCell({ sceneId: item.id, column })}
-                onEditEnd={() => setEditingCell(null)}
-                onUpdate={onUpdate}
-                onSceneContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (!canEdit) return;
-                  setSelection(null);
-                  setMenu(null);
-                  setSceneMenu({
-                    itemId: item.id,
-                    ...clampFixedPosition(event.clientX, event.clientY, 112, 48)
-                  });
-                }}
-                onActorTextEdit={(role) => setActorTextEditor({ sceneId: item.id, role })}
-                onCutValidationChange={onCutValidationChange}
-              />
-            )}
-          />
-        </table>
-
-        {items.length === 0 ? (
-          <p className="border-x border-b border-[#d6d6d6] bg-white px-3 py-10 text-center text-xs font-semibold text-[#777]">
-            등록된 씬이 없습니다.
-          </p>
+          >
+            <div
+              className="origin-top-left"
+              style={{
+                width: `${tableNaturalWidth}px`,
+                transform: `scale(${fit.scale})`,
+                transformOrigin: "left top"
+              }}
+            >
+              <table
+                role="presentation"
+                className="table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
+                style={{ width: `${tableNaturalWidth}px`, minWidth: `${tableNaturalWidth}px` }}
+              >
+                <SceneTableColGroup actorRoles={actorRoles} />
+                <thead className="bg-[#eeeeee] text-[11px] font-black leading-4">
+                  <SceneTableHeaderRow actorRoles={actorRoles} actorStyles={actorStyles} />
+                </thead>
+              </table>
+            </div>
+          </div>
         ) : null}
+        <div
+          ref={fitStageRef}
+          data-scene-table-fit-stage
+          className="origin-top-left"
+          style={{
+            position: fit.ready ? "absolute" : "relative",
+            left: fit.ready ? 0 : undefined,
+            top: fit.ready ? 0 : undefined,
+            width: `${tableNaturalWidth}px`,
+            transform: fit.ready ? `scale(${fit.scale})` : undefined,
+            transformOrigin: "left top"
+          }}
+        >
+          <table
+            ref={tableRef}
+            aria-label="프로젝트 씬리스트"
+            className="table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
+            style={{ width: `${tableNaturalWidth}px`, minWidth: `${tableNaturalWidth}px` }}
+          >
+            <SceneTableColGroup actorRoles={actorRoles} />
+            <thead className="pointer-events-none bg-[#eeeeee] text-[11px] font-black leading-4 opacity-0">
+              <SceneTableHeaderRow actorRoles={actorRoles} actorStyles={actorStyles} />
+            </thead>
+
+            <SceneReorderList
+              items={items}
+              disabled={!canEdit || Boolean(menu) || hasPendingMutation}
+              fitScale={fit.scale}
+              onReorder={onReorderLocal}
+              validateReorder={(next, previous) => {
+                const validation = validateSceneListReorderWithMerges(
+                  next.map((item) => item.id),
+                  cellMerges,
+                  previous.map((item) => item.id)
+                );
+                if (!validation.ok) return { ok: false, message: validation.error ?? undefined };
+                return { ok: true };
+              }}
+              onCommit={async (next, previous) => {
+                await onReorderCommit(next, previous);
+                return { ok: true };
+              }}
+              onCommitError={onError}
+              renderRow={(item, index, { trProps }) => (
+                <SceneNativeRow
+                  key={item.id}
+                  trProps={trProps}
+                  item={item}
+                  index={index}
+                  actorRoles={actorRoles}
+                  actorStyles={actorStyles}
+                  locationStyle={getLocationStyle(item, locationStyles)}
+                  mergeLayout={mergeLayout}
+                  resolvedSelection={resolvedSelection}
+                  canEdit={canEdit}
+                  hasPendingMutation={hasPendingMutation}
+                  editingCell={editingCell}
+                  suppressClickRef={suppressClickRef}
+                  suppressActorClickRef={suppressActorClickRef}
+                  actorPointerCleanupRef={actorPointerCleanupRef}
+                  onBeginSelection={beginSelectionPointer}
+                  onMergeContextMenu={handleMergeCellContextMenu}
+                  onEdit={(column) => setEditingCell({ sceneId: item.id, column })}
+                  onEditEnd={() => setEditingCell(null)}
+                  onUpdate={onUpdate}
+                  onSceneContextMenu={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (!canEdit || hasPendingMutation) return;
+                    setSelection(null);
+                    setMenu(null);
+                    setSceneMenu({
+                      itemId: item.id,
+                      ...clampFixedPosition(event.clientX, event.clientY, 112, 48)
+                    });
+                  }}
+                  onActorTextEdit={(role) => setActorTextEditor({ sceneId: item.id, role })}
+                  onCutValidationChange={onCutValidationChange}
+                />
+              )}
+            />
+          </table>
+
+          {items.length === 0 ? (
+            <p className="border-x border-b border-[#d6d6d6] bg-white px-3 py-10 text-center text-xs font-semibold text-[#777]">
+              등록된 씬이 없습니다.
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {menu && resolvedSelection && typeof document !== "undefined"
@@ -572,7 +585,7 @@ export function SceneListNativeTable({
               onPointerDown={(event) => event.stopPropagation()}
             >
               <SceneMenuButton
-                disabled={!canMergeSelection || isMutating}
+                disabled={!canMergeSelection}
                 onClick={() => {
                   const values = valuesInSelection(resolvedSelection);
                   if (new Set(values).size > 1) {
@@ -589,13 +602,13 @@ export function SceneListNativeTable({
                 선택 칸 병합
               </SceneMenuButton>
               <SceneMenuButton
-                disabled={!canEdit || intersectingMerges.length === 0 || isMutating}
+                disabled={!canEdit || intersectingMerges.length === 0}
                 onClick={() => void executeUnmerge()}
               >
                 병합 해제
               </SceneMenuButton>
               <SceneMenuButton
-                disabled={!canEdit || isMutating}
+                disabled={!canEdit}
                 onClick={() => {
                   if (valuesInSelection(resolvedSelection).length > 0) {
                     setConfirmState({
@@ -625,7 +638,7 @@ export function SceneListNativeTable({
               onPointerDown={(event) => event.stopPropagation()}
             >
               <SceneMenuButton
-                disabled={!canEdit}
+                disabled={!canEdit || hasPendingMutation}
                 onClick={() => {
                   if (!canEdit) return;
                   const item = items.find((candidate) => candidate.id === sceneMenu.itemId);
@@ -644,7 +657,7 @@ export function SceneListNativeTable({
         ? createPortal(
             <SceneConfirmDialog
               state={confirmState}
-              busy={isMutating}
+              busy={false}
               onCancel={() => setConfirmState(null)}
               onConfirm={() => {
                 setConfirmState(null);
@@ -679,30 +692,8 @@ export function SceneListNativeTable({
   );
 }
 
-function SceneNativeRow({
-  trProps,
-  item,
-  index,
-  actorRoles,
-  actorStyles,
-  locationStyle,
-  mergeLayout,
-  resolvedSelection,
-  canEdit,
-  editingCell,
-  suppressClickRef,
-  suppressActorClickRef,
-  actorPointerCleanupRef,
-  onBeginSelection,
-  onMergeContextMenu,
-  onEdit,
-  onEditEnd,
-  onUpdate,
-  onSceneContextMenu,
-  onActorTextEdit,
-  onCutValidationChange
-}: {
-  trProps: React.HTMLAttributes<HTMLTableRowElement> & { ref?: React.Ref<HTMLTableRowElement> };
+type SceneNativeRowProps = {
+  trProps: SceneReorderRowProps;
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
@@ -711,6 +702,7 @@ function SceneNativeRow({
   mergeLayout: ReturnType<typeof buildSceneListMergeLayout>;
   resolvedSelection: SceneListResolvedCellRange | null;
   canEdit: boolean;
+  hasPendingMutation: boolean;
   editingCell: { sceneId: string; column: SceneEditableColumn } | null;
   suppressClickRef: React.MutableRefObject<boolean>;
   suppressActorClickRef: React.MutableRefObject<boolean>;
@@ -723,7 +715,32 @@ function SceneNativeRow({
   onSceneContextMenu: (event: React.MouseEvent<HTMLTableCellElement>) => void;
   onActorTextEdit: (role: string) => void;
   onCutValidationChange: (id: string, message: string) => void;
-}) {
+};
+
+const SceneNativeRow = memo(function SceneNativeRow({
+  trProps,
+  item,
+  index,
+  actorRoles,
+  actorStyles,
+  locationStyle,
+  mergeLayout,
+  resolvedSelection,
+  canEdit,
+  hasPendingMutation,
+  editingCell,
+  suppressClickRef,
+  suppressActorClickRef,
+  actorPointerCleanupRef,
+  onBeginSelection,
+  onMergeContextMenu,
+  onEdit,
+  onEditEnd,
+  onUpdate,
+  onSceneContextMenu,
+  onActorTextEdit,
+  onCutValidationChange
+}: SceneNativeRowProps) {
   const isEditing = (column: SceneEditableColumn) => (
     editingCell?.sceneId === item.id && editingCell.column === column
   );
@@ -968,6 +985,76 @@ function SceneNativeRow({
       />
     </tr>
   );
+}, areSceneNativeRowPropsEqual);
+
+function areSceneNativeRowPropsEqual(
+  previous: SceneNativeRowProps,
+  next: SceneNativeRowProps
+) {
+  if (
+    previous.item !== next.item
+    || previous.index !== next.index
+    || previous.actorRoles !== next.actorRoles
+    || previous.actorStyles !== next.actorStyles
+    || previous.canEdit !== next.canEdit
+    || previous.hasPendingMutation !== next.hasPendingMutation
+    || previous.locationStyle.background !== next.locationStyle.background
+    || previous.locationStyle.color !== next.locationStyle.color
+  ) {
+    return false;
+  }
+
+  const previousEditingColumn = previous.editingCell?.sceneId === previous.item.id
+    ? previous.editingCell.column
+    : null;
+  const nextEditingColumn = next.editingCell?.sceneId === next.item.id
+    ? next.editingCell.column
+    : null;
+  if (previousEditingColumn !== nextEditingColumn) return false;
+
+  for (const column of ["location", "subLocation", "day", "time", "intExt"] as const) {
+    const previousState = getSceneListCellMergeState(previous.mergeLayout, previous.item.id, column);
+    const nextState = getSceneListCellMergeState(next.mergeLayout, next.item.id, column);
+    if (!sameMergeCellState(previousState, nextState)) return false;
+    const cell = { sceneId: previous.item.id, column };
+    if (
+      isCellInResolvedRange(cell, previous.resolvedSelection)
+      !== isCellInResolvedRange(cell, next.resolvedSelection)
+    ) {
+      return false;
+    }
+  }
+
+  const previousStyle = previous.trProps.style;
+  const nextStyle = next.trProps.style;
+  return (
+    previous.trProps.className === next.trProps.className
+    && previous.trProps["aria-grabbed"] === next.trProps["aria-grabbed"]
+    && previous.trProps["data-scene-reorder-state"] === next.trProps["data-scene-reorder-state"]
+    && previousStyle?.transform === nextStyle?.transform
+    && previousStyle?.opacity === nextStyle?.opacity
+    && previousStyle?.zIndex === nextStyle?.zIndex
+    && previousStyle?.touchAction === nextStyle?.touchAction
+  );
+}
+
+function sameMergeCellState(
+  previous: ReturnType<typeof getSceneListCellMergeState>,
+  next: ReturnType<typeof getSceneListCellMergeState>
+) {
+  if (previous === next) return true;
+  if (!previous || !next || previous.kind !== next.kind) return false;
+  if (previous.merge.id !== next.merge.id) return false;
+  if (previous.kind === "anchor" && next.kind === "anchor") {
+    return previous.rowSpan === next.rowSpan && previous.colSpan === next.colSpan;
+  }
+  if (previous.kind === "covered" && next.kind === "covered") {
+    return (
+      previous.anchorSceneId === next.anchorSceneId
+      && previous.anchorColumn === next.anchorColumn
+    );
+  }
+  return false;
 }
 
 function renderMergeEditor(
@@ -1074,12 +1161,66 @@ function SceneTableHeader({
   return (
     <th
       scope="col"
-      className="h-11 border-b border-r border-[#bebebe] px-1 py-1 text-center align-middle"
+      className="h-11 border-b border-r border-[#bebebe] bg-[#eeeeee] px-1 py-1 text-center align-middle"
       style={style}
     >
       <span className="block leading-4">{label}</span>
       {description ? <span className="block text-[9px] font-semibold leading-3">{description}</span> : null}
     </th>
+  );
+}
+
+function SceneTableColGroup({ actorRoles }: { actorRoles: string[] }) {
+  return (
+    <colgroup>
+      <col className="w-[70px]" />
+      <col className="w-[105px]" />
+      <col className="w-[128px]" />
+      <col className="w-[68px]" />
+      <col className="w-[54px]" />
+      <col className="w-[60px]" />
+      <col className="w-[380px]" />
+      {actorRoles.map((role) => <col key={role} className="w-[72px]" />)}
+      <col className="w-[66px]" />
+      <col className="w-[156px]" />
+    </colgroup>
+  );
+}
+
+function SceneTableHeaderRow({
+  actorRoles,
+  actorStyles
+}: {
+  actorRoles: string[];
+  actorStyles: Array<ReturnType<typeof getActorStyle>>;
+}) {
+  return (
+    <tr>
+      {[
+        ["Scene", "씬"],
+        ["Location", "대장소"],
+        ["Sub-Location", "세부장소"],
+        ["Day", ""],
+        ["Time", "D/N"],
+        ["Int/Ext", "I/E"],
+        ["Content", "씬 내용"]
+      ].map(([label, description]) => (
+        <SceneTableHeader key={label} label={label} description={description} />
+      ))}
+      {actorRoles.map((role, index) => (
+        <SceneTableHeader
+          key={role}
+          label={role}
+          description="등장인물"
+          style={{
+            backgroundColor: actorStyles[index]?.headerBackground,
+            color: actorStyles[index]?.color
+          }}
+        />
+      ))}
+      <SceneTableHeader label="Cut" description="총 컷수" />
+      <SceneTableHeader label="Memo" description="소품&특이사항" />
+    </tr>
   );
 }
 
@@ -1244,6 +1385,153 @@ function isCellInResolvedRange(
   range: SceneListResolvedCellRange | null
 ) {
   return Boolean(range?.sceneIds.includes(cell.sceneId) && range.columns.includes(cell.column));
+}
+
+type SceneTableFitState = {
+  ready: boolean;
+  scale: number;
+  naturalWidth: number;
+  naturalHeight: number;
+  headerHeight: number;
+  scaledHeight: number;
+  availableWidth: number;
+};
+
+function useStableSceneIds(items: ProjectSceneItem[]) {
+  const nextIds = items.map((item) => item.id);
+  const stableIdsRef = useRef(nextIds);
+  const previous = stableIdsRef.current;
+  if (
+    previous.length !== nextIds.length
+    || previous.some((id, index) => id !== nextIds[index])
+  ) {
+    stableIdsRef.current = nextIds;
+  }
+  return stableIdsRef.current;
+}
+
+function useSceneTableFit(
+  shellRef: React.RefObject<HTMLDivElement | null>,
+  stageRef: React.RefObject<HTMLDivElement | null>,
+  tableRef: React.RefObject<HTMLTableElement | null>,
+  declaredNaturalWidth: number
+) {
+  const [fit, setFit] = useState<SceneTableFitState>({
+    ready: false,
+    scale: 1,
+    naturalWidth: declaredNaturalWidth,
+    naturalHeight: 0,
+    headerHeight: 44,
+    scaledHeight: 0,
+    availableWidth: declaredNaturalWidth
+  });
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const stage = stageRef.current;
+    const table = tableRef.current;
+    if (!shell || !stage || !table) return undefined;
+
+    let animationFrame = 0;
+    let disposed = false;
+
+    const measure = () => {
+      animationFrame = 0;
+      if (disposed) return;
+      const shellRect = shell.getBoundingClientRect();
+      let availableWidth = Math.max(1, shell.clientWidth || shellRect.width);
+
+      // The sidebar is a fixed overlay. Reserve only its real overlap once on
+      // desktop; mobile keeps the underlying page width while the overlay is open.
+      if (window.matchMedia("(min-width: 768px)").matches) {
+        const sidebarPanel = document.querySelector<HTMLElement>(
+          '[data-project-sidebar-panel][data-project-sidebar-open="true"]'
+        );
+        if (sidebarPanel) {
+          const panelRect = sidebarPanel.getBoundingClientRect();
+          const overlap = Math.max(
+            0,
+            Math.min(shellRect.right, panelRect.right) - Math.max(shellRect.left, panelRect.left)
+          );
+          if (overlap > 0 && overlap < availableWidth) {
+            availableWidth = Math.max(1, availableWidth - overlap - 8);
+          }
+        }
+      }
+
+      const naturalWidth = Math.max(
+        declaredNaturalWidth,
+        table.offsetWidth,
+        table.scrollWidth
+      );
+      const naturalHeight = Math.max(stage.offsetHeight, stage.scrollHeight, table.offsetHeight);
+      const headerHeight = table.tHead?.offsetHeight || 44;
+      const scale = Math.max(0.01, Math.min(1, availableWidth / naturalWidth));
+      const appliedScale = Math.floor(scale * 10_000) / 10_000;
+      const next: SceneTableFitState = {
+        ready: true,
+        scale: appliedScale,
+        naturalWidth,
+        naturalHeight,
+        headerHeight,
+        scaledHeight: Math.ceil(naturalHeight * appliedScale),
+        availableWidth
+      };
+
+      setFit((current) => (
+        current.ready === next.ready
+        && Math.abs(current.scale - next.scale) < 0.0001
+        && Math.abs(current.naturalWidth - next.naturalWidth) < 1
+        && Math.abs(current.naturalHeight - next.naturalHeight) < 1
+        && Math.abs(current.headerHeight - next.headerHeight) < 1
+        && Math.abs(current.scaledHeight - next.scaledHeight) < 1
+        && Math.abs(current.availableWidth - next.availableWidth) < 1
+          ? current
+          : next
+      ));
+    };
+
+    const scheduleMeasure = () => {
+      if (disposed) return;
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(measure);
+    };
+
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(shell);
+    resizeObserver.observe(stage);
+    resizeObserver.observe(table);
+
+    const sidebarRoot = document.querySelector<HTMLElement>("[data-project-sidebar-root]");
+    const sidebarObserver = sidebarRoot
+      ? new MutationObserver(scheduleMeasure)
+      : null;
+    sidebarObserver?.observe(sidebarRoot!, {
+      attributes: true,
+      attributeFilter: ["data-project-sidebar-open"],
+      subtree: true
+    });
+
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("orientationchange", scheduleMeasure);
+    window.addEventListener("project-sidebar-layout", scheduleMeasure);
+    window.visualViewport?.addEventListener("resize", scheduleMeasure);
+    void document.fonts?.ready.then(scheduleMeasure);
+    measure();
+
+    return () => {
+      disposed = true;
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      sidebarObserver?.disconnect();
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("orientationchange", scheduleMeasure);
+      window.removeEventListener("project-sidebar-layout", scheduleMeasure);
+      window.visualViewport?.removeEventListener("resize", scheduleMeasure);
+    };
+  }, [declaredNaturalWidth, shellRef, stageRef, tableRef]);
+
+  return fit;
 }
 
 function isLocationMergeColumn(column: ProjectSceneMergeColumn) {

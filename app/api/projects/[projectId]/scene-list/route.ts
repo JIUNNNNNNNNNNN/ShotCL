@@ -336,7 +336,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           .order("created_at"),
         supabase
           .from("project_scene_notes")
-          .select("updated_at")
+          .select("cell_merges,updated_at")
           .eq("project_id", projectId)
           .maybeSingle()
       ]);
@@ -373,9 +373,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         ? String(noteResult.data.updated_at)
         : null;
       if (expectedUpdatedAt.value !== currentUpdatedAt) {
-        return NextResponse.json(
-          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
-          { status: 409 }
+        return sceneListMergeConflict(
+          noteResult.data?.cell_merges,
+          currentUpdatedAt
         );
       }
 
@@ -397,19 +397,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           .select("cell_merges,updated_at")
           .single();
         if (error?.code === "23505") {
-          return NextResponse.json(
-            { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
-            { status: 409 }
-          );
+          const { data: latest, error: latestError } = await supabase
+            .from("project_scene_notes")
+            .select("cell_merges,updated_at")
+            .eq("project_id", projectId)
+            .maybeSingle();
+          if (latestError) throw latestError;
+          return sceneListMergeConflict(latest?.cell_merges, latest?.updated_at);
         }
         if (error) throw error;
         note = data;
       }
       if (!note) {
-        return NextResponse.json(
-          { error: "다른 사용자가 씬리스트 병합 상태를 변경했습니다. 페이지를 다시 불러온 뒤 시도해주세요." },
-          { status: 409 }
-        );
+        const { data: latest, error: latestError } = await supabase
+          .from("project_scene_notes")
+          .select("cell_merges,updated_at")
+          .eq("project_id", projectId)
+          .maybeSingle();
+        if (latestError) throw latestError;
+        return sceneListMergeConflict(latest?.cell_merges, latest?.updated_at);
       }
 
       return NextResponse.json({
@@ -726,6 +732,18 @@ function serializeActorCells(value: unknown) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function sceneListMergeConflict(cellMerges: unknown, updatedAt: unknown) {
+  return NextResponse.json(
+    {
+      error: "다른 사용자가 변경한 최신 병합 상태로 동기화했습니다. 다시 시도해주세요.",
+      cellMerges: parseSceneListCellMerges(cellMerges).merges,
+      cellMergesMaterialized: Array.isArray(cellMerges),
+      cellMergesUpdatedAt: updatedAt ? String(updatedAt) : null
+    },
+    { status: 409 }
+  );
 }
 
 function sceneListError(error: unknown, fallback: string) {

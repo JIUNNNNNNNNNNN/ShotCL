@@ -36,6 +36,28 @@ export type ProjectSceneListResult = ProjectSceneList & {
   actorRoles: string[];
 };
 
+export class SceneListMergeMutationError extends Error {
+  readonly status: number;
+  readonly latestCellMerges: ProjectSceneCellMerge[];
+  readonly latestMaterialized: boolean;
+  readonly latestUpdatedAt: string | null;
+
+  constructor(
+    message: string,
+    status: number,
+    latestCellMerges: ProjectSceneCellMerge[],
+    latestMaterialized: boolean,
+    latestUpdatedAt: string | null
+  ) {
+    super(message);
+    this.name = "SceneListMergeMutationError";
+    this.status = status;
+    this.latestCellMerges = latestCellMerges;
+    this.latestMaterialized = latestMaterialized;
+    this.latestUpdatedAt = latestUpdatedAt;
+  }
+}
+
 type ProjectSceneListSaveInput = Pick<ProjectSceneList, "items" | "scenarioReference"> &
   Partial<Pick<
     ProjectSceneList,
@@ -209,6 +231,15 @@ export async function saveProjectSceneCellMerges(
         cellMerges: normalizeSceneListCellMerges(payload.cellMerges),
         updatedAt: normalizeOptionalTimestamp(payload.cellMergesUpdatedAt)
       };
+    }
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new SceneListMergeMutationError(
+        payload.error || "셀 병합 상태가 다른 변경과 충돌했습니다.",
+        response.status,
+        normalizeSceneListCellMerges(payload.cellMerges),
+        payload.cellMergesMaterialized === true,
+        normalizeOptionalTimestamp(payload.cellMergesUpdatedAt)
+      );
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
       throw new Error(payload.error || "셀 병합 상태를 저장하지 못했습니다.");

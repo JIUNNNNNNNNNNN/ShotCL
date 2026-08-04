@@ -107,6 +107,7 @@ function restorePreviousStableIdOrder(
 export function SceneReorderList({
   items,
   disabled,
+  fitScale = 1,
   onReorder,
   validateReorder,
   onCommit,
@@ -116,6 +117,7 @@ export function SceneReorderList({
 }: {
   items: ProjectSceneItem[];
   disabled: boolean;
+  fitScale?: number;
   onReorder: (items: ProjectSceneItem[]) => void;
   validateReorder?: (
     nextItems: ProjectSceneItem[],
@@ -134,6 +136,11 @@ export function SceneReorderList({
   className?: string;
 }) {
   const itemsRef = useRef(items);
+  const disabledRef = useRef(disabled);
+  const onReorderRef = useRef(onReorder);
+  const validateReorderRef = useRef(validateReorder);
+  const onCommitRef = useRef(onCommit);
+  const onCommitErrorRef = useRef(onCommitError);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const pendingRef = useRef<PendingDrag | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -141,8 +148,16 @@ export function SceneReorderList({
   const committingRef = useRef(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   const suppressClickRef = useRef(false);
+  const safeFitScale = Number.isFinite(fitScale) && fitScale > 0
+    ? Math.min(1, Math.max(0.01, fitScale))
+    : 1;
 
   itemsRef.current = items;
+  disabledRef.current = disabled;
+  onReorderRef.current = onReorder;
+  validateReorderRef.current = validateReorder;
+  onCommitRef.current = onCommit;
+  onCommitErrorRef.current = onCommitError;
 
   useEffect(
     () => () => {
@@ -159,7 +174,14 @@ export function SceneReorderList({
   );
 
   function beginDrag(pending: PendingDrag) {
-    if (pendingRef.current !== pending) return;
+    if (
+      pendingRef.current !== pending
+      || disabledRef.current
+      || committingRef.current
+    ) {
+      if (pendingRef.current === pending) clearPending();
+      return;
+    }
     const next: DragState = {
       itemId: pending.itemId,
       pointerId: pending.pointerId,
@@ -229,20 +251,21 @@ export function SceneReorderList({
     );
     if (nextItems === previousItems) return;
 
-    const validation = validateReorder?.(nextItems, previousItems);
+    const validation = validateReorderRef.current?.(nextItems, previousItems);
     if (validation && !validation.ok) {
-      onCommitError?.(validation.message || "씬 순서를 변경하지 못했습니다.");
+      onCommitErrorRef.current?.(validation.message || "씬 순서를 변경하지 못했습니다.");
       return;
     }
 
     // The list updates immediately. A failed server commit restores the exact
     // stable-id order that existed before this drag.
-    onReorder(nextItems);
-    if (!onCommit) return;
+    onReorderRef.current(nextItems);
+    const commit = onCommitRef.current;
+    if (!commit) return;
 
     committingRef.current = true;
     void Promise.resolve()
-      .then(() => onCommit(nextItems, previousItems))
+      .then(() => commit(nextItems, previousItems))
       .then((result) => {
         if (result && !result.ok) {
           throw new Error(result.message || "씬 순서를 변경하지 못했습니다.");
@@ -251,8 +274,8 @@ export function SceneReorderList({
       .catch((error: unknown) => {
         // Restore the previous order only for rows that still exist. New rows
         // stay present, deleted rows stay deleted, and the latest cell values survive.
-        onReorder(restorePreviousStableIdOrder(itemsRef.current, previousItems));
-        onCommitError?.(getErrorMessage(error));
+        onReorderRef.current(restorePreviousStableIdOrder(itemsRef.current, previousItems));
+        onCommitErrorRef.current?.(getErrorMessage(error));
       })
       .finally(() => {
         committingRef.current = false;
@@ -274,7 +297,7 @@ export function SceneReorderList({
     itemId: string
   ) {
     if (
-      disabled ||
+      disabledRef.current ||
       committingRef.current ||
       event.button !== 0 ||
       pendingRef.current ||
@@ -403,7 +426,7 @@ export function SceneReorderList({
           className: `relative ${indicatorClass}`,
           style: {
             transform: isDragging
-              ? `translateY(${(drag?.currentY ?? 0) - (drag?.startY ?? 0)}px)`
+              ? `translateY(${((drag?.currentY ?? 0) - (drag?.startY ?? 0)) / safeFitScale}px)`
               : undefined,
             opacity: isDragging ? 0.82 : 1,
             zIndex: isDragging ? 20 : undefined,

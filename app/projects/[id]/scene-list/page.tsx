@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
-import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import {
+  confirmUnsavedChangesNavigation,
+  useUnsavedChangesGuard
+} from "@/hooks/useUnsavedChangesGuard";
 import {
   clearProjectSceneCells,
   createBlankProjectSceneItem,
@@ -15,6 +19,7 @@ import {
   reorderProjectSceneItems,
   saveProjectSceneCellMerges,
   saveProjectSceneList,
+  SceneListMergeMutationError,
   type ProjectSceneClearCell
 } from "@/lib/data/sceneList";
 import { getProject } from "@/lib/data/projects";
@@ -32,12 +37,45 @@ function useProjectId() {
   return Array.isArray(params.id) ? params.id[0] : params.id;
 }
 
+type PersistedMergeSnapshot = {
+  merges: ProjectSceneCellMerge[];
+  materialized: boolean;
+  updatedAt: string | null;
+};
+
+type MergeSaveJob = {
+  projectId: string;
+  version: number;
+  merges: ProjectSceneCellMerge[];
+  expectedUpdatedAt: string | null;
+  rollbackSnapshot: PersistedMergeSnapshot;
+  legacyItems: ProjectSceneItem[];
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
+type ClearSaveJob = {
+  projectId: string;
+  version: number;
+  cells: ProjectSceneClearCell[];
+  previousValues: Map<string, string>;
+  previousVersions: Map<string, number | undefined>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
+// SPA 내부 이동으로 page instance가 교체되어도 같은 프로젝트의 저장 완료를
+// 다음 load가 기다릴 수 있도록 module scope에서 pending tail을 공유합니다.
+const projectMergeMutationTails = new Map<string, Promise<void>>();
+const projectClearMutationTails = new Map<string, Promise<void>>();
+
 /** 프로젝트 공통 씬리스트를 수동 저장하며 Cut 값은 일촬표 컷수와 공유합니다. */
 export default function ProjectSceneListPage() {
   const projectId = useProjectId();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const [project, setProject] = useState<Project | null>(null);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [items, setItems] = useState<ProjectSceneItem[]>([]);
   const [actorRoles, setActorRoles] = useState<string[]>([]);
   const [scenarioReference, setScenarioReference] = useState("");
@@ -47,6 +85,8 @@ export default function ProjectSceneListPage() {
   const [mergeMetadataDirty, setMergeMetadataDirty] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isMergePersisting, setIsMergePersisting] = useState(false);
+  const [isClearPersisting, setIsClearPersisting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [cutInputErrors, setCutInputErrors] = useState<Record<string, string>>({});
@@ -54,7 +94,30 @@ export default function ProjectSceneListPage() {
   const cellMergesRef = useRef(cellMerges);
   const cellMergesMaterializedRef = useRef(cellMergesMaterialized);
   const cellMergesUpdatedAtRef = useRef(cellMergesUpdatedAt);
-  useUnsavedChangesGuard(isDirty);
+  const mountedRef = useRef(true);
+  const activeProjectIdRef = useRef(projectId);
+  const loadRequestVersionRef = useRef(0);
+  const persistedMergeSnapshotRef = useRef<PersistedMergeSnapshot>({
+    merges: [],
+    materialized: false,
+    updatedAt: null
+  });
+  const mergeMutationVersionsRef = useRef(new Map<string, number>());
+  const mergeSaveQueueRef = useRef<MergeSaveJob[]>([]);
+  const mergeSaveRunningRef = useRef(false);
+  const sceneCellMutationVersionRef = useRef(0);
+  const sceneCellVersionsRef = useRef(new Map<string, number>());
+  const clearSaveQueueRef = useRef<ClearSaveJob[]>([]);
+  const clearSaveRunningRef = useRef(false);
+  activeProjectIdRef.current = projectId;
+  useUnsavedChangesGuard(isDirty || isMergePersisting || isClearPersisting);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -71,8 +134,18 @@ export default function ProjectSceneListPage() {
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    const requestVersion = ++loadRequestVersionRef.current;
     setIsLoading(true);
     try {
+      await Promise.all([
+        projectMergeMutationTails.get(projectId),
+        projectClearMutationTails.get(projectId)
+      ].filter((pending): pending is Promise<void> => Boolean(pending)));
+      if (
+        !mountedRef.current
+        || activeProjectIdRef.current !== projectId
+        || loadRequestVersionRef.current !== requestVersion
+      ) return;
       const [projectData, sceneList] = await Promise.all([
         auditQuery(
           "sceneList.loadProject",
@@ -88,7 +161,22 @@ export default function ProjectSceneListPage() {
       const visibleMerges = sceneList.cellMergesMaterialized
         ? sceneList.cellMerges
         : deriveLegacySceneListMerges(sceneList.items);
+      if (
+        !mountedRef.current
+        || activeProjectIdRef.current !== projectId
+        || loadRequestVersionRef.current !== requestVersion
+      ) return;
+      itemsRef.current = sceneList.items;
+      cellMergesRef.current = visibleMerges;
+      cellMergesMaterializedRef.current = sceneList.cellMergesMaterialized;
+      cellMergesUpdatedAtRef.current = sceneList.cellMergesUpdatedAt;
+      persistedMergeSnapshotRef.current = {
+        merges: visibleMerges,
+        materialized: sceneList.cellMergesMaterialized,
+        updatedAt: sceneList.cellMergesUpdatedAt
+      };
       setProject(projectData);
+      setLoadedProjectId(projectId);
       setItems(sceneList.items);
       setActorRoles(sceneList.actorRoles);
       setScenarioReference(sceneList.scenarioReference);
@@ -100,9 +188,23 @@ export default function ProjectSceneListPage() {
       setIsDirty(false);
       setErrorMessage("");
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "씬리스트를 불러오지 못했습니다."));
+      if (
+        mountedRef.current
+        && activeProjectIdRef.current === projectId
+        && loadRequestVersionRef.current === requestVersion
+      ) {
+        setProject(null);
+        setLoadedProjectId(projectId);
+        setErrorMessage(getErrorMessage(error, "씬리스트를 불러오지 못했습니다."));
+      }
     } finally {
-      setIsLoading(false);
+      if (
+        mountedRef.current
+        && activeProjectIdRef.current === projectId
+        && loadRequestVersionRef.current === requestVersion
+      ) {
+        setIsLoading(false);
+      }
     }
   }, [projectId]);
 
@@ -111,11 +213,22 @@ export default function ProjectSceneListPage() {
   }, [load]);
 
   const updateItem = useCallback((id: string, patch: Partial<ProjectSceneItem>) => {
-    if (!canEdit) return;
-    setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+    if (!canEdit || !projectId) return;
+    markSceneCellPatchVersion(
+      sceneCellVersionsRef.current,
+      projectId,
+      id,
+      patch,
+      ++sceneCellMutationVersionRef.current
+    );
+    setItems((current) => {
+      const next = current.map((item) => item.id === id ? { ...item, ...patch } : item);
+      itemsRef.current = next;
+      return next;
+    });
     setIsDirty(true);
     setErrorMessage("");
-  }, [canEdit]);
+  }, [canEdit, projectId]);
 
   const updateCutInputError = useCallback((id: string, message: string) => {
     setCutInputErrors((current) => {
@@ -128,22 +241,31 @@ export default function ProjectSceneListPage() {
 
   const addItem = useCallback(() => {
     if (!canEdit || !projectId) return;
-    setItems((current) => [
-      ...current,
-      createBlankProjectSceneItem(projectId, current.length + 1)
-    ]);
+    setItems((current) => {
+      const next = [
+        ...current,
+        createBlankProjectSceneItem(projectId, current.length + 1)
+      ];
+      itemsRef.current = next;
+      return next;
+    });
     setIsDirty(true);
     setErrorMessage("");
   }, [canEdit, projectId]);
 
   const deleteItem = useCallback((item: ProjectSceneItem) => {
     if (!canEdit) return;
-    setItems((current) => current
-      .filter((candidate) => candidate.id !== item.id)
-      .map((candidate, index) => ({ ...candidate, sortOrder: index + 1 }))
-    );
+    setItems((current) => {
+      const next = current
+        .filter((candidate) => candidate.id !== item.id)
+        .map((candidate, index) => ({ ...candidate, sortOrder: index + 1 }));
+      itemsRef.current = next;
+      return next;
+    });
     const remainingMerges = cellMergesRef.current.filter((merge) => !merge.sceneIds.includes(item.id));
     if (remainingMerges.length !== cellMergesRef.current.length) {
+      cellMergesRef.current = remainingMerges;
+      cellMergesMaterializedRef.current = true;
       setCellMerges(remainingMerges);
       setCellMergesMaterialized(true);
       setMergeMetadataDirty(true);
@@ -157,32 +279,199 @@ export default function ProjectSceneListPage() {
     setErrorMessage("");
   }, [canEdit]);
 
-  const persistMerges = useCallback(async (nextMerges: ProjectSceneCellMerge[]) => {
-    if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
-    const previous = cellMergesRef.current;
-    const previousMaterialized = cellMergesMaterializedRef.current;
-    setCellMerges(nextMerges);
-    setCellMergesMaterialized(true);
-    setErrorMessage("");
+  const drainMergeSaveQueue = useCallback(async () => {
+    if (mergeSaveRunningRef.current) return;
+    mergeSaveRunningRef.current = true;
+    if (mountedRef.current) setIsMergePersisting(true);
     try {
-      const saved = await saveProjectSceneCellMerges(
-        projectId,
-        nextMerges,
-        cellMergesUpdatedAtRef.current
-      );
-      setCellMerges(saved.cellMerges);
-      setCellMergesMaterialized(true);
-      setCellMergesUpdatedAt(saved.updatedAt);
-      setMergeMetadataDirty(false);
-    } catch (error) {
-      setCellMerges(previous);
-      setCellMergesMaterialized(previousMaterialized);
-      throw error;
-    }
-  }, [projectId]);
+      while (mergeSaveQueueRef.current.length > 0) {
+        const job = mergeSaveQueueRef.current.shift()!;
+        try {
+          const saved = await saveProjectSceneCellMerges(
+            job.projectId,
+            job.merges,
+            job.expectedUpdatedAt
+          );
+          const snapshot: PersistedMergeSnapshot = {
+            merges: saved.cellMerges,
+            materialized: true,
+            updatedAt: saved.updatedAt
+          };
+          rebaseQueuedMergeJobs(mergeSaveQueueRef.current, job.projectId, snapshot);
+          const isActiveProject = mountedRef.current
+            && activeProjectIdRef.current === job.projectId;
+          if (isActiveProject) {
+            persistedMergeSnapshotRef.current = snapshot;
+            cellMergesUpdatedAtRef.current = saved.updatedAt;
+            setCellMergesUpdatedAt(saved.updatedAt);
+          }
 
-  const clearCells = useCallback(async (cells: SceneListMergeCell[]) => {
-    if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
+          if (
+            isActiveProject
+            && !mergeQueueContainsProject(mergeSaveQueueRef.current, job.projectId)
+            && job.version === mergeMutationVersionsRef.current.get(job.projectId)
+          ) {
+            cellMergesRef.current = saved.cellMerges;
+            cellMergesMaterializedRef.current = true;
+            flushSync(() => {
+              setCellMerges(saved.cellMerges);
+              setCellMergesMaterialized(true);
+              setMergeMetadataDirty(false);
+            });
+          }
+          job.resolve();
+        } catch (error) {
+          if (error instanceof SceneListMergeMutationError && error.status === 409) {
+            const latestMerges = error.latestMaterialized
+              ? error.latestCellMerges
+              : deriveLegacySceneListMerges(job.legacyItems);
+            const latest: PersistedMergeSnapshot = {
+              merges: latestMerges,
+              materialized: error.latestMaterialized,
+              updatedAt: error.latestUpdatedAt
+            };
+            const queued = takeMergeJobsForProject(mergeSaveQueueRef.current, job.projectId);
+            if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
+              persistedMergeSnapshotRef.current = latest;
+              cellMergesUpdatedAtRef.current = latest.updatedAt;
+              cellMergesRef.current = latest.merges;
+              cellMergesMaterializedRef.current = latest.materialized;
+              flushSync(() => {
+                setCellMerges(latest.merges);
+                setCellMergesMaterialized(latest.materialized);
+                setCellMergesUpdatedAt(latest.updatedAt);
+                setMergeMetadataDirty(false);
+              });
+            }
+            const shouldReport = mountedRef.current
+              && activeProjectIdRef.current === job.projectId;
+            if (shouldReport) {
+              job.reject(error);
+              queued.forEach((queuedJob) => queuedJob.reject(error));
+            } else {
+              job.resolve();
+              queued.forEach((queuedJob) => queuedJob.resolve());
+            }
+            continue;
+          }
+
+          if (mergeQueueContainsProject(mergeSaveQueueRef.current, job.projectId)) {
+            // 뒤의 작업은 현재 전체 optimistic 상태를 포함하므로 최신 작업으로 재시도합니다.
+            job.resolve();
+            continue;
+          }
+
+          const persisted = job.rollbackSnapshot;
+          if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
+            persistedMergeSnapshotRef.current = persisted;
+            cellMergesRef.current = persisted.merges;
+            cellMergesMaterializedRef.current = persisted.materialized;
+            flushSync(() => {
+              setCellMerges(persisted.merges);
+              setCellMergesMaterialized(persisted.materialized);
+              setCellMergesUpdatedAt(persisted.updatedAt);
+              setMergeMetadataDirty(false);
+            });
+          }
+          if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
+            job.reject(error);
+          } else {
+            job.resolve();
+          }
+        }
+      }
+    } finally {
+      mergeSaveRunningRef.current = false;
+      if (mountedRef.current) setIsMergePersisting(false);
+    }
+  }, []);
+
+  const persistMerges = useCallback((nextMerges: ProjectSceneCellMerge[]) => {
+    if (!projectId) return Promise.reject(new Error("프로젝트 ID를 확인할 수 없습니다."));
+    const version = (mergeMutationVersionsRef.current.get(projectId) ?? 0) + 1;
+    mergeMutationVersionsRef.current.set(projectId, version);
+    cellMergesRef.current = nextMerges;
+    cellMergesMaterializedRef.current = true;
+    flushSync(() => {
+      setCellMerges(nextMerges);
+      setCellMergesMaterialized(true);
+      setMergeMetadataDirty(true);
+      setErrorMessage("");
+    });
+    const promise = new Promise<void>((resolve, reject) => {
+      mergeSaveQueueRef.current.push({
+        projectId,
+        version,
+        merges: nextMerges,
+        expectedUpdatedAt: persistedMergeSnapshotRef.current.updatedAt,
+        rollbackSnapshot: clonePersistedMergeSnapshot(persistedMergeSnapshotRef.current),
+        legacyItems: itemsRef.current,
+        resolve,
+        reject
+      });
+    });
+    trackProjectMutationTail(projectMergeMutationTails, projectId, promise);
+    void drainMergeSaveQueue();
+    return promise;
+  }, [drainMergeSaveQueue, projectId]);
+
+  const drainClearSaveQueue = useCallback(async () => {
+    if (clearSaveRunningRef.current) return;
+    clearSaveRunningRef.current = true;
+    if (mountedRef.current) setIsClearPersisting(true);
+    try {
+      while (clearSaveQueueRef.current.length > 0) {
+        const job = clearSaveQueueRef.current.shift()!;
+        try {
+          await clearProjectSceneCells(job.projectId, job.cells);
+          for (const cell of job.cells) {
+            const key = sceneCellKey(job.projectId, cell.sceneId, cell.column);
+            rebaseQueuedClearJobs(
+              clearSaveQueueRef.current,
+              job.projectId,
+              key,
+              job.version,
+              ""
+            );
+          }
+          job.resolve();
+        } catch (error) {
+          if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
+            setItems((current) => {
+              const next = restoreClearJobValues(
+                current,
+                job,
+                sceneCellVersionsRef.current
+              );
+              itemsRef.current = next;
+              return next;
+            });
+          }
+          for (const cell of job.cells) {
+            const key = sceneCellKey(job.projectId, cell.sceneId, cell.column);
+            rebaseQueuedClearJobs(
+              clearSaveQueueRef.current,
+              job.projectId,
+              key,
+              job.version,
+              job.previousValues.get(key) ?? ""
+            );
+          }
+          if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
+            job.reject(error);
+          } else {
+            job.resolve();
+          }
+        }
+      }
+    } finally {
+      clearSaveRunningRef.current = false;
+      if (mountedRef.current) setIsClearPersisting(false);
+    }
+  }, []);
+
+  const clearCells = useCallback((cells: SceneListMergeCell[]) => {
+    if (!projectId) return Promise.reject(new Error("프로젝트 ID를 확인할 수 없습니다."));
     const previous = itemsRef.current;
     const columnsById = new Map<string, Set<ProjectSceneMergeColumn>>();
     for (const cell of cells) {
@@ -191,33 +480,65 @@ export default function ProjectSceneListPage() {
       columnsById.set(cell.sceneId, columns);
     }
     const nextItems = previous.map((item) => clearSceneItemColumns(item, columnsById.get(item.id)));
-    setItems(nextItems);
-    setErrorMessage("");
-    try {
-      await clearProjectSceneCells(projectId, cells as ProjectSceneClearCell[]);
-    } catch (error) {
-      const previousById = new Map(previous.map((item) => [item.id, item]));
-      setItems((current) => current.map((item) => restoreSceneItemColumns(
-        item,
-        previousById.get(item.id),
-        columnsById.get(item.id)
-      )));
-      throw error;
+    const version = ++sceneCellMutationVersionRef.current;
+    const normalizedCells = cells as ProjectSceneClearCell[];
+    const previousValues = new Map<string, string>();
+    const previousVersions = new Map<string, number | undefined>();
+    for (const cell of normalizedCells) {
+      const item = previous.find((candidate) => candidate.id === cell.sceneId);
+      const key = sceneCellKey(projectId, cell.sceneId, cell.column);
+      previousValues.set(key, readSceneCellValue(item, cell.column));
+      previousVersions.set(key, sceneCellVersionsRef.current.get(key));
+      sceneCellVersionsRef.current.set(key, version);
     }
-  }, [projectId]);
+    itemsRef.current = nextItems;
+    flushSync(() => {
+      setItems(nextItems);
+      setErrorMessage("");
+    });
+    const promise = new Promise<void>((resolve, reject) => {
+      clearSaveQueueRef.current.push({
+        projectId,
+        version,
+        cells: normalizedCells,
+        previousValues,
+        previousVersions,
+        resolve,
+        reject
+      });
+    });
+    trackProjectMutationTail(projectClearMutationTails, projectId, promise);
+    void drainClearSaveQueue();
+    return promise;
+  }, [drainClearSaveQueue, projectId]);
 
   const reorderLocal = useCallback((nextItems: ProjectSceneItem[]) => {
-    setItems(nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 })));
+    const ordered = nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 }));
+    itemsRef.current = ordered;
+    setItems(ordered);
     setErrorMessage("");
   }, []);
 
   const commitReorder = useCallback(async (nextItems: ProjectSceneItem[]) => {
     if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
-    await reorderProjectSceneItems(projectId, nextItems.map((item) => item.id));
+    try {
+      await reorderProjectSceneItems(projectId, nextItems.map((item) => item.id));
+    } catch (error) {
+      if (activeProjectIdRef.current === projectId) throw error;
+    }
   }, [projectId]);
 
   const save = useCallback(async () => {
-    if (!canEdit || !projectId) return;
+    if (
+      !canEdit
+      || !projectId
+      || isMergePersisting
+      || isClearPersisting
+      || mergeSaveRunningRef.current
+      || clearSaveRunningRef.current
+      || mergeSaveQueueRef.current.length > 0
+      || clearSaveQueueRef.current.length > 0
+    ) return;
     const activeCutError = Object.entries(cutInputErrors).find(([itemId, message]) => (
       message && items.some((item) => item.id === itemId)
     ));
@@ -237,9 +558,19 @@ export default function ProjectSceneListPage() {
           cellMergesUpdatedAt
         } : {})
       });
+      if (!mountedRef.current || activeProjectIdRef.current !== projectId) return;
       const visibleMerges = saved.cellMergesMaterialized
         ? saved.cellMerges
         : deriveLegacySceneListMerges(saved.items);
+      itemsRef.current = saved.items;
+      cellMergesRef.current = visibleMerges;
+      cellMergesMaterializedRef.current = saved.cellMergesMaterialized;
+      cellMergesUpdatedAtRef.current = saved.cellMergesUpdatedAt;
+      persistedMergeSnapshotRef.current = {
+        merges: visibleMerges,
+        materialized: saved.cellMergesMaterialized,
+        updatedAt: saved.cellMergesUpdatedAt
+      };
       setItems(saved.items);
       setScenarioReference(saved.scenarioReference);
       setCellMerges(visibleMerges);
@@ -249,9 +580,11 @@ export default function ProjectSceneListPage() {
       setCutInputErrors({});
       setIsDirty(false);
     } catch (error) {
-      setErrorMessage(getErrorMessage(error, "씬리스트를 저장하지 못했습니다."));
+      if (mountedRef.current && activeProjectIdRef.current === projectId) {
+        setErrorMessage(getErrorMessage(error, "씬리스트를 저장하지 못했습니다."));
+      }
     } finally {
-      setIsSaving(false);
+      if (mountedRef.current) setIsSaving(false);
     }
   }, [
     canEdit,
@@ -259,12 +592,14 @@ export default function ProjectSceneListPage() {
     cellMergesUpdatedAt,
     cutInputErrors,
     items,
+    isClearPersisting,
+    isMergePersisting,
     mergeMetadataDirty,
     projectId,
     scenarioReference
   ]);
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading || loadedProjectId !== projectId) return <PixelDogLoader size="lg" />;
 
   if (!project) {
     return (
@@ -282,14 +617,22 @@ export default function ProjectSceneListPage() {
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
-      <section className="overflow-clip border border-field-border bg-field-panel">
+      <section className="border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
-          <h1 className="font-display min-w-0 truncate text-lg font-black text-field-text">
-            {project.name} 씬리스트
-          </h1>
+          <div className="min-w-0">
+            <h1 className="font-display truncate text-lg font-black text-field-text">
+              {project.name} 씬리스트
+            </h1>
+            {isMergePersisting || isClearPersisting ? (
+              <p className="text-[10px] font-bold text-field-muted" role="status">변경사항 저장 중</p>
+            ) : null}
+          </div>
           <div className="flex items-center gap-1.5">
             <Link
               href={`/projects/${project.id}`}
+              onClick={(event) => {
+                if (!confirmUnsavedChangesNavigation()) event.preventDefault();
+              }}
               className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:bg-field-hover"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
@@ -299,7 +642,7 @@ export default function ProjectSceneListPage() {
               <button
                 type="button"
                 onClick={() => void save()}
-                disabled={isSaving || !isDirty}
+                disabled={isSaving || isMergePersisting || isClearPersisting || !isDirty}
                 className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 border border-field-primary/70 bg-field-primary/10 px-3 text-xs font-bold text-field-primary transition-colors hover:bg-field-primary/15 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
@@ -321,6 +664,7 @@ export default function ProjectSceneListPage() {
             actorRoles={actorRoles}
             cellMerges={cellMerges}
             canEdit={canEdit && !isSaving}
+            hasPendingMutation={isMergePersisting || isClearPersisting}
             onUpdate={updateItem}
             onReorderLocal={reorderLocal}
             onReorderCommit={commitReorder}
@@ -335,7 +679,7 @@ export default function ProjectSceneListPage() {
               <button
                 type="button"
                 onClick={addItem}
-                disabled={isSaving}
+                disabled={isSaving || isMergePersisting || isClearPersisting}
                 className="workspace-button inline-flex min-h-9 items-center gap-1 border px-3 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
@@ -394,19 +738,151 @@ function clearSceneItemColumns(
   return next;
 }
 
-function restoreSceneItemColumns(
-  item: ProjectSceneItem,
-  previous: ProjectSceneItem | undefined,
-  columns: Set<ProjectSceneMergeColumn> | undefined
+function restoreClearJobValues(
+  items: ProjectSceneItem[],
+  job: ClearSaveJob,
+  latestVersions: Map<string, number>
 ) {
-  if (!previous || !columns?.size) return item;
-  const next = { ...item };
-  if (columns.has("location")) next.mainLocation = previous.mainLocation;
-  if (columns.has("subLocation")) next.subLocation = previous.subLocation;
-  if (columns.has("day")) next.dayLabel = previous.dayLabel;
-  if (columns.has("time")) next.dayNight = previous.dayNight;
-  if (columns.has("intExt")) next.interiorExterior = previous.interiorExterior;
-  return next;
+  const cellsBySceneId = new Map<string, ProjectSceneClearCell[]>();
+  for (const cell of job.cells) {
+    const key = sceneCellKey(job.projectId, cell.sceneId, cell.column);
+    if (latestVersions.get(key) !== job.version) continue;
+    const current = cellsBySceneId.get(cell.sceneId) ?? [];
+    current.push(cell);
+    cellsBySceneId.set(cell.sceneId, current);
+  }
+  if (cellsBySceneId.size === 0) return items;
+  return items.map((item) => {
+    const cells = cellsBySceneId.get(item.id);
+    if (!cells?.length) return item;
+    const next = { ...item };
+    for (const cell of cells) {
+      writeSceneCellValue(
+        next,
+        cell.column,
+        job.previousValues.get(sceneCellKey(job.projectId, cell.sceneId, cell.column)) ?? ""
+      );
+    }
+    return next;
+  });
+}
+
+function markSceneCellPatchVersion(
+  versions: Map<string, number>,
+  projectId: string,
+  sceneId: string,
+  patch: Partial<ProjectSceneItem>,
+  version: number
+) {
+  const keys: Array<[keyof ProjectSceneItem, ProjectSceneMergeColumn]> = [
+    ["mainLocation", "location"],
+    ["subLocation", "subLocation"],
+    ["dayLabel", "day"],
+    ["dayNight", "time"],
+    ["interiorExterior", "intExt"]
+  ];
+  keys.forEach(([field, column]) => {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      versions.set(sceneCellKey(projectId, sceneId, column), version);
+    }
+  });
+}
+
+function readSceneCellValue(
+  item: ProjectSceneItem | undefined,
+  column: ProjectSceneMergeColumn
+) {
+  if (!item) return "";
+  if (column === "location") return item.mainLocation;
+  if (column === "subLocation") return item.subLocation;
+  if (column === "day") return item.dayLabel;
+  if (column === "time") return item.dayNight;
+  return item.interiorExterior;
+}
+
+function writeSceneCellValue(
+  item: ProjectSceneItem,
+  column: ProjectSceneMergeColumn,
+  value: string
+) {
+  if (column === "location") item.mainLocation = value;
+  else if (column === "subLocation") item.subLocation = value;
+  else if (column === "day") item.dayLabel = value;
+  else if (column === "time") item.dayNight = value;
+  else item.interiorExterior = value;
+}
+
+function sceneCellKey(
+  projectId: string,
+  sceneId: string,
+  column: ProjectSceneMergeColumn
+) {
+  return `${projectId}\u0000${sceneId}\u0000${column}`;
+}
+
+function clonePersistedMergeSnapshot(snapshot: PersistedMergeSnapshot): PersistedMergeSnapshot {
+  return {
+    merges: snapshot.merges,
+    materialized: snapshot.materialized,
+    updatedAt: snapshot.updatedAt
+  };
+}
+
+function trackProjectMutationTail(
+  tails: Map<string, Promise<void>>,
+  projectId: string,
+  mutation: Promise<void>
+) {
+  const settled = mutation.then(() => undefined, () => undefined);
+  tails.set(projectId, settled);
+  void settled.then(() => {
+    if (tails.get(projectId) === settled) tails.delete(projectId);
+  });
+}
+
+function rebaseQueuedMergeJobs(
+  queue: MergeSaveJob[],
+  projectId: string,
+  snapshot: PersistedMergeSnapshot
+) {
+  queue.forEach((job) => {
+    if (job.projectId === projectId) {
+      job.expectedUpdatedAt = snapshot.updatedAt;
+      job.rollbackSnapshot = clonePersistedMergeSnapshot(snapshot);
+    }
+  });
+}
+
+function mergeQueueContainsProject(queue: MergeSaveJob[], projectId: string) {
+  return queue.some((job) => job.projectId === projectId);
+}
+
+function takeMergeJobsForProject(queue: MergeSaveJob[], projectId: string) {
+  const selected: MergeSaveJob[] = [];
+  for (let index = queue.length - 1; index >= 0; index -= 1) {
+    if (queue[index]?.projectId === projectId) {
+      selected.unshift(queue[index]!);
+      queue.splice(index, 1);
+    }
+  }
+  return selected;
+}
+
+function rebaseQueuedClearJobs(
+  queue: ClearSaveJob[],
+  projectId: string,
+  cellKey: string,
+  settledVersion: number,
+  value: string
+) {
+  queue.forEach((job) => {
+    if (
+      job.projectId === projectId
+      && job.previousVersions.get(cellKey) === settledVersion
+    ) {
+      job.previousValues.set(cellKey, value);
+    }
+  });
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
