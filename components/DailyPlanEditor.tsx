@@ -2,9 +2,8 @@
 
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GripVertical, ListChecks, Plus, Printer, RotateCcw, Save, Search, X } from "lucide-react";
+import { ListChecks, Plus, Printer, RotateCcw, Save, Search } from "lucide-react";
 import {
   createBlankDailyPlanDraft,
   createBlankDailyPlanShotDraft,
@@ -228,8 +227,6 @@ type WindowWithDaumPostcode = Window & {
   };
 };
 
-type ReorderCollection = "starring";
-
 type LocationInputMode = "search" | "manual";
 
 type EditorTimetableRow =
@@ -277,7 +274,7 @@ const inputClass =
 const compactInputClass =
   "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/20 [&::-webkit-date-and-time-value]:text-center";
 
-const centeredSelectClass = `${compactInputClass} [text-align-last:center]`;
+const centeredSelectClass = `${compactInputClass} daily-plan-dropdown-no-indicator appearance-none [text-align-last:center]`;
 const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden text-center text-ellipsis whitespace-nowrap`;
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
@@ -340,7 +337,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       projectStaffMembers,
       activeProjectBasicInfo?.actors ?? [],
       projectStaffDepartments,
-      initialPlanDraft.episode || initialDefaults.printMeta.day
+      initialPlanDraft.episode || initialDefaults.printMeta.day,
+      initialDefaults.printMeta.starring.length > 0
     );
     const printMetaWithTimetableDefaults: DailyPlanPrintMeta = isNewDailyPlan
       ? { ...staffPrintMeta, timetableRowOrder: ["event"] }
@@ -417,7 +415,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [printLayout, setPrintLayout] = useState<DailyPlanPrintLayout>("single");
   const [isPrinting, setIsPrinting] = useState(false);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
+  const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
   const [isTimetableMutationPending, setIsTimetableMutationPending] = useState(false);
+  const [isActorMutationPending, setIsActorMutationPending] = useState(false);
+  const [activeDragSource, setActiveDragSource] = useState<"timetable" | "actor" | null>(null);
   const [gatheringPhotoPreview, setGatheringPhotoPreview] = useState<{
     images: Array<{ url: string; title: string }>;
     index: number;
@@ -439,7 +440,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
   const printPageStyleRef = useRef<HTMLStyleElement | null>(null);
   const printCleanupTimeoutRef = useRef<number | null>(null);
-  const timetableTrashRef = useRef<HTMLDivElement | null>(null);
+  const editorTrashRef = useRef<HTMLDivElement | null>(null);
   const automaticStartRowIdsRef = useRef<Set<string>>(
     new Set(initialPrintMeta.automaticTimetableRowIds)
   );
@@ -454,15 +455,55 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => timetableRows.map(getEditorTimetableRowKey),
     [timetableRows]
   );
+  const actorRowKeys = useMemo(
+    () => printMeta.starring.map((person) => getActorRowKey(person.id)),
+    [printMeta.starring]
+  );
   const timetableInteraction = useDailyPlanTimetableInteraction({
     rowKeys: timetableRowKeys,
-    disabled: !canManageTimetable || isSaving || isTimetableMutationPending || pendingTimetableDeleteKey !== null,
-    trashRef: timetableTrashRef,
+    disabled: !canManageTimetable
+      || isSaving
+      || isTimetableMutationPending
+      || isActorMutationPending
+      || pendingTimetableDeleteKey !== null
+      || pendingActorDeleteId !== null
+      || activeDragSource === "actor",
+    trashRef: editorTrashRef,
     onReorder: ({ orderedRowKeys }) => {
       void persistTimetableReorder(orderedRowKeys);
     },
     onTrashDrop: (rowKey) => {
       setPendingTimetableDeleteKey(rowKey);
+    },
+    onDragStart: () => {
+      setActiveDragSource("timetable");
+    },
+    onDragEnd: () => {
+      setActiveDragSource((current) => current === "timetable" ? null : current);
+    }
+  });
+  const actorInteraction = useDailyPlanTimetableInteraction({
+    rowKeys: actorRowKeys,
+    disabled: !canManageTimetable
+      || isSaving
+      || isTimetableMutationPending
+      || isActorMutationPending
+      || pendingTimetableDeleteKey !== null
+      || pendingActorDeleteId !== null
+      || activeDragSource === "timetable",
+    trashRef: editorTrashRef,
+    onReorder: ({ orderedRowKeys }) => {
+      void persistActorReorder(orderedRowKeys);
+    },
+    onTrashDrop: (rowKey) => {
+      const actorId = getActorIdFromRowKey(rowKey);
+      if (actorId) setPendingActorDeleteId(actorId);
+    },
+    onDragStart: () => {
+      setActiveDragSource("actor");
+    },
+    onDragEnd: () => {
+      setActiveDragSource((current) => current === "actor" ? null : current);
     }
   });
   const sceneLocationOptions = useMemo(
@@ -497,7 +538,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   useEffect(() => {
     const root = editorInteractionRootRef.current;
     if (!root) return;
-    const shouldLock = isSaving || isTimetableMutationPending;
+    const shouldLock = isSaving || isTimetableMutationPending || isActorMutationPending;
     root.inert = shouldLock;
     if (shouldLock && document.activeElement instanceof HTMLElement && root.contains(document.activeElement)) {
       document.activeElement.blur();
@@ -505,7 +546,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     return () => {
       root.inert = false;
     };
-  }, [isSaving, isTimetableMutationPending]);
+  }, [isActorMutationPending, isSaving, isTimetableMutationPending]);
   const previewData = useMemo(() => {
     const printablePlan = buildPlanForSave(
       deferredPreviewSource.plan,
@@ -542,8 +583,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const weatherLookupSource = getKoreanWeatherRegionQuery(printMeta.weatherRegion);
   const weatherCards: EditableWeatherCardConfig[] = [
     { field: "weather", label: "날씨", value: printMeta.weather },
-    { field: "sunrise", label: "일출", value: printMeta.sunrise, placeholder: "HHMM", timeValue: true },
-    { field: "sunset", label: "일몰", value: printMeta.sunset, placeholder: "HHMM", timeValue: true },
+    { field: "sunrise", label: "일출", value: printMeta.sunrise, placeholder: "--:--", timeValue: true },
+    { field: "sunset", label: "일몰", value: printMeta.sunset, placeholder: "--:--", timeValue: true },
     { field: "minTemperature", label: "최저 기온", value: printMeta.minTemperature },
     { field: "maxTemperature", label: "최고 기온", value: printMeta.maxTemperature },
     { field: "rainProbability", label: "강수 확률", value: printMeta.rainProbability }
@@ -599,7 +640,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       projectStaffMembers,
       activeProjectBasicInfo?.actors ?? [],
       projectStaffDepartments,
-      value
+      value,
+      false
     ));
   }
 
@@ -628,22 +670,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
   function addStarring() {
     setPrintMeta((current) => ({ ...current, starring: [...current.starring, createBlankCallSheetPerson()] }));
-  }
-
-  function deleteStarring(index: number) {
-    const removedValue = printMeta.starring[index] ? getCastMemberValue(printMeta.starring[index]) : "";
-    setPrintMeta((current) => ({ ...current, starring: current.starring.filter((_, personIndex) => personIndex !== index) }));
-    if (removedValue) {
-      setScenes((current) => current.map((scene) => {
-        const nextSubject = replaceSceneCastValue(scene.subject, removedValue, "");
-        if (nextSubject === scene.subject) return scene;
-        return {
-          ...scene,
-          subject: nextSubject,
-          charactersOverride: scene.sourceSceneId ? nextSubject : scene.charactersOverride
-        };
-      }));
-    }
   }
 
   function updateTeam(index: number, patch: Partial<TeamCallSheetRow>) {
@@ -1110,20 +1136,78 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     await persistTimetableMutation(nextSnapshot, rollbackSnapshot, "타임테이블 행을 삭제했습니다.");
   }
 
-  function startReorder(event: React.DragEvent<HTMLElement>, collection: ReorderCollection, index: number) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", `${collection}:${index}`);
+  async function persistActorMutation(
+    nextSnapshot: TimetableMutationSnapshot,
+    rollbackSnapshot: TimetableMutationSnapshot,
+    successMessage: string
+  ) {
+    applyTimetableMutationSnapshot(nextSnapshot);
+    setIsActorMutationPending(true);
+    setErrorMessage("");
+    try {
+      const result = await saveCurrentPlan(false, nextSnapshot);
+      if (!result) {
+        applyTimetableMutationSnapshot(rollbackSnapshot);
+        return;
+      }
+      setMessage(result.didSyncShots ? successMessage : formatProgressSyncFailure(result.saved));
+    } finally {
+      setIsActorMutationPending(false);
+    }
   }
 
-  function finishReorder(event: React.DragEvent<HTMLElement>, collection: ReorderCollection, targetIndex: number) {
-    event.preventDefault();
-    const [sourceCollection, sourceIndexValue] = event.dataTransfer.getData("text/plain").split(":");
-    const sourceIndex = Number(sourceIndexValue);
-    if (sourceCollection !== collection || !Number.isInteger(sourceIndex) || sourceIndex === targetIndex) return;
+  async function persistActorReorder(orderedRowKeys: string[]) {
+    if (
+      !canManageTimetable
+      || isSavingRef.current
+      || isTimetableMutationPending
+      || isActorMutationPending
+    ) return;
+    const orderedActors = orderActorsByStableRowKeys(printMeta.starring, orderedRowKeys);
+    if (orderedActors === printMeta.starring) return;
+    const rollbackSnapshot = captureTimetableMutationSnapshot();
+    const nextSnapshot: TimetableMutationSnapshot = {
+      ...rollbackSnapshot,
+      printMeta: {
+        ...rollbackSnapshot.printMeta,
+        starring: orderedActors
+      }
+    };
+    await persistActorMutation(nextSnapshot, rollbackSnapshot, "배우 순서를 저장했습니다.");
+  }
 
-    if (collection === "starring") {
-      setPrintMeta((current) => ({ ...current, starring: moveArrayItemToIndex(current.starring, sourceIndex, targetIndex) }));
+  async function confirmActorDelete() {
+    const actorId = pendingActorDeleteId;
+    if (
+      !actorId
+      || !canManageTimetable
+      || isSavingRef.current
+      || isTimetableMutationPending
+      || isActorMutationPending
+    ) return;
+    const actor = printMeta.starring.find((person) => person.id === actorId);
+    if (!actor) {
+      setPendingActorDeleteId(null);
+      actorInteraction.clearSelection();
+      return;
     }
+
+    const rollbackSnapshot = captureTimetableMutationSnapshot();
+    const nextStarring = rollbackSnapshot.printMeta.starring.filter((person) => person.id !== actorId);
+    const nextScenes = rollbackSnapshot.scenes.map((scene) => (
+      removeActorFromSceneCast(scene, actor, nextStarring)
+    ));
+    const nextSnapshot: TimetableMutationSnapshot = {
+      ...rollbackSnapshot,
+      scenes: nextScenes,
+      printMeta: {
+        ...rollbackSnapshot.printMeta,
+        starring: nextStarring
+      }
+    };
+    setPendingActorDeleteId(null);
+    actorInteraction.clearSelection();
+    await persistActorMutation(nextSnapshot, rollbackSnapshot, "배우 카드를 삭제했습니다.");
   }
 
   function updateSceneLocation(sceneIndex: number, locationId: string) {
@@ -1534,31 +1618,28 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     };
   }, [clearPrintCleanupTimeout, clearPrintPageStyle, releasePrintView]);
 
+  const isActorCardDragging = actorInteraction.isDragging;
+  const activeCardInteraction = isActorCardDragging ? actorInteraction : timetableInteraction;
+  const hasActiveCardDrag = actorInteraction.isDragging || timetableInteraction.isDragging;
+  const activeDragLabel = activeCardInteraction.ghost
+    ? isActorCardDragging
+      ? getActorCardLabel(printMeta.starring, activeCardInteraction.ghost.rowKey)
+      : getTimetableRowLabel(timetableRows, activeCardInteraction.ghost.rowKey)
+    : "";
+
   return (
     <div className="print-daily-plan">
       <div
         ref={editorInteractionRootRef}
-        aria-busy={isSaving || isTimetableMutationPending}
+        aria-busy={isSaving || isTimetableMutationPending || isActorMutationPending}
         className={`daily-plan-editor no-print text-center text-[13px] md:text-sm ${
-          isSaving || isTimetableMutationPending ? "pointer-events-none select-none" : ""
+          isSaving || isTimetableMutationPending || isActorMutationPending ? "pointer-events-none select-none" : ""
         }`}
       >
         {message ? <div className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-bold text-field-text">{message}</div> : null}
         {errorMessage ? <div className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
 
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2 text-xs font-black">
-              <span className="max-w-[55vw] truncate border border-field-border bg-field-input px-3 py-1.5 text-field-text">{project.name}</span>
-            </div>
-            <Link
-              href={`/projects/${project.id}/daily-plans`}
-              className="inline-flex min-h-10 items-center justify-center border border-field-border bg-field-input px-4 text-sm font-black text-field-subtle transition-colors hover:bg-field-hover hover:text-field-text"
-            >
-              목록으로 돌아가기
-            </Link>
-        </div>
-
-        <section className="field-section mt-3 overflow-hidden p-2 md:mt-5 md:p-5">
+        <section className="field-section overflow-hidden p-2 md:p-5">
           <div className="grid gap-3">
             <div className="grid min-w-0 gap-1.5 md:hidden">
               <div className="grid grid-cols-[0.72fr_1.56fr_0.72fr] gap-1.5">
@@ -1653,6 +1734,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             <div className="mt-3 grid gap-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
               <WeatherRegionPicker
                 value={printMeta.weatherRegion ?? ""}
+                hideIndicator
                 onChange={(region) =>
                   setPrintMeta((current) => ({
                     ...current,
@@ -1790,12 +1872,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             </div>
                           ) : (
                             <div
-                              className={`flex min-h-9 min-w-0 items-center overflow-hidden border px-2 text-[10px] font-normal md:text-[13px] ${
+                              className={`flex h-9 min-h-9 min-w-0 items-center justify-center overflow-hidden border px-2 text-center text-[10px] font-normal md:text-[13px] ${
                                 locationAddress ? "border-field-border bg-field-input text-field-text" : "border-field-border bg-field-input text-field-muted"
                               }`}
                               title={locationAddress || undefined}
                             >
-                              <span className="truncate">
+                              <span className="line-clamp-2 min-w-0 flex-1 break-words text-center leading-[1.25]">
                                 {locationAddress || (addressSearchLocationId === location.id ? addressSearchMessage : "") || "실제 촬영 주소"}
                               </span>
                             </div>
@@ -2050,27 +2132,43 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 </Button>
               </div>
               <div className="mt-4 grid gap-2">
-                {printMeta.starring.map((person, index) => (
-                  <div
-                    key={person.id}
-                    className="grid items-center gap-2 border border-field-border bg-field-panel p-2 text-center md:grid-cols-[auto_1fr_1fr_1fr_1.2fr_1.2fr_auto]"
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => finishReorder(event, "starring", index)}
-                  >
-                    <div className="flex items-center justify-center"><DragHandle label={`배우 ${index + 1} 순서 변경`} onDragStart={(event) => startReorder(event, "starring", index)} /></div>
-                    <DraftInput className={compactInputClass} value={person.name} onCommit={(value) => updateStarring(index, { name: value })} placeholder="배우" />
-                    <DraftInput className={compactInputClass} value={person.role} onCommit={(value) => updateStarring(index, { role: value })} placeholder="역할" />
-                    <TimeWheelPicker label="콜 시간" value={person.callTime} onChange={(value) => updateStarring(index, { callTime: value })} compact showLabel={false} />
-                    <CallLocationSelect
-                      ariaLabel={`배우 ${index + 1} 집합장소`}
-                      value={person.callLocation}
-                      locations={locations}
-                      onChange={(value) => updateStarring(index, { callLocation: value })}
-                    />
-                    <MemoPopoverField value={person.notes} placeholder="주의사항" ariaLabel={`배우 ${index + 1} 주의사항 수정`} onChange={(value) => updateStarring(index, { notes: value })} />
-                    <div className="flex items-center justify-center"><CircularDeleteButton label={`배우 ${index + 1} 삭제`} onClick={() => deleteStarring(index)} /></div>
-                  </div>
-                ))}
+                {printMeta.starring.map((person, index) => {
+                  const rowKey = getActorRowKey(person.id);
+                  const isSelected = actorInteraction.selectedRowKey === rowKey;
+                  const isDragging = actorInteraction.draggingRowKey === rowKey;
+                  return (
+                    <div
+                      key={person.id}
+                      ref={actorInteraction.registerRow(rowKey) as React.Ref<HTMLDivElement>}
+                      className={`grid items-center gap-2 border p-2 text-center transition-colors md:grid-cols-[1fr_1fr_1fr_1.2fr_1.2fr] ${
+                        isSelected
+                          ? "border-field-primary bg-field-primary/10"
+                          : "border-field-border bg-field-panel"
+                      } ${isDragging ? "opacity-35" : ""}`}
+                      role="group"
+                      aria-label={`배우 카드 ${index + 1}`}
+                      data-testid="daily-plan-actor-card"
+                      data-actor-id={person.id}
+                      data-selected={isSelected ? "true" : undefined}
+                      data-dragging={isDragging ? "true" : undefined}
+                      style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
+                      onPointerDownCapture={(event) => actorInteraction.onRowPointerDownCapture(rowKey, event)}
+                      onClickCapture={(event) => actorInteraction.onRowClickCapture(rowKey, event)}
+                      onContextMenu={(event) => actorInteraction.onRowContextMenu(rowKey, event)}
+                    >
+                      <DraftInput className={compactInputClass} value={person.name} onCommit={(value) => updateStarring(index, { name: value })} placeholder="배우" />
+                      <DraftInput className={compactInputClass} value={person.role} onCommit={(value) => updateStarring(index, { role: value })} placeholder="역할" />
+                      <TimeWheelPicker label="콜 시간" value={person.callTime} onChange={(value) => updateStarring(index, { callTime: value })} compact showLabel={false} />
+                      <CallLocationSelect
+                        ariaLabel={`배우 ${index + 1} 집합장소`}
+                        value={person.callLocation}
+                        locations={locations}
+                        onChange={(value) => updateStarring(index, { callLocation: value })}
+                      />
+                      <MemoPopoverField value={person.notes} placeholder="주의사항" ariaLabel={`배우 ${index + 1} 주의사항 수정`} onChange={(value) => updateStarring(index, { notes: value })} />
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
@@ -2195,34 +2293,34 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           rootRef={printDocumentRef}
         />
       ) : null}
-      {typeof document !== "undefined" && timetableInteraction.isDragging ? createPortal(
+      {typeof document !== "undefined" && hasActiveCardDrag ? createPortal(
         <div className="no-print contents">
-          {timetableInteraction.insertion ? (
+          {activeCardInteraction.insertion ? (
             <div
               className="pointer-events-none fixed z-[128] h-0.5 bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               style={{
-                left: timetableInteraction.insertion.left,
-                top: timetableInteraction.insertion.top,
-                width: timetableInteraction.insertion.width
+                left: activeCardInteraction.insertion.left,
+                top: activeCardInteraction.insertion.top,
+                width: activeCardInteraction.insertion.width
               }}
               aria-hidden
             />
           ) : null}
-          {timetableInteraction.ghost ? (
+          {activeCardInteraction.ghost ? (
             <div
               className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-black text-field-text shadow-floating"
               style={{
-                left: timetableInteraction.ghost.left,
-                top: timetableInteraction.ghost.top,
-                width: Math.min(timetableInteraction.ghost.width, 420),
-                height: Math.min(timetableInteraction.ghost.height, 112)
+                left: activeCardInteraction.ghost.left,
+                top: activeCardInteraction.ghost.top,
+                width: Math.min(activeCardInteraction.ghost.width, 420),
+                height: Math.min(activeCardInteraction.ghost.height, 112)
               }}
               aria-hidden
             >
-              {getTimetableRowLabel(timetableRows, timetableInteraction.ghost.rowKey)} 이동 중
+              {activeDragLabel} 이동 중
             </div>
           ) : null}
-          <ArchiveDeleteDropZone ref={timetableTrashRef} isActive={timetableInteraction.isOverTrash} />
+          <ArchiveDeleteDropZone ref={editorTrashRef} isActive={activeCardInteraction.isOverTrash} />
         </div>,
         document.body
       ) : null}
@@ -2255,6 +2353,43 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 variant="danger"
                 disabled={isTimetableMutationPending}
                 onClick={() => void confirmTimetableDelete()}
+              >
+                삭제
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      ) : null}
+      {typeof document !== "undefined" && pendingActorDeleteId ? createPortal(
+        <div className="no-print fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center" role="presentation">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="actor-delete-title"
+            className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
+          >
+            <h2 id="actor-delete-title" className="text-base font-black text-field-text">
+              {getActorLabelById(printMeta.starring, pendingActorDeleteId)} 삭제
+            </h2>
+            <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
+              선택한 배우 카드를 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                disabled={isActorMutationPending}
+                onClick={() => {
+                  setPendingActorDeleteId(null);
+                  actorInteraction.clearSelection();
+                }}
+              >
+                취소
+              </Button>
+              <Button
+                variant="danger"
+                disabled={isActorMutationPending}
+                onClick={() => void confirmActorDelete()}
               >
                 삭제
               </Button>
@@ -2830,7 +2965,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
           inputMode="numeric"
           pattern="[0-9]*"
           maxLength={4}
-          placeholder="90"
+          placeholder="--"
           onChange={(event) => applyDraft(event.currentTarget.value)}
           onBlur={finishEditing}
           onKeyDown={(event) => {
@@ -2894,7 +3029,7 @@ function CallLocationSelect({
     <>
       <input
         type="text"
-        className={compactInputClass}
+        className={`${compactInputClass} daily-plan-dropdown-no-indicator`}
         value={value}
         list={listId}
         onChange={(event) => {
@@ -3222,22 +3357,6 @@ function focusAdjacentElement(source: HTMLElement | null, direction: -1 | 1) {
   focusable[currentIndex + direction]?.focus();
 }
 
-function DragHandle({ label, onDragStart, tabIndex }: { label: string; onDragStart: (event: React.DragEvent<HTMLButtonElement>) => void; tabIndex?: number }) {
-  return (
-    <button
-      type="button"
-      draggable
-      onDragStart={onDragStart}
-      className="inline-flex h-9 w-9 cursor-grab items-center justify-center border border-field-border bg-field-input text-field-subtle transition-colors hover:bg-field-hover active:cursor-grabbing"
-      aria-label={label}
-      title={label}
-      tabIndex={tabIndex}
-    >
-      <GripVertical className="h-4 w-4" aria-hidden />
-    </button>
-  );
-}
-
 function SceneSourceSelector({
   value,
   legacySceneNumber,
@@ -3532,21 +3651,6 @@ function SceneCastSelector({
   );
 }
 
-function CircularDeleteButton({ label, onClick, tabIndex }: { label: string; onClick: () => void; tabIndex?: number }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex h-8 w-8 items-center justify-center border border-field-danger bg-field-input text-field-danger transition-colors hover:bg-field-danger hover:text-field-text"
-      aria-label={label}
-      title={label}
-      tabIndex={tabIndex}
-    >
-      <X className="h-4 w-4" aria-hidden />
-    </button>
-  );
-}
-
 function TimeWheelPicker({
   label,
   value,
@@ -3601,7 +3705,7 @@ function TimeWheelPicker({
         inputMode="numeric"
         pattern="[0-9]*"
         maxLength={4}
-        placeholder="HHMM"
+        placeholder="--:--"
         onChange={(event) => applyDraft(event.currentTarget.value)}
         onFocus={(event) => {
           setDraftValue(savedDigits);
@@ -3655,7 +3759,7 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
   orientation: DailyPlanPdfOrientation | null;
 }) {
   return (
-    <section className="mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
+    <section className="daily-plan-live-preview mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
       <div className="grid gap-1">
         <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
@@ -4888,15 +4992,6 @@ function moveArrayItem<T>(items: T[], index: number, direction: "up" | "down") {
   return next;
 }
 
-function moveArrayItemToIndex<T>(items: T[], sourceIndex: number, targetIndex: number) {
-  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= items.length || targetIndex >= items.length) return items;
-  const next = [...items];
-  const [moved] = next.splice(sourceIndex, 1);
-  if (!moved) return items;
-  next.splice(targetIndex, 0, moved);
-  return next;
-}
-
 function buildEditorTimetableRows(
   scenes: SceneBlockInput[],
   mealTimes: DailyPlanMealTime[],
@@ -4920,6 +5015,92 @@ function orderEditorTimetableRowsByStableKeys(
   if (orderedRows.length !== rows.length) return rows;
   const unchanged = orderedRows.every((row, index) => row === rows[index]);
   return unchanged ? rows : orderedRows;
+}
+
+function getActorRowKey(actorId: string) {
+  return `actor:${actorId}`;
+}
+
+function getActorIdFromRowKey(rowKey: string) {
+  const prefix = "actor:";
+  return rowKey.startsWith(prefix) ? rowKey.slice(prefix.length) : "";
+}
+
+function orderActorsByStableRowKeys(
+  people: CallSheetPerson[],
+  orderedRowKeys: string[]
+) {
+  if (people.length !== orderedRowKeys.length) return people;
+  const peopleByRowKey = new Map(people.map((person) => [getActorRowKey(person.id), person]));
+  if (
+    peopleByRowKey.size !== people.length
+    || new Set(orderedRowKeys).size !== orderedRowKeys.length
+  ) return people;
+  const orderedPeople = orderedRowKeys.flatMap((rowKey) => {
+    const person = peopleByRowKey.get(rowKey);
+    return person ? [person] : [];
+  });
+  if (orderedPeople.length !== people.length) return people;
+  return orderedPeople.every((person, index) => person === people[index])
+    ? people
+    : orderedPeople;
+}
+
+function getActorLabelById(people: CallSheetPerson[], actorId: string) {
+  const actor = people.find((person) => person.id === actorId);
+  if (!actor) return "배우 카드";
+  return [actor.role.trim(), actor.name.trim()].filter(Boolean).join(" · ") || "배우 카드";
+}
+
+function getActorCardLabel(people: CallSheetPerson[], rowKey: string) {
+  const actorId = getActorIdFromRowKey(rowKey);
+  return actorId ? getActorLabelById(people, actorId) : "배우 카드";
+}
+
+function removeActorFromSceneCast(
+  scene: SceneBlockInput,
+  actor: CallSheetPerson,
+  remainingActors: CallSheetPerson[]
+) {
+  const selectedIds = scene.characterIdsOverride;
+  const wasExplicitlySelected = selectedIds?.includes(actor.id) ?? false;
+  const nextSelectedIds = selectedIds === null
+    ? null
+    : selectedIds.filter((actorId) => actorId !== actor.id);
+  const removedRole = getCastMemberValue(actor);
+  const sameRoleRemainsSelected = Boolean(
+    removedRole
+    && (
+      selectedIds === null
+        ? remainingActors.some((person) => getCastMemberValue(person) === removedRole)
+        : nextSelectedIds?.some((actorId) => (
+          remainingActors.some((person) => person.id === actorId && getCastMemberValue(person) === removedRole)
+        ))
+    )
+  );
+  const shouldRemoveRole = Boolean(
+    removedRole
+    && !sameRoleRemainsSelected
+    && (selectedIds === null || wasExplicitlySelected)
+  );
+  const nextSubject = shouldRemoveRole
+    ? replaceSceneCastValue(scene.subject, removedRole, "")
+    : scene.subject;
+  const selectedIdsChanged = selectedIds !== null
+    && nextSelectedIds !== null
+    && (
+      selectedIds.length !== nextSelectedIds.length
+      || selectedIds.some((actorId, index) => actorId !== nextSelectedIds[index])
+    );
+  if (nextSubject === scene.subject && !selectedIdsChanged) return scene;
+  return {
+    ...scene,
+    subject: nextSubject,
+    charactersOverride: scene.sourceSceneId && nextSubject !== scene.subject
+      ? nextSubject
+      : scene.charactersOverride,
+    characterIdsOverride: nextSelectedIds
+  };
 }
 
 function createTimetableMutationSnapshot(

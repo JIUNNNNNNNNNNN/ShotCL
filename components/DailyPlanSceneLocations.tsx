@@ -155,13 +155,13 @@ export function DailyPlanSceneLocations({
         ref={pickerButtonRef}
         type="button"
         data-location-reorder-press
-        className="flex min-h-9 w-full min-w-0 items-center border border-field-border bg-field-input px-2.5 text-left text-xs font-normal text-field-text transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
+        className="flex min-h-9 w-full min-w-0 items-center justify-center border border-field-border bg-field-input px-2.5 text-center text-xs font-normal text-field-text transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25"
         aria-expanded={isPickerOpen}
         aria-haspopup="dialog"
         title={selectedLabel || "장소명 선택"}
         onClick={openPicker}
       >
-        <span className={`min-w-0 flex-1 truncate ${selectedLabel ? "" : "text-field-muted"}`}>
+        <span className={`min-w-0 flex-1 truncate text-center ${selectedLabel ? "" : "text-field-muted"}`}>
           {selectedLabel || "장소명 선택"}
         </span>
       </button>
@@ -203,7 +203,7 @@ export function DailyPlanSceneLocations({
                       type="button"
                       aria-pressed={isSelected}
                       disabled={isAssignedElsewhere}
-                      className={`grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-3 text-left text-xs font-normal transition-colors disabled:cursor-not-allowed ${
+                      className={`grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-3 text-center text-xs font-normal transition-colors disabled:cursor-not-allowed ${
                         isSelected
                           ? "border-field-primary bg-field-primary/10 text-field-text"
                           : isAssignedElsewhere
@@ -212,9 +212,9 @@ export function DailyPlanSceneLocations({
                       }`}
                       onClick={() => togglePickerOption(option)}
                     >
-                      <span className="truncate">{option.name}</span>
+                      <span className="truncate text-center">{option.name}</span>
                       {status ? (
-                        <span className="max-w-28 truncate text-[10px] text-field-muted" title={status}>
+                        <span className="max-w-28 truncate text-center text-[10px] text-field-muted" title={status}>
                           {status}
                         </span>
                       ) : null}

@@ -574,17 +574,19 @@ function normalizeMainStaff(rows: DailyPlanMainStaffRow[] | undefined) {
 }
 
 function normalizePeople(rows: CallSheetPerson[] | undefined) {
-  const next = (Array.isArray(rows) ? rows : []).map((row) => ({
-    id: row.id || createMetaId("star"),
-    name: row.name ?? "",
-    role: row.role ?? "",
-    contact: formatKoreanPhoneNumber(row.contact ?? ""),
-    callTime: row.callTime ?? "",
-    callLocation: row.callLocation ?? "",
-    notes: row.notes ?? ""
-  }));
-
-  return next.length > 0 ? next : [createBlankCallSheetPerson()];
+  const usedIds = new Set<string>();
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const sourceId = String(row?.id ?? "").trim() || createMetaId("star");
+    return {
+      id: createUniqueSnapshotId(sourceId, usedIds),
+      name: row?.name ?? "",
+      role: row?.role ?? "",
+      contact: formatKoreanPhoneNumber(row?.contact ?? ""),
+      callTime: row?.callTime ?? "",
+      callLocation: row?.callLocation ?? "",
+      notes: row?.notes ?? ""
+    };
+  });
 }
 
 function normalizeTeams(rows: TeamCallSheetRow[] | undefined) {

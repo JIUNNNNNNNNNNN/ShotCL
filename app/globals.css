@@ -795,6 +795,35 @@ a[class*="min-h-"][class*="items-center"] {
   font-size: 13px;
 }
 
+.daily-plan-editor .daily-plan-dropdown-no-indicator {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: none;
+  padding-right: 0.5rem;
+}
+
+.daily-plan-editor .daily-plan-dropdown-no-indicator::-ms-expand,
+.daily-plan-editor input[list].daily-plan-dropdown-no-indicator::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+@media screen {
+  .daily-plan-live-preview {
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "SF Pro Display",
+      "SF Pro Text",
+      "Apple SD Gothic Neo",
+      system-ui,
+      sans-serif;
+  }
+
+  .daily-plan-live-preview .daily-plan-template {
+    font-family: inherit;
+  }
+}
+
 .daily-plan-weather-card-row {
   display: grid;
   width: 100%;

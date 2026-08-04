@@ -44,7 +44,8 @@ export function applyProjectStaffDefaults(
   projectStaffMembers: ProjectStaffMember[],
   projectActors: ProjectActor[],
   projectStaffDepartments: ProjectStaffDepartment[] = [],
-  episodeNumber?: string | number | null
+  episodeNumber?: string | number | null,
+  seedActorsWhenEmpty = true
 ): DailyPlanPrintMeta {
   const actorDefaults = buildActorDefaults(projectStaffMembers, projectActors);
   const teamDefaults = buildTeamDefaults(
@@ -55,7 +56,7 @@ export function applyProjectStaffDefaults(
 
   return deriveDailyPlanHeadcount({
     ...sourceMeta,
-    starring: hasMeaningfulPeople(sourceMeta.starring) || actorDefaults.length === 0
+    starring: !seedActorsWhenEmpty || hasMeaningfulPeople(sourceMeta.starring) || actorDefaults.length === 0
       ? sourceMeta.starring
       : actorDefaults,
     teams: mergeDailyPlanTeamRows(sourceMeta.teams, teamDefaults, projectStaffMembers)

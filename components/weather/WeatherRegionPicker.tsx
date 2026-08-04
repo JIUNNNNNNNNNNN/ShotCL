@@ -15,6 +15,7 @@ type WeatherRegionPickerProps = {
   value: string;
   onChange: (region: KoreanWeatherRegion | null) => void;
   readOnly?: boolean;
+  hideIndicator?: boolean;
 };
 
 type PopoverPosition = {
@@ -87,7 +88,8 @@ function getPopoverPosition(trigger: HTMLButtonElement): PopoverPosition {
 export function WeatherRegionPicker({
   value,
   onChange,
-  readOnly = false
+  readOnly = false,
+  hideIndicator = false
 }: WeatherRegionPickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeRegionLabel, setActiveRegionLabel] = useState<string | null>(null);
@@ -203,7 +205,11 @@ export function WeatherRegionPicker({
       <button
         ref={triggerRef}
         type="button"
-        className="grid min-h-11 w-full grid-cols-[6.5rem_minmax(0,1fr)_auto] items-center gap-2 border border-field-border bg-field-input px-3 py-2 text-left transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2"
+        className={`grid min-h-11 w-full items-center gap-2 border border-field-border bg-field-input px-3 py-2 text-left transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 ${
+          hideIndicator
+            ? "grid-cols-[6.5rem_minmax(0,1fr)]"
+            : "grid-cols-[6.5rem_minmax(0,1fr)_auto]"
+        }`}
         onClick={openOrClose}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
@@ -214,10 +220,12 @@ export function WeatherRegionPicker({
         <span className="truncate text-center text-sm font-normal text-field-text">
           {selected?.label ?? "지역 선택"}
         </span>
-        <ChevronDown
-          className={`h-4 w-4 text-field-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
-          aria-hidden
-        />
+        {hideIndicator ? null : (
+          <ChevronDown
+            className={`h-4 w-4 text-field-muted transition-transform ${isOpen ? "rotate-180" : ""}`}
+            aria-hidden
+          />
+        )}
       </button>
 
       {isOpen && typeof document !== "undefined"
