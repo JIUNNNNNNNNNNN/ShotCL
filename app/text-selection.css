@@ -1,0 +1,54 @@
+@media screen {
+  /*
+   * Prevent accidental text highlighting without intercepting pointer/touch
+   * events used by carousels, reordering, or long-press gestures.
+   */
+  .app-theme {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Editable controls and explicitly copyable content keep native selection. */
+  .app-theme :where(
+    input,
+    textarea,
+    [contenteditable]:not([contenteditable="false"]),
+    [data-allow-text-selection="true"],
+    [data-allow-text-selection="true"] *
+  ) {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /* Preserve the native keyboard and picker behavior of select controls. */
+  .app-theme select {
+    -webkit-user-select: auto;
+    user-select: auto;
+    -webkit-touch-callout: default;
+  }
+
+  /* Existing drag sessions can explicitly suspend editing selection. */
+  .app-theme :where(input.select-none, textarea.select-none),
+  .app-theme .daily-plan-timetable-row[data-dragging="true"] :where(
+    input,
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"])
+  ) {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* Timetable long-press belongs to row reordering; short input editing stays enabled. */
+  .app-theme .daily-plan-timetable-row :where(
+    input,
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"])
+  ) {
+    -webkit-touch-callout: none;
+  }
+}

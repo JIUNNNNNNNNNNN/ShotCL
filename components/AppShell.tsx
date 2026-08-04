@@ -93,7 +93,10 @@ function DevRuntimeInfo() {
 
   return (
     <footer className="mx-auto w-full max-w-6xl px-4 pb-24 md:px-8 md:pb-6 lg:px-12">
-      <div className="border border-field-border bg-field-panel/90 p-3 text-xs leading-5 text-field-muted">
+      <div
+        data-allow-text-selection="true"
+        className="border border-field-border bg-field-panel/90 p-3 text-xs leading-5 text-field-muted"
+      >
         <p>현재 접속 주소: {origin || "확인 중"}</p>
         <p>현재 페이지: {pathname || "/"}</p>
       </div>

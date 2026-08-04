@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { AppShell } from "@/components/AppShell";
 import { PwaRegister } from "@/components/PwaRegister";
 import "./globals.css";
+import "./text-selection.css";
 
 export const metadata: Metadata = {
   title: "오늘의 스토리보드 진행 관리",
