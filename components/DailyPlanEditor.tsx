@@ -1556,11 +1556,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     installPrintPageStyle(orientation);
     try {
       let density: DailyPlanDocumentDensity = DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
+      let shouldWaitForDocumentFonts = true;
       let root: HTMLDivElement;
 
       while (true) {
         setPrintJob({ data: currentPreviewData, orientation, density });
-        await waitForDailyPlanPrintDocument(printDocumentRef);
+        await waitForDailyPlanPrintDocument(printDocumentRef, shouldWaitForDocumentFonts);
+        shouldWaitForDocumentFonts = false;
         const nextRoot = printDocumentRef.current;
         if (!nextRoot) throw new Error("PDF 문서를 준비하지 못했습니다.");
         root = nextRoot;
@@ -4037,12 +4039,15 @@ function hasDailyPlanPortraitPageOverflow(root: HTMLElement) {
     || secondaryContent.scrollHeight > safePrintableHeight;
 }
 
-async function waitForDailyPlanPrintDocument(rootRef: React.RefObject<HTMLDivElement | null>) {
+async function waitForDailyPlanPrintDocument(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  waitForFonts: boolean
+) {
   await waitForAnimationFrames(2);
   const root = rootRef.current;
   if (!root) throw new Error("PDF 문서를 준비하지 못했습니다.");
 
-  if ("fonts" in document) {
+  if (waitForFonts && "fonts" in document) {
     await document.fonts.ready;
   }
 

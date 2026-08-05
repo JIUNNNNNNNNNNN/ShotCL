@@ -196,6 +196,17 @@
   --field-accent-border: rgba(182, 165, 112, 0.52);
   --field-accent-foreground: #15130d;
   --field-danger: #e25555;
+  --daily-plan-font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Display",
+    "SF Pro Text",
+    "Apple SD Gothic Neo",
+    system-ui,
+    sans-serif;
+  --daily-plan-font-weight-body: 400;
+  --daily-plan-font-weight-label: 500;
+  --daily-plan-font-weight-title: 700;
 }
 
 * {
@@ -807,38 +818,11 @@ a[class*="min-h-"][class*="items-center"] {
   display: none;
 }
 
-@media screen {
-  .daily-plan-live-preview {
-    font-family:
-      -apple-system,
-      BlinkMacSystemFont,
-      "SF Pro Display",
-      "SF Pro Text",
-      "Apple SD Gothic Neo",
-      system-ui,
-      sans-serif;
-  }
-
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template {
-    font-family: inherit;
-    font-weight: 400;
-  }
-
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template td,
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-normal {
-    font-weight: 400;
-  }
-
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template th,
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .daily-plan-preview-header,
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-bold,
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-black {
-    font-weight: 500;
-  }
-
-  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .daily-plan-document-title {
-    font-weight: 700;
-  }
+.daily-plan-live-preview,
+.daily-plan-print-staging {
+  font-family: var(--daily-plan-font-family);
+  font-weight: var(--daily-plan-font-weight-body);
+  font-synthesis: none;
 }
 
 .daily-plan-weather-card-row {
@@ -987,7 +971,8 @@ a[class*="min-h-"][class*="items-center"] {
   --daily-plan-weather-line-height: 1.2;
   --daily-plan-weather-padding-block: 2px;
   --daily-plan-weather-padding-inline: 3px;
-  font-family: inherit;
+  font-family: var(--daily-plan-font-family);
+  font-weight: var(--daily-plan-font-weight-body);
   font-size: var(--daily-plan-font-size);
   line-height: var(--daily-plan-line-height);
 }
@@ -1242,8 +1227,20 @@ a[class*="min-h-"][class*="items-center"] {
   min-width: 0;
 }
 
-.daily-plan-template th {
-  font-weight: 700;
+.daily-plan-template td,
+.daily-plan-template .font-normal {
+  font-weight: var(--daily-plan-font-weight-body);
+}
+
+.daily-plan-template th,
+.daily-plan-template .daily-plan-preview-header,
+.daily-plan-template .font-bold,
+.daily-plan-template .font-black {
+  font-weight: var(--daily-plan-font-weight-label);
+}
+
+.daily-plan-template .daily-plan-document-title {
+  font-weight: var(--daily-plan-font-weight-title);
 }
 
 .daily-plan-template .daily-plan-cell--wrap {
