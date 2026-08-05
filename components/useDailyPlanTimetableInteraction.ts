@@ -62,6 +62,14 @@ export type UseDailyPlanTimetableInteractionOptions = {
   movementTolerance?: number;
   edgeScrollThreshold?: number;
   maxScrollStep?: number;
+  /** 같은 drag scope에 속한 행만 재정렬 후보로 제한할 때 사용합니다. */
+  getRowScopeKey?: (rowKey: string) => string | null;
+  /** 특정 행만 mutation 중인 경우 그 행의 새 gesture를 막습니다. */
+  isRowDisabled?: (rowKey: string) => boolean;
+  /** 현재 pointer 위치가 source scope 안의 유효한 drop 지점인지 판정합니다. */
+  isDropAllowed?: (input: { rowKey: string; clientX: number; clientY: number }) => boolean;
+  /** pointermove 상태 발행을 animation frame당 한 번으로 제한합니다. */
+  throttleWithAnimationFrame?: boolean;
   onReorder: (change: DailyPlanTimetableReorder) => void;
   onTrashDrop: (rowKey: string) => void;
   onDragStart?: (rowKey: string) => void;
@@ -96,6 +104,7 @@ type ActiveDrag = {
   originalRowKeys: string[];
   insertionIndex: number;
   isOverTrash: boolean;
+  isDropAllowed: boolean;
   didMove: boolean;
   previousTouchAction: string;
   previousUserSelect: string;
@@ -131,6 +140,10 @@ export function useDailyPlanTimetableInteraction({
   movementTolerance = DEFAULT_MOVEMENT_TOLERANCE,
   edgeScrollThreshold = DEFAULT_EDGE_THRESHOLD,
   maxScrollStep = DEFAULT_MAX_SCROLL_STEP,
+  getRowScopeKey,
+  isRowDisabled,
+  isDropAllowed,
+  throttleWithAnimationFrame = false,
   onReorder,
   onTrashDrop,
   onDragStart,
@@ -147,6 +160,7 @@ export function useDailyPlanTimetableInteraction({
   const suppressedClickRef = useRef<SuppressedClick | null>(null);
   const suppressClickTimerRef = useRef<number | null>(null);
   const autoScrollFrameRef = useRef<number | null>(null);
+  const publishFrameRef = useRef<number | null>(null);
   const finishingRef = useRef(false);
   const optionsRef = useRef({
     trashRef,
@@ -154,6 +168,10 @@ export function useDailyPlanTimetableInteraction({
     movementTolerance,
     edgeScrollThreshold,
     maxScrollStep,
+    getRowScopeKey,
+    isRowDisabled,
+    isDropAllowed,
+    throttleWithAnimationFrame,
     onReorder,
     onTrashDrop,
     onDragStart,
@@ -168,6 +186,10 @@ export function useDailyPlanTimetableInteraction({
     movementTolerance,
     edgeScrollThreshold,
     maxScrollStep,
+    getRowScopeKey,
+    isRowDisabled,
+    isDropAllowed,
+    throttleWithAnimationFrame,
     onReorder,
     onTrashDrop,
     onDragStart,
@@ -187,6 +209,13 @@ export function useDailyPlanTimetableInteraction({
     if (autoScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(autoScrollFrameRef.current);
       autoScrollFrameRef.current = null;
+    }
+  }, []);
+
+  const cancelScheduledPublish = useCallback(() => {
+    if (publishFrameRef.current !== null) {
+      window.cancelAnimationFrame(publishFrameRef.current);
+      publishFrameRef.current = null;
     }
   }, []);
 
@@ -235,7 +264,7 @@ export function useDailyPlanTimetableInteraction({
   }, []);
 
   const calculateInsertion = useCallback((drag: ActiveDrag) => {
-    const remainingKeys = rowKeysRef.current.filter((rowKey) => rowKey !== drag.rowKey);
+    const remainingKeys = drag.originalRowKeys.filter((rowKey) => rowKey !== drag.rowKey);
     const candidates = remainingKeys.flatMap((rowKey) => {
       const element = rowElementsRef.current.get(rowKey);
       if (!element || element.getClientRects().length === 0) return [];
@@ -285,7 +314,15 @@ export function useDailyPlanTimetableInteraction({
   const publishActiveDrag = useCallback((drag: ActiveDrag) => {
     const isOverTrash = getTrashHit(drag.latestX, drag.latestY);
     drag.isOverTrash = isOverTrash;
-    const insertion = isOverTrash ? null : calculateInsertion(drag);
+    const isDropAllowed = !isOverTrash && (
+      optionsRef.current.isDropAllowed?.({
+        rowKey: drag.rowKey,
+        clientX: drag.latestX,
+        clientY: drag.latestY
+      }) ?? true
+    );
+    drag.isDropAllowed = isDropAllowed;
+    const insertion = isDropAllowed ? calculateInsertion(drag) : null;
     if (insertion) drag.insertionIndex = insertion.index;
 
     setState({
@@ -302,6 +339,18 @@ export function useDailyPlanTimetableInteraction({
       isOverTrash
     });
   }, [calculateInsertion, getTrashHit]);
+
+  const scheduleActiveDragPublish = useCallback((drag: ActiveDrag) => {
+    if (!optionsRef.current.throttleWithAnimationFrame) {
+      publishActiveDrag(drag);
+      return;
+    }
+    if (publishFrameRef.current !== null) return;
+    publishFrameRef.current = window.requestAnimationFrame(() => {
+      publishFrameRef.current = null;
+      if (activeRef.current === drag) publishActiveDrag(drag);
+    });
+  }, [publishActiveDrag]);
 
   const getAutoScrollDelta = useCallback((clientY: number) => {
     const visualViewport = window.visualViewport;
@@ -347,6 +396,7 @@ export function useDailyPlanTimetableInteraction({
     if (!drag || finishingRef.current) return;
     finishingRef.current = true;
     activeRef.current = null;
+    cancelScheduledPublish();
     stopAutoScroll();
     restoreDraggedRow(drag);
 
@@ -356,13 +406,17 @@ export function useDailyPlanTimetableInteraction({
         optionsRef.current.onTrashDrop(drag.rowKey);
         outcome = "trash";
       } else if (drag.didMove) {
-        const remainingKeys = drag.originalRowKeys.filter((rowKey) => rowKey !== drag.rowKey);
-        const insertionIndex = Math.max(0, Math.min(drag.insertionIndex, remainingKeys.length));
-        const orderedRowKeys = [...remainingKeys];
-        orderedRowKeys.splice(insertionIndex, 0, drag.rowKey);
-        if (!areStringArraysEqual(orderedRowKeys, drag.originalRowKeys)) {
-          optionsRef.current.onReorder({ rowKey: drag.rowKey, insertionIndex, orderedRowKeys });
-          outcome = "reordered";
+        if (drag.isDropAllowed) {
+          const remainingKeys = drag.originalRowKeys.filter((rowKey) => rowKey !== drag.rowKey);
+          const insertionIndex = Math.max(0, Math.min(drag.insertionIndex, remainingKeys.length));
+          const orderedRowKeys = [...remainingKeys];
+          orderedRowKeys.splice(insertionIndex, 0, drag.rowKey);
+          if (!areStringArraysEqual(orderedRowKeys, drag.originalRowKeys)) {
+            optionsRef.current.onReorder({ rowKey: drag.rowKey, insertionIndex, orderedRowKeys });
+            outcome = "reordered";
+          } else {
+            outcome = "unchanged";
+          }
         } else {
           outcome = "unchanged";
         }
@@ -382,7 +436,7 @@ export function useDailyPlanTimetableInteraction({
     }
     optionsRef.current.onDragEnd?.({ rowKey: drag.rowKey, outcome });
     finishingRef.current = false;
-  }, [restoreDraggedRow, setSelectedRowKey, stopAutoScroll, suppressNextClick]);
+  }, [cancelScheduledPublish, restoreDraggedRow, setSelectedRowKey, stopAutoScroll, suppressNextClick]);
 
   const cancelInteraction = useCallback((clearSelection = true) => {
     clearPendingPress();
@@ -394,7 +448,12 @@ export function useDailyPlanTimetableInteraction({
   }, [clearPendingPress, endActiveDrag, setSelectedRowKey]);
 
   const activatePendingPress = useCallback((press: PendingPress) => {
-    if (disabledRef.current || pendingRef.current !== press || activeRef.current) return;
+    if (
+      disabledRef.current
+      || optionsRef.current.isRowDisabled?.(press.rowKey)
+      || pendingRef.current !== press
+      || activeRef.current
+    ) return;
     pendingRef.current = null;
     const rect = press.row.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
@@ -403,7 +462,11 @@ export function useDailyPlanTimetableInteraction({
     if (activeElement instanceof HTMLElement && press.row.contains(activeElement)) activeElement.blur();
     window.getSelection()?.removeAllRanges();
 
-    const originalRowKeys = [...rowKeysRef.current];
+    const allRowKeys = [...rowKeysRef.current];
+    const sourceScopeKey = optionsRef.current.getRowScopeKey?.(press.rowKey);
+    const originalRowKeys = optionsRef.current.getRowScopeKey
+      ? allRowKeys.filter((rowKey) => optionsRef.current.getRowScopeKey?.(rowKey) === sourceScopeKey)
+      : allRowKeys;
     const originalIndex = Math.max(0, originalRowKeys.indexOf(press.rowKey));
     const drag: ActiveDrag = {
       rowKey: press.rowKey,
@@ -421,6 +484,7 @@ export function useDailyPlanTimetableInteraction({
       originalRowKeys,
       insertionIndex: Math.min(originalIndex, Math.max(0, originalRowKeys.length - 1)),
       isOverTrash: false,
+      isDropAllowed: true,
       didMove: false,
       previousTouchAction: press.row.style.touchAction,
       previousUserSelect: press.row.style.userSelect,
@@ -466,7 +530,13 @@ export function useDailyPlanTimetableInteraction({
     rowKey: string,
     event: ReactPointerEvent<HTMLElement>
   ) => {
-    if (disabledRef.current || !event.isPrimary || event.button !== 0 || activeRef.current) return;
+    if (
+      disabledRef.current
+      || optionsRef.current.isRowDisabled?.(rowKey)
+      || !event.isPrimary
+      || event.button !== 0
+      || activeRef.current
+    ) return;
     const row = rowElementsRef.current.get(rowKey) ?? event.currentTarget;
     clearPendingPress();
 
@@ -525,7 +595,7 @@ export function useDailyPlanTimetableInteraction({
       drag.latestX = event.clientX;
       drag.latestY = event.clientY;
       if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 2) drag.didMove = true;
-      publishActiveDrag(drag);
+      scheduleActiveDragPublish(drag);
       if (getAutoScrollDelta(drag.latestY) === 0) stopAutoScroll();
       else ensureAutoScroll();
     }
@@ -541,6 +611,8 @@ export function useDailyPlanTimetableInteraction({
       drag.latestX = event.clientX;
       drag.latestY = event.clientY;
       drag.isOverTrash = getTrashHit(event.clientX, event.clientY);
+      cancelScheduledPublish();
+      publishActiveDrag(drag);
       endActiveDrag("drop");
     }
 
@@ -584,9 +656,10 @@ export function useDailyPlanTimetableInteraction({
       document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
       cancelInteraction();
       clearSuppressedClick();
+      cancelScheduledPublish();
       stopAutoScroll();
     };
-  }, [cancelInteraction, clearPendingPress, clearSuppressedClick, endActiveDrag, ensureAutoScroll, getAutoScrollDelta, getTrashHit, publishActiveDrag, setSelectedRowKey, stopAutoScroll]);
+  }, [cancelInteraction, cancelScheduledPublish, clearPendingPress, clearSuppressedClick, endActiveDrag, ensureAutoScroll, getAutoScrollDelta, getTrashHit, publishActiveDrag, scheduleActiveDragPublish, setSelectedRowKey, stopAutoScroll]);
 
   useEffect(() => {
     if (disabled) cancelInteraction();

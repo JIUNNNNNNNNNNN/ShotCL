@@ -29,6 +29,15 @@ type StaffDepartmentInput = {
   name?: unknown;
 };
 
+type StaffReorderInput = {
+  department?: unknown;
+  memberIds?: unknown;
+};
+
+type StaffDeleteInput = {
+  memberId?: unknown;
+};
+
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
     const scope = await requireReadScope(request, context);
@@ -251,6 +260,183 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
   }
 }
 
+/** 같은 부서에 속한 스탭 ID 전체를 한 번에 받아 기존 sort_order 슬롯 안에서 재배치합니다. */
+export async function PATCH(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
+  try {
+    const scope = await requireAdminScope(request, context);
+    if (scope instanceof NextResponse) return scope;
+    const { projectId, supabase } = scope;
+    const body = (await request.json()) as StaffReorderInput | null;
+    if (!body || typeof body.department !== "string" || !Array.isArray(body.memberIds) || body.memberIds.length === 0 || body.memberIds.length > 500) {
+      return NextResponse.json({ error: "스탭 순서 데이터가 올바르지 않습니다." }, { status: 400 });
+    }
+    const departmentKey = staffDepartmentScopeKey(body.department);
+
+    const memberIds = body.memberIds.map((value) => String(value ?? "").trim());
+    if (memberIds.some((id) => !isUuid(id)) || new Set(memberIds).size !== memberIds.length) {
+      return NextResponse.json({ error: "중복되거나 올바르지 않은 스탭 행 ID가 있습니다." }, { status: 400 });
+    }
+
+    const [ownerRowsResult, projectRowsResult] = await Promise.all([
+      supabase
+        .from("project_staff_members")
+        .select("id,project_id")
+        .in("id", memberIds),
+      supabase
+        .from("project_staff_members")
+        .select("id,project_id,department,sort_order,created_at,updated_at")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at")
+        .order("id")
+    ]);
+    if (ownerRowsResult.error) throw ownerRowsResult.error;
+    if (projectRowsResult.error) throw projectRowsResult.error;
+
+    const ownerRows = ownerRowsResult.data ?? [];
+    if (ownerRows.some((row) => row.project_id !== projectId)) {
+      return NextResponse.json({ error: "다른 프로젝트의 스탭 행은 이동할 수 없습니다." }, { status: 409 });
+    }
+    if (ownerRows.length !== memberIds.length) {
+      return NextResponse.json({ error: "스탭 목록이 변경되었습니다. 다시 확인해주세요." }, { status: 409 });
+    }
+
+    const sectionRows = (projectRowsResult.data ?? []).filter((row) => (
+      staffDepartmentScopeKey(row.department) === departmentKey
+    ));
+    const sectionIdSet = new Set(sectionRows.map((row) => String(row.id)));
+    if (
+      sectionRows.length !== memberIds.length
+      || memberIds.some((id) => !sectionIdSet.has(id))
+    ) {
+      return NextResponse.json({ error: "해당 부서의 스탭 목록이 변경되었습니다. 다시 확인해주세요." }, { status: 409 });
+    }
+
+    const currentIds = sectionRows.map((row) => String(row.id));
+    const rowById = new Map(sectionRows.map((row) => [String(row.id), row]));
+    const currentSortOrderSlots = sectionRows.map((row, index) => {
+      const sortOrder = Number(row.sort_order);
+      return Number.isInteger(sortOrder) && sortOrder > 0 ? sortOrder : index + 1;
+    });
+    const hasStableSlots = currentSortOrderSlots.every((sortOrder, index) => (
+      index === 0 || sortOrder > currentSortOrderSlots[index - 1]
+    ));
+    const projectPositionById = new Map((projectRowsResult.data ?? []).map((row, index) => (
+      [String(row.id), index + 1]
+    )));
+    const sortOrderSlots = hasStableSlots
+      ? currentSortOrderSlots
+      : sectionRows.map((row, index) => projectPositionById.get(String(row.id)) ?? index + 1);
+    if (
+      hasStableSlots
+      && currentIds.every((id, index) => id === memberIds[index])
+    ) {
+      return NextResponse.json({
+        orders: sectionRows.map(staffOrderResponseRow)
+      });
+    }
+    const updates = memberIds.map((id, index) => {
+      const row = rowById.get(id)!;
+      return {
+        id,
+        previousSortOrder: Number(row.sort_order) || sortOrderSlots[index],
+        previousUpdatedAt: String(row.updated_at ?? ""),
+        nextSortOrder: sortOrderSlots[index]
+      };
+    }).filter((update) => update.previousSortOrder !== update.nextSortOrder);
+
+    // 한 HTTP mutation 안에서 순서 필드만 갱신합니다. 다른 탭의 이름·연락처·메모는 덮어쓰지 않습니다.
+    const updateResults = await settleWithConcurrency(updates, 8, async (update) => {
+      const { data, error } = await supabase
+        .from("project_staff_members")
+        .update({ sort_order: update.nextSortOrder })
+        .eq("project_id", projectId)
+        .eq("id", update.id)
+        .eq("updated_at", update.previousUpdatedAt)
+        .select("id,sort_order,updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new StaffReorderConflictError();
+      return { update, saved: data };
+    });
+    const successfulUpdates = updateResults.flatMap((result) => (
+      result.status === "fulfilled" ? [result.value] : []
+    ));
+    const failedUpdates = updateResults.filter((result): result is PromiseRejectedResult => (
+      result.status === "rejected"
+    ));
+    if (failedUpdates.length > 0) {
+      // 여러 update 중 일부만 성공했다면 성공 응답의 updated_at까지 일치할 때만 원래 슬롯으로 복원합니다.
+      const rollbackResults = await settleWithConcurrency(successfulUpdates, 8, async ({ update, saved }) => {
+        const { data, error } = await supabase
+          .from("project_staff_members")
+          .update({ sort_order: update.previousSortOrder })
+          .eq("project_id", projectId)
+          .eq("id", update.id)
+          .eq("updated_at", String(saved.updated_at ?? ""))
+          .select("id")
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) throw new StaffReorderRollbackError();
+        return data;
+      });
+      if (rollbackResults.some((result) => result.status === "rejected")) {
+        return NextResponse.json(
+          { error: "스탭 순서를 완전히 복구하지 못했습니다. 목록을 다시 확인해주세요." },
+          { status: 500 }
+        );
+      }
+      const databaseFailure = failedUpdates.find((result) => (
+        !(result.reason instanceof StaffReorderConflictError)
+      ));
+      if (databaseFailure) throw databaseFailure.reason;
+      return NextResponse.json(
+        { error: "스탭 목록이 다른 곳에서 변경되었습니다. 다시 확인해주세요." },
+        { status: 409 }
+      );
+    }
+
+    const savedById = new Map(successfulUpdates.map(({ saved }) => [String(saved.id), saved]));
+    return NextResponse.json({
+      orders: memberIds.map((id) => staffOrderResponseRow(savedById.get(id) ?? rowById.get(id) ?? {}))
+    });
+  } catch (error) {
+    return staffRouteError(error, "스탭 순서를 저장하지 못했습니다.");
+  }
+}
+
+/** 프로젝트와 stable staff ID를 함께 제한해 여러 번 호출해도 안전하게 같은 결과를 냅니다. */
+export async function DELETE(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
+  try {
+    const scope = await requireAdminScope(request, context);
+    if (scope instanceof NextResponse) return scope;
+    const { projectId, supabase } = scope;
+    const body = (await request.json()) as StaffDeleteInput | null;
+    if (!body) {
+      return NextResponse.json({ error: "스탭 행 ID가 올바르지 않습니다." }, { status: 400 });
+    }
+    const memberId = String(body.memberId ?? "").trim();
+    if (!isUuid(memberId)) {
+      return NextResponse.json({ error: "스탭 행 ID가 올바르지 않습니다." }, { status: 400 });
+    }
+
+    const { data: deletedRows, error } = await supabase
+      .from("project_staff_members")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("id", memberId)
+      .select("id");
+    if (error) throw error;
+
+    return NextResponse.json({
+      memberId,
+      deleted: (deletedRows ?? []).length > 0
+    });
+  } catch (error) {
+    return staffRouteError(error, "스탭을 삭제하지 못했습니다.");
+  }
+}
+
 async function requireAdminScope(
   request: NextRequest,
   context: { params: Promise<{ projectId: string }> }
@@ -322,6 +508,58 @@ function staffMemberResponseRow(row: Record<string, unknown>) {
     notes: decodedNotes.notes,
     excludedEpisodeNumbers: decodedNotes.excludedEpisodeNumbers
   };
+}
+
+function staffOrderResponseRow(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    sortOrder: Number(row.sort_order) || 1,
+    updatedAt: String(row.updated_at ?? "")
+  };
+}
+
+function staffDepartmentScopeKey(value: unknown) {
+  return normalizeStaffDepartment(value).toLocaleLowerCase("ko-KR");
+}
+
+class StaffReorderConflictError extends Error {
+  constructor() {
+    super("STAFF_REORDER_CONFLICT");
+    this.name = "StaffReorderConflictError";
+  }
+}
+
+class StaffReorderRollbackError extends Error {
+  constructor() {
+    super("STAFF_REORDER_ROLLBACK_FAILED");
+    this.name = "StaffReorderRollbackError";
+  }
+}
+
+async function settleWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<PromiseSettledResult<R>[]> {
+  if (items.length === 0) return [];
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let nextIndex = 0;
+  async function runWorker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: "fulfilled", value: await worker(items[index], index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(Math.max(1, limit), items.length) },
+    () => runWorker()
+  ));
+  return results;
 }
 
 function normalizeDepartmentInput(

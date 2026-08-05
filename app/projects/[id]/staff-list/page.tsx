@@ -10,15 +10,21 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
+import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { Button } from "@/components/ui/Button";
+import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import {
   createBlankProjectStaffDepartment,
   createBlankProjectStaffMember,
+  deleteProjectStaffMember,
   listProjectStaffMembers,
+  reorderProjectStaffMembers,
   saveProjectStaffMembers
 } from "@/lib/data/staffMembers";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
@@ -26,7 +32,8 @@ import { getProject } from "@/lib/data/projects";
 import {
   groupStaffMembersForDisplay,
   getStaffDepartmentColor,
-  moveProjectStaffMember,
+  normalizeStaffDepartment,
+  sortStaffMembers
 } from "@/lib/dailyPlan/staffList";
 import {
   isStaffParticipatingInEpisode,
@@ -43,6 +50,16 @@ const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
 const desktopEditableGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)_2.5rem]";
+
+type StaffDisplaySection = ReturnType<typeof groupStaffMembersForDisplay>[number] & {
+  sectionKey: string;
+};
+
+type PendingStaffDelete = {
+  member: ProjectStaffMember;
+  sectionKey: string;
+  sectionLabel: string;
+};
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -65,39 +82,30 @@ export default function StaffListPage() {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
-  const [draggedMemberId, setDraggedMemberId] = useState<string | null>(null);
-  const [dragTargetMemberId, setDragTargetMemberId] = useState<string | null>(null);
+  const [pendingMemberDelete, setPendingMemberDelete] = useState<PendingStaffDelete | null>(null);
+  const [isDeletingMember, setIsDeletingMember] = useState(false);
+  const [pendingSectionKeys, setPendingSectionKeys] = useState<Set<string>>(() => new Set());
   const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
   const editVersionRef = useRef(0);
+  const membersRef = useRef<ProjectStaffMember[]>([]);
+  const persistedMemberIdsRef = useRef(new Set<string>());
+  const sectionMutationLocksRef = useRef(new Set<string>());
+  const sectionMutationVersionsRef = useRef(new Map<string, number>());
   const pendingDepartmentSubmitRef = useRef(false);
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
   const notesSummaryRef = useRef<HTMLDivElement | null>(null);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pointerDragRef = useRef<{
-    memberId: string;
-    pointerId: number;
-    startX: number;
-    startY: number;
-    active: boolean;
-    input: HTMLInputElement;
-  } | null>(null);
-  const suppressedNameClickRef = useRef<string | null>(null);
-  const previousBodyUserSelectRef = useRef("");
   const canEdit = role !== "progress";
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
     [departments, members]
   );
-  const displayedMemberNumbers = useMemo(
-    () => new Map(
-      staffGroups
-        .flatMap((group) => group.members)
-        .map((member, index) => [member.id, index + 1])
-    ),
+  const staffSections = useMemo<StaffDisplaySection[]>(
+    () => staffGroups.map((group) => ({ ...group, sectionKey: group.key })),
     [staffGroups]
   );
   const notesSummary = useMemo(() => buildStaffNotesSummary(members), [members]);
+  membersRef.current = members;
   useUnsavedChangesGuard(isDirty);
 
   const load = useCallback(async () => {
@@ -108,7 +116,9 @@ export default function StaffListPage() {
         listProjectStaffMembers(projectId, { includeTotalEpisodes: true })
       ]);
       setProject(projectData);
+      membersRef.current = staffData.members;
       setMembers(staffData.members);
+      persistedMemberIdsRef.current = new Set(staffData.members.map((member) => member.id));
       setDepartments(staffData.departments);
       setTotalEpisodes(staffData.totalEpisodes);
       setIsDirty(false);
@@ -162,7 +172,7 @@ export default function StaffListPage() {
     sourceDepartments: ProjectStaffDepartment[],
     showMessage = false
   ) => {
-    if (!projectId || !canEdit) return;
+    if (!projectId || !canEdit || sectionMutationLocksRef.current.size > 0) return;
     const version = editVersionRef.current;
     setIsSaving(true);
     setErrorMessage("");
@@ -173,7 +183,9 @@ export default function StaffListPage() {
         sourceDepartments,
         totalEpisodes
       );
+      persistedMemberIdsRef.current = new Set(result.members.map((member) => member.id));
       if (editVersionRef.current === version) {
+        membersRef.current = result.members;
         setMembers(result.members);
         setDepartments(result.departments);
         setTotalEpisodes(result.totalEpisodes);
@@ -189,10 +201,12 @@ export default function StaffListPage() {
 
   const commitMembers = useCallback((updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) => {
     editVersionRef.current += 1;
-    setMembers((current) => updater(current).map((member, index) => ({
+    const nextMembers = updater(membersRef.current).map((member, index) => ({
       ...member,
       sortOrder: index + 1
-    })));
+    }));
+    membersRef.current = nextMembers;
+    setMembers(nextMembers);
     setIsDirty(true);
     setMessage("");
     setErrorMessage("");
@@ -200,9 +214,11 @@ export default function StaffListPage() {
 
   const updateMember = useCallback((id: string, patch: Partial<ProjectStaffMember>) => {
     editVersionRef.current += 1;
-    setMembers((current) => current.map((member) => (
+    const nextMembers = membersRef.current.map((member) => (
       member.id === id ? { ...member, ...patch } : member
-    )));
+    ));
+    membersRef.current = nextMembers;
+    setMembers(nextMembers);
     setIsDirty(true);
     setMessage("");
     setErrorMessage("");
@@ -264,6 +280,7 @@ export default function StaffListPage() {
   }
 
   const addMember = useCallback((department: string, afterMemberId?: string) => {
+    if (sectionMutationLocksRef.current.has(getStaffSectionKey(department))) return;
     const newMember = createBlankProjectStaffMember(projectId, department, 1);
     commitMembers((current) => {
       if (!afterMemberId) {
@@ -291,150 +308,168 @@ export default function StaffListPage() {
     setPendingMemberFocusId(newMember.id);
   }, [commitMembers, projectId]);
 
-  const moveMember = useCallback((
-    sourceMemberId: string,
-    targetDepartment: string,
-    targetMemberId?: string,
-    placeAfter = false
-  ) => {
-    commitMembers((current) => moveProjectStaffMember(
-      current,
-      sourceMemberId,
-      targetDepartment,
-      targetMemberId,
-      placeAfter
-    ));
-  }, [commitMembers]);
-
-  const finishMemberDrag = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-    pointerDragRef.current = null;
-    if (typeof document !== "undefined") {
-      document.body.style.userSelect = previousBodyUserSelectRef.current;
-    }
-    setDraggedMemberId(null);
-    setDragTargetMemberId(null);
-  }, []);
-
-  useEffect(() => finishMemberDrag, [finishMemberDrag]);
-
-  const findPointerDropTarget = useCallback((clientX: number, clientY: number) => {
-    const target = document.elementFromPoint(clientX, clientY);
-    if (!(target instanceof Element)) return null;
-    const memberElement = target.closest<HTMLElement>("[data-staff-member-id]");
-    if (memberElement) {
-      return {
-        department: memberElement.dataset.staffDepartment ?? "",
-        memberId: memberElement.dataset.staffMemberId
-      };
-    }
-    const departmentElement = target.closest<HTMLElement>("[data-staff-department]");
-    if (!departmentElement) return null;
-    return {
-      department: departmentElement.dataset.staffDepartment ?? "",
-      memberId: undefined
-    };
-  }, []);
-
-  const handleNamePointerDown = useCallback((
-    event: ReactPointerEvent<HTMLInputElement>,
-    memberId: string
-  ) => {
-    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
-    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-    const input = event.currentTarget;
-    const pointerId = event.pointerId;
-    pointerDragRef.current = {
-      memberId,
-      pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      active: false,
-      input
-    };
-
-    longPressTimerRef.current = setTimeout(() => {
-      const current = pointerDragRef.current;
-      if (!current || current.memberId !== memberId || current.pointerId !== pointerId) return;
-      current.active = true;
-      previousBodyUserSelectRef.current = document.body.style.userSelect;
-      document.body.style.userSelect = "none";
-      input.blur();
-      try {
-        input.setPointerCapture?.(current.pointerId);
-      } catch {
-        finishMemberDrag();
-        return;
-      }
-      setDraggedMemberId(memberId);
-    }, 520);
-  }, [finishMemberDrag]);
-
-  const handleNamePointerMove = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
-    const current = pointerDragRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY);
-    if (!current.active) {
-      if (distance > 8) finishMemberDrag();
-      return;
-    }
-
-    event.preventDefault();
-    const target = findPointerDropTarget(event.clientX, event.clientY);
-    setDragTargetMemberId(target?.memberId && target.memberId !== current.memberId
-      ? target.memberId
-      : null);
-  }, [findPointerDropTarget, finishMemberDrag]);
-
-  const handleNamePointerEnd = useCallback((event: ReactPointerEvent<HTMLInputElement>) => {
-    const current = pointerDragRef.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    if (!current.active) {
-      finishMemberDrag();
-      return;
-    }
-
-    event.preventDefault();
-    const target = findPointerDropTarget(event.clientX, event.clientY);
-    if (target?.department) {
-      const targetElement = target.memberId
-        ? document.querySelector<HTMLElement>(`[data-staff-member-id="${CSS.escape(target.memberId)}"]`)
-        : null;
-      const placeAfter = targetElement
-        ? event.clientY >= targetElement.getBoundingClientRect().top + targetElement.getBoundingClientRect().height / 2
-        : false;
-      moveMember(current.memberId, target.department, target.memberId, placeAfter);
-    }
-    suppressedNameClickRef.current = current.memberId;
-    window.setTimeout(() => {
-      if (suppressedNameClickRef.current === current.memberId) {
-        suppressedNameClickRef.current = null;
-      }
-    }, 0);
-    finishMemberDrag();
-  }, [findPointerDropTarget, finishMemberDrag, moveMember]);
-
-  const handleNameClick = useCallback((
-    event: ReactMouseEvent<HTMLInputElement>,
-    memberId: string
-  ) => {
-    if (suppressedNameClickRef.current !== memberId) return;
-    event.preventDefault();
-    event.currentTarget.blur();
-    suppressedNameClickRef.current = null;
-  }, []);
-
   const registerMemberRoleInput = useCallback((id: string, input: HTMLInputElement | null) => {
     if (input) memberRoleInputRefs.current.set(id, input);
     else memberRoleInputRefs.current.delete(id);
   }, []);
 
-  const deleteMember = useCallback((member: ProjectStaffMember) => {
-    commitMembers((current) => current.filter((item) => item.id !== member.id));
-  }, [commitMembers]);
+  const setSectionPending = useCallback((sectionKey: string, pending: boolean) => {
+    setPendingSectionKeys((current) => {
+      const next = new Set(current);
+      if (pending) next.add(sectionKey);
+      else next.delete(sectionKey);
+      return next;
+    });
+  }, []);
+
+  const finishSectionMutation = useCallback((sectionKey: string, version: number) => {
+    if (sectionMutationVersionsRef.current.get(sectionKey) !== version) return;
+    sectionMutationLocksRef.current.delete(sectionKey);
+    setSectionPending(sectionKey, false);
+  }, [setSectionPending]);
+
+  const reorderMemberSection = useCallback(async (
+    sourceMemberId: string,
+    orderedMemberIds: string[]
+  ) => {
+    if (!projectId || !canEdit) return;
+    const beforeMembers = membersRef.current;
+    const sourceMember = beforeMembers.find((member) => member.id === sourceMemberId);
+    if (!sourceMember) return;
+    const sectionKey = getStaffSectionKey(sourceMember.department);
+    if (sectionMutationLocksRef.current.has(sectionKey)) return;
+
+    const sectionMembers = sortStaffMembers(beforeMembers.filter((member) => (
+      getStaffSectionKey(member.department) === sectionKey
+    )));
+    if (!hasSameIds(sectionMembers.map((member) => member.id), orderedMemberIds)) {
+      setErrorMessage("해당 부서의 스탭 목록이 변경되었습니다. 다시 시도해주세요.");
+      return;
+    }
+    if (sectionMembers.every((member, index) => member.id === orderedMemberIds[index])) return;
+
+    const snapshot = new Map(sectionMembers.map((member) => [member.id, {
+      sortOrder: member.sortOrder,
+      updatedAt: member.updatedAt
+    }]));
+    const optimisticMembers = applyStaffSectionOrder(beforeMembers, sectionKey, orderedMemberIds);
+    if (!optimisticMembers) return;
+
+    const mutationVersion = (sectionMutationVersionsRef.current.get(sectionKey) ?? 0) + 1;
+    sectionMutationVersionsRef.current.set(sectionKey, mutationVersion);
+    sectionMutationLocksRef.current.add(sectionKey);
+    setSectionPending(sectionKey, true);
+    editVersionRef.current += 1;
+    membersRef.current = optimisticMembers;
+    setMembers(optimisticMembers);
+    setMessage("");
+    setErrorMessage("");
+
+    const hasUnpersistedMember = orderedMemberIds.some((id) => !persistedMemberIdsRef.current.has(id));
+    if (hasUnpersistedMember) {
+      setIsDirty(true);
+      setMessage("새 스탭이 포함된 순서는 상단 저장 버튼을 눌러 확정해주세요.");
+      finishSectionMutation(sectionKey, mutationVersion);
+      return;
+    }
+
+    try {
+      const orders = await reorderProjectStaffMembers(
+        projectId,
+        sourceMember.department,
+        orderedMemberIds
+      );
+      if (sectionMutationVersionsRef.current.get(sectionKey) !== mutationVersion) return;
+      const orderById = new Map(orders.map((order) => [order.id, order]));
+      const confirmedMembers = membersRef.current.map((member) => {
+        const order = orderById.get(member.id);
+        return order ? { ...member, ...order } : member;
+      });
+      membersRef.current = confirmedMembers;
+      setMembers(confirmedMembers);
+      setMessage("스탭 순서를 저장했습니다.");
+    } catch (error) {
+      if (sectionMutationVersionsRef.current.get(sectionKey) !== mutationVersion) return;
+      const membersWithPreviousOrders = membersRef.current.map((member) => {
+        const previous = snapshot.get(member.id);
+        return previous ? { ...member, ...previous } : member;
+      });
+      const rolledBackMembers = applyStaffSectionOrder(
+        membersWithPreviousOrders,
+        sectionKey,
+        sectionMembers.map((member) => member.id)
+      ) ?? membersWithPreviousOrders;
+      membersRef.current = rolledBackMembers;
+      setMembers(rolledBackMembers);
+      setErrorMessage(error instanceof Error ? error.message : "스탭 순서를 저장하지 못했습니다.");
+    } finally {
+      finishSectionMutation(sectionKey, mutationVersion);
+    }
+  }, [canEdit, finishSectionMutation, projectId, setSectionPending]);
+
+  const requestMemberDelete = useCallback((member: ProjectStaffMember) => {
+    if (!canEdit) return;
+    const sectionKey = getStaffSectionKey(member.department);
+    if (sectionMutationLocksRef.current.has(sectionKey)) return;
+    setPendingMemberDelete({
+      member,
+      sectionKey,
+      sectionLabel: normalizeStaffDepartment(member.department) || "미분류"
+    });
+  }, [canEdit]);
+
+  const confirmMemberDelete = useCallback(async () => {
+    const pending = pendingMemberDelete;
+    if (!pending || !projectId || !canEdit) return;
+    if (sectionMutationLocksRef.current.has(pending.sectionKey)) return;
+
+    const currentMember = membersRef.current.find((member) => member.id === pending.member.id);
+    if (!currentMember) {
+      setPendingMemberDelete(null);
+      return;
+    }
+    const mutationVersion = (sectionMutationVersionsRef.current.get(pending.sectionKey) ?? 0) + 1;
+    sectionMutationVersionsRef.current.set(pending.sectionKey, mutationVersion);
+    sectionMutationLocksRef.current.add(pending.sectionKey);
+    setSectionPending(pending.sectionKey, true);
+    setIsDeletingMember(true);
+    setMessage("");
+    setErrorMessage("");
+
+    const originalSectionMemberIds = sortStaffMembers(membersRef.current.filter((member) => (
+      getStaffSectionKey(member.department) === pending.sectionKey
+    ))).map((member) => member.id);
+    const optimisticMembers = membersRef.current.filter((member) => member.id !== currentMember.id);
+    editVersionRef.current += 1;
+    membersRef.current = optimisticMembers;
+    setMembers(optimisticMembers);
+
+    const isPersisted = persistedMemberIdsRef.current.has(currentMember.id);
+    try {
+      if (isPersisted) await deleteProjectStaffMember(projectId, currentMember.id);
+      if (sectionMutationVersionsRef.current.get(pending.sectionKey) !== mutationVersion) return;
+      persistedMemberIdsRef.current.delete(currentMember.id);
+      if (!isPersisted) setIsDirty(true);
+      setPendingMemberDelete(null);
+      setMessage(`${currentMember.name.trim() || "스탭"}을 삭제했습니다.`);
+    } catch (error) {
+      if (sectionMutationVersionsRef.current.get(pending.sectionKey) !== mutationVersion) return;
+      const restoredMemberSet = membersRef.current.some((member) => member.id === currentMember.id)
+        ? membersRef.current
+        : [...membersRef.current, currentMember];
+      const rolledBackMembers = applyStaffSectionOrder(
+        restoredMemberSet,
+        pending.sectionKey,
+        originalSectionMemberIds
+      ) ?? restoredMemberSet;
+      membersRef.current = rolledBackMembers;
+      setMembers(rolledBackMembers);
+      setErrorMessage(error instanceof Error ? error.message : "스탭을 삭제하지 못했습니다.");
+    } finally {
+      setIsDeletingMember(false);
+      finishSectionMutation(pending.sectionKey, mutationVersion);
+    }
+  }, [canEdit, finishSectionMutation, pendingMemberDelete, projectId, setSectionPending]);
 
   if (isLoading) return <PixelDogLoader size="lg" />;
 
@@ -474,7 +509,7 @@ export default function StaffListPage() {
               <button
                 type="button"
                 onClick={() => void save(members, departments, true)}
-                disabled={isSaving || !isDirty}
+                disabled={isSaving || pendingSectionKeys.size > 0 || !isDirty}
                 className="inline-flex h-9 items-center gap-1.5 border border-field-primary/70 bg-field-primary/10 px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-secondary/80 hover:bg-field-primary/15 hover:text-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
@@ -494,7 +529,7 @@ export default function StaffListPage() {
       </section>
 
       {errorMessage ? (
-        <p className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-xs font-bold text-field-danger">{errorMessage}</p>
+        <p className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-xs font-bold text-field-danger" role="alert">{errorMessage}</p>
       ) : null}
       {message ? (
         <p className="mt-3 border border-field-divider bg-field-elevated px-3 py-2 text-xs font-bold text-field-subtle">{message}</p>
@@ -628,67 +663,20 @@ export default function StaffListPage() {
       </section>
 
       <section className="workspace-canvas workspace-border mt-3 border p-2">
-        {staffGroups.length > 0 ? (
-          <div className="grid gap-2">
-            {staffGroups.map((group) => {
-              const departmentColor = getStaffDepartmentColor(group.name, group.colorIndex);
-              return (
-                <section
-                  key={group.key}
-                  className="staff-department-section workspace-border overflow-visible border border-l-[3px]"
-                  data-staff-department={group.name}
-                  style={{ borderLeftColor: departmentColor.border }}
-                >
-                  <div className="overflow-hidden">
-                    <header
-                      className="workspace-header workspace-border flex h-7 items-center border-b px-2.5 text-xs font-black"
-                      style={{ color: departmentColor.border }}
-                    >
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span className="truncate">{group.name || "미분류"}</span>
-                        {canEdit && group.name ? (
-                          <button
-                            type="button"
-                            onClick={() => addMember(group.name)}
-                            className="workspace-button grid h-5 w-5 shrink-0 place-items-center border p-0 transition-colors active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)]"
-                            aria-label={`${group.name} 부서에 인원 추가`}
-                          >
-                            <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
-                          </button>
-                        ) : null}
-                      </span>
-                      <span className="workspace-text-secondary ml-auto shrink-0 text-[10px]">
-                        {group.members.length}명
-                      </span>
-                    </header>
-                  </div>
-                  <div>
-                    {group.members.map((member, index) => (
-                      <StaffMemberRow
-                        key={member.id}
-                        member={member}
-                        number={displayedMemberNumbers.get(member.id) ?? index + 1}
-                        departmentColorIndex={group.colorIndex}
-                        showBottomBorder={index < group.members.length - 1}
-                        isDragging={draggedMemberId === member.id}
-                        isDragTarget={dragTargetMemberId === member.id}
-                        canEdit={canEdit}
-                        totalEpisodes={totalEpisodes}
-                        onChange={updateMember}
-                        onDelete={deleteMember}
-                        onRoleInputRef={registerMemberRoleInput}
-                        onNamePointerDown={handleNamePointerDown}
-                        onNamePointerMove={handleNamePointerMove}
-                        onNamePointerUp={handleNamePointerEnd}
-                        onNamePointerCancel={finishMemberDrag}
-                        onNameClick={handleNameClick}
-                      />
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
+        {staffSections.length > 0 ? (
+          <StaffCardsWorkspace
+            sections={staffSections}
+            canEdit={canEdit}
+            totalEpisodes={totalEpisodes}
+            isSaving={isSaving}
+            pendingDeleteMemberId={pendingMemberDelete?.member.id ?? null}
+            pendingSectionKeys={pendingSectionKeys}
+            onAddMember={addMember}
+            onChange={updateMember}
+            onRequestDelete={requestMemberDelete}
+            onReorder={reorderMemberSection}
+            onRoleInputRef={registerMemberRoleInput}
+          />
         ) : null}
         {departments.length === 0 ? (
           <p className="workspace-text-muted px-2 py-3 text-center text-xs font-bold">
@@ -696,50 +684,257 @@ export default function StaffListPage() {
           </p>
         ) : null}
       </section>
+      {pendingMemberDelete ? (
+        <StaffDeleteConfirmationDialog
+          pending={pendingMemberDelete}
+          isDeleting={isDeletingMember}
+          onCancel={() => {
+            if (!isDeletingMember) setPendingMemberDelete(null);
+          }}
+          onConfirm={() => void confirmMemberDelete()}
+        />
+      ) : null}
     </main>
   );
 }
+
+const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
+  sections,
+  canEdit,
+  totalEpisodes,
+  isSaving,
+  pendingDeleteMemberId,
+  pendingSectionKeys,
+  onAddMember,
+  onChange,
+  onRequestDelete,
+  onReorder,
+  onRoleInputRef
+}: {
+  sections: StaffDisplaySection[];
+  canEdit: boolean;
+  totalEpisodes: number;
+  isSaving: boolean;
+  pendingDeleteMemberId: string | null;
+  pendingSectionKeys: Set<string>;
+  onAddMember: (department: string, afterMemberId?: string) => void;
+  onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
+  onRequestDelete: (member: ProjectStaffMember) => void;
+  onReorder: (sourceMemberId: string, orderedMemberIds: string[]) => void;
+  onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
+}) {
+  const trashRef = useRef<HTMLDivElement | null>(null);
+  const sectionElementsRef = useRef(new Map<string, HTMLDivElement>());
+  const sectionRefCallbacksRef = useRef(new Map<string, (element: HTMLDivElement | null) => void>());
+  const rowKeys = useMemo(
+    () => sections.flatMap((section) => section.members.map((member) => member.id)),
+    [sections]
+  );
+  const sectionKeyByMemberId = useMemo(() => new Map(
+    sections.flatMap((section) => section.members.map((member) => [member.id, section.sectionKey] as const))
+  ), [sections]);
+  const memberById = useMemo(() => new Map(
+    sections.flatMap((section) => section.members.map((member) => [member.id, member] as const))
+  ), [sections]);
+  const displayedMemberNumbers = useMemo(() => new Map(
+    rowKeys.map((memberId, index) => [memberId, index + 1])
+  ), [rowKeys]);
+
+  const registerSection = useCallback((sectionKey: string) => {
+    const existing = sectionRefCallbacksRef.current.get(sectionKey);
+    if (existing) return existing;
+    const callback = (element: HTMLDivElement | null) => {
+      if (element) sectionElementsRef.current.set(sectionKey, element);
+      else sectionElementsRef.current.delete(sectionKey);
+    };
+    sectionRefCallbacksRef.current.set(sectionKey, callback);
+    return callback;
+  }, []);
+
+  const getRowScopeKey = useCallback((rowKey: string) => (
+    sectionKeyByMemberId.get(rowKey) ?? `missing:${rowKey}`
+  ), [sectionKeyByMemberId]);
+
+  const isRowDisabled = useCallback((rowKey: string) => {
+    const sectionKey = sectionKeyByMemberId.get(rowKey);
+    return rowKey === pendingDeleteMemberId
+      || (sectionKey ? pendingSectionKeys.has(sectionKey) : true);
+  }, [pendingDeleteMemberId, pendingSectionKeys, sectionKeyByMemberId]);
+
+  const isDropAllowed = useCallback(({ rowKey, clientX, clientY }: {
+    rowKey: string;
+    clientX: number;
+    clientY: number;
+  }) => {
+    const sectionKey = sectionKeyByMemberId.get(rowKey);
+    const sectionElement = sectionKey ? sectionElementsRef.current.get(sectionKey) : null;
+    if (!sectionElement) return false;
+    const rect = sectionElement.getBoundingClientRect();
+    return clientX >= rect.left
+      && clientX <= rect.right
+      && clientY >= rect.top
+      && clientY <= rect.bottom;
+  }, [sectionKeyByMemberId]);
+
+  const handleReorder = useCallback(({ rowKey, orderedRowKeys }: {
+    rowKey: string;
+    orderedRowKeys: string[];
+  }) => {
+    onReorder(rowKey, orderedRowKeys);
+  }, [onReorder]);
+
+  const handleTrashDrop = useCallback((rowKey: string) => {
+    const member = memberById.get(rowKey);
+    if (member) onRequestDelete(member);
+  }, [memberById, onRequestDelete]);
+
+  const interaction = useDailyPlanTimetableInteraction({
+    rowKeys,
+    disabled: !canEdit || isSaving || pendingDeleteMemberId !== null,
+    trashRef,
+    getRowScopeKey,
+    isRowDisabled,
+    isDropAllowed,
+    throttleWithAnimationFrame: true,
+    onReorder: handleReorder,
+    onTrashDrop: handleTrashDrop
+  });
+  const draggedMember = interaction.draggingRowKey
+    ? memberById.get(interaction.draggingRowKey) ?? null
+    : null;
+
+  return (
+    <>
+      <div className="grid gap-2">
+        {sections.map((section) => {
+          const departmentColor = getStaffDepartmentColor(section.name, section.colorIndex);
+          return (
+            <section
+              key={section.sectionKey}
+              className="staff-department-section workspace-border overflow-visible border border-l-[3px]"
+              data-staff-department={section.name}
+              style={{ borderLeftColor: departmentColor.border }}
+            >
+              <div className="overflow-hidden">
+                <header
+                  className="workspace-header workspace-border flex h-7 items-center border-b px-2.5 text-xs font-black"
+                  style={{ color: departmentColor.border }}
+                >
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span className="truncate">{section.name || "미분류"}</span>
+                    {canEdit && section.name ? (
+                      <button
+                        type="button"
+                        disabled={pendingSectionKeys.has(section.sectionKey)}
+                        onClick={() => onAddMember(section.name)}
+                        className="workspace-button grid h-5 w-5 shrink-0 place-items-center border p-0 transition-colors active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label={`${section.name} 부서에 인원 추가`}
+                      >
+                        <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
+                      </button>
+                    ) : null}
+                  </span>
+                  <span className="workspace-text-secondary ml-auto shrink-0 text-[10px]">
+                    {section.members.length}명
+                  </span>
+                </header>
+              </div>
+              <div ref={registerSection(section.sectionKey)} data-staff-section-key={section.sectionKey}>
+                {section.members.map((member, index) => (
+                  <StaffMemberRow
+                    key={member.id}
+                    member={member}
+                    number={displayedMemberNumbers.get(member.id) ?? index + 1}
+                    departmentColorIndex={section.colorIndex}
+                    showBottomBorder={index < section.members.length - 1}
+                    isSelected={interaction.selectedRowKey === member.id}
+                    isDragging={interaction.draggingRowKey === member.id}
+                    isPending={pendingSectionKeys.has(section.sectionKey) || pendingDeleteMemberId === member.id}
+                    canEdit={canEdit}
+                    totalEpisodes={totalEpisodes}
+                    onChange={onChange}
+                    onDelete={onRequestDelete}
+                    onRoleInputRef={onRoleInputRef}
+                    registerRow={interaction.registerRow}
+                    onCardPointerDownCapture={interaction.onRowPointerDownCapture}
+                    onCardClickCapture={interaction.onRowClickCapture}
+                    onCardContextMenu={interaction.onRowContextMenu}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      {typeof document !== "undefined" && interaction.isDragging ? createPortal(
+        <div className="no-print contents" data-drag-source="staff-card">
+          {interaction.insertion ? (
+            <div
+              className="pointer-events-none fixed z-[128] h-0.5 bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              style={{
+                left: interaction.insertion.left,
+                top: interaction.insertion.top,
+                width: interaction.insertion.width
+              }}
+              aria-hidden
+            />
+          ) : null}
+          {interaction.ghost ? (
+            <div
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-black text-field-text shadow-floating"
+              style={{
+                left: interaction.ghost.left,
+                top: interaction.ghost.top,
+                width: Math.min(interaction.ghost.width, 420),
+                height: Math.min(interaction.ghost.height, 112)
+              }}
+              aria-hidden
+            >
+              {draggedMember?.name.trim() || draggedMember?.role.trim() || "스탭"} 이동 중
+            </div>
+          ) : null}
+          <ArchiveDeleteDropZone ref={trashRef} isActive={interaction.isOverTrash} />
+        </div>,
+        document.body
+      ) : null}
+    </>
+  );
+});
 
 const StaffMemberRow = memo(function StaffMemberRow({
   member,
   number,
   departmentColorIndex,
   showBottomBorder,
+  isSelected,
   isDragging,
-  isDragTarget,
+  isPending,
   canEdit,
   totalEpisodes,
   onChange,
   onDelete,
   onRoleInputRef,
-  onNamePointerDown,
-  onNamePointerMove,
-  onNamePointerUp,
-  onNamePointerCancel,
-  onNameClick
+  registerRow,
+  onCardPointerDownCapture,
+  onCardClickCapture,
+  onCardContextMenu
 }: {
   member: ProjectStaffMember;
   number: number;
   departmentColorIndex: number | null;
   showBottomBorder: boolean;
+  isSelected: boolean;
   isDragging: boolean;
-  isDragTarget: boolean;
+  isPending: boolean;
   canEdit: boolean;
   totalEpisodes: number;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
-  onNamePointerDown: (
-    event: ReactPointerEvent<HTMLInputElement>,
-    memberId: string
-  ) => void;
-  onNamePointerMove: (event: ReactPointerEvent<HTMLInputElement>) => void;
-  onNamePointerUp: (event: ReactPointerEvent<HTMLInputElement>) => void;
-  onNamePointerCancel: () => void;
-  onNameClick: (
-    event: ReactMouseEvent<HTMLInputElement>,
-    memberId: string
-  ) => void;
+  registerRow: (rowKey: string) => (element: HTMLElement | null) => void;
+  onCardPointerDownCapture: (rowKey: string, event: ReactPointerEvent<HTMLElement>) => void;
+  onCardClickCapture: (rowKey: string, event: ReactMouseEvent<HTMLElement>) => void;
+  onCardContextMenu: (rowKey: string, event: ReactMouseEvent<HTMLElement>) => void;
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
   const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -750,14 +945,23 @@ const StaffMemberRow = memo(function StaffMemberRow({
 
   return (
     <article
-      className={`relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition ${
+      ref={registerRow(member.id)}
+      className={`staff-member-row relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition ${
         canEdit
           ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
           : `grid-cols-6 ${desktopGridClassName}`
-      } workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isDragging ? "scale-[0.995] opacity-70" : ""} ${isDragTarget ? "ring-2 ring-inset ring-field-primary/25" : ""}`}
+      } workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "ring-2 ring-inset ring-field-primary/50 bg-field-primary/5" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}
+      data-drag-source="staff-card"
+      data-selected={isSelected ? "true" : "false"}
+      data-dragging={isDragging ? "true" : "false"}
+      aria-busy={isPending || undefined}
+      style={{ WebkitTouchCallout: "none" }}
+      onPointerDownCapture={canEdit ? (event) => onCardPointerDownCapture(member.id, event) : undefined}
+      onClickCapture={canEdit ? (event) => onCardClickCapture(member.id, event) : undefined}
+      onContextMenu={canEdit ? (event) => onCardContextMenu(member.id, event) : undefined}
     >
       <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 직책</span>
@@ -775,18 +979,12 @@ const StaffMemberRow = memo(function StaffMemberRow({
       <label className="col-span-1 flex min-h-8 min-w-0 items-center md:col-auto">
         <span className="sr-only">{number}번 이름</span>
         <input
-          className={`${inputClassName} ${isDragging ? "cursor-grabbing select-none" : ""}`}
+          className={inputClassName}
           value={member.name}
           onChange={(event) => onChange(member.id, { name: event.target.value })}
-          onPointerDown={canEdit ? (event) => onNamePointerDown(event, member.id) : undefined}
-          onPointerMove={canEdit ? onNamePointerMove : undefined}
-          onPointerUp={canEdit ? onNamePointerUp : undefined}
-          onPointerCancel={canEdit ? onNamePointerCancel : undefined}
-          onClick={canEdit ? (event) => onNameClick(event, member.id) : undefined}
           readOnly={!canEdit}
           placeholder="이름"
           aria-label={`${number}번 이름`}
-          title="길게 누른 뒤 움직여 순서 변경"
         />
       </label>
       <label className="col-span-3 flex min-h-8 min-w-0 items-center md:col-auto">
@@ -841,12 +1039,13 @@ const StaffMemberRow = memo(function StaffMemberRow({
         <div className="workspace-border col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
           <button
             type="button"
+            disabled={isPending}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={(event) => {
               event.stopPropagation();
               onDelete(member);
             }}
-            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-field-input text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger"
+            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-field-input text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={`${member.name || `${number}번 스탭`} 삭제`}
           >
             <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
@@ -856,6 +1055,110 @@ const StaffMemberRow = memo(function StaffMemberRow({
     </article>
   );
 });
+
+function StaffDeleteConfirmationDialog({
+  pending,
+  isDeleting,
+  onCancel,
+  onConfirm
+}: {
+  pending: PendingStaffDelete;
+  isDeleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const isDeletingRef = useRef(isDeleting);
+  const onCancelRef = useRef(onCancel);
+  isDeletingRef.current = isDeleting;
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusFrame = window.requestAnimationFrame(() => {
+      dialogRef.current?.querySelector<HTMLButtonElement>("[data-staff-delete-cancel]")?.focus();
+    });
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !isDeletingRef.current) {
+        event.preventDefault();
+        onCancelRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLButtonElement);
+      const nextIndex = event.shiftKey
+        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+      event.preventDefault();
+      focusable[nextIndex]?.focus();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
+    };
+  }, []);
+
+  if (typeof document === "undefined") return null;
+  const staffLabel = pending.member.name.trim() || pending.member.role.trim() || "스탭";
+
+  return createPortal(
+    <div
+      className="no-print fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget && !isDeleting) onCancel();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="staff-delete-title"
+        aria-describedby="staff-delete-description"
+        className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
+      >
+        <h2 id="staff-delete-title" className="text-base font-black text-field-text">
+          {staffLabel} 삭제
+        </h2>
+        <p id="staff-delete-description" className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
+          {pending.sectionLabel} 소속 스탭을 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button
+            data-staff-delete-cancel
+            variant="secondary"
+            disabled={isDeleting}
+            onClick={onCancel}
+          >
+            취소
+          </Button>
+          <Button
+            variant="danger"
+            disabled={isDeleting}
+            onClick={onConfirm}
+          >
+            {isDeleting ? "삭제 중…" : "삭제"}
+          </Button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 function EpisodeParticipationCells({
   member,
@@ -1068,6 +1371,52 @@ function DepartmentChip({
       </button>
     </div>
   );
+}
+
+function getStaffSectionKey(department: unknown) {
+  return normalizeStaffDepartment(department).toLocaleLowerCase("ko-KR") || "__unassigned__";
+}
+
+function hasSameIds(currentIds: string[], requestedIds: string[]) {
+  if (currentIds.length !== requestedIds.length) return false;
+  const currentIdSet = new Set(currentIds);
+  const requestedIdSet = new Set(requestedIds);
+  return requestedIdSet.size === requestedIds.length
+    && requestedIds.every((id) => currentIdSet.has(id));
+}
+
+function applyStaffSectionOrder(
+  members: ProjectStaffMember[],
+  sectionKey: string,
+  orderedMemberIds: string[]
+) {
+  const sectionMembers = sortStaffMembers(members.filter((member) => (
+    getStaffSectionKey(member.department) === sectionKey
+  )));
+  if (!hasSameIds(sectionMembers.map((member) => member.id), orderedMemberIds)) return null;
+
+  const existingSlots = sectionMembers.map((member) => member.sortOrder);
+  const hasStableSlots = existingSlots.every((slot, index) => (
+    Number.isInteger(slot)
+    && slot > 0
+    && (index === 0 || slot > existingSlots[index - 1])
+  ));
+  const orderSlots = hasStableSlots
+    ? existingSlots
+    : sectionMembers.map((_, index) => index + 1);
+  const memberById = new Map(sectionMembers.map((member) => [member.id, member]));
+  const sectionIndexes = members.flatMap((member, index) => (
+    getStaffSectionKey(member.department) === sectionKey ? [index] : []
+  ));
+  const nextMembers = [...members];
+  orderedMemberIds.forEach((memberId, index) => {
+    const member = memberById.get(memberId);
+    const targetIndex = sectionIndexes[index];
+    if (member && targetIndex !== undefined) {
+      nextMembers[targetIndex] = { ...member, sortOrder: orderSlots[index] };
+    }
+  });
+  return nextMembers;
 }
 
 function normalizeDepartmentName(value: string) {

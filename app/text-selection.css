@@ -36,6 +36,12 @@
     textarea,
     select,
     [contenteditable]:not([contenteditable="false"])
+  ),
+  .app-theme .staff-member-row[data-dragging="true"] :where(
+    input,
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"])
   ) {
     -webkit-user-select: none;
     user-select: none;
@@ -44,6 +50,16 @@
 
   /* Timetable long-press belongs to row reordering; short input editing stays enabled. */
   .app-theme .daily-plan-timetable-row :where(
+    input,
+    textarea,
+    select,
+    [contenteditable]:not([contenteditable="false"])
+  ) {
+    -webkit-touch-callout: none;
+  }
+
+  /* Staff cards use the same delayed full-row long-press interaction. */
+  .app-theme .staff-member-row :where(
     input,
     textarea,
     select,
