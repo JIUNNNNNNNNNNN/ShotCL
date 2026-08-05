@@ -80,6 +80,9 @@ export default function ProjectSceneListPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [items, setItems] = useState<ProjectSceneItem[]>([]);
+  const [expandedPortraitSceneIds, setExpandedPortraitSceneIds] = useState<Set<string>>(
+    () => new Set()
+  );
   const [actorRoles, setActorRoles] = useState<string[]>([]);
   const [scenarioReference, setScenarioReference] = useState("");
   const [cellMerges, setCellMerges] = useState<ProjectSceneCellMerge[]>([]);
@@ -125,6 +128,29 @@ export default function ProjectSceneListPage() {
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
+
+  useEffect(() => {
+    setExpandedPortraitSceneIds(new Set());
+  }, [projectId]);
+
+  useEffect(() => {
+    const availableSceneIds = new Set(items.map((item) => item.id));
+    setExpandedPortraitSceneIds((current) => {
+      const next = new Set(
+        Array.from(current).filter((sceneId) => availableSceneIds.has(sceneId))
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [items]);
+
+  const togglePortraitScene = useCallback((sceneId: string) => {
+    setExpandedPortraitSceneIds((current) => {
+      const next = new Set(current);
+      if (next.has(sceneId)) next.delete(sceneId);
+      else next.add(sceneId);
+      return next;
+    });
+  }, []);
   useEffect(() => {
     cellMergesRef.current = cellMerges;
   }, [cellMerges]);
@@ -676,6 +702,8 @@ export default function ProjectSceneListPage() {
               items={items}
               actorRoles={actorRoles}
               cellMerges={cellMerges}
+              expandedSceneIds={expandedPortraitSceneIds}
+              onToggle={togglePortraitScene}
             />
           ) : (
             <div data-scene-list-mode="editor">
@@ -740,11 +768,11 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {viewportMode === "portrait" && scenarioReference ? (
-        <details className="light-workspace scene-workspace workspace-surface workspace-border mt-3 border">
-          <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold">
-            시나리오 참고
+        <details className="mt-3 border border-[rgba(255,255,255,0.20)] bg-[#1e1e1e] text-[rgba(255,255,255,0.87)]">
+          <summary className="cursor-pointer border-0 px-3 py-2 text-center text-sm font-bold">
+            메모
           </summary>
-          <p className="workspace-border workspace-text min-w-0 whitespace-pre-wrap border-t p-3 text-[13px] font-medium leading-[1.5] [overflow-wrap:anywhere]">
+          <p className="min-w-0 whitespace-pre-wrap border-t border-[rgba(255,255,255,0.20)] p-3 text-center text-[13px] font-medium leading-[1.5] text-[rgba(255,255,255,0.87)] [overflow-wrap:anywhere]">
             {scenarioReference}
           </p>
         </details>
