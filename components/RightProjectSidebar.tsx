@@ -78,9 +78,9 @@ function ActionMenuHeader({
   onClose?: () => void;
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-3 border-b border-field-divider px-4 py-3">
+    <div className="flex min-w-0 items-start gap-2 border-b border-field-divider px-3 py-3">
       <div className="min-w-0 flex-1">
-        <p className="font-display truncate text-lg font-black text-field-text" title={projectName || "프로젝트"}>
+        <p className="font-display line-clamp-2 break-words text-base font-black leading-5 text-field-text" title={projectName || "프로젝트"}>
           {projectName || "프로젝트"}
         </p>
         <p className="mt-0.5 text-xs font-bold text-field-muted">{menu.title}</p>
@@ -107,7 +107,7 @@ function ActionMenuItems({
   onAction?: () => void;
 }) {
   return (
-    <nav className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-3" aria-label={menu.ariaLabel}>
+    <nav className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-2.5" aria-label={menu.ariaLabel}>
       {menu.actions.map((action) => (
         <PageActionItem key={action.id} action={action} onAction={onAction} />
       ))}
@@ -135,7 +135,7 @@ function PageActionItem({
       {action.pending
         ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
         : <Icon className="h-4 w-4 shrink-0" aria-hidden />}
-      <span className="min-w-0 break-keep">{action.label}</span>
+      <span className="min-w-0 whitespace-normal break-words leading-5">{action.label}</span>
     </>
   );
 

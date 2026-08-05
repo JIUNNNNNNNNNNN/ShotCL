@@ -81,7 +81,7 @@ const CONTEXT_MENU_WIDTH = 224;
 const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
 
-/** 프로젝트의 공통 기능과 회차를 데스크톱 rail·모바일 drawer에서 함께 사용합니다. */
+/** 프로젝트의 공통 기능과 회차를 floating navigation·모바일 drawer에서 함께 사용합니다. */
 export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigationProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();

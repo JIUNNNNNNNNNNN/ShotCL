@@ -19,7 +19,24 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pro
     if (!project) return NextResponse.json({ error: "프로젝트를 찾을 수 없습니다.", code: "PROJECT_NOT_FOUND" }, { status: 404 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "이 프로젝트에 접근할 권한이 없습니다.", code: "PROJECT_ACCESS_DENIED" }, { status: 403 });
-    return NextResponse.json({ project: { ...project, access_role: grant.role } });
+    const { data: calendarInfo, error: calendarInfoError } = await supabase
+      .from("project_basic_info")
+      .select("total_episodes,shooting_start_date,shooting_end_date")
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (calendarInfoError) {
+      console.error("[project-calendar] basic info lookup failed", {
+        code: calendarInfoError.code,
+        message: calendarInfoError.message
+      });
+    }
+    return NextResponse.json({
+      project: {
+        ...project,
+        access_role: grant.role,
+        calendar_info: calendarInfoError ? null : calendarInfo
+      }
+    });
   } catch (error) {
     return NextResponse.json({ error: "프로젝트 정보를 불러오지 못했습니다.", code: "PROJECT_LOOKUP_FAILED" }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }

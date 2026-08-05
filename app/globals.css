@@ -1611,6 +1611,125 @@ button {
   margin: 0;
 }
 
+.project-calendar-empty {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-surface-2);
+  padding: 16px;
+}
+
+.project-calendar-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(10px, 1.25vw, 16px);
+  min-width: 0;
+}
+
+.project-calendar-grid[data-month-count="1"] {
+  max-width: 32rem;
+}
+
+.project-calendar-grid[data-month-count="2"] {
+  max-width: 64rem;
+}
+
+.project-calendar-month {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-surface-2);
+  padding: clamp(10px, 1.1vw, 14px);
+  box-shadow: var(--shadow-card);
+}
+
+.project-calendar-month__title {
+  min-width: 0;
+  padding: 1px 2px 10px;
+  overflow-wrap: anywhere;
+  color: var(--ui-text-primary);
+  font-size: 0.925rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.project-calendar-weekdays,
+.project-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+  gap: clamp(3px, 0.45vw, 6px);
+}
+
+.project-calendar-weekdays {
+  margin-bottom: 5px;
+  color: var(--ui-text-muted);
+  font-size: clamp(0.65rem, 0.75vw, 0.75rem);
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.project-calendar-day {
+  position: relative;
+  display: grid;
+  aspect-ratio: 1;
+  min-width: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  color: var(--ui-text-secondary);
+  font-size: clamp(0.7rem, 0.85vw, 0.8rem);
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.project-calendar-day--outside {
+  background: transparent;
+  color: var(--ui-text-disabled);
+  opacity: 0.5;
+}
+
+.project-calendar-day--today {
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text-primary);
+}
+
+.project-calendar-day--shooting {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  font-weight: 600;
+}
+
+.project-calendar-day__count {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  font-size: 0.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (min-width: 768px) and (orientation: landscape) {
+  .project-calendar-grid {
+    grid-template-columns: repeat(var(--project-calendar-tablet-columns), minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1120px) and (orientation: landscape) {
+  .project-calendar-grid {
+    grid-template-columns: repeat(var(--project-calendar-desktop-columns), minmax(0, 1fr));
+  }
+}
+
 /* Project App Shell breakpoints are centralized here: mobile < 900, compact < 1360, wide >= 1360. */
 .project-shell {
   box-sizing: border-box;
@@ -1630,17 +1749,6 @@ button {
 .project-shell *::before,
 .project-shell *::after {
   box-sizing: border-box;
-}
-
-.project-shell__navigation {
-  display: none;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  background: var(--bg-surface-1);
-  border-right: 1px solid var(--border-subtle);
 }
 
 .project-shell__app-bar {
@@ -1780,71 +1888,81 @@ button {
   }
 }
 
-@media (min-width: 900px) {
+@media (min-width: 900px), (min-width: 768px) and (min-height: 600px) {
   .project-shell {
-    grid-template-columns: clamp(216px, 22vw, 248px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
 
-  .project-shell__navigation {
-    display: block;
-    grid-column: 1;
-    grid-row: 1 / span 2;
-  }
-
   .project-shell__app-bar {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 1;
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
     padding-left: 16px;
     padding-right: 16px;
   }
 
-  .project-shell__mobile-home,
-  .project-shell__navigation-toggle {
+  .project-shell__mobile-home {
     display: none;
   }
 
   .project-shell__content {
-    grid-column: 2;
+    grid-column: 1;
     grid-row: 2;
     padding: 20px clamp(18px, 2.5vw, 30px) max(28px, env(safe-area-inset-bottom));
   }
 
-  .project-shell__drawer-layer {
-    display: none;
+  .project-shell__drawer-layer--floating {
+    pointer-events: none;
+  }
+
+  .project-shell__navigation-drawer {
+    pointer-events: auto;
+    top: calc(env(safe-area-inset-top) + 64px);
+    bottom: auto;
+    left: max(12px, env(safe-area-inset-left));
+    width: min(312px, calc(100vw - 24px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - 76px);
+    padding-top: 0;
+    padding-bottom: 0;
+    border: 1px solid var(--ui-border-default);
+    border-radius: var(--ui-radius-card);
+    box-shadow: var(--shadow-dialog);
   }
 }
 
 @media (min-width: 1360px) {
   .project-shell {
-    grid-template-columns: clamp(220px, 17vw, 272px) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .project-shell--has-actions {
-    grid-template-columns: clamp(220px, 17vw, 272px) minmax(0, 1fr) clamp(264px, 21vw, 336px);
-  }
-
-  .project-shell__navigation {
-    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) clamp(208px, 15vw, 264px);
   }
 
   .project-shell__app-bar {
-    display: none;
+    display: grid;
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .project-shell__content {
-    grid-column: 2;
-    grid-row: 1;
+    grid-column: 1;
+    grid-row: 2;
     padding: 24px clamp(22px, 2.5vw, 36px) max(32px, env(safe-area-inset-bottom));
   }
 
   .project-shell__action-panel {
     display: flex;
-    grid-column: 3;
-    grid-row: 1;
+    grid-column: 2;
+    grid-row: 1 / span 2;
     flex-direction: column;
+  }
+
+  .project-shell__action-toggle {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .project-shell__action-drawer-overlay {

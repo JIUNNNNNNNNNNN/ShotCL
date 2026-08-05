@@ -114,6 +114,7 @@ export function normalizeDailyPlanMealTimes(value: unknown): DailyPlanMealTime[]
 
 /** Supabase의 snake_case 프로젝트 row를 화면에서 쓰는 camelCase 타입으로 바꿉니다. */
 export function projectFromRow(row: AnyRow): Project {
+  const calendarInfo = normalizeProjectCalendarInfo(row.calendar_info);
   return {
     id: row.id,
     name: row.name,
@@ -122,7 +123,25 @@ export function projectFromRow(row: AnyRow): Project {
     createdAt: row.created_at,
     shareConfigured: Boolean(row.share_enabled),
     accessRole: row.access_role === "admin" || row.access_role === "progress" ? row.access_role : undefined,
-    basicInfo: row.project_basic_info == null ? undefined : normalizeProjectBasicInfo(row.project_basic_info)
+    basicInfo: row.project_basic_info == null ? undefined : normalizeProjectBasicInfo(row.project_basic_info),
+    calendarInfo
+  };
+}
+
+function normalizeProjectCalendarInfo(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const source = value as Record<string, unknown>;
+  const normalized = normalizeProjectBasicInfo({
+    totalEpisodes: source.totalEpisodes ?? source.total_episodes,
+    shootingStartDate: source.shootingStartDate ?? source.shooting_start_date,
+    shootingEndDate: source.shootingEndDate ?? source.shooting_end_date,
+    mainStaff: [],
+    actors: []
+  });
+  return {
+    totalEpisodes: normalized.totalEpisodes,
+    shootingStartDate: normalized.shootingStartDate,
+    shootingEndDate: normalized.shootingEndDate
   };
 }
 

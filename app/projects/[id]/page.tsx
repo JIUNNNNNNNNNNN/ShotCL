@@ -897,7 +897,10 @@ export default function ProjectDetailPage() {
     return (
       <ProjectGuideMenu
         projectId={project.id}
+        projectName={project.name}
         role={role}
+        calendarInfo={project.calendarInfo ?? project.basicInfo ?? null}
+        dailyPlans={dailyPlans}
       />
     );
   }

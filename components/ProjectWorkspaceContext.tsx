@@ -11,7 +11,7 @@ import {
 } from "react";
 import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { getProject } from "@/lib/data/projects";
-import type { DailyPlan, Project } from "@/lib/types";
+import type { DailyPlan, Project, ProjectBasicInfo } from "@/lib/types";
 
 type DailyPlanSummaryPatch = Partial<Pick<
   DailyPlanListItem,
@@ -26,6 +26,7 @@ type ProjectWorkspaceValue = {
   isLoading: boolean;
   error: string;
   refreshDailyPlans: () => Promise<DailyPlanListItem[]>;
+  updateProjectBasicInfo: (basicInfo: ProjectBasicInfo) => void;
   upsertDailyPlan: (plan: DailyPlan, summary?: DailyPlanSummaryPatch) => void;
   removeDailyPlan: (dailyPlanId: string) => void;
 };
@@ -85,6 +86,18 @@ export function ProjectWorkspaceProvider({
     return plans;
   }, [projectId]);
 
+  const updateProjectBasicInfo = useCallback((basicInfo: ProjectBasicInfo) => {
+    setProject((current) => current ? {
+      ...current,
+      basicInfo,
+      calendarInfo: {
+        totalEpisodes: basicInfo.totalEpisodes,
+        shootingStartDate: basicInfo.shootingStartDate,
+        shootingEndDate: basicInfo.shootingEndDate
+      }
+    } : current);
+  }, []);
+
   const upsertDailyPlan = useCallback((plan: DailyPlan, summary: DailyPlanSummaryPatch = {}) => {
     setDailyPlans((current) => {
       const previous = current.find((item) => item.id === plan.id);
@@ -111,6 +124,7 @@ export function ProjectWorkspaceProvider({
     isLoading,
     error,
     refreshDailyPlans,
+    updateProjectBasicInfo,
     upsertDailyPlan,
     removeDailyPlan
   }), [
@@ -122,6 +136,7 @@ export function ProjectWorkspaceProvider({
     projectId,
     refreshDailyPlans,
     removeDailyPlan,
+    updateProjectBasicInfo,
     upsertDailyPlan
   ]);
 

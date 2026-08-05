@@ -11,15 +11,20 @@ import {
   type LucideIcon
 } from "lucide-react";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
+import { ProjectShootingCalendar } from "@/components/ProjectShootingCalendar";
 import {
   buildProjectNavigationHref,
   getVisibleProjectNavigationItems,
   type ProjectNavigationItemId
 } from "@/lib/projectNavigation";
+import type { DailyPlan, ProjectCalendarInfo } from "@/lib/types";
 
 type ProjectGuideMenuProps = {
   projectId: string;
+  projectName: string;
   role: SharedProjectRole | null;
+  calendarInfo?: ProjectCalendarInfo | null;
+  dailyPlans: ReadonlyArray<Pick<DailyPlan, "shootingDate">>;
 };
 
 const PROJECT_GUIDE_ICONS: Record<ProjectNavigationItemId, LucideIcon> = {
@@ -33,16 +38,39 @@ const PROJECT_GUIDE_ICONS: Record<ProjectNavigationItemId, LucideIcon> = {
   storyboardOverhead: Images
 };
 
-/** Go로 프로젝트에 들어온 직후 표시하는 중앙 빠른 이동 메뉴입니다. */
-export function ProjectGuideMenu({ projectId, role }: ProjectGuideMenuProps) {
+/** 모든 진입 경로가 공유하는 프로젝트 홈의 일정과 빠른 이동 메뉴입니다. */
+export function ProjectGuideMenu({
+  projectId,
+  projectName,
+  role,
+  calendarInfo,
+  dailyPlans
+}: ProjectGuideMenuProps) {
   return (
-    <section className="mx-auto flex min-h-[calc(100dvh-8rem)] w-full max-w-4xl items-center justify-center py-4 sm:py-6">
-      <div className="w-full max-w-3xl">
-        <div className="mb-5 text-center sm:mb-6">
-          <h1 className="font-display-strong text-2xl text-field-text sm:text-3xl">프로젝트 메뉴</h1>
-          <p className="mt-1.5 text-sm text-field-subtle">작업할 기능을 선택하세요.</p>
-        </div>
+    <section className="mx-auto grid w-full max-w-[92rem] min-w-0 gap-7 py-2 sm:gap-8 sm:py-3">
+      <header className="min-w-0 border-b border-field-divider pb-4">
+        <h1 className="font-display-strong break-words text-2xl text-field-text sm:text-[1.75rem]">
+          {projectName}
+        </h1>
+        <p className="mt-1.5 text-sm text-field-subtle">
+          {calendarInfo
+            ? `총 ${calendarInfo.totalEpisodes}회차 · 등록 일촬표 ${dailyPlans.length}개`
+            : `등록 일촬표 ${dailyPlans.length}개`}
+        </p>
+      </header>
 
+      <ProjectShootingCalendar
+        projectId={projectId}
+        calendarInfo={calendarInfo}
+        dailyPlans={dailyPlans}
+        canEditBasicInfo={role !== "progress"}
+      />
+
+      <div className="min-w-0">
+        <div className="mb-3 flex items-end justify-between gap-3 px-0.5">
+          <h2 className="font-display text-lg font-black text-field-text">프로젝트 메뉴</h2>
+          <p className="text-xs text-field-muted">작업할 기능을 선택하세요.</p>
+        </div>
         <nav className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3" aria-label="프로젝트 기능 길잡이">
           {getVisibleProjectNavigationItems(role).map((item) => {
             const Icon = PROJECT_GUIDE_ICONS[item.id];

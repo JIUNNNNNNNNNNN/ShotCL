@@ -325,7 +325,15 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
   cacheProjectBasicInfo(databaseProjectId, savedBasicInfo);
   const cachedProject = projectCache.get(databaseProjectId);
   if (cachedProject) {
-    cacheProject(databaseProjectId, { ...cachedProject.value, basicInfo: savedBasicInfo });
+    cacheProject(databaseProjectId, {
+      ...cachedProject.value,
+      basicInfo: savedBasicInfo,
+      calendarInfo: {
+        totalEpisodes: savedBasicInfo.totalEpisodes,
+        shootingStartDate: savedBasicInfo.shootingStartDate,
+        shootingEndDate: savedBasicInfo.shootingEndDate
+      }
+    });
   }
   return savedBasicInfo;
 }

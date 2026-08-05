@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { ProjectBasicInfoForm } from "@/components/ProjectBasicInfoForm";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo, saveProjectBasicInfo } from "@/lib/data/projects";
 import type { Project, ProjectBasicInfo } from "@/lib/types";
@@ -17,6 +18,7 @@ function useProjectId() {
 export default function ProjectBasicInfoPage() {
   const projectId = useProjectId();
   const router = useRouter();
+  const { updateProjectBasicInfo } = useProjectWorkspace();
   const [project, setProject] = useState<Project | null>(null);
   const [basicInfo, setBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -55,8 +57,9 @@ export default function ProjectBasicInfoPage() {
     if (!project) throw new Error("프로젝트를 찾을 수 없습니다.");
     const saved = await saveProjectBasicInfo(project.id, nextValue);
     setBasicInfo(saved);
+    updateProjectBasicInfo(saved);
     router.replace(`/projects/${project.id}`);
-  }, [project, router]);
+  }, [project, router, updateProjectBasicInfo]);
 
   if (isLoading) return <PixelDogLoader size="lg" />;
   if (!project || !basicInfo) {

@@ -92,6 +92,12 @@ export type ProjectBasicInfo = {
   actors: ProjectActor[];
 };
 
+/** 프로젝트 홈에서 권한 공통으로 노출해도 되는 촬영 일정 요약입니다. */
+export type ProjectCalendarInfo = Pick<
+  ProjectBasicInfo,
+  "totalEpisodes" | "shootingStartDate" | "shootingEndDate"
+>;
+
 export type Project = {
   id: string;
   name: string;
@@ -101,6 +107,7 @@ export type Project = {
   shareConfigured?: boolean;
   accessRole?: "admin" | "progress";
   basicInfo?: ProjectBasicInfo;
+  calendarInfo?: ProjectCalendarInfo;
 };
 
 export type ProjectInput = {
