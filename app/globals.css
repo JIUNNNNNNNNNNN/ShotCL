@@ -144,20 +144,31 @@
 
 :root {
   color-scheme: dark;
-  background: #121212;
-  --ui-bg: #121212;
-  --ui-bg-deep: #121212;
-  --ui-surface-1: #1e1e1e;
-  --ui-surface-2: #222222;
-  --ui-surface-3: #272727;
-  --ui-surface-4: #2d2d2d;
-  --accent-neon: #f0ff3d;
-  --accent-neon-hover: #f5ff70;
-  --accent-neon-active: #d9ea2d;
-  --accent-neon-soft: rgba(240, 255, 61, 0.14);
-  --accent-neon-soft-strong: rgba(240, 255, 61, 0.22);
-  --accent-neon-border: rgba(240, 255, 61, 0.72);
-  --accent-neon-focus: rgba(240, 255, 61, 0.42);
+  background: #070807;
+  --bg-base: #070807;
+  --bg-surface-1: #111111;
+  --bg-surface-2: #161616;
+  --bg-surface-3: #1d1d1d;
+  --text-primary: #ffffff;
+  --text-secondary: #c0c2b8;
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --accent-primary: #d5ff40;
+  --accent-glow: rgba(213, 255, 64, 0.22);
+  --accent-soft: rgba(213, 255, 64, 0.14);
+  --focus-ring: rgba(213, 255, 64, 0.4);
+  --ui-bg: var(--bg-base);
+  --ui-bg-deep: #050505;
+  --ui-surface-1: var(--bg-surface-1);
+  --ui-surface-2: var(--bg-surface-2);
+  --ui-surface-3: var(--bg-surface-3);
+  --ui-surface-4: #222222;
+  --accent-neon: var(--accent-primary);
+  --accent-neon-hover: #e1ff72;
+  --accent-neon-active: #b7dd2d;
+  --accent-neon-soft: var(--accent-soft);
+  --accent-neon-soft-strong: rgba(213, 255, 64, 0.22);
+  --accent-neon-border: rgba(213, 255, 64, 0.68);
+  --accent-neon-focus: var(--focus-ring);
   --on-accent-neon: #111111;
   --ui-accent: var(--accent-neon);
   --ui-accent-hover: var(--accent-neon-hover);
@@ -167,14 +178,14 @@
   --ui-accent-border: var(--accent-neon-border);
   --ui-accent-focus: var(--accent-neon-focus);
   --ui-on-accent: var(--on-accent-neon);
-  --ui-text-primary: #f7f8f2;
-  --ui-text-secondary: #c0c2b8;
-  --ui-text-muted: #82877c;
-  --ui-text-disabled: #6f6f6f;
-  --ui-border-subtle: rgba(255, 255, 255, 0.09);
-  --ui-border-default: rgba(255, 255, 255, 0.14);
-  --ui-border-strong: rgba(255, 255, 255, 0.22);
-  --ui-control: #252525;
+  --ui-text-primary: var(--text-primary);
+  --ui-text-secondary: var(--text-secondary);
+  --ui-text-muted: #858a80;
+  --ui-text-disabled: #686b64;
+  --ui-border-subtle: var(--border-subtle);
+  --ui-border-default: rgba(255, 255, 255, 0.16);
+  --ui-border-strong: rgba(255, 255, 255, 0.24);
+  --ui-control: var(--bg-surface-3);
   --ui-radius-control: 6px;
   --ui-radius-card: 10px;
   --ui-radius-panel: 14px;
@@ -186,15 +197,15 @@
   --ui-space-6: 24px;
   --ui-space-8: 32px;
   --ui-space-12: 48px;
-  --surface-00: #121212;
-  --surface-01: #1e1e1e;
-  --surface-02: #222222;
-  --surface-03: #252525;
-  --surface-04: #272727;
-  --surface-06: #2c2c2c;
-  --surface-08: #2d2d2d;
-  --surface-12: #333333;
-  --surface-16: #353535;
+  --surface-00: var(--bg-base);
+  --surface-01: var(--bg-surface-1);
+  --surface-02: var(--bg-surface-2);
+  --surface-03: var(--bg-surface-3);
+  --surface-04: #222222;
+  --surface-06: #252525;
+  --surface-08: #292929;
+  --surface-12: #2d2d2d;
+  --surface-16: #333333;
   --surface-24: #383838;
   --background: var(--surface-00);
   --section: var(--surface-01);
@@ -206,13 +217,11 @@
   --floating-high: var(--surface-12);
   --overlay-panel: var(--surface-16);
   --dialog: var(--surface-24);
-  --text-primary: var(--ui-text-primary);
-  --text-secondary: var(--ui-text-secondary);
   --text-disabled: var(--ui-text-disabled);
   --border-neutral: var(--ui-border-subtle);
   --border-strong: var(--ui-border-default);
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-floating: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.035), 0 10px 28px rgba(0, 0, 0, 0.18);
+  --shadow-floating: 0 12px 34px rgba(0, 0, 0, 0.34);
   --shadow-dialog: 0 18px 48px rgba(0, 0, 0, 0.42);
   --field-paper: var(--background);
   --field-section: var(--section);
@@ -240,8 +249,8 @@
   --field-accent-focus: var(--ui-accent-focus);
   --field-accent-foreground: var(--ui-on-accent);
   --field-danger: #e25555;
-  --status-ok: #9a8956;
-  --status-warning: #9a8956;
+  --status-ok: var(--accent-primary);
+  --status-warning: var(--accent-primary);
   --daily-plan-font-family:
     -apple-system,
     BlinkMacSystemFont,
@@ -445,14 +454,44 @@ button {
 }
 
 .app-background {
+  --app-glow-layer: radial-gradient(
+    ellipse 76% 34% at 50% 112%,
+    rgba(213, 255, 64, 0.07),
+    transparent 72%
+  );
   min-width: 0;
   overflow-x: clip;
   background-color: var(--ui-bg);
-  background-image: none;
+  background-image:
+    var(--app-glow-layer),
+    linear-gradient(180deg, #070807 0%, #090a08 58%, #060706 100%);
 }
 
 .app-home-glow {
-  background-image: none;
+  --app-glow-layer: radial-gradient(
+    ellipse 88% 40% at 50% 104%,
+    rgba(213, 255, 64, 0.16),
+    transparent 70%
+  );
+}
+
+@media (max-width: 767px) {
+  .app-background {
+    --app-glow-layer: radial-gradient(
+      ellipse 104% 28% at 50% 106%,
+      rgba(213, 255, 64, 0.055),
+      transparent 72%
+    );
+    background-image: var(--app-glow-layer), linear-gradient(180deg, #070807 0%, #090a08 62%, #060706 100%);
+  }
+
+  .app-home-glow {
+    --app-glow-layer: radial-gradient(
+      ellipse 112% 34% at 50% 100%,
+      rgba(213, 255, 64, 0.13),
+      transparent 72%
+    );
+  }
 }
 
 /* Generic accent utilities use one visible neon system instead of many weak opacity variants. */
@@ -490,12 +529,14 @@ button {
   border-color: var(--accent-neon);
   background-color: var(--accent-neon);
   color: var(--on-accent-neon);
+  box-shadow: 0 8px 24px rgba(213, 255, 64, 0.12);
 }
 
 @media (hover: hover) {
   .neon-primary:hover {
     border-color: var(--accent-neon-hover);
     background-color: var(--accent-neon-hover);
+    box-shadow: 0 10px 28px rgba(213, 255, 64, 0.18);
   }
 }
 
@@ -639,9 +680,9 @@ button {
   --workspace-border: #d5d5d5;
   --workspace-grid: #d6d6d6;
   --workspace-divider: #bfbfbf;
-  --workspace-accent: #7a693c;
-  --workspace-accent-soft: rgba(154, 137, 86, 0.09);
-  --workspace-accent-border: rgba(122, 105, 60, 0.48);
+  --workspace-accent: #111111;
+  --workspace-accent-soft: rgba(213, 255, 64, 0.26);
+  --workspace-accent-border: rgba(17, 17, 17, 0.72);
   color: var(--workspace-text);
 }
 
@@ -777,7 +818,7 @@ button {
 }
 
 .light-workspace .workspace-accent-text {
-  color: #695b36;
+  color: #111111;
 }
 
 .light-workspace .workspace-control,
@@ -830,18 +871,18 @@ button {
 
 .light-workspace.workspace-primary-action,
 .light-workspace .workspace-primary-action {
-  border-color: var(--workspace-accent-border);
+  border-color: #d5ff40;
   border-radius: 0;
-  background-color: var(--workspace-accent-soft);
-  color: #695b36;
+  background-color: #d5ff40;
+  color: #111111;
 }
 
 @media (hover: hover) {
   .light-workspace.workspace-primary-action:hover,
   .light-workspace .workspace-primary-action:hover {
-    border-color: var(--workspace-accent);
-    background-color: rgba(154, 137, 86, 0.14);
-    color: #594d2e;
+    border-color: #e1ff72;
+    background-color: #e1ff72;
+    color: #111111;
   }
 }
 

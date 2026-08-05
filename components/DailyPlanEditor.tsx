@@ -2004,7 +2004,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <tr
                         key={meal.id}
                         ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
-                        className={`daily-plan-timetable-row bg-[#fff3c4] align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                        className={`daily-plan-timetable-row bg-field-soft align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                         data-selected={isSelected ? "true" : undefined}
                         data-dragging={isDragging ? "true" : undefined}
                         style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}

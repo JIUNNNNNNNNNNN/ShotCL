@@ -887,18 +887,18 @@ export default function HomePage() {
                   }}
                   className={`functional-circle flex h-full w-full flex-col items-center justify-center border bg-field-panel px-2 text-center text-field-text outline-none transition-[background-color,border-color] duration-[240ms] ease-out ${
                     isSelectedProject
-                      ? "neon-selected-strong text-field-text"
+                      ? "neon-primary !text-field-accent-foreground"
                       : isActive
-                      ? "neon-selected-strong text-field-text"
+                      ? "neon-primary !text-field-accent-foreground"
                       : "border-field-border hover:border-field-divider hover:bg-field-hover"
                   } focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
                   aria-label={`${project.name} ${pickerTitle}`}
                   aria-pressed={isActive || isSelectedProject}
                 >
-                  <span className="overflow-hidden text-[11px] font-bold leading-[1.4] text-field-text [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
+                  <span className="overflow-hidden text-[11px] font-bold leading-[1.4] text-inherit [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] md:text-xs">
                     <span className="font-display">{project.name}</span>
                   </span>
-                  <span className={`mt-1 hidden max-w-full truncate text-[9px] md:block md:text-[10px] ${isActive || isSelectedProject ? "text-field-subtle" : "text-field-muted"}`}>
+                  <span className={`mt-1 hidden max-w-full truncate text-[9px] md:block md:text-[10px] ${isActive || isSelectedProject ? "text-[#111111]/75" : "text-field-muted"}`}>
                     {project.accessRole === "progress" ? "Staff" : project.shareConfigured ? "Key staff" : "공유 설정 필요"}
                   </span>
                 </button>
@@ -1039,8 +1039,8 @@ export default function HomePage() {
                         } ${
                           isEmphasized
                             ? isProjectRingOpen
-                              ? "neon-selected-strong z-20 scale-[0.86] !text-field-text opacity-100 md:scale-[0.94]"
-                              : "neon-selected-strong z-20 scale-[0.94] !text-field-text opacity-100"
+                              ? "neon-primary z-20 scale-[0.86] !text-field-accent-foreground opacity-100 md:scale-[0.94]"
+                              : "neon-primary z-20 scale-[0.94] !text-field-accent-foreground opacity-100"
                             : isProjectRingOpen
                               ? "z-10 scale-[0.7] border-field-border opacity-55 hover:border-field-divider hover:opacity-75 md:scale-[0.82] md:opacity-70"
                               : "z-10 scale-[0.82] border-field-border opacity-70 hover:border-field-divider hover:opacity-90"

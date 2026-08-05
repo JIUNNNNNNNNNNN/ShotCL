@@ -4,8 +4,8 @@
   "description": "촬영 현장에서 오늘의 컷 진행 상태를 공유하는 모바일 PWA",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#121212",
-  "theme_color": "#121212",
+  "background_color": "#070807",
+  "theme_color": "#070807",
   "orientation": "portrait",
   "icons": [
     {

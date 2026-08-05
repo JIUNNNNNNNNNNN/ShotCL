@@ -143,14 +143,14 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
       data-scene-portrait-row-id={item.id}
       data-expanded={isExpanded ? "true" : "false"}
       className={`box-border w-full max-w-full min-w-0 border bg-white ${
-        isExpanded ? "border-[#9a8956]" : "border-[#aeb3ae]"
+        isExpanded ? "border-[#111111]" : "border-[#aeb3ae]"
       }`}
     >
       <button
         type="button"
         data-scene-portrait-toggle={item.id}
         className={`grid min-h-12 w-full min-w-0 touch-pan-y grid-cols-[1.5rem_minmax(0,1fr)_1.5rem] items-center border-0 px-3 py-2 text-center ${
-          isExpanded ? "border-b border-[#9a8956] bg-[#e8e6df] text-[#5d512f]" : "bg-[#e7e7e7] text-[#252525]"
+          isExpanded ? "border-b border-[#111111] bg-[#d5ff40] text-[#111111]" : "bg-[#e7e7e7] text-[#252525]"
         }`}
         aria-expanded={isExpanded}
         aria-controls={bodyId}
@@ -267,20 +267,20 @@ function PortraitField({
       role="group"
       data-scene-portrait-memo={isDark ? "true" : undefined}
       className={`box-border flex min-w-0 flex-col text-center ${
-        isDark ? "bg-[#1e1e1e] text-[rgba(255,255,255,0.87)]" : ""
+        isDark ? "bg-field-section text-field-text" : ""
       } ${className}`}
       aria-label={label}
     >
       <span className={`flex min-h-7 items-center justify-center px-2 py-1 text-center text-[11px] font-bold leading-[1.4] ${
         isDark
-          ? "border-b border-[rgba(255,255,255,0.20)] bg-[#1e1e1e] text-[rgba(255,255,255,0.87)]"
+          ? "border-b border-field-divider bg-field-section text-field-text"
           : "bg-[#eeeeee] text-[#555]"
       }`}>
         {label}
       </span>
       <span
         className={`flex min-h-9 min-w-0 flex-col items-center justify-center whitespace-pre-wrap px-2 py-2 text-center [overflow-wrap:anywhere] ${
-          isDark ? "bg-[#1e1e1e] text-[rgba(255,255,255,0.87)]" : ""
+          isDark ? "bg-field-section text-field-text" : ""
         } ${valueClassName}`}
         style={valueStyle}
       >

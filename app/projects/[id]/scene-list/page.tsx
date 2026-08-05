@@ -768,11 +768,11 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {viewportMode === "portrait" && scenarioReference ? (
-        <details className="mt-3 border border-[rgba(255,255,255,0.20)] bg-[#1e1e1e] text-[rgba(255,255,255,0.87)]">
+        <details className="mt-3 border border-field-divider bg-field-section text-field-text">
           <summary className="cursor-pointer border-0 px-3 py-2 text-center text-sm font-bold">
             메모
           </summary>
-          <p className="min-w-0 whitespace-pre-wrap border-t border-[rgba(255,255,255,0.20)] p-3 text-center text-[13px] font-medium leading-[1.5] text-[rgba(255,255,255,0.87)] [overflow-wrap:anywhere]">
+          <p className="min-w-0 whitespace-pre-wrap border-t border-field-divider p-3 text-center text-[13px] font-medium leading-[1.5] text-field-text [overflow-wrap:anywhere]">
             {scenarioReference}
           </p>
         </details>

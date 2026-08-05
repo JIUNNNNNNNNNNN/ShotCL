@@ -85,7 +85,7 @@ const mergeColumnField: Record<ProjectSceneMergeColumn, keyof ProjectSceneItem> 
 };
 
 const tableInputClass =
-  "h-full min-h-9 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944]";
+  "h-full min-h-9 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111]";
 const sceneTableBaseWidth = 1087;
 const sceneActorColumnWidth = 72;
 
@@ -777,7 +777,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
         style={{
           ...style,
           boxShadow: selected
-            ? "inset 0 0 0 2px rgba(122,105,60,.78), inset 0 0 0 9999px rgba(154,137,86,.07)"
+            ? "inset 0 0 0 2px rgba(17,17,17,.88), inset 0 0 0 9999px rgba(213,255,64,.24)"
             : undefined
         }}
         onPointerDown={(event) => onBeginSelection(event, cell)}
@@ -1144,7 +1144,7 @@ function EditableTextCell({
             }}
             rows={Math.max(1, Math.min(5, value.split("\n").length))}
             aria-label={ariaLabel}
-            className="block min-h-9 w-full resize-none border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-medium leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944]"
+            className="block min-h-9 w-full resize-none border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-medium leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111]"
           />
         ) : null
       ) : (
@@ -1246,7 +1246,7 @@ function SceneMenuButton({
       role="menuitem"
       disabled={disabled}
       onClick={onClick}
-      className="workspace-button flex min-h-10 w-full items-center border-0 px-3 text-left text-xs font-bold transition-colors hover:bg-[#f0f0f0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#8b7944] disabled:cursor-not-allowed disabled:opacity-35"
+      className="workspace-button flex min-h-10 w-full items-center border-0 px-3 text-left text-xs font-bold transition-colors hover:bg-[#f0f0f0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111] disabled:cursor-not-allowed disabled:opacity-35"
     >
       {children}
     </button>
