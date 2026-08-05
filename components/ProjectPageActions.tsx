@@ -38,6 +38,7 @@ export type ProjectPageActionOverride = {
   disabled?: boolean;
   pending?: boolean;
   hidden?: boolean;
+  emphasis?: "primary" | "secondary";
 };
 
 export type ProjectPageActionMenuRegistration = {
@@ -63,6 +64,7 @@ export type ResolvedProjectPageActionMenu = {
 type ActionDefinition = {
   label: string;
   icon: LucideIcon;
+  emphasis?: "primary" | "secondary";
 };
 
 type MenuDefinition = {
@@ -74,12 +76,12 @@ type MenuDefinition = {
 const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   dailyPlanPdf: { label: "PDF 저장", icon: Printer },
   dailyPlanPortraitPdf: { label: "PDF 세로 저장", icon: Printer },
-  dailyPlanSave: { label: "일촬표 저장", icon: Save },
+  dailyPlanSave: { label: "일촬표 저장", icon: Save, emphasis: "primary" },
   dailyPlanRounds: { label: "회차 선택", icon: CalendarDays },
   archiveDiagram: { label: "부감도", icon: Map },
   archiveStoryboard: { label: "콘티", icon: Clapperboard },
   progressRounds: { label: "회차 선택", icon: CalendarDays },
-  progressAddCut: { label: "새 컷 추가", icon: Plus }
+  progressAddCut: { label: "새 컷 추가", icon: Plus, emphasis: "primary" }
 };
 
 const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {

@@ -142,7 +142,7 @@ export function ShotArchivePicker({
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-disabled focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
           </label>
           {selected ? (
-            <div className="flex items-center justify-between gap-2 border border-field-primary/70 bg-field-primary/10 px-3 py-2">
+            <div className="flex items-center justify-between gap-2 rounded-[10px] border border-field-primary/70 bg-field-primary/10 px-3 py-2">
               <p className="min-w-0 truncate text-xs font-bold text-field-primary">현재 연결: {selected.filename}</p>
               {!readOnly ? (
                 <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1  border border-field-danger/60 bg-field-panel px-2 text-[11px] font-bold text-field-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger">

@@ -84,7 +84,7 @@ export default function LoginPage() {
           title="로그인"
           description="현재 배포본은 테스트 모드이며 실제 계정 로그인과 프로젝트 공유가 비활성화되어 있습니다."
         />
-        <div className="border border-field-border bg-field-panel p-5 leading-6 text-field-muted">
+        <div className="rounded-[10px] border border-field-border bg-field-panel p-5 leading-6 text-field-muted shadow-card">
           Supabase URL과 anon key가 연결되지 않았습니다. 환경변수를 연결한 뒤 실제 계정 로그인과 협업 공유를 사용할 수 있습니다.
         </div>
       </>
@@ -95,8 +95,8 @@ export default function LoginPage() {
     <>
       <PageHeader title="로그인" description="Supabase 이메일 매직링크로 접속합니다." />
 
-      {message ? <div className="mb-4 border border-field-divider bg-field-soft p-4 text-sm font-bold text-field-subtle">{message}</div> : null}
-      {errorMessage ? <div className="mb-4 border border-field-danger bg-field-panel p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
+      {message ? <div role="status" className="mb-4 border border-field-divider bg-field-soft p-4 text-sm font-semibold text-field-subtle">{message}</div> : null}
+      {errorMessage ? <div role="alert" className="mb-4 border border-field-danger bg-field-panel p-4 text-sm font-semibold text-field-danger">{errorMessage}</div> : null}
 
       {currentEmail ? (
         <section className="border border-field-border bg-field-panel p-4">
@@ -113,7 +113,7 @@ export default function LoginPage() {
           </button>
         </section>
       ) : (
-        <form onSubmit={handleLogin} className="grid gap-4 border border-field-border bg-field-panel p-4">
+        <form onSubmit={handleLogin} className="grid gap-4 rounded-[10px] border border-field-border bg-field-panel p-4 shadow-card">
           <label className="grid gap-2">
             <span className="text-sm text-field-muted">이메일</span>
             <input

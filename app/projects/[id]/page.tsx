@@ -951,13 +951,13 @@ export default function ProjectDetailPage() {
       />
 
       {errorMessage ? (
-        <div className="mb-3 border border-field-danger bg-field-panel p-3 text-sm font-bold text-field-danger">
+        <div role="alert" className="mb-3 border border-field-danger bg-field-panel p-3 text-sm font-semibold text-field-danger">
           {errorMessage}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="mb-3 border border-field-divider bg-field-soft p-3 text-sm font-bold text-field-subtle">
+        <div role="status" className="mb-3 border border-field-divider bg-field-soft p-3 text-sm font-semibold text-field-subtle">
           {successMessage}
         </div>
       ) : null}
@@ -974,7 +974,7 @@ export default function ProjectDetailPage() {
         ) : (
           <div className="grid gap-3">
             <section aria-labelledby="active-progress-shots-title" className="grid gap-2">
-              <div className="flex min-h-10 items-center gap-2 border border-field-border bg-field-section px-3 py-2">
+              <div className="flex min-h-10 items-center gap-2 rounded-[10px] border border-field-border bg-field-section px-3 py-2">
                 <h3 id="active-progress-shots-title" className="text-sm font-bold text-field-text">미촬영·촬영중</h3>
                 <span className="tabular-nums text-xs font-bold text-field-subtle">{activeShots.length}</span>
               </div>
@@ -1283,7 +1283,7 @@ function EpisodeSelection({
           </h1>
         </div>
 
-        {invalidSelection ? <p className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-bold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
+        {invalidSelection ? <p role="alert" className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-semibold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
 
         {carouselItems.length === 0 ? (
           <p className="mt-8 text-center text-sm text-field-muted">진행 가능한 일촬표가 없습니다.</p>

@@ -144,17 +144,48 @@
 
 :root {
   color-scheme: dark;
-  background: #121212;
-  --surface-00: #121212;
-  --surface-01: #1e1e1e;
-  --surface-02: #222222;
-  --surface-03: #252525;
-  --surface-04: #272727;
-  --surface-06: #2c2c2c;
-  --surface-08: #2d2d2d;
-  --surface-12: #333333;
-  --surface-16: #353535;
-  --surface-24: #383838;
+  background: #080a08;
+  --ui-bg: #080a08;
+  --ui-bg-deep: #050605;
+  --ui-surface-1: #10120f;
+  --ui-surface-2: #151814;
+  --ui-surface-3: #1b1f19;
+  --ui-surface-4: #22271f;
+  --ui-accent: #d5ff40;
+  --ui-accent-hover: #e1ff72;
+  --ui-accent-active: #b7dd2d;
+  --ui-accent-soft: rgba(213, 255, 64, 0.1);
+  --ui-accent-border: rgba(213, 255, 64, 0.42);
+  --ui-on-accent: #090b08;
+  --ui-text-primary: #f7f8f2;
+  --ui-text-secondary: #c0c2b8;
+  --ui-text-muted: #82877c;
+  --ui-text-disabled: #5e635a;
+  --ui-border-subtle: rgba(255, 255, 255, 0.09);
+  --ui-border-default: rgba(255, 255, 255, 0.14);
+  --ui-border-strong: rgba(255, 255, 255, 0.22);
+  --ui-control: #0d0f0c;
+  --ui-radius-control: 6px;
+  --ui-radius-card: 10px;
+  --ui-radius-panel: 14px;
+  --ui-radius-landing: 20px;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-6: 24px;
+  --ui-space-8: 32px;
+  --ui-space-12: 48px;
+  --surface-00: var(--ui-bg);
+  --surface-01: var(--ui-surface-1);
+  --surface-02: var(--ui-surface-2);
+  --surface-03: var(--ui-control);
+  --surface-04: var(--ui-surface-3);
+  --surface-06: var(--ui-surface-3);
+  --surface-08: var(--ui-surface-3);
+  --surface-12: var(--ui-surface-4);
+  --surface-16: var(--ui-surface-4);
+  --surface-24: var(--ui-surface-2);
   --background: var(--surface-00);
   --section: var(--surface-01);
   --card: var(--surface-02);
@@ -165,13 +196,14 @@
   --floating-high: var(--surface-12);
   --overlay-panel: var(--surface-16);
   --dialog: var(--surface-24);
-  --text-primary: rgba(255, 255, 255, 0.87);
-  --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-disabled: rgba(255, 255, 255, 0.38);
-  --border-neutral: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(255, 255, 255, 0.2);
-  --shadow-floating: 0 8px 24px rgba(0, 0, 0, 0.24);
-  --shadow-dialog: 0 12px 32px rgba(0, 0, 0, 0.32);
+  --text-primary: var(--ui-text-primary);
+  --text-secondary: var(--ui-text-secondary);
+  --text-disabled: var(--ui-text-disabled);
+  --border-neutral: var(--ui-border-subtle);
+  --border-strong: var(--ui-border-default);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-floating: 0 10px 28px rgba(0, 0, 0, 0.28);
+  --shadow-dialog: 0 18px 48px rgba(0, 0, 0, 0.42);
   --field-paper: var(--background);
   --field-section: var(--section);
   --field-panel: var(--card);
@@ -182,20 +214,22 @@
   --field-elevated: var(--floating);
   --field-floating: var(--floating-high);
   --field-overlay: var(--overlay-panel);
-  --field-dialog: var(--dialog);
+  --field-dialog: var(--ui-surface-2);
   --field-line: var(--border-neutral);
   --field-divider: var(--border-strong);
   --field-text: var(--text-primary);
   --field-secondary-text: var(--text-secondary);
-  --field-muted: var(--text-secondary);
+  --field-muted: var(--ui-text-muted);
   --field-disabled: var(--text-disabled);
-  --field-accent: #9a8956;
-  --field-accent-hover: #aa9964;
-  --field-accent-strong: #b6a570;
-  --field-accent-soft: rgba(154, 137, 86, 0.1);
-  --field-accent-border: rgba(182, 165, 112, 0.52);
-  --field-accent-foreground: #15130d;
+  --field-accent: var(--ui-accent);
+  --field-accent-hover: var(--ui-accent-hover);
+  --field-accent-strong: var(--ui-accent-active);
+  --field-accent-soft: var(--ui-accent-soft);
+  --field-accent-border: var(--ui-accent-border);
+  --field-accent-foreground: var(--ui-on-accent);
   --field-danger: #e25555;
+  --status-ok: #9a8956;
+  --status-warning: #9a8956;
   --daily-plan-font-family:
     -apple-system,
     BlinkMacSystemFont,
@@ -225,7 +259,8 @@ html {
     "Noto Sans KR",
     sans-serif;
   line-height: 1.45;
-  font-weight: 100;
+  font-weight: 400;
+  overflow-x: clip;
 }
 
 body {
@@ -242,7 +277,7 @@ body {
     "Noto Sans KR",
     sans-serif;
   line-height: 1.45;
-  font-weight: 100;
+  font-weight: 400;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -253,7 +288,7 @@ input,
 textarea,
 select {
   font-family: inherit;
-  font-weight: 100 !important;
+  font-weight: 400 !important;
   line-height: 1.35;
 }
 
@@ -267,7 +302,7 @@ table {
 }
 
 table td {
-  font-weight: 100;
+  font-weight: 400;
 }
 
 th,
@@ -285,6 +320,10 @@ b {
 .font-display,
 .font-display-strong {
   font-family: "Paperlogy", system-ui, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-weight: 600;
+}
+
+.font-display-strong {
   font-weight: 700;
 }
 
@@ -298,12 +337,36 @@ div {
 
 button {
   -webkit-tap-highlight-color: transparent;
-  border-radius: 0;
 }
 
-.app-theme :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select),
-.app-theme :where([role="dialog"], [role="menu"], [role="listbox"], [role="option"]) {
-  border-radius: 0;
+.app-theme :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  min-width: 0;
+}
+
+@layer base {
+  button,
+  summary,
+  label:has(input[type="file"]),
+  a[class*="inline-flex"],
+  a[class*="min-h-"][class*="items-center"] {
+    border-radius: var(--ui-radius-control);
+  }
+
+  .app-theme :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    border-radius: var(--ui-radius-control);
+  }
+
+  .app-theme :where(button, a, input, textarea, select, summary) {
+    transition-property: color, background-color, border-color, box-shadow, opacity;
+    transition-duration: 140ms;
+    transition-timing-function: ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app-theme :where(button, a, input, textarea, select, summary, [role="dialog"], [role="menu"]) {
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 /* role에 맞춘 surface 단계만 보정하며 modal scrim과 문서 preview에는 영향을 주지 않습니다. */
@@ -343,20 +406,13 @@ button {
   }
 }
 
-summary,
-label:has(input[type="file"]),
-a[class*="inline-flex"],
-a[class*="min-h-"][class*="items-center"] {
-  border-radius: 0;
-}
-
 /* New / Join / Go와 프로젝트 궤도처럼 동작 자체가 원형인 컨트롤만 예외입니다. */
 .functional-circle {
   border-radius: 9999px !important;
 }
 
 ::selection {
-  background: rgba(154, 137, 86, 0.24);
+  background: rgba(213, 255, 64, 0.24);
   color: var(--field-text);
 }
 
@@ -364,36 +420,116 @@ a[class*="min-h-"][class*="items-center"] {
   outline-color: var(--field-accent);
 }
 
+.app-background {
+  min-width: 0;
+  overflow-x: clip;
+  background-color: var(--ui-bg);
+  background-image: radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.055) 0 0.55px, transparent 0.75px);
+  background-size: 4px 4px;
+}
+
+.app-home-glow {
+  background-image:
+    radial-gradient(ellipse 58% 34% at 50% 92%, rgba(213, 255, 64, 0.11), transparent 72%),
+    radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.055) 0 0.55px, transparent 0.75px);
+  background-size: 100% 100%, 4px 4px;
+}
+
+@media (max-width: 767px) {
+  .app-home-glow {
+    background-image:
+      radial-gradient(ellipse 82% 28% at 50% 88%, rgba(213, 255, 64, 0.1), transparent 74%),
+      radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.05) 0 0.5px, transparent 0.7px);
+  }
+}
+
+@layer components {
+  .app-theme :where([role="menu"], [role="listbox"]) {
+    border-radius: var(--ui-radius-card);
+  }
+
+  .app-theme :where([role="option"]) {
+    border-radius: var(--ui-radius-control);
+  }
+
+  .app-theme :where(:is(section, article, details)[class*="border"][class*="bg-field-"]) {
+    border-radius: var(--ui-radius-card);
+  }
+
+  .app-theme :where(:is(.bg-field-elevated, .bg-field-floating, .bg-field-overlay)[class*="border"]) {
+    border-radius: var(--ui-radius-card);
+  }
+
+  /* Opacity-modified Tailwind surfaces (for example bg-field-floating/95)
+     use a different class token, so keep these floating layers on the same radius scale. */
+  .app-theme :where(:is(
+    [class*="bg-field-elevated"],
+    [class*="bg-field-floating"],
+    [class*="bg-field-overlay"]
+  )[class*="border"]) {
+    border-radius: var(--ui-radius-card);
+  }
+
+  .app-theme :where(:is([role="status"], [role="alert"])[class*="border"][class*="bg-field-"]) {
+    border-radius: var(--ui-radius-card);
+  }
+
+  .app-theme :where(.bg-field-dialog[class*="border"]) {
+    border-radius: var(--ui-radius-panel);
+  }
+
+  .app-theme :where(
+    [role="dialog"][aria-modal="true"].bg-field-dialog,
+    [role="dialog"][aria-modal="true"].bg-field-panel,
+    [role="dialog"][aria-modal="true"].bg-field-elevated,
+    [role="alertdialog"].bg-field-dialog,
+    [role="alertdialog"].bg-field-panel,
+    [role="alertdialog"].bg-field-elevated
+  ),
+  .app-theme :where([role="dialog"], [role="alertdialog"]) > :where(.bg-field-dialog, .bg-field-panel, .bg-field-elevated) {
+    border-radius: var(--ui-radius-panel);
+  }
+}
+
+.app-theme :where(button, input, textarea, select):disabled {
+  border-color: var(--ui-border-subtle);
+  background-color: var(--ui-surface-1);
+  color: var(--ui-text-disabled);
+}
+
 @layer components {
   .field-section {
     border: 1px solid var(--field-line);
-    border-radius: 0;
+    border-radius: var(--ui-radius-panel);
     background: var(--field-section);
+    box-shadow: var(--shadow-card);
   }
 
   .field-subsection {
     border: 1px solid var(--field-line);
-    border-radius: 0;
+    border-radius: var(--ui-radius-card);
     background: var(--field-soft);
   }
 
   .field-card {
     border: 1px solid var(--field-line);
-    border-radius: 0;
+    border-radius: var(--ui-radius-card);
     background: var(--field-panel);
+    box-shadow: var(--shadow-card);
   }
 
   .field-cell {
     min-width: 0;
     border: 1px solid var(--field-line);
-    border-radius: 0;
+    border-radius: var(--ui-radius-control);
     background: var(--field-panel);
   }
 
   .field-toast {
     border: 1px solid var(--field-line);
-    border-radius: 0;
+    border-radius: var(--ui-radius-card);
     background: var(--field-toast);
+    box-shadow: var(--shadow-floating);
   }
 }
 
@@ -419,6 +555,27 @@ a[class*="min-h-"][class*="items-center"] {
   --workspace-accent-soft: rgba(154, 137, 86, 0.09);
   --workspace-accent-border: rgba(122, 105, 60, 0.48);
   color: var(--workspace-text);
+}
+
+/* 밝은 문서형 workspace의 촘촘한 표·카드 geometry는 새 dark radius 정책에서 제외합니다. */
+.light-workspace :where(button, input, textarea, select, section, article, details) {
+  border-radius: 0;
+}
+
+.light-workspace :focus-visible {
+  outline-color: var(--workspace-accent);
+}
+
+.light-workspace button:disabled {
+  border-color: inherit;
+  background-color: transparent;
+  color: inherit;
+}
+
+.light-workspace :where(input, textarea, select):disabled {
+  border-color: var(--workspace-border);
+  background-color: var(--workspace-control);
+  color: var(--workspace-text-muted);
 }
 
 .staff-workspace {
@@ -644,6 +801,15 @@ a[class*="min-h-"][class*="items-center"] {
   color: var(--workspace-text);
 }
 
+.staff-workspace .staff-department-section {
+  border-radius: var(--ui-radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.staff-workspace .staff-department-section > .workspace-header {
+  border-radius: calc(var(--ui-radius-card) - 1px) calc(var(--ui-radius-card) - 1px) 0 0;
+}
+
 .staff-workspace.workspace-header,
 .staff-workspace .workspace-header {
   background-color: var(--workspace-header);
@@ -691,13 +857,13 @@ a[class*="min-h-"][class*="items-center"] {
 .staff-workspace .workspace-control,
 .staff-workspace.workspace-control {
   border-color: var(--workspace-border);
-  border-radius: 0;
+  border-radius: var(--ui-radius-control);
   background-color: var(--workspace-control);
   color: var(--workspace-text);
 }
 
 .staff-workspace .workspace-cell-control {
-  border-radius: 0;
+  border-radius: var(--ui-radius-control);
   background-color: transparent;
   color: var(--workspace-text);
 }
@@ -722,7 +888,7 @@ a[class*="min-h-"][class*="items-center"] {
 .staff-workspace.workspace-button,
 .staff-workspace .workspace-button {
   border-color: var(--workspace-border);
-  border-radius: 0;
+  border-radius: var(--ui-radius-control);
   background-color: var(--workspace-control);
   color: var(--workspace-text);
 }
@@ -739,7 +905,7 @@ a[class*="min-h-"][class*="items-center"] {
 .staff-workspace.workspace-primary-action,
 .staff-workspace .workspace-primary-action {
   border-color: var(--workspace-accent-border);
-  border-radius: 0;
+  border-radius: var(--ui-radius-control);
   background-color: var(--workspace-accent-soft);
   color: var(--field-accent-strong);
 }
@@ -748,7 +914,7 @@ a[class*="min-h-"][class*="items-center"] {
   .staff-workspace.workspace-primary-action:hover,
   .staff-workspace .workspace-primary-action:hover {
     border-color: var(--workspace-accent);
-    background-color: rgba(154, 137, 86, 0.16);
+    background-color: rgba(213, 255, 64, 0.16);
     color: var(--field-accent-strong);
   }
 }
@@ -762,7 +928,7 @@ a[class*="min-h-"][class*="items-center"] {
 .staff-workspace.workspace-popup,
 .staff-workspace .workspace-popup {
   border-color: var(--workspace-divider);
-  border-radius: 0;
+  border-radius: var(--ui-radius-card);
   background-color: var(--workspace-popup);
   color: var(--workspace-text);
   box-shadow: var(--shadow-floating);
@@ -787,7 +953,7 @@ a[class*="min-h-"][class*="items-center"] {
 .staff-workspace.workspace-dialog,
 .staff-workspace .workspace-dialog {
   border-color: var(--workspace-divider);
-  border-radius: 0;
+  border-radius: var(--ui-radius-panel);
   background-color: var(--workspace-dialog);
   color: var(--workspace-text);
   box-shadow: var(--shadow-dialog);
@@ -889,23 +1055,23 @@ a[class*="min-h-"][class*="items-center"] {
 
 .daily-plan-timetable-row[data-selected="true"] > td {
   box-shadow:
-    inset 0 1px rgba(172, 147, 82, 0.78),
-    inset 0 -1px rgba(172, 147, 82, 0.78);
-  background-image: linear-gradient(rgba(172, 147, 82, 0.06), rgba(172, 147, 82, 0.06));
+    inset 0 1px rgba(213, 255, 64, 0.78),
+    inset 0 -1px rgba(213, 255, 64, 0.78);
+  background-image: linear-gradient(rgba(213, 255, 64, 0.06), rgba(213, 255, 64, 0.06));
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:first-child {
   box-shadow:
-    inset 1px 0 rgba(172, 147, 82, 0.78),
-    inset 0 1px rgba(172, 147, 82, 0.78),
-    inset 0 -1px rgba(172, 147, 82, 0.78);
+    inset 1px 0 rgba(213, 255, 64, 0.78),
+    inset 0 1px rgba(213, 255, 64, 0.78),
+    inset 0 -1px rgba(213, 255, 64, 0.78);
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:last-child {
   box-shadow:
-    inset -1px 0 rgba(172, 147, 82, 0.78),
-    inset 0 1px rgba(172, 147, 82, 0.78),
-    inset 0 -1px rgba(172, 147, 82, 0.78);
+    inset -1px 0 rgba(213, 255, 64, 0.78),
+    inset 0 1px rgba(213, 255, 64, 0.78),
+    inset 0 -1px rgba(213, 255, 64, 0.78);
 }
 
 .daily-plan-timetable-row[data-dragging="true"] {
@@ -915,7 +1081,7 @@ a[class*="min-h-"][class*="items-center"] {
 
 @media (max-width: 1023px) {
   .daily-plan-timetable-row[data-selected="true"] {
-    outline: 1px solid rgba(172, 147, 82, 0.78);
+    outline: 1px solid rgba(213, 255, 64, 0.78);
     outline-offset: -1px;
   }
 
@@ -975,6 +1141,16 @@ a[class*="min-h-"][class*="items-center"] {
   font-weight: var(--daily-plan-font-weight-body);
   font-size: var(--daily-plan-font-size);
   line-height: var(--daily-plan-line-height);
+}
+
+/* Screen preview and print/PDF remain a square white document, independent of dark app chrome. */
+.daily-plan-template,
+.daily-plan-template * {
+  border-radius: 0 !important;
+}
+
+.scene-list-mobile details > summary {
+  border-radius: 0;
 }
 
 .daily-plan-document--portrait {
@@ -1310,6 +1486,12 @@ a[class*="min-h-"][class*="items-center"] {
   html,
   body {
     background: #ffffff !important;
+  }
+
+  .app-background,
+  .app-home-glow {
+    background: #ffffff !important;
+    background-image: none !important;
   }
 
   body[data-daily-plan-print-active] {

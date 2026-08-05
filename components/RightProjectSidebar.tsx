@@ -74,7 +74,7 @@ export function RightProjectSidebar({ projectName }: RightProjectSidebarProps) {
         aria-label={isOpen ? "페이지 작업 메뉴 닫기" : "페이지 작업 메뉴 열기"}
         aria-expanded={isOpen}
         aria-controls="right-project-menu"
-        className="ml-auto grid h-10 w-10 place-items-center border border-field-divider bg-field-floating text-field-subtle transition-[background-color,border-color,transform] hover:border-field-subtle hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 md:h-11 md:w-11"
+        className="ml-auto grid h-10 w-10 place-items-center rounded-md border border-field-divider bg-field-floating text-field-subtle shadow-floating transition-[background-color,border-color,transform] hover:border-field-primary/50 hover:bg-field-hover hover:text-field-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 md:h-11 md:w-11"
       >
         {isOpen
           ? <X className="h-[18px] w-[18px] md:h-5 md:w-5" aria-hidden />
@@ -95,7 +95,7 @@ export function RightProjectSidebar({ projectName }: RightProjectSidebarProps) {
             : "invisible pointer-events-none -translate-y-2 scale-y-95 opacity-0"
         }`}
       >
-        <div className="overflow-hidden border border-field-divider bg-field-section shadow-floating">
+        <div className="overflow-hidden rounded-[10px] border border-field-divider bg-field-section shadow-floating">
           <div className="flex items-start gap-3 border-b border-field-divider bg-field-section px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="font-display truncate text-lg font-black text-field-text">{projectName || "프로젝트"}</p>
@@ -105,7 +105,7 @@ export function RightProjectSidebar({ projectName }: RightProjectSidebarProps) {
               type="button"
               onClick={closePanel}
               aria-label="페이지 작업 메뉴 닫기"
-              className="grid h-8 w-8 shrink-0 place-items-center border border-field-divider bg-field-input text-field-muted transition hover:border-field-subtle hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-field-divider bg-field-input text-field-muted transition hover:border-field-primary/50 hover:bg-field-hover hover:text-field-primary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             >
               <X className="h-4 w-4" aria-hidden />
             </button>
@@ -130,10 +130,12 @@ function PageActionItem({
   onAction: () => void;
 }) {
   const Icon = action.icon;
-  const sharedClassName = `flex min-h-10 w-full items-center gap-2 border px-3 py-2 text-left text-sm font-black transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+  const sharedClassName = `flex min-h-10 w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.active
-      ? "border-field-primary bg-transparent text-field-primary"
-      : "border-field-divider bg-transparent text-field-text hover:border-field-subtle hover:bg-field-input"
+      ? "border-field-primary/70 bg-field-primary/10 text-field-primary"
+      : action.emphasis === "primary"
+      ? "border-field-primary bg-field-primary text-field-accent-foreground hover:border-field-secondary hover:bg-field-secondary active:bg-field-strong"
+      : "border-field-border bg-transparent text-field-subtle hover:border-field-divider hover:bg-field-hover hover:text-field-text"
   }`;
   const content = (
     <>

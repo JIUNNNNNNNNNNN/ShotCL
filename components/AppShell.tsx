@@ -20,7 +20,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div
-      className="app-theme min-h-screen bg-field-bg text-field-text"
+      className={`app-theme app-background min-h-screen bg-field-bg text-field-text ${isHome ? "app-home-glow" : ""}`}
       onContextMenuCapture={(event) => event.preventDefault()}
     >
       <HomeButton />
@@ -44,7 +44,7 @@ export function AppShell({ children }: AppShellProps) {
 function TestModeWarning({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
-      <aside role="alert" className="mb-3 border border-field-primary/60 bg-field-primary/10 px-3 py-2.5 text-field-text">
+      <aside role="alert" className="mb-3 rounded-[10px] border border-status-warning/60 bg-status-warning/10 px-3 py-2.5 text-field-text">
         <details>
           <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-black marker:content-none">
             <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
@@ -62,7 +62,7 @@ function TestModeWarning({ compact = false }: { compact?: boolean }) {
   return (
     <aside
       role="alert"
-      className="mb-3 border border-field-primary/60 bg-field-primary/10 p-3 text-field-text"
+      className="mb-3 rounded-[10px] border border-status-warning/60 bg-status-warning/10 p-3 text-field-text"
     >
       <div className="flex items-start gap-3">
         <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />

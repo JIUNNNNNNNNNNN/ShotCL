@@ -48,7 +48,7 @@ export default function NewProjectPage() {
     <section className="mx-auto grid w-full max-w-6xl gap-6">
       <PageHeader title="새 프로젝트" description="촬영일과 프로젝트 정보를 입력하세요." />
 
-      <form onSubmit={handleSubmit} className="grid w-full max-w-2xl gap-5 border border-field-border bg-field-panel p-5 md:p-6">
+      <form onSubmit={handleSubmit} className="grid w-full max-w-2xl gap-5 rounded-[10px] border border-field-border bg-field-panel p-5 shadow-card md:p-6">
         <label className="grid gap-2">
           <span className="text-sm font-black text-field-subtle">프로젝트명 <span className="text-field-danger">*</span></span>
           <input

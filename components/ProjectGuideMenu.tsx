@@ -47,7 +47,7 @@ export function ProjectGuideMenu({ projectId, role, queryString = "" }: ProjectG
     <section className="mx-auto flex min-h-[calc(100dvh-8rem)] w-full max-w-4xl items-center justify-center py-4 sm:py-6">
       <div className="w-full max-w-3xl">
         <div className="mb-5 text-center sm:mb-6">
-          <h1 className="font-display text-2xl font-black text-field-text sm:text-3xl">프로젝트 메뉴</h1>
+          <h1 className="font-display-strong text-2xl text-field-text sm:text-3xl">프로젝트 메뉴</h1>
           <p className="mt-1.5 text-sm text-field-subtle">작업할 기능을 선택하세요.</p>
         </div>
 
@@ -59,7 +59,7 @@ export function ProjectGuideMenu({ projectId, role, queryString = "" }: ProjectG
                 key={item.id}
                 href={createGuideHref(projectBasePath, item.path, queryString)}
                 aria-label={`${item.label}로 이동`}
-                className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2.5 border border-field-border bg-field-soft px-2 py-3 text-center text-field-subtle transition-[background-color,border-color,color,transform] hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg sm:min-h-28"
+                className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-2.5 rounded-[20px] border border-field-border bg-field-soft px-2 py-3 text-center text-field-subtle shadow-[0_10px_32px_rgba(0,0,0,0.14)] transition-[background-color,border-color,color,transform] hover:border-field-primary/45 hover:bg-field-hover hover:text-field-text active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg sm:min-h-28"
               >
                 <item.icon className="h-6 w-6 shrink-0 sm:h-7 sm:w-7" strokeWidth={2} aria-hidden />
                 <span className="w-full break-keep text-sm font-bold leading-[1.35]">{item.label}</span>

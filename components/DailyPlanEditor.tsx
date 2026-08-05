@@ -1672,8 +1672,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           isSaving || isTimetableMutationPending || isActorMutationPending ? "pointer-events-none select-none" : ""
         }`}
       >
-        {message ? <div className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-bold text-field-text">{message}</div> : null}
-        {errorMessage ? <div className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-bold text-field-danger">{errorMessage}</div> : null}
+        {message ? <div role="status" className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-semibold text-field-text">{message}</div> : null}
+        {errorMessage ? <div role="alert" className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-semibold text-field-danger">{errorMessage}</div> : null}
 
         <section className="field-section overflow-hidden p-2 md:p-5">
           <div className="grid gap-3">
@@ -1753,7 +1753,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onContactChange={(value) => updatePrintMetaField("producerContact", value)}
               />
             </div> : mainStaffSummary ? (
-              <p className="hidden border border-field-border bg-field-panel px-3 py-2 text-center text-xs font-normal text-field-muted md:block">
+              <p className="hidden rounded-[10px] border border-field-border bg-field-panel px-3 py-2 text-center text-xs font-normal text-field-muted md:block">
                 {mainStaffSummary}
               </p>
             ) : null}
@@ -1824,7 +1824,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   return (
                     <div
-                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
+                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 rounded-[10px] border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
                         isDragging ? "border-field-primary bg-field-primary/10" : "border-field-border"
                       }`}
                       role="group"
@@ -1903,12 +1903,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                               />
                             </label>
                           ) : isSearching ? (
-                            <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden border border-field-border bg-field-input">
+                            <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden rounded-md border border-field-border bg-field-input">
                               <PixelDogLoader size="xs" compact />
                             </div>
                           ) : (
                             <div
-                              className={`flex h-9 min-h-9 min-w-0 items-center justify-center overflow-hidden border px-2 text-center text-[10px] font-normal md:text-[13px] ${
+                              className={`flex h-9 min-h-9 min-w-0 items-center justify-center overflow-hidden rounded-md border px-2 text-center text-[10px] font-normal md:text-[13px] ${
                                 locationAddress ? "border-field-border bg-field-input text-field-text" : "border-field-border bg-field-input text-field-muted"
                               }`}
                               title={locationAddress || undefined}
@@ -1949,7 +1949,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           </div>
 
           <div className="order-3 mt-3 grid grid-cols-2 gap-1.5 md:hidden">
-            <div className="min-w-0 border border-field-border bg-field-panel p-1.5">
+            <div className="min-w-0 rounded-[10px] border border-field-border bg-field-panel p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-subtle">주의사항</span>
               <MemoPopoverField
                 value={plan.safetyNotice}
@@ -1958,7 +1958,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onChange={(value) => updatePlanField("safetyNotice", value)}
               />
             </div>
-            <div className="min-w-0 border border-field-border bg-field-panel p-1.5">
+            <div className="min-w-0 rounded-[10px] border border-field-border bg-field-panel p-1.5">
               <span className="mb-1 block text-center text-[10px] font-black text-field-subtle">Memo</span>
               <MemoPopoverField
                 value={printMeta.memoText}
@@ -2229,14 +2229,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <span>주의사항</span>
                   </div>
                 ) : (
-                  <p className="border border-dashed border-field-border bg-field-panel px-3 py-4 text-sm font-normal text-field-muted">
+                  <p className="rounded-[10px] border border-dashed border-field-border bg-field-panel px-3 py-4 text-sm font-normal text-field-muted">
                     스탭리스트에 등록된 부서가 없습니다.
                   </p>
                 )}
                 {effectivePrintMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className={`${staffDepartmentGridClass} border border-field-border bg-field-panel p-0.5 text-center sm:p-1 md:p-2 max-md:[&_button]:min-h-[32px] max-md:[&_button]:px-0.5 max-md:[&_button]:py-1 max-md:[&_button]:!text-[9px] max-md:[&_input]:min-h-[32px] max-md:[&_input]:px-0.5 max-md:[&_input]:py-1 max-md:[&_input]:!text-[9px]`}
+                    className={`${staffDepartmentGridClass} rounded-[10px] border border-field-border bg-field-panel p-0.5 text-center sm:p-1 md:p-2 max-md:[&_button]:min-h-[32px] max-md:[&_button]:px-0.5 max-md:[&_button]:py-1 max-md:[&_button]:!text-[9px] max-md:[&_input]:min-h-[32px] max-md:[&_input]:px-0.5 max-md:[&_input]:py-1 max-md:[&_input]:!text-[9px]`}
                     data-testid="daily-plan-staff-department-row"
                   >
                     <div className="flex min-h-[32px] min-w-0 max-w-full items-center justify-center whitespace-nowrap bg-field-soft px-0.5 text-[8px] font-black tracking-[-0.03em] text-field-text sm:text-[10px] md:min-h-[38px] md:px-2 md:text-sm">
@@ -2326,7 +2326,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           ) : null}
           {activeCardInteraction.ghost ? (
             <div
-              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-black text-field-text shadow-floating"
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[10px] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-semibold text-field-text shadow-floating"
               style={{
                 left: activeCardInteraction.ghost.left,
                 top: activeCardInteraction.ghost.top,
@@ -2564,7 +2564,7 @@ function EpisodeField({
 
   if (mobile) {
     return (
-      <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
+      <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
         <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">회차</span>
         {hasConstrainedOptions ? (
           <select
@@ -2649,7 +2649,7 @@ function MobileInfoField({
 }) {
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
       <DraftInput
         className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
@@ -2679,7 +2679,7 @@ function MobileTotalCrewField({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1">
+    <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">총 인원</span>
       <TotalCrewInput
         value={value}
@@ -2783,7 +2783,7 @@ function TeamCountInput({
 
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <div className="grid min-w-0 gap-0.5 overflow-hidden border border-field-border bg-field-panel p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
@@ -2857,7 +2857,7 @@ function EditableWeatherCard({
 
   if (isEditing) {
     return (
-      <label ref={cardRef} data-weather-card className="daily-plan-weather-card grid content-center border border-field-primary bg-field-input text-center ring-1 ring-field-primary/20">
+      <label ref={cardRef} data-weather-card className="daily-plan-weather-card grid content-center rounded-md border border-field-primary bg-field-input text-center ring-1 ring-field-primary/20">
         <span className="daily-plan-weather-card-label font-black text-field-muted">{label}</span>
         <input
           autoFocus
@@ -2921,7 +2921,7 @@ function RoleContactGroup({
   onContactChange: (value: string) => void;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden border border-field-border bg-field-panel p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
+    <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,0.8fr)_minmax(0,1.2fr)] items-center gap-1 overflow-hidden rounded-[10px] border border-field-border bg-field-panel p-1.5 md:grid-cols-[4rem_minmax(0,1fr)_minmax(0,1fr)] md:gap-2 md:p-2 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
       <span className="whitespace-nowrap text-xs font-black text-field-subtle">{role}</span>
       <DraftInput
         className={`${compactInputClass} min-w-0`}

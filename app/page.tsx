@@ -926,7 +926,7 @@ export default function HomePage() {
 
   return (
     <div
-      className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-field-bg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
+      className="relative grid h-[100dvh] min-h-[100svh] w-full place-items-center overflow-hidden bg-transparent pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
       onContextMenu={(event) => {
         event.preventDefault();
         closeRememberedProjectMenu();
@@ -948,7 +948,7 @@ export default function HomePage() {
           <div
             className={
               isProjectRingOpen
-                ? "relative flex aspect-square w-[min(94vw,25rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_260ms_ease-out] md:w-[min(92vw,36rem)]"
+                ? "relative flex aspect-square w-[min(calc(100vw-2.5rem),25rem)] shrink-0 items-center justify-center motion-safe:animate-[project-ring-reveal_260ms_ease-out] md:w-[min(92vw,36rem)]"
                 : "contents"
             }
           >

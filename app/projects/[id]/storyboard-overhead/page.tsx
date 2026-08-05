@@ -2951,7 +2951,7 @@ export default function ProjectStoryboardOverheadPage() {
             <h1 className="font-display truncate text-xl font-bold text-field-text">부감도&콘티 아카이브</h1>
             <p className="truncate text-xs text-field-muted">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
-          {!canEdit ? <span className="border border-field-border bg-field-panel px-3 py-2 text-xs font-bold text-field-muted">읽기 전용</span> : null}
+          {!canEdit ? <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span> : null}
         </div>
 
         {errorMessage ? <p role="alert" className=" border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}
@@ -3415,7 +3415,7 @@ export default function ProjectStoryboardOverheadPage() {
       {reorderOverlay && typeof document !== "undefined" ? createPortal(
         <div
           ref={reorderOverlayRef}
-          className="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden border-2 border-field-primary bg-field-soft p-1 "
+          className="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden rounded-[10px] border-2 border-field-primary bg-field-soft p-1"
           style={{
             width: reorderOverlay.width,
             height: reorderOverlay.height,

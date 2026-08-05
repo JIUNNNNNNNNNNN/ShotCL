@@ -775,7 +775,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       }
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
-      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-subtle hover:bg-field-hover focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
+      className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden rounded-[10px] border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-subtle hover:bg-field-hover focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
         active ? "border-field-primary/80 bg-field-primary/10" : "border-field-divider"
       } ${
         item.kind === "new"

@@ -46,7 +46,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
 
       <div className="grid min-w-0 gap-1.5 sm:grid-cols-[max-content_minmax(0,1fr)] sm:items-center sm:gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
-          <span className="shrink-0 border border-field-primary/70 bg-field-primary/10 px-2 py-1 text-[10px] font-bold text-field-primary">
+          <span className="shrink-0 rounded-md border border-field-primary/70 bg-field-primary/10 px-2 py-1 text-[10px] font-semibold text-field-primary">
             기타일정
           </span>
           {time ? (

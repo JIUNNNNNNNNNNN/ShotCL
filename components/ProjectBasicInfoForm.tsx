@@ -185,7 +185,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           <p className="font-display text-xl font-black text-field-text md:text-2xl">프로젝트 기본정보</p>
           <p className="mt-1 truncate text-sm text-field-muted">{projectName}</p>
         </div>
-        <span className="border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
+        <span className="rounded-md border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
           프로젝트 공통 정보
         </span>
       </div>
@@ -263,7 +263,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
             {episodeLimitViolations.map(({ episodeNumber, members }) => (
               <p
                 key={episodeNumber}
-                className="border border-field-danger bg-field-panel px-3 py-2 text-xs font-bold text-field-danger"
+                className="rounded-[10px] border border-field-danger bg-field-panel px-3 py-2 text-xs font-semibold text-field-danger"
               >
                 {episodeNumber}회차 일촬표 표시 인원이 {members.length}명입니다. 최대 3명까지 선택할 수 있습니다.
                 <span className="mt-0.5 block text-[11px]">
@@ -306,7 +306,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       </section>
 
       {errorMessage ? (
-        <p className="border border-field-danger bg-field-panel px-4 py-3 text-sm font-bold text-field-danger">
+        <p role="alert" className="border border-field-danger bg-field-panel px-4 py-3 text-sm font-semibold text-field-danger">
           {errorMessage}
         </p>
       ) : null}
@@ -352,7 +352,7 @@ const StaffFields = memo(function StaffFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid min-w-0 gap-1.5 border border-field-border bg-field-soft/50 p-2">
+    <div className="grid min-w-0 gap-1.5 rounded-[10px] border border-field-border bg-field-soft/50 p-2">
       <div className="flex items-center justify-between gap-1">
         <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-bold text-field-subtle">
           <input
@@ -574,7 +574,7 @@ const ActorFields = memo(function ActorFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 border border-field-border bg-field-soft/50 p-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-[10px] border border-field-border bg-field-soft/50 p-2">
       <input
         className={fieldClass}
         value={actor.role}

@@ -42,7 +42,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
         />
       </div>
       <p className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-normal leading-5 text-field-muted">
-        <span>OK <strong className="tabular-nums text-field-primary">{progress.okCutCount}</strong></span>
+        <span>OK <strong className="tabular-nums text-status-ok">{progress.okCutCount}</strong></span>
         <span aria-hidden>·</span>
         <span>OMIT <strong className="tabular-nums text-field-danger">{progress.omitCutCount}</strong></span>
         <span aria-hidden>·</span>

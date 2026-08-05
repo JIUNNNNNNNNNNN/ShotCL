@@ -473,7 +473,7 @@ export default function StaffListPage() {
 
   if (!project) {
     return (
-      <div className="border border-field-danger bg-field-panel p-6 text-center">
+      <div className="rounded-[10px] border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-black text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <Link href="/" className="mt-4 inline-flex border border-field-divider bg-field-panel px-4 py-2 text-sm font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary">
           홈으로
@@ -487,7 +487,7 @@ export default function StaffListPage() {
       <section className="border border-field-border bg-field-section px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
-            <div className="grid h-10 w-10 shrink-0 place-items-center border border-field-divider bg-field-soft text-field-text">
+            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-field-divider bg-field-soft text-field-text">
               <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
@@ -508,7 +508,7 @@ export default function StaffListPage() {
                 type="button"
                 onClick={() => void save(members, departments, true)}
                 disabled={isSaving || pendingSectionKeys.size > 0 || !isDirty}
-                className="inline-flex h-9 items-center gap-1.5 border border-field-primary/70 bg-field-primary/10 px-3 text-xs font-bold text-field-primary transition-colors hover:border-field-secondary/80 hover:bg-field-primary/15 hover:text-field-secondary active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-1.5 rounded-md border border-field-primary bg-field-primary px-3 text-xs font-semibold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary active:scale-95 active:bg-field-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
@@ -878,7 +878,7 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
           ) : null}
           {interaction.ghost ? (
             <div
-              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-black text-field-text shadow-floating"
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[10px] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-semibold text-field-text shadow-floating"
               style={{
                 left: interaction.ghost.left,
                 top: interaction.ghost.top,

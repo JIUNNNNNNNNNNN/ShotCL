@@ -83,7 +83,7 @@ export const ShotCard = memo(function ShotCard({
       className={cn(
         "relative grid min-w-0 cursor-pointer gap-2 overflow-hidden  border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
         isOk
-          ? "border-field-primary/80 bg-field-primary/10 after:pointer-events-none after:absolute after:inset-x-3 after:top-1/2 after:z-10 after:h-[2px] after:-translate-y-1/2 after:bg-field-primary/55 after:content-['']"
+          ? "border-status-ok/80 bg-status-ok/10 after:pointer-events-none after:absolute after:inset-x-3 after:top-1/2 after:z-10 after:h-[2px] after:-translate-y-1/2 after:bg-status-ok/55 after:content-['']"
           : isOmit
             ? "border-field-danger/70 bg-field-danger/10"
             : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"
@@ -155,7 +155,7 @@ export const ShotCard = memo(function ShotCard({
           <h2 className="min-w-0 truncate text-sm font-bold leading-5 text-field-text">
             {cutLabel}
           </h2>
-          <p className={cn("px-2 py-1 text-[10px] font-bold leading-[1.35]", isOk ? "border border-field-primary/70 bg-field-primary/10 text-field-primary" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
+          <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
           <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -224,7 +224,7 @@ export const ShotCard = memo(function ShotCard({
             aria-pressed={isOk}
             className={cn(
               "min-h-[38px]  border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-              isOk ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
+              isOk ? "border-status-ok/80 bg-status-ok/10 text-status-ok" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
             )}
           >
             <span className="font-display">OK</span>

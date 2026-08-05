@@ -46,7 +46,7 @@ export function ProgressStatusSection({
           onClick={() => onExpandedChange(!expanded)}
           className="flex min-h-11 w-full items-center gap-2 border-0 bg-field-section px-3 py-2.5 text-left text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary"
         >
-          <span className={kind === "ok" ? "text-field-primary" : "text-field-danger"}>{label}</span>
+          <span className={kind === "ok" ? "text-status-ok" : "text-field-danger"}>{label}</span>
           <span className="tabular-nums text-field-subtle">{safeCount}</span>
           <ChevronDown
             className={cn("ml-auto h-4 w-4 shrink-0 text-field-muted transition-transform", expanded && "rotate-180")}

@@ -690,7 +690,7 @@ export default function ProjectCostumesPage() {
               </Button>
             </>
           ) : (
-            <span className="border border-field-border bg-field-panel px-2.5 py-1.5 text-[11px] font-bold text-field-muted">읽기 전용</span>
+            <span className="rounded-md border border-field-border bg-field-panel px-2.5 py-1.5 text-[11px] font-semibold text-field-muted">읽기 전용</span>
           )}
         </div>
 
@@ -711,7 +711,7 @@ export default function ProjectCostumesPage() {
         {isFiltering ? (
           <div className="py-8"><PixelDogLoader size="sm" /></div>
         ) : filteredScenes.length === 0 ? (
-          <div className="border border-field-border bg-field-panel px-4 py-12 text-center text-sm text-field-muted">
+          <div className="rounded-[10px] border border-field-border bg-field-panel px-4 py-12 text-center text-sm text-field-muted">
             {scenes.length === 0 ? "등록된 의상 씬이 없습니다." : "선택한 일촬표에 포함된 의상 씬이 없습니다."}
           </div>
         ) : (
@@ -1183,7 +1183,7 @@ function ReadOnlyMediaField({
             </button>
           ))}
         </div> : <div className="grid min-h-32 place-items-center border border-dashed border-field-border text-[10px] text-field-muted">이미지 없음</div>}
-        <div className="min-h-32 border border-field-border bg-field-soft p-2">
+        <div className="min-h-32 rounded-[10px] border border-field-border bg-field-soft p-2">
           <span className="text-[10px] font-bold text-field-muted">{label} 메모</span>
           <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-field-text">{value || "미입력"}</p>
         </div>
@@ -1266,7 +1266,7 @@ function SceneSeedSummary({
   }
 
   return (
-    <div className="grid gap-2 border border-field-border bg-field-soft p-2.5">
+    <div className="grid gap-2 rounded-[10px] border border-field-border bg-field-soft p-2.5">
       <p className="text-xs leading-5 text-field-muted">
         {selectedScene
           ? "이 씬에는 색상/등장 상태인 배우칸이 없어 배역을 자동 추가하지 않습니다."

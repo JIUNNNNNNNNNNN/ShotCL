@@ -323,7 +323,7 @@ export default function ProjectScenarioPage() {
                 rel="noreferrer"
                 aria-label={`${selectedAsset.filename} 새 창에서 열기`}
                 title="원본 PDF 새 창"
-                className="grid h-9 w-9 place-items-center border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="grid h-9 w-9 place-items-center rounded-md border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 <ExternalLink className="h-3.5 w-3.5" aria-hidden />
               </a>
@@ -334,7 +334,7 @@ export default function ProjectScenarioPage() {
                 rel="noreferrer"
                 aria-label={`${selectedAsset.filename} 다운로드`}
                 title="다운로드"
-                className="grid h-9 w-9 place-items-center border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                className="grid h-9 w-9 place-items-center rounded-md border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 <Download className="h-3.5 w-3.5" aria-hidden />
               </a>
@@ -380,7 +380,7 @@ export default function ProjectScenarioPage() {
 
       {selectedAsset ? (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <div className="inline-flex border border-field-border bg-field-panel p-0.5">
+          <div className="inline-flex rounded-md border border-field-border bg-field-panel p-0.5">
             <ModeButton active={viewMode === "scenes"} onClick={() => setViewMode("scenes")} icon={List}>
               씬별 보기
             </ModeButton>
@@ -534,7 +534,7 @@ export default function ProjectScenarioPage() {
                           className={`h-4 w-4 shrink-0 text-field-muted transition-transform ${expanded ? "rotate-180" : ""}`}
                           aria-hidden
                         />
-                        <span className="shrink-0 border border-field-border bg-field-soft px-2 py-0.5 text-xs font-bold text-field-subtle">
+                        <span className="shrink-0 rounded-md border border-field-border bg-field-soft px-2 py-0.5 text-xs font-semibold text-field-subtle">
                           S#{scene.sceneNo || index + 1}
                         </span>
                         <span className="min-w-0 flex-1 truncate text-sm font-bold leading-normal text-field-text">

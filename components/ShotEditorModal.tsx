@@ -121,8 +121,8 @@ export function ShotEditorModal({
       className={cn(
         "fixed inset-0 z-50 flex p-3",
         mode === "add"
-          ? "items-end bg-black/35 sm:items-center sm:p-4"
-          : "items-center justify-center bg-black/15"
+          ? "items-end bg-black/70 sm:items-center sm:p-4"
+          : "items-center justify-center bg-black/70"
       )}
       role="dialog"
       aria-modal="true"

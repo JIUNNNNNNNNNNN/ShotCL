@@ -8,7 +8,7 @@ type StatusBadgeProps = {
 
 const statusClassNames: Record<ShotStatus, string> = {
   pending: "border-field-border bg-field-soft text-field-subtle",
-  ok: "border-field-primary/60 bg-field-primary/10 text-field-primary",
+  ok: "border-status-ok/60 bg-status-ok/10 text-status-ok",
   omit: "border-field-danger/60 bg-field-danger/10 text-field-danger"
 };
 
@@ -17,7 +17,7 @@ export function StatusBadge({ status, compact = false }: StatusBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center  border font-bold",
+        "inline-flex shrink-0 items-center rounded-md border font-semibold",
         compact ? "px-2 py-1 text-xs" : "px-3 py-1.5 text-sm",
         statusClassNames[status]
       )}
