@@ -431,11 +431,6 @@ button {
   }
 }
 
-/* New / Join / Go와 프로젝트 궤도처럼 동작 자체가 원형인 컨트롤만 예외입니다. */
-.functional-circle {
-  border-radius: 9999px !important;
-}
-
 ::selection {
   background: var(--accent-neon-soft-strong);
   color: var(--field-text);

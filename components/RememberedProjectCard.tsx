@@ -170,12 +170,12 @@ export function RememberedProjectCard({
         }
         onOpen(project);
       }}
-      className="flex min-h-10 touch-pan-y select-none items-center justify-between gap-3 border border-field-divider bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-subtle hover:bg-field-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+      className="flex min-h-11 min-w-0 touch-pan-y select-none items-center justify-between gap-3 rounded-[10px] border border-field-divider bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-subtle hover:bg-field-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       style={{ WebkitTouchCallout: "none" }}
       aria-label={`${project.name} 프로젝트 홈 열기`}
       aria-busy={isOpening}
     >
-      <span className="min-w-0 truncate text-xs font-black text-field-text">
+      <span className="min-w-0 break-words text-xs font-black leading-5 text-field-text [overflow-wrap:anywhere]">
         <span className="font-display">{project.name}</span>
       </span>
       <span className="shrink-0 text-[9px] font-bold text-field-muted">
@@ -287,7 +287,7 @@ export function RememberedProjectActions({
         type="button"
         role="menuitem"
         onClick={() => onRequestRemoval(menuTarget.project)}
-        className="flex min-h-9 w-full items-center px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+        className="flex min-h-11 w-full items-center rounded-[8px] px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       >
         목록에서 지우기
       </button>
