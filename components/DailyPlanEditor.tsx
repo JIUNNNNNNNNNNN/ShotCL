@@ -91,6 +91,7 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   useProjectPageActionMenu,
   type ProjectPageActionMenuRegistration
@@ -327,6 +328,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const router = useRouter();
   const documentOrientation = useDailyPlanDocumentOrientation();
   const { role: projectAccessRole } = useProjectAccess();
+  const { upsertDailyPlan } = useProjectWorkspace();
   const canManageTimetable = projectAccessRole !== "progress" && project.accessRole !== "progress";
   const initialEditorState = useMemo(() => {
     const isNewDailyPlan = !initialPlan && !initialDraft;
@@ -1443,6 +1445,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       automaticStartRowIdsRef.current = savedAutomaticRowIds.size > 0
         ? savedAutomaticRowIds
         : restoreAutomaticTimetableRowIds(nextPersistedTimetableRows, automaticRowPositions);
+      upsertDailyPlan(saved.plan, {
+        shotCount: saved.shots.length,
+        ...(typeof saved.progressShotCount === "number" ? { progressTotal: saved.progressShotCount } : {}),
+        sceneNumbers: [...new Set(saved.shots.map((shot) => shot.sceneNumber.trim()).filter(Boolean))]
+      });
       setDailyPlanId(saved.plan.id);
       setPlan({ ...savedDraft, memo: savedMeta.memoText });
       setPrintMeta(savedMeta);
@@ -1647,9 +1654,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         disabled: !canManageTimetable || isSaving,
         pending: isSaving
       },
-      dailyPlanRounds: {
-        href: `/projects/${project.id}/daily-plans`
-      }
     }
   }), [activePrintAction, canManageTimetable, canPrint, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
   useProjectPageActionMenu(dailyPlanActionMenu);

@@ -7,8 +7,8 @@ import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard"
 
 const LONG_PRESS_MS = 700;
 
-/** 짧게 누르면 현재 프로젝트 회차선택, 길게 누르면 메인 화면으로 이동합니다. */
-export function HomeButton() {
+/** 짧게 누르면 현재 프로젝트 메뉴, 길게 누르면 메인 화면으로 이동합니다. */
+export function HomeButton({ embedded = false }: { embedded?: boolean } = {}) {
   const pathname = usePathname();
   const router = useRouter();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -91,9 +91,13 @@ export function HomeButton() {
     <button
       ref={buttonRef}
       type="button"
-      aria-label={projectId ? "회차 선택으로 이동, 길게 누르면 메인 홈으로 이동" : "메인 홈으로 이동"}
-      title={projectId ? "회차 선택 · 길게 누르면 메인 홈" : "메인 홈"}
-      className={`no-print fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center rounded-md border bg-field-floating text-field-text shadow-floating transition-[background-color,border-color,transform] hover:border-field-primary/60 hover:bg-field-hover hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:left-5 md:h-11 md:w-11 ${
+      aria-label={projectId ? "프로젝트 메뉴로 이동, 길게 누르면 메인 홈으로 이동" : "메인 홈으로 이동"}
+      title={projectId ? "프로젝트 메뉴 · 길게 누르면 메인 홈" : "메인 홈"}
+      className={`no-print flex h-11 w-11 shrink-0 select-none items-center justify-center rounded-md border bg-field-floating text-field-text shadow-floating transition-[background-color,border-color,transform] hover:border-field-primary/60 hover:bg-field-hover hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
+        embedded
+          ? "relative"
+          : "fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] md:left-5"
+      } ${
         isArmed
           ? "neon-selected-strong scale-95 text-field-primary"
           : isPressing

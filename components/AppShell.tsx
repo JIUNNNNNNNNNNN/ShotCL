@@ -17,24 +17,35 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const isHome = pathname === "/";
   const isProjectDashboard = /^\/projects\/[^/]+$/.test(pathname);
+  const isProjectWorkspace = /^\/projects\/(?!new(?:\/|$))[^/]+(?:\/|$)/.test(pathname);
+
+  const pageContent = (
+    <>
+      {demoStorageMode && !isHome && !isProjectWorkspace ? <TestModeWarning compact={isProjectDashboard} /> : null}
+      {children}
+    </>
+  );
 
   return (
     <div
       className={`app-theme app-background min-h-screen bg-field-bg text-field-text ${isHome ? "app-home-glow" : ""}`}
       onContextMenuCapture={(event) => event.preventDefault()}
     >
-      <HomeButton />
-      <main className={
-        isHome
-          ? "min-h-screen w-full"
-          : isProjectDashboard
-            ? "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-6 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-8"
-            : "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-4 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-6 lg:px-12"
-      }>
-        {demoStorageMode && !isHome ? <TestModeWarning compact={isProjectDashboard} /> : null}
-        {children}
-      </main>
-      {!isHome ? <DevRuntimeInfo /> : null}
+      {!isProjectWorkspace ? <HomeButton /> : null}
+      {isProjectWorkspace ? (
+        <div className="min-h-[100dvh] min-w-0 w-full">{pageContent}</div>
+      ) : (
+        <main className={
+          isHome
+            ? "min-h-screen w-full"
+            : isProjectDashboard
+              ? "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-6 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-8"
+              : "safe-bottom mx-auto w-full max-w-[1480px] px-3 pb-4 pt-[max(4rem,calc(env(safe-area-inset-top)+3.25rem))] md:px-8 md:pb-6 lg:px-12"
+        }>
+          {pageContent}
+        </main>
+      )}
+      {!isHome && !isProjectWorkspace ? <DevRuntimeInfo /> : null}
       <QueryAuditPanel />
     </div>
   );

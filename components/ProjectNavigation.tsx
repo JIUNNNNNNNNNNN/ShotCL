@@ -1,0 +1,661 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject
+} from "react";
+import { createPortal } from "react-dom";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  BookOpen,
+  CalendarDays,
+  ChevronDown,
+  Copy,
+  FilePenLine,
+  House,
+  Images,
+  ListChecks,
+  Plus,
+  Shirt,
+  Table2,
+  Trash2,
+  Users,
+  type LucideIcon
+} from "lucide-react";
+import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
+import { deleteDailyPlan, duplicateDailyPlan } from "@/lib/data/dailyPlans";
+import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
+import { formatDailyPlanCardDate } from "@/lib/dailyPlan/dateOnly";
+import {
+  buildDailyPlanRoundHref,
+  buildNewDailyPlanHref,
+  buildProgressRoundHref,
+  buildProjectNavigationHref,
+  getVisibleProjectNavigationItems,
+  isDailyPlanRoundActive,
+  isProgressRoundActive,
+  resolveActiveProjectNavigationItem,
+  type ProjectNavigationItemId
+} from "@/lib/projectNavigation";
+import type { DailyPlan } from "@/lib/types";
+
+export { getProjectPageTitle } from "@/lib/projectNavigation";
+
+type ProjectNavigationProps = {
+  onNavigate?: (href: string) => void;
+  drawer?: boolean;
+};
+
+type PlanContextMenu = {
+  plan: DailyPlan;
+  x: number;
+  y: number;
+};
+
+type PendingDelete = {
+  plan: DailyPlan;
+  label: string;
+};
+
+const NAVIGATION_ICONS: Record<ProjectNavigationItemId, LucideIcon> = {
+  basicInfo: FilePenLine,
+  dailyPlans: CalendarDays,
+  progress: ListChecks,
+  sceneList: Table2,
+  staffList: Users,
+  scenario: BookOpen,
+  costumes: Shirt,
+  storyboardOverhead: Images
+};
+
+const LONG_PRESS_MS = 600;
+const CONTEXT_MENU_WIDTH = 224;
+const CONTEXT_MENU_HEIGHT = 92;
+const CONTEXT_MENU_EDGE = 8;
+
+/** 프로젝트의 공통 기능과 회차를 데스크톱 rail·모바일 drawer에서 함께 사용합니다. */
+export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigationProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { role } = useProjectAccess();
+  const {
+    projectId,
+    project,
+    projectName,
+    dailyPlans,
+    isLoading,
+    error,
+    upsertDailyPlan,
+    removeDailyPlan
+  } = useProjectWorkspace();
+  const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [mutationError, setMutationError] = useState("");
+  const [duplicatingId, setDuplicatingId] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<"dailyPlans" | "progress", boolean>>({
+    dailyPlans: true,
+    progress: true
+  });
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const duplicateLockRef = useRef("");
+  const visibleItems = useMemo(() => getVisibleProjectNavigationItems(role), [role]);
+  const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
+  const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
+  const canManageDailyPlans = role !== "progress" && project?.accessRole !== "progress";
+  const instanceId = drawer ? "drawer" : "panel";
+
+  useEffect(() => {
+    if (activeItem !== "dailyPlans" && activeItem !== "progress") return;
+    setExpandedGroups((current) => current[activeItem]
+      ? current
+      : { ...current, [activeItem]: true });
+  }, [activeItem]);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const focusFrame = window.requestAnimationFrame(() => {
+      contextMenuRef.current?.querySelector<HTMLButtonElement>("[role='menuitem']")?.focus();
+    });
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      closeContextMenu();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeContextMenu();
+    };
+    const closeOnViewportChange = () => closeContextMenu();
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [closeContextMenu, contextMenu]);
+
+  useEffect(() => {
+    if (!pendingDelete) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || isDeleting) return;
+      setPendingDelete(null);
+      setMutationError("");
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isDeleting, pendingDelete]);
+
+  function notifyNavigation(href: string) {
+    onNavigate?.(href);
+  }
+
+  function guardLinkNavigation(event: React.MouseEvent<HTMLAnchorElement>, href: string) {
+    if (!confirmUnsavedChangesNavigation()) {
+      event.preventDefault();
+      return;
+    }
+    notifyNavigation(href);
+  }
+
+  function openContextMenu(plan: DailyPlan, clientX: number, clientY: number) {
+    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting || pendingDelete) return;
+    const maxX = Math.max(CONTEXT_MENU_EDGE, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE);
+    const maxY = Math.max(CONTEXT_MENU_EDGE, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_EDGE);
+    setMutationError("");
+    setContextMenu({
+      plan,
+      x: Math.min(Math.max(CONTEXT_MENU_EDGE, clientX), maxX),
+      y: Math.min(Math.max(CONTEXT_MENU_EDGE, clientY), maxY)
+    });
+  }
+
+  async function handleDuplicate(plan: DailyPlan) {
+    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    duplicateLockRef.current = plan.id;
+    setDuplicatingId(plan.id);
+    closeContextMenu();
+    setMutationError("");
+    try {
+      const duplicated = await duplicateDailyPlan(projectId, plan.id);
+      upsertDailyPlan(duplicated.plan, { shotCount: duplicated.shots.length });
+    } catch (error) {
+      setMutationError(getErrorMessage(error, "일촬표를 복사하지 못했습니다."));
+    } finally {
+      if (duplicateLockRef.current === plan.id) duplicateLockRef.current = "";
+      setDuplicatingId("");
+    }
+  }
+
+  function requestDelete(plan: DailyPlan) {
+    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    closeContextMenu();
+    setMutationError("");
+    setPendingDelete({ plan, label: formatDailyPlanEpisodeLabel(plan.episode) });
+  }
+
+  async function confirmDelete() {
+    const target = pendingDelete?.plan;
+    if (!target || !canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    const safeHref = getSafeSelectionHrefAfterDelete(pathname, searchParams, projectId, target.id);
+    if (safeHref && !confirmUnsavedChangesNavigation()) return;
+    setIsDeleting(true);
+    setMutationError("");
+    try {
+      await deleteDailyPlan(projectId, target.id);
+      removeDailyPlan(target.id);
+      setPendingDelete(null);
+      if (safeHref) {
+        notifyNavigation(safeHref);
+        router.replace(safeHref);
+      }
+    } catch (error) {
+      setMutationError(getErrorMessage(error, "일촬표를 삭제하지 못했습니다."));
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  return (
+    <>
+      <nav
+        aria-label="프로젝트 기능"
+        className={`min-h-0 min-w-0 overflow-y-auto overscroll-contain ${drawer ? "flex-1 px-3 pb-4" : "px-2 py-3"}`}
+      >
+        <Link
+          href="/"
+          onClick={(event) => guardLinkNavigation(event, "/")}
+          className="mb-3 flex min-h-11 min-w-0 items-center gap-2 border border-transparent px-2.5 py-2 text-sm font-bold text-field-subtle transition-colors hover:border-field-border hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+        >
+          <House className="h-4 w-4 shrink-0" aria-hidden />
+          <span>Home</span>
+        </Link>
+
+        <div className="mb-3 min-w-0 border-b border-field-border px-2 pb-3">
+          <p className="break-words text-sm font-black leading-5 text-field-text" title={projectName}>
+            {projectName}
+          </p>
+          {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
+          {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트 메뉴를 불러오지 못했습니다.")}</p> : null}
+        </div>
+
+        <ul className="grid gap-1">
+          {visibleItems.map((item) => {
+            const Icon = NAVIGATION_ICONS[item.id];
+            const href = buildProjectNavigationHref(projectId, item.id);
+            const active = activeItem === item.id;
+            const roundKind = item.id === "dailyPlans" || item.id === "progress" ? item.id : null;
+            const expanded = roundKind ? expandedGroups[roundKind] : false;
+            return (
+              <li key={item.id} className="min-w-0">
+                <div className={`min-w-0 border transition-colors ${
+                  active
+                    ? "neon-selected text-field-primary"
+                    : "border-transparent text-field-subtle hover:border-field-border hover:bg-field-hover hover:text-field-text"
+                } ${roundKind ? "grid grid-cols-[minmax(0,1fr)_44px]" : "block"}`}>
+                  <Link
+                    href={href}
+                    onClick={(event) => guardLinkNavigation(event, href)}
+                    aria-current={active ? "page" : undefined}
+                    className="flex min-h-11 min-w-0 items-center gap-2 px-2.5 py-2 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  >
+                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                    <span className="min-w-0 truncate">{item.label}</span>
+                  </Link>
+                  {roundKind ? (
+                    <button
+                      type="button"
+                      aria-label={`${item.label} 회차 목록 ${expanded ? "접기" : "펼치기"}`}
+                      aria-controls={`project-navigation-${instanceId}-rounds-${roundKind}`}
+                      aria-expanded={expanded}
+                      onClick={() => setExpandedGroups((current) => ({
+                        ...current,
+                        [roundKind]: !current[roundKind]
+                      }))}
+                      className="grid min-h-11 w-11 place-items-center border-l border-current/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                    >
+                      <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} aria-hidden />
+                    </button>
+                  ) : null}
+                </div>
+
+                {roundKind && expanded ? (
+                  <RoundNavigationList
+                    id={`project-navigation-${instanceId}-rounds-${roundKind}`}
+                    kind={roundKind}
+                    projectId={projectId}
+                    plans={sortedPlans}
+                    pathname={pathname}
+                    searchParams={searchParams}
+                    canManage={canManageDailyPlans}
+                    isBusy={Boolean(duplicatingId) || isDeleting}
+                    onNavigate={notifyNavigation}
+                    onOpenContextMenu={openContextMenu}
+                  />
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+
+        {mutationError && !pendingDelete ? (
+          <p role="alert" className="mt-3 border border-field-danger/60 bg-field-danger/10 px-2 py-1.5 text-[11px] font-bold leading-4 text-field-danger">
+            {mutationError}
+          </p>
+        ) : null}
+      </nav>
+
+      {contextMenu && typeof document !== "undefined" ? createPortal(
+        <PlanContextMenu
+          menu={contextMenu}
+          menuRef={contextMenuRef}
+          disabled={Boolean(duplicatingId) || isDeleting}
+          onDuplicate={() => void handleDuplicate(contextMenu.plan)}
+          onDelete={() => requestDelete(contextMenu.plan)}
+        />,
+        document.body
+      ) : null}
+
+      {pendingDelete && typeof document !== "undefined" ? createPortal(
+        <DeleteConfirmation
+          pending={pendingDelete}
+          error={mutationError}
+          isDeleting={isDeleting}
+          onCancel={() => {
+            if (isDeleting) return;
+            setPendingDelete(null);
+            setMutationError("");
+          }}
+          onConfirm={() => void confirmDelete()}
+        />,
+        document.body
+      ) : null}
+    </>
+  );
+}
+
+function RoundNavigationList({
+  id,
+  kind,
+  projectId,
+  plans,
+  pathname,
+  searchParams,
+  canManage,
+  isBusy,
+  onNavigate,
+  onOpenContextMenu
+}: {
+  id: string;
+  kind: "dailyPlans" | "progress";
+  projectId: string;
+  plans: DailyPlan[];
+  pathname: string;
+  searchParams: Pick<URLSearchParams, "get">;
+  canManage: boolean;
+  isBusy: boolean;
+  onNavigate: (href: string) => void;
+  onOpenContextMenu: (plan: DailyPlan, clientX: number, clientY: number) => void;
+}) {
+  return (
+    <ul id={id} className="ml-4 grid border-l border-field-border pl-2" aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차`}>
+      {kind === "dailyPlans" && canManage ? (
+        <li>
+          <NavigationLink href={buildNewDailyPlanHref(projectId)} onNavigate={onNavigate} className="text-field-primary">
+            <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>새 일촬표</span>
+          </NavigationLink>
+        </li>
+      ) : null}
+
+      {plans.map((plan) => {
+        const href = kind === "dailyPlans"
+          ? buildDailyPlanRoundHref(projectId, plan.id)
+          : buildProgressRoundHref(projectId, plan.id);
+        const active = kind === "dailyPlans"
+          ? isDailyPlanRoundActive(pathname, plan.id)
+          : isProgressRoundActive(searchParams, plan.id);
+        return (
+          <li key={plan.id} className="min-w-0">
+            <RoundNavigationLink
+              plan={plan}
+              href={href}
+              active={active}
+              contextMenuEnabled={kind === "dailyPlans" && canManage && !isBusy}
+              onNavigate={onNavigate}
+              onOpenContextMenu={onOpenContextMenu}
+            />
+          </li>
+        );
+      })}
+
+      {!isBusy && plans.length === 0 ? (
+        <li className="px-2 py-1.5 text-[11px] text-field-muted">저장된 회차 없음</li>
+      ) : null}
+    </ul>
+  );
+}
+
+function NavigationLink({
+  href,
+  onNavigate,
+  className = "",
+  children
+}: {
+  href: string;
+  onNavigate: (href: string) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={(event) => {
+        if (!confirmUnsavedChangesNavigation()) {
+          event.preventDefault();
+          return;
+        }
+        onNavigate(href);
+      }}
+      className={`flex min-h-11 min-w-0 items-center gap-1.5 px-2 py-1.5 text-xs font-semibold hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${className}`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function RoundNavigationLink({
+  plan,
+  href,
+  active,
+  contextMenuEnabled,
+  onNavigate,
+  onOpenContextMenu
+}: {
+  plan: DailyPlan;
+  href: string;
+  active: boolean;
+  contextMenuEnabled: boolean;
+  onNavigate: (href: string) => void;
+  onOpenContextMenu: (plan: DailyPlan, clientX: number, clientY: number) => void;
+}) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pointerRef = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    target: HTMLAnchorElement;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const cancelLongPress = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    const pointer = pointerRef.current;
+    if (pointer?.target.hasPointerCapture(pointer.id)) {
+      try {
+        pointer.target.releasePointerCapture(pointer.id);
+      } catch {
+        // 브라우저가 먼저 capture를 해제한 경우에도 timer 상태는 정리합니다.
+      }
+    }
+    timerRef.current = null;
+    pointerRef.current = null;
+  }, []);
+
+  useEffect(() => cancelLongPress, [cancelLongPress]);
+
+  function beginLongPress(event: ReactPointerEvent<HTMLAnchorElement>) {
+    if (!contextMenuEnabled || event.pointerType === "mouse") return;
+    cancelLongPress();
+    suppressClickRef.current = false;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // capture 미지원 환경에서는 동일한 timer 취소 흐름을 사용합니다.
+    }
+    pointerRef.current = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      target: event.currentTarget
+    };
+    timerRef.current = setTimeout(() => {
+      const pointer = pointerRef.current;
+      if (!pointer) return;
+      timerRef.current = null;
+      suppressClickRef.current = true;
+      onOpenContextMenu(plan, pointer.x, pointer.y);
+    }, LONG_PRESS_MS);
+  }
+
+  return (
+    <Link
+      href={href}
+      draggable={false}
+      aria-current={active ? "page" : undefined}
+      aria-label={`${formatDailyPlanEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDate(plan.shootingDate)}`}
+      onClick={(event) => {
+        if (suppressClickRef.current) {
+          event.preventDefault();
+          suppressClickRef.current = false;
+          return;
+        }
+        if (!confirmUnsavedChangesNavigation()) {
+          event.preventDefault();
+          return;
+        }
+        onNavigate(href);
+      }}
+      onContextMenu={(event) => {
+        if (!contextMenuEnabled) return;
+        event.preventDefault();
+        onOpenContextMenu(plan, event.clientX, event.clientY);
+      }}
+      onKeyDown={(event) => {
+        if (!contextMenuEnabled || !(event.shiftKey && event.key === "F10")) return;
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpenContextMenu(plan, rect.left + Math.min(rect.width, 24), rect.top + rect.height / 2);
+      }}
+      onPointerDown={beginLongPress}
+      onPointerMove={(event) => {
+        const pointer = pointerRef.current;
+        if (!pointer || pointer.id !== event.pointerId) return;
+        if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12) cancelLongPress();
+      }}
+      onPointerUp={cancelLongPress}
+      onPointerCancel={cancelLongPress}
+      onDragStart={(event) => event.preventDefault()}
+      className={`block min-h-11 min-w-0 select-none px-2 py-2.5 text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+        active ? "bg-field-primary-soft text-field-primary" : "text-field-muted hover:bg-field-hover hover:text-field-text"
+      }`}
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate font-bold">{formatDailyPlanEpisodeLabel(plan.episode)}</span>
+        <span className="shrink-0 text-[10px] tabular-nums opacity-75">{formatDailyPlanCardDate(plan.shootingDate)}</span>
+      </span>
+    </Link>
+  );
+}
+
+function PlanContextMenu({
+  menu,
+  menuRef,
+  disabled,
+  onDuplicate,
+  onDelete
+}: {
+  menu: PlanContextMenu;
+  menuRef: RefObject<HTMLDivElement | null>;
+  disabled: boolean;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      ref={menuRef}
+      data-project-shell-portal
+      role="menu"
+      aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
+      className="fixed z-[100] grid w-56 gap-1 border border-field-divider bg-field-elevated p-1.5 text-field-text shadow-floating"
+      style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button type="button" role="menuitem" disabled={disabled} onClick={onDuplicate} className="flex min-h-9 items-center gap-2 px-2.5 text-left text-xs font-bold hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50">
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+        복사해서 새 일촬표 만들기
+      </button>
+      <button type="button" role="menuitem" disabled={disabled} onClick={onDelete} className="flex min-h-9 items-center gap-2 px-2.5 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger disabled:opacity-50">
+        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+        삭제
+      </button>
+    </div>
+  );
+}
+
+function DeleteConfirmation({
+  pending,
+  error,
+  isDeleting,
+  onCancel,
+  onConfirm
+}: {
+  pending: PendingDelete;
+  error: string;
+  isDeleting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div data-project-shell-portal className="fixed inset-0 z-[110] grid place-items-center bg-black/70 p-4" role="presentation">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="project-nav-delete-title"
+        aria-describedby="project-nav-delete-description"
+        aria-busy={isDeleting}
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-elevated p-4 shadow-dialog"
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not([disabled])"));
+          if (buttons.length === 0) return;
+          const first = buttons[0];
+          const last = buttons[buttons.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
+        <h2 id="project-nav-delete-title" className="text-base font-black text-field-text">일촬표 삭제</h2>
+        <div id="project-nav-delete-description" className="mt-2 space-y-1 text-sm leading-6 text-field-text">
+          <p><strong>{pending.label}</strong> 일촬표를 삭제하시겠습니까?</p>
+          <p className="text-field-muted">삭제한 일촬표는 복구할 수 없습니다.</p>
+        </div>
+        {error ? <p role="alert" className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{error}</p> : null}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button type="button" autoFocus disabled={isDeleting} onClick={onCancel} className="min-h-10 border border-field-divider bg-field-panel px-3 py-2 text-sm font-bold text-field-text hover:bg-field-hover disabled:opacity-50">취소</button>
+          <button type="button" disabled={isDeleting} onClick={onConfirm} className="min-h-10 border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-field-text hover:brightness-95 disabled:opacity-50">{isDeleting ? "삭제 중" : "삭제"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function getSafeSelectionHrefAfterDelete(
+  pathname: string,
+  searchParams: Pick<URLSearchParams, "get">,
+  projectId: string,
+  dailyPlanId: string
+) {
+  if (isDailyPlanRoundActive(pathname, dailyPlanId)) {
+    return buildProjectNavigationHref(projectId, "dailyPlans");
+  }
+  if (isProgressRoundActive(searchParams, dailyPlanId)) {
+    return buildProjectNavigationHref(projectId, "progress");
+  }
+  return "";
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return fallback;
+}

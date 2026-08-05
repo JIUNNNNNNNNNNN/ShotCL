@@ -2,10 +2,10 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ImagePlus, Pencil, Plus, Save, Trash2, X } from "lucide-react";
-import { useParams } from "next/navigation";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { Button } from "@/components/ui/Button";
 import {
   getProjectCostumeSceneOverview,
@@ -15,11 +15,8 @@ import {
   type ProjectCostumeBulkSaveInput,
   type ProjectCostumeBulkSaveResult
 } from "@/lib/data/projectReferenceAssets";
-import {
-  listDailyPlans,
-  type DailyPlanListItem
-} from "@/lib/data/dailyPlans";
-import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import type { DailyPlanListItem } from "@/lib/data/dailyPlans";
+import { getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
 import { auditQuery, isQueryAuditEnabled } from "@/lib/queryAudit";
@@ -59,16 +56,19 @@ const providerOptions = ["소지", "대여", "구입"];
 const tempPrefix = "costume-local-";
 
 export default function ProjectCostumesPage() {
-  const params = useParams<{ id: string | string[] }>();
-  const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
   const { role } = useProjectAccess();
+  const {
+    projectId,
+    project,
+    dailyPlans,
+    isLoading: isWorkspaceLoading
+  } = useProjectWorkspace();
   const canEdit = role === "admin";
   const [projectName, setProjectName] = useState("");
   const [scenes, setScenes] = useState<ProjectCostumeScene[]>([]);
   const [actors, setActors] = useState<ProjectActor[]>([]);
   const [sceneOptions, setSceneOptions] = useState<ProjectSceneItem[]>([]);
   const [sceneActorRoles, setSceneActorRoles] = useState<string[]>([]);
-  const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [totalEpisodes, setTotalEpisodes] = useState(0);
   const [automaticEpisodesByScene, setAutomaticEpisodesByScene] = useState<Map<string, Set<number>>>(new Map());
   const [selectedDailyPlanId, setSelectedDailyPlanId] = useState("");
@@ -91,17 +91,12 @@ export default function ProjectCostumesPage() {
   const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (!projectId || saveLockRef.current || dirtyRef.current) return;
+    if (!projectId || isWorkspaceLoading || saveLockRef.current || dirtyRef.current) return;
     const requestId = loadRequestRef.current + 1;
     loadRequestRef.current = requestId;
     setIsLoading(true);
     try {
-      const [project, costumeOverview, basicInfo, plans, sceneList] = await Promise.all([
-        auditQuery(
-          "costume.loadProject",
-          "app/projects/[id]/costumes/page.tsx:load",
-          () => getProject(projectId)
-        ),
+      const [costumeOverview, basicInfo, sceneList] = await Promise.all([
         auditQuery(
           "costume.loadCostumeScenesAndItems",
           "app/projects/[id]/costumes/page.tsx:load",
@@ -113,11 +108,6 @@ export default function ProjectCostumesPage() {
           () => getProjectBasicInfo(projectId)
         ).catch(() => null),
         auditQuery(
-          "costume.loadDailyPlans",
-          "app/projects/[id]/costumes/page.tsx:load",
-          () => listDailyPlans(projectId)
-        ).catch(() => []),
-        auditQuery(
           "costume.loadSceneList",
           "app/projects/[id]/costumes/page.tsx:load",
           () => getProjectSceneList(projectId)
@@ -125,7 +115,7 @@ export default function ProjectCostumesPage() {
       ]);
       if (requestId !== loadRequestRef.current || saveLockRef.current || dirtyRef.current) return;
       const costumeScenes = costumeOverview.scenes;
-      const automaticEpisodes = buildAutomaticEpisodesByScene(plans);
+      const automaticEpisodes = buildAutomaticEpisodesByScene(dailyPlans);
       const scenesWithAutomaticEpisodes = costumeScenes.map((scene) => ({
         ...scene,
         episodeNumbers: mergeEpisodeNumbers(
@@ -141,7 +131,6 @@ export default function ProjectCostumesPage() {
       setActors(basicInfo?.actors ?? []);
       setSceneOptions(sceneList?.items ?? []);
       setSceneActorRoles(sceneList?.actorRoles ?? []);
-      setDailyPlans(plans);
       setTotalEpisodes(Math.max(
         0,
         basicInfo?.totalEpisodes
@@ -171,7 +160,7 @@ export default function ProjectCostumesPage() {
     } finally {
       if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  }, [canEdit, projectId]);
+  }, [canEdit, dailyPlans, isWorkspaceLoading, project, projectId]);
 
   useEffect(() => {
     void load();

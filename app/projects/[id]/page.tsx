@@ -2,9 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
-import type { DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import {
   useProjectPageActionMenu,
@@ -31,30 +30,25 @@ import {
   type ProgressArchiveMediaAsset
 } from "@/lib/data/shotMediaArchive";
 import {
-  listDailyPlans,
   updateDailyPlanSceneDuration,
   updateDailyPlanScheduleItem,
   type DailyPlanListItem
 } from "@/lib/data/dailyPlans";
-import { getProject } from "@/lib/data/projects";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
-import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
-import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dailyPlan/dateOnly";
+import { compareDailyPlanEpisodes } from "@/lib/dailyPlan/carouselPresentation";
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
-import { calculateDailyProgress, calculateProgressPercent } from "@/lib/progress/dailyProgress";
+import { calculateDailyProgress } from "@/lib/progress/dailyProgress";
+import { buildProgressRoundHref } from "@/lib/projectNavigation";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import type { DailyPlan, DailyPlanMealTime, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
 type ProgressVisualBucket = "active" | "ok" | "omit";
 const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
 
-const DailyPlanCoverflow = dynamic(
-  () => import("@/components/DailyPlanCoverflow").then((module) => module.DailyPlanCoverflow),
-  { ssr: false }
-);
 const DailyPlanGatheringLocations = dynamic(
   () => import("@/components/DailyPlanGatheringLocations").then((module) => module.DailyPlanGatheringLocations),
   { ssr: false }
@@ -88,13 +82,6 @@ const ShotArchivePicker = dynamic(
   () => import("@/components/ShotArchivePicker").then((module) => module.ShotArchivePicker),
   { ssr: false, loading: ModalLoadingFallback }
 );
-
-/** URL 파라미터에서 프로젝트 ID를 안전하게 읽습니다. */
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  const id = params.id;
-  return Array.isArray(id) ? id[0] : id;
-}
 
 /** 쉼표로 입력한 등장 인물을 배열로 정리합니다. */
 function parseCharacters(value: string) {
@@ -159,14 +146,19 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
 export default function ProjectDetailPage() {
   const { role } = useProjectAccess();
+  const {
+    projectId,
+    project,
+    dailyPlans,
+    isLoading: isWorkspaceLoading,
+    error: workspaceError,
+    upsertDailyPlan
+  } = useProjectWorkspace();
   const progressOnly = role === "progress";
-  const projectId = useProjectId();
   const searchParams = useSearchParams();
   const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
   const isProgressView = searchParams.get("view") === "progress" || Boolean(dailyPlanId);
   const progressEntryKey = `${projectId ?? "missing-project"}:${dailyPlanId || "episode-selection"}`;
-  const [project, setProject] = useState<Project | null>(null);
-  const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
   const [sessionBucketByShotId, setSessionBucketByShotId] = useState<Map<string, ProgressVisualBucket>>(() => new Map());
   const [archiveMediaByShotId, setArchiveMediaByShotId] = useState<Map<string, ProgressArchiveMediaAsset[]>>(() => new Map());
@@ -215,7 +207,6 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     if (!isProgressView) return;
     void Promise.all([
-      import("@/components/DailyPlanCoverflow"),
       import("@/components/DailyPlanGatheringLocations"),
       import("@/components/ProgressSceneDurationEditor"),
       import("@/components/ShotCard"),
@@ -223,30 +214,38 @@ export default function ProjectDetailPage() {
     ]);
   }, [isProgressView]);
 
+  const selectedPlan = useMemo(
+    () => dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null,
+    [dailyPlanId, dailyPlans]
+  );
+  const selectedDailyPlanId = selectedPlan?.id ?? "";
+
   const refresh = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || isWorkspaceLoading) return;
     const requestedEntryKey = progressEntryKey;
 
     try {
-      const [projectData, planData, selectedShots, archiveAssets] = await Promise.all([
-        auditQuery(
-          "progress.loadProject",
-          "app/projects/[id]/page.tsx:refresh",
-          () => getProject(projectId)
-        ),
-        auditQuery(
-          "progress.loadDailyPlans",
-          "app/projects/[id]/page.tsx:refresh",
-          () => listDailyPlans(projectId)
-        ),
-        dailyPlanId
+      if (!project) {
+        shotsRef.current = [];
+        setShots([]);
+        archiveAssetsRef.current = [];
+        persistedStatusByShotIdRef.current.clear();
+        setArchiveMediaByShotId(new Map());
+        setMediaLinksByShotId(new Map());
+        commitSessionBuckets(new Map());
+        setErrorMessage(workspaceError);
+        return;
+      }
+
+      const [selectedShots, archiveAssets] = await Promise.all([
+        selectedDailyPlanId
           ? auditQuery(
               "progress.loadCuts",
               "app/projects/[id]/page.tsx:refresh",
-              () => listShots(projectId, dailyPlanId)
+              () => listShots(projectId, selectedDailyPlanId)
             )
           : Promise.resolve([]),
-        dailyPlanId
+        selectedDailyPlanId
           ? auditQuery(
               "progress.loadArchiveMedia",
               "app/projects/[id]/page.tsx:refresh",
@@ -255,19 +254,6 @@ export default function ProjectDetailPage() {
           : Promise.resolve([] as ProgressArchiveMediaAsset[])
       ]);
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      setProject(projectData);
-      if (!projectData) {
-        setDailyPlans([]);
-        shotsRef.current = [];
-        setShots([]);
-        archiveAssetsRef.current = [];
-        persistedStatusByShotIdRef.current.clear();
-        setArchiveMediaByShotId(new Map());
-        setMediaLinksByShotId(new Map());
-        commitSessionBuckets(new Map());
-        setErrorMessage("");
-        return;
-      }
       let shotsWithDiagrams = selectedShots;
       let nextMediaLinksByShotId = new Map<string, ShotMediaLink[]>();
       if (selectedShots.length > 0) {
@@ -295,18 +281,16 @@ export default function ProjectDetailPage() {
         }
       }
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      const selectedPlanForAssets = planData.find((plan) => plan.id === dailyPlanId) ?? null;
       archiveAssetsRef.current = archiveAssets;
-      setArchiveMediaByShotId(selectedPlanForAssets
+      setArchiveMediaByShotId(selectedPlan
         ? buildProgressArchiveMediaByShotId({
             shots: shotsWithDiagrams,
             assets: archiveAssets,
-            timetableScenes: decodeDailyPlanMemo(selectedPlanForAssets.memo).timetableScenes,
-            dailyPlanId: selectedPlanForAssets.id,
-            episodeNumber: parseEpisodeNumber(selectedPlanForAssets.episode)
+            timetableScenes: decodeDailyPlanMemo(selectedPlan.memo).timetableScenes,
+            dailyPlanId: selectedPlan.id,
+            episodeNumber: parseEpisodeNumber(selectedPlan.episode)
           })
         : new Map());
-      setDailyPlans(planData);
       setMediaLinksByShotId(nextMediaLinksByShotId);
       persistedStatusByShotIdRef.current = new Map(shotsWithDiagrams.map((shot) => [
         shot.id,
@@ -329,7 +313,16 @@ export default function ProjectDetailPage() {
     } finally {
       if (activeProgressEntryKeyRef.current === requestedEntryKey) setIsLoading(false);
     }
-  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId]);
+  }, [
+    commitSessionBuckets,
+    isWorkspaceLoading,
+    progressEntryKey,
+    project,
+    projectId,
+    selectedPlan,
+    selectedDailyPlanId,
+    workspaceError
+  ]);
 
   useEffect(() => {
     selectedShotsRefreshVersionRef.current += 1;
@@ -351,7 +344,6 @@ export default function ProjectDetailPage() {
   }, [refresh]);
 
   const nextOrderIndex = shots.length + 1;
-  const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
   const rebuildArchiveMedia = useCallback((nextShots: Shot[]) => {
     setArchiveMediaByShotId(selectedPlan
       ? buildProgressArchiveMediaByShotId({
@@ -365,14 +357,14 @@ export default function ProjectDetailPage() {
   }, [selectedPlan]);
 
   const refreshSelectedShots = useCallback(async () => {
-    if (!projectId || !dailyPlanId) return;
+    if (!projectId || !selectedDailyPlanId) return;
     const requestedEntryKey = progressEntryKey;
     const refreshVersion = ++selectedShotsRefreshVersionRef.current;
     try {
       const refreshedShots = await auditQuery(
         "progress.realtime.reloadCuts",
         "app/projects/[id]/page.tsx:refreshSelectedShots",
-        () => listShots(projectId, dailyPlanId)
+        () => listShots(projectId, selectedDailyPlanId)
       );
       if (
         activeProgressEntryKeyRef.current !== requestedEntryKey
@@ -403,12 +395,12 @@ export default function ProjectDetailPage() {
       ) return;
       setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
     }
-  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId, rebuildArchiveMedia]);
+  }, [commitSessionBuckets, progressEntryKey, projectId, rebuildArchiveMedia, selectedDailyPlanId]);
 
   useEffect(() => {
-    if (!projectId || !dailyPlanId) return undefined;
-    return subscribeToShotChanges(projectId, refreshSelectedShots, dailyPlanId);
-  }, [dailyPlanId, projectId, refreshSelectedShots]);
+    if (!projectId || !selectedDailyPlanId) return undefined;
+    return subscribeToShotChanges(projectId, refreshSelectedShots, selectedDailyPlanId);
+  }, [projectId, refreshSelectedShots, selectedDailyPlanId]);
 
   const refreshSelectedShotMedia = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
@@ -510,9 +502,6 @@ export default function ProjectDetailPage() {
       key: "progressDetail",
       scopeKey: `progress-detail:${project.id}:${dailyPlanId}`,
       actions: {
-        progressRounds: {
-          href: `/projects/${project.id}?view=progress`
-        },
         progressAddCut: {
           onSelect: () => setIsAddOpen(true),
           hidden: progressOnly,
@@ -533,10 +522,9 @@ export default function ProjectDetailPage() {
   const handleDailyPlanMetadataChange = useCallback((
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
   ) => {
-    setDailyPlans((current) => current.map((item) => (
-      item.id === dailyPlanId ? { ...item, ...patch } : item
-    )));
-  }, [dailyPlanId]);
+    if (!selectedPlan) return;
+    upsertDailyPlan({ ...selectedPlan, ...patch });
+  }, [selectedPlan, upsertDailyPlan]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     const requestedEntryKey = activeProgressEntryKeyRef.current;
@@ -712,9 +700,7 @@ export default function ProjectDetailPage() {
         progressMemo: values.progressMemo.trim(),
         imageUrl
       });
-      setDailyPlans((current) => current.map((plan) => (
-        plan.id === dailyPlanId ? { ...plan, mealTimes } : plan
-      )));
+      if (selectedPlan) upsertDailyPlan({ ...selectedPlan, mealTimes });
       setEditingSchedule(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "기타일정 정보를 저장하지 못했습니다.");
@@ -740,12 +726,8 @@ export default function ProjectDetailPage() {
       runtimeMinutes,
       expectedUpdatedAt: currentPlan.updatedAt
     });
-    setDailyPlans((current) => current.map((plan) => (
-      plan.id === dailyPlanId
-        ? { ...plan, memo: result.memo, updatedAt: result.updatedAt }
-        : plan
-    )));
-  }, [dailyPlanId, dailyPlans, projectId, role]);
+    upsertDailyPlan({ ...currentPlan, memo: result.memo, updatedAt: result.updatedAt });
+  }, [dailyPlanId, dailyPlans, projectId, role, upsertDailyPlan]);
 
   const renderSceneDurationBeforeIndex = useCallback((visibleShots: Shot[], index: number) => {
     const shot = visibleShots[index];
@@ -896,14 +878,14 @@ export default function ProjectDetailPage() {
     }
   }
 
-  if (isLoading) {
+  if (isWorkspaceLoading || isLoading) {
     return <PixelDogLoader size="lg" />;
   }
 
   if (!project) {
     return (
       <Card className="border-field-danger text-field-danger">
-        <p className="font-bold">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
+        <p className="font-bold">{workspaceError || errorMessage || "프로젝트를 찾을 수 없습니다."}</p>
         <ButtonLink href="/" className="mt-4">
           프로젝트 선택으로
         </ButtonLink>
@@ -916,7 +898,6 @@ export default function ProjectDetailPage() {
       <ProjectGuideMenu
         projectId={project.id}
         role={role}
-        queryString={searchParams.toString()}
       />
     );
   }
@@ -924,7 +905,7 @@ export default function ProjectDetailPage() {
   if (!dailyPlanId || !selectedPlan) {
     return (
       <EpisodeSelection
-        project={project}
+        projectId={project.id}
         plans={dailyPlans}
         invalidSelection={Boolean(dailyPlanId)}
       />
@@ -1223,79 +1204,37 @@ function mergeShotOrder(currentShots: Shot[], orderedShots: Shot[]) {
 }
 
 function EpisodeSelection({
-  project,
+  projectId,
   plans,
   invalidSelection
 }: {
-  project: Project;
+  projectId: string;
   plans: DailyPlanListItem[];
   invalidSelection: boolean;
 }) {
   const router = useRouter();
-  const navigationLockedRef = useRef(false);
-  const navigationUnlockTimerRef = useRef<number | null>(null);
   const sortedPlans = useMemo(() => [...plans].sort(compareDailyPlanEpisodes), [plans]);
-  const carouselItems = useMemo<DailyPlanCarouselItem[]>(() => sortedPlans.map((plan) => {
-    const episodeLabel = formatDailyPlanEpisodeLabel(plan.episode);
-    const dateLabel = formatDailyPlanCardDate(plan.shootingDate);
-    const totalCuts = plan.progressTotal;
-    const progressPercent = calculateProgressPercent(totalCuts, plan.progressCompleted);
-    return {
-      id: `progress-daily-plan:${plan.id}`,
-      kind: "plan",
-      label: episodeLabel,
-      dateLabel,
-      metaLabel: `총 ${totalCuts}컷`,
-      progressPercent,
-      ariaLabel: `${episodeLabel}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}, 총 ${totalCuts}컷, 진행률 ${progressPercent}퍼센트`,
-      planId: plan.id
-    };
-  }), [sortedPlans]);
+  const onlyPlanId = sortedPlans.length === 1 ? sortedPlans[0]?.id.trim() ?? "" : "";
 
-  useEffect(() => () => {
-    if (navigationUnlockTimerRef.current !== null) {
-      window.clearTimeout(navigationUnlockTimerRef.current);
-    }
-  }, []);
-
-  function handleActivatePlan(item: DailyPlanCarouselItem) {
-    if (!item.planId || navigationLockedRef.current) return false;
-    navigationLockedRef.current = true;
-    try {
-      router.push(`/projects/${project.id}?dailyPlanId=${encodeURIComponent(item.planId)}`);
-      navigationUnlockTimerRef.current = window.setTimeout(() => {
-        navigationLockedRef.current = false;
-        navigationUnlockTimerRef.current = null;
-      }, 1_500);
-      return true;
-    } catch {
-      navigationLockedRef.current = false;
-      return false;
-    }
-  }
+  useEffect(() => {
+    if (!onlyPlanId) return;
+    router.replace(buildProgressRoundHref(projectId, onlyPlanId));
+  }, [onlyPlanId, projectId, router]);
 
   return (
-    <main className="flex min-h-[calc(100dvh-8rem)] min-w-0 items-start justify-center overflow-x-clip pb-12 pt-4 md:pt-7">
-      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
-        <div className="relative flex w-full min-w-0 items-start justify-center px-4">
-          <h1 className="max-w-full truncate text-center text-xl font-black leading-[1.35] text-field-text md:text-2xl" title={project.name}>
-            {project.name}
-          </h1>
-        </div>
-
+    <section className="flex min-h-[min(24rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
+      <Card className="w-full max-w-md text-center">
         {invalidSelection ? <p role="alert" className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-semibold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
-
-        {carouselItems.length === 0 ? (
-          <p className="mt-8 text-center text-sm text-field-muted">진행 가능한 일촬표가 없습니다.</p>
-        ) : (
-          <DailyPlanCoverflow
-            items={carouselItems}
-            onActivate={handleActivatePlan}
-            ariaLabel="진행도 회차 선택 카드"
-          />
-        )}
-      </div>
-    </main>
+        <h1 className="font-display text-xl font-black text-field-text">진행도</h1>
+        <p className="mt-3 text-sm leading-6 text-field-muted">
+          {sortedPlans.length === 0
+            ? "진행 가능한 일촬표가 없습니다."
+            : onlyPlanId
+              ? "회차 진행도로 이동하고 있습니다."
+              : "좌측 진행도 메뉴에서 회차를 선택하세요."}
+        </p>
+      </Card>
+    </section>
   );
 }
 

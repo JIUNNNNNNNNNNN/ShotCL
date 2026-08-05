@@ -1,445 +1,77 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { createPortal } from "react-dom";
-import { useParams, useRouter } from "next/navigation";
-import {
-  DailyPlanCoverflow,
-  type DailyPlanCarouselItem
-} from "@/components/DailyPlanCoverflow";
+import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { useProjectAccess } from "@/components/ProjectAccessGate";
-import { deleteDailyPlan, duplicateDailyPlan, listDailyPlans } from "@/lib/data/dailyPlans";
-import { getProject } from "@/lib/data/projects";
-import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
-import { formatDailyPlanCardDate, formatDailyPlanCardDateAria } from "@/lib/dailyPlan/dateOnly";
-import type { DailyPlan, Project } from "@/lib/types";
+import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
+import { buildDailyPlanRoundHref, buildNewDailyPlanHref } from "@/lib/projectNavigation";
 
-type DailyPlanListItem = DailyPlan & { shotCount: number };
-
-type PlanContextMenu = {
-  plan: DailyPlanListItem;
-  x: number;
-  y: number;
-};
-
-type PendingDeleteItem = {
-  dailyPlanId: string;
-  episodeLabel: string;
-};
-
-const NEW_CARD_ID = "new-daily-plan";
-const CONTEXT_MENU_WIDTH = 232;
-const CONTEXT_MENU_HEIGHT = 92;
-const CONTEXT_MENU_EDGE = 8;
-
-/** 서버가 반환한 canonical 일촬표를 ID 기준으로 한 번만 보관합니다. */
-function upsertCanonicalDailyPlan(
-  current: DailyPlanListItem[],
-  next: DailyPlanListItem
-) {
-  const plansById = new Map<string, DailyPlanListItem>();
-  current.forEach((item) => plansById.set(item.id, item));
-  plansById.set(next.id, next);
-  return Array.from(plansById.values());
-}
-
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  const id = params.id;
-  return Array.isArray(id) ? id[0] : id;
-}
-
-/** 프로젝트명과 회차 portrait 카드만 중앙에 보여주고 기존 생성·복사·삭제 흐름을 연결합니다. */
+/**
+ * 이전 회차 선택 URL을 보존합니다. 회차 선택과 관리 작업은 프로젝트 좌측
+ * navigation이 담당하며, 회차가 하나뿐일 때만 canonical 상세 URL로 바로 이동합니다.
+ */
 export default function DailyPlansPage() {
-  const projectId = useProjectId();
   const router = useRouter();
-  const { role } = useProjectAccess();
-  const [project, setProject] = useState<Project | null>(null);
-  const [plans, setPlans] = useState<DailyPlanListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDuplicating, setIsDuplicating] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
-  const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
-  const [pendingDeleteItem, setPendingDeleteItem] = useState<PendingDeleteItem | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
-  const duplicateInFlightRef = useRef<string | null>(null);
-  const navigationLockedRef = useRef(false);
-  const navigationUnlockTimerRef = useRef<number | null>(null);
-  const canManage = role !== "progress" && project?.accessRole !== "progress";
-
-  const sortedPlans = useMemo(
-    () => [...plans].sort(compareDailyPlanEpisodes),
-    [plans]
-  );
-  const carouselItems = useMemo<DailyPlanCarouselItem[]>(() => [
-    ...(canManage ? [{ id: NEW_CARD_ID, kind: "new" as const, label: "+" }] : []),
-    ...sortedPlans.map((plan) => ({
-      id: `daily-plan:${plan.id}`,
-      kind: "plan" as const,
-      label: formatDailyPlanEpisodeLabel(plan.episode),
-      dateLabel: formatDailyPlanCardDate(plan.shootingDate),
-      ariaLabel: `${formatDailyPlanEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDateAria(plan.shootingDate)}`,
-      planId: plan.id
-    }))
-  ], [canManage, sortedPlans]);
-
-  const refresh = useCallback(async () => {
-    if (!projectId) return;
-
-    try {
-      const [projectData, planData] = await Promise.all([
-        getProject(projectId),
-        listDailyPlans(projectId)
-      ]);
-      setProject(projectData);
-      setPlans(projectData ? planData : []);
-      setErrorMessage("");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "저장된 일촬표 목록을 불러오지 못했습니다.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [projectId]);
+  const { project, dailyPlans, isLoading, error } = useProjectWorkspace();
+  const redirectAttemptRef = useRef("");
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-
-    function closeOnOutsidePointer(event: PointerEvent) {
-      if (contextMenuRef.current?.contains(event.target as Node)) return;
-      setContextMenu(null);
+    if (isLoading || error || !project || dailyPlans.length !== 1) {
+      redirectAttemptRef.current = "";
+      return;
     }
 
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setContextMenu(null);
-    }
-
-    function closeOnViewportChange() {
-      setContextMenu(null);
-    }
-
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    window.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-      window.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
-    };
-  }, [contextMenu]);
-
-  useEffect(() => {
-    if (!pendingDeleteItem) return;
-
-    function closeDeleteDialogOnEscape(event: KeyboardEvent) {
-      if (event.key !== "Escape" || isDeleting) return;
-      setPendingDeleteItem(null);
-      setDeleteErrorMessage("");
-    }
-
-    window.addEventListener("keydown", closeDeleteDialogOnEscape);
-    return () => window.removeEventListener("keydown", closeDeleteDialogOnEscape);
-  }, [isDeleting, pendingDeleteItem]);
-
-  useEffect(() => () => {
-    if (navigationUnlockTimerRef.current !== null) {
-      window.clearTimeout(navigationUnlockTimerRef.current);
-    }
-  }, []);
-
-  function navigateOnce(path: string) {
-    if (navigationLockedRef.current) return;
-    navigationLockedRef.current = true;
-    setErrorMessage("");
-    try {
-      router.push(path);
-      navigationUnlockTimerRef.current = window.setTimeout(() => {
-        navigationLockedRef.current = false;
-        navigationUnlockTimerRef.current = null;
-      }, 1_500);
-    } catch (error) {
-      navigationLockedRef.current = false;
-      setErrorMessage(error instanceof Error ? error.message : "일촬표 화면으로 이동하지 못했습니다.");
-    }
-  }
-
-  function handleActivateItem(item: DailyPlanCarouselItem) {
-    if (!projectId || duplicateInFlightRef.current || isDuplicating || pendingDeleteItem) return false;
-    if (item.kind === "new") {
-      navigateOnce(`/projects/${projectId}/daily-plans/new`);
-      return true;
-    }
-    if (!item.planId) {
-      setErrorMessage("열 일촬표 ID를 찾을 수 없습니다.");
-      return false;
-    }
-    navigateOnce(`/projects/${projectId}/daily-plans/${item.planId}`);
-    return true;
-  }
-
-  function openPlanContextMenu(item: DailyPlanCarouselItem, clientX: number, clientY: number) {
-    if (
-      item.kind !== "plan"
-      || !item.planId
-      || !canManage
-      || duplicateInFlightRef.current
-      || isDuplicating
-      || isDeleting
-      || pendingDeleteItem
-    ) return;
-    const plan = sortedPlans.find((candidate) => candidate.id === item.planId);
-    if (!plan) return;
-    const maxX = Math.max(CONTEXT_MENU_EDGE, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE);
-    const maxY = Math.max(CONTEXT_MENU_EDGE, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_EDGE);
-    setContextMenu({
-      plan,
-      x: Math.min(Math.max(CONTEXT_MENU_EDGE, clientX), maxX),
-      y: Math.min(Math.max(CONTEXT_MENU_EDGE, clientY), maxY)
-    });
-  }
-
-  async function handleDuplicate(plan: DailyPlanListItem) {
-    if (
-      !projectId
-      || duplicateInFlightRef.current
-      || isDuplicating
-      || isDeleting
-      || pendingDeleteItem
-      || !canManage
-    ) return;
-    // setState가 반영되기 전의 연속 click/long-press click도 같은 요청을 두 번 만들지 못하게 합니다.
-    duplicateInFlightRef.current = plan.id;
-    setContextMenu(null);
-    setIsDuplicating(true);
-    setErrorMessage("");
-
-    try {
-      const duplicated = await duplicateDailyPlan(projectId, plan.id);
-      const duplicatedItem: DailyPlanListItem = {
-        ...duplicated.plan,
-        shotCount: duplicated.shots.length
-      };
-      setPlans((current) => upsertCanonicalDailyPlan(current, duplicatedItem));
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "일촬표를 복사하지 못했습니다.");
-    } finally {
-      if (duplicateInFlightRef.current === plan.id) duplicateInFlightRef.current = null;
-      setIsDuplicating(false);
-    }
-  }
-
-  function requestDelete(plan: DailyPlanListItem) {
-    if (!projectId || duplicateInFlightRef.current || isDuplicating || isDeleting || !canManage) return;
-    setContextMenu(null);
-    setDeleteErrorMessage("");
-    setPendingDeleteItem({
-      dailyPlanId: plan.id,
-      episodeLabel: formatDailyPlanEpisodeLabel(plan.episode)
-    });
-  }
-
-  function cancelDelete() {
-    if (isDeleting) return;
-    setPendingDeleteItem(null);
-    setDeleteErrorMessage("");
-  }
-
-  async function confirmDelete() {
-    const target = pendingDeleteItem;
-    if (!projectId || !target || duplicateInFlightRef.current || isDeleting || !canManage) return;
-    setIsDeleting(true);
-    setDeleteErrorMessage("");
-
-    try {
-      await deleteDailyPlan(projectId, target.dailyPlanId);
-      setPlans((current) => current.filter((item) => item.id !== target.dailyPlanId));
-      setPendingDeleteItem(null);
-    } catch (error) {
-      setDeleteErrorMessage(error instanceof Error ? error.message : "일촬표를 삭제하지 못했습니다.");
-    } finally {
-      setIsDeleting(false);
-    }
-  }
+    const dailyPlanId = dailyPlans[0]?.id.trim();
+    if (!dailyPlanId) return;
+    const target = buildDailyPlanRoundHref(project.id, dailyPlanId);
+    if (redirectAttemptRef.current === target) return;
+    redirectAttemptRef.current = target;
+    if (!confirmUnsavedChangesNavigation()) return;
+    router.replace(target);
+  }, [dailyPlans, error, isLoading, project, router]);
 
   if (isLoading) return <PixelDogLoader />;
 
   if (!project) {
-    return <Card className="border-field-danger font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</Card>;
+    return (
+      <Card className="border-field-danger font-bold text-field-danger">
+        {error || "프로젝트를 찾을 수 없습니다."}
+      </Card>
+    );
+  }
+
+  if (error) {
+    return <Card className="border-field-danger font-bold text-field-danger">{error}</Card>;
+  }
+
+  if (dailyPlans.length === 0) {
+    return (
+      <section className="flex min-h-[min(28rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
+        <Card className="w-full max-w-md text-center">
+          <h1 className="font-display text-xl font-black text-field-text">{project.name}</h1>
+          <p className="mt-3 text-sm leading-6 text-field-muted">아직 저장된 일촬표가 없습니다.</p>
+          <ButtonLink
+            href={buildNewDailyPlanHref(project.id)}
+            className="mt-5"
+          >
+            새 일촬표 만들기
+          </ButtonLink>
+        </Card>
+      </section>
+    );
   }
 
   return (
-    <section
-      className="flex min-h-[calc(100dvh-8rem)] min-w-0 select-none items-start justify-center overflow-x-clip px-0 py-4 md:py-7"
-      aria-labelledby="daily-plan-project-title"
-    >
-      <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center justify-start">
-        <h1
-          id="daily-plan-project-title"
-          className="max-w-full truncate px-3 text-center text-xl font-black leading-[1.35] text-field-text md:text-2xl"
-          title={project.name}
-        >
-          {project.name}
-        </h1>
-
-        {errorMessage ? (
-          <p role="alert" className="mx-auto mt-2 w-full max-w-xl border border-field-danger bg-field-panel px-3 py-2 text-center text-sm font-bold text-field-danger">
-            {errorMessage}
-          </p>
-        ) : null}
-
-        <DailyPlanCoverflow
-          items={carouselItems}
-          disabled={isDuplicating || Boolean(pendingDeleteItem)}
-          onActivate={handleActivateItem}
-          onOpenContextMenu={openPlanContextMenu}
-        />
-      </div>
-
-      {contextMenu && typeof document !== "undefined" ? createPortal(
-        <DailyPlanContextMenu
-          menu={contextMenu}
-          menuRef={contextMenuRef}
-          disabled={isDuplicating || isDeleting}
-          onDuplicate={() => handleDuplicate(contextMenu.plan)}
-          onDelete={() => requestDelete(contextMenu.plan)}
-        />,
-        document.body
-      ) : null}
-
-      {pendingDeleteItem && typeof document !== "undefined" ? createPortal(
-        <DailyPlanDeleteDialog
-          item={pendingDeleteItem}
-          errorMessage={deleteErrorMessage}
-          isDeleting={isDeleting}
-          onCancel={cancelDelete}
-          onConfirm={confirmDelete}
-        />,
-        document.body
-      ) : null}
+    <section className="flex min-h-[min(24rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
+      <Card className="w-full max-w-md text-center">
+        <h1 className="font-display text-xl font-black text-field-text">{project.name}</h1>
+        <p className="mt-3 text-sm leading-6 text-field-muted">
+          좌측 일촬표 메뉴에서 회차를 선택하세요.
+        </p>
+      </Card>
     </section>
-  );
-}
-
-function DailyPlanContextMenu({
-  menu,
-  menuRef,
-  disabled,
-  onDuplicate,
-  onDelete
-}: {
-  menu: PlanContextMenu;
-  menuRef: RefObject<HTMLDivElement | null>;
-  disabled: boolean;
-  onDuplicate: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      ref={menuRef}
-      role="menu"
-      aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
-      className="fixed z-[100] grid w-[232px] gap-1 border border-field-divider bg-field-elevated p-1.5 text-field-text"
-      style={{ left: menu.x, top: menu.y }}
-      onPointerDown={(event) => event.stopPropagation()}
-    >
-      <button
-        type="button"
-        role="menuitem"
-        className="min-h-9 px-2.5 text-left text-xs font-bold text-field-text hover:bg-field-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:opacity-50"
-        onClick={(event) => {
-          event.stopPropagation();
-          onDuplicate();
-        }}
-        disabled={disabled}
-      >
-        복사해서 새 일촬표 만들기
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="min-h-9 px-2.5 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger disabled:opacity-50"
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete();
-        }}
-        disabled={disabled}
-      >
-        삭제
-      </button>
-    </div>
-  );
-}
-
-function DailyPlanDeleteDialog({
-  item,
-  errorMessage,
-  isDeleting,
-  onCancel,
-  onConfirm
-}: {
-  item: PendingDeleteItem;
-  errorMessage: string;
-  isDeleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-[110] grid place-items-center bg-black/70 p-4"
-      role="presentation"
-    >
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="daily-plan-delete-title"
-        aria-describedby="daily-plan-delete-description"
-        aria-busy={isDeleting}
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-elevated p-4"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <h2 id="daily-plan-delete-title" className="text-base font-black leading-[1.4] text-field-text">
-          일촬표 삭제
-        </h2>
-        <div id="daily-plan-delete-description" className="mt-2 space-y-1 text-sm leading-[1.5] text-field-text">
-          <p><strong>{item.episodeLabel}</strong> 일촬표를 삭제하시겠습니까?</p>
-          <p className="text-field-muted">삭제한 일촬표는 복구할 수 없습니다.</p>
-        </div>
-
-        {errorMessage ? (
-          <p role="alert" className="mt-3 border border-field-danger bg-field-panel px-3 py-2 text-sm font-bold leading-[1.45] text-field-danger">
-            {errorMessage}
-          </p>
-        ) : null}
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            autoFocus
-            className="min-h-10 border border-field-divider bg-field-panel px-3 py-2 text-sm font-bold text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-primary disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={onCancel}
-            disabled={isDeleting}
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            className="min-h-10 border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-field-text hover:brightness-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-field-danger focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={onConfirm}
-            disabled={isDeleting}
-          >
-            {isDeleting ? "삭제 중" : "삭제"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

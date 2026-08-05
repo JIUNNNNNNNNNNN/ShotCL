@@ -1616,6 +1616,247 @@ button {
   margin: 0;
 }
 
+/* Project App Shell breakpoints are centralized here: mobile < 900, compact < 1360, wide >= 1360. */
+.project-shell {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  max-width: 100vw;
+  height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  overflow: clip;
+  background: var(--bg-base);
+}
+
+.project-shell *,
+.project-shell *::before,
+.project-shell *::after {
+  box-sizing: border-box;
+}
+
+.project-shell__navigation {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--bg-surface-1);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.project-shell__app-bar {
+  z-index: 45;
+  display: grid;
+  grid-column: 1;
+  grid-row: 1;
+  grid-template-columns: 44px 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: calc(56px + env(safe-area-inset-top));
+  padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(17, 17, 17, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.project-shell__bar-button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  color: var(--ui-text-secondary);
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.project-shell__bar-button:hover {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-surface-4);
+  color: var(--ui-accent);
+}
+
+.project-shell__bar-button:active {
+  transform: scale(0.96);
+}
+
+.project-shell__bar-button:focus-visible {
+  outline: 2px solid var(--ui-accent-focus);
+  outline-offset: 2px;
+}
+
+.project-shell__bar-button > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.project-shell__bar-spacer {
+  width: 44px;
+  height: 44px;
+}
+
+.project-shell__content {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px max(10px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  scrollbar-gutter: stable;
+}
+
+.project-shell__page,
+.project-shell__page > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.project-shell__action-panel {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-surface-1);
+  border-left: 1px solid var(--border-subtle);
+}
+
+.project-shell__drawer-layer,
+.project-shell__action-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+}
+
+.project-shell__drawer-backdrop,
+.project-shell__action-drawer-overlay::before {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.62);
+  content: "";
+}
+
+.project-shell__navigation-drawer,
+.project-shell__action-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-surface-1);
+  box-shadow: var(--shadow-dialog);
+}
+
+.project-shell__navigation-drawer {
+  left: 0;
+  width: min(320px, calc(100vw - 24px));
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  border-right: 1px solid var(--ui-border-default);
+}
+
+.project-shell__action-drawer {
+  right: 0;
+  width: min(336px, calc(100vw - 24px));
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  border-left: 1px solid var(--ui-border-default);
+}
+
+@media (max-width: 899px) {
+  [data-project-action-id="dailyPlanPortraitPdf"] {
+    display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .project-shell {
+    grid-template-columns: clamp(216px, 22vw, 248px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .project-shell__navigation {
+    display: block;
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .project-shell__app-bar {
+    grid-column: 2;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .project-shell__mobile-home,
+  .project-shell__navigation-toggle {
+    display: none;
+  }
+
+  .project-shell__content {
+    grid-column: 2;
+    grid-row: 2;
+    padding: 20px clamp(18px, 2.5vw, 30px) max(28px, env(safe-area-inset-bottom));
+  }
+
+  .project-shell__drawer-layer {
+    display: none;
+  }
+}
+
+@media (min-width: 1360px) {
+  .project-shell {
+    grid-template-columns: clamp(220px, 17vw, 272px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .project-shell--has-actions {
+    grid-template-columns: clamp(220px, 17vw, 272px) minmax(0, 1fr) clamp(264px, 21vw, 336px);
+  }
+
+  .project-shell__navigation {
+    grid-row: 1;
+  }
+
+  .project-shell__app-bar {
+    display: none;
+  }
+
+  .project-shell__content {
+    grid-column: 2;
+    grid-row: 1;
+    padding: 24px clamp(22px, 2.5vw, 36px) max(32px, env(safe-area-inset-bottom));
+  }
+
+  .project-shell__action-panel {
+    display: flex;
+    grid-column: 3;
+    grid-row: 1;
+    flex-direction: column;
+  }
+
+  .project-shell__action-drawer-overlay {
+    display: none;
+  }
+}
+
 @media print {
   html,
   body {
@@ -1681,6 +1922,18 @@ button {
 
   main {
     max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .project-shell,
+  .project-shell__content,
+  .project-shell__page {
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
     padding: 0 !important;
   }
 

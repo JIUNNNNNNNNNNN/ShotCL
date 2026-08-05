@@ -1446,25 +1446,7 @@ function useSceneTableFit(
       animationFrame = 0;
       if (disposed) return;
       const shellRect = shell.getBoundingClientRect();
-      let availableWidth = Math.max(1, shell.clientWidth || shellRect.width);
-
-      // The sidebar is a fixed overlay. Reserve only its real overlap once on
-      // desktop; mobile keeps the underlying page width while the overlay is open.
-      if (window.matchMedia("(min-width: 768px)").matches) {
-        const sidebarPanel = document.querySelector<HTMLElement>(
-          '[data-project-sidebar-panel][data-project-sidebar-open="true"]'
-        );
-        if (sidebarPanel) {
-          const panelRect = sidebarPanel.getBoundingClientRect();
-          const overlap = Math.max(
-            0,
-            Math.min(shellRect.right, panelRect.right) - Math.max(shellRect.left, panelRect.left)
-          );
-          if (overlap > 0 && overlap < availableWidth) {
-            availableWidth = Math.max(1, availableWidth - overlap - 8);
-          }
-        }
-      }
+      const availableWidth = Math.max(1, shell.clientWidth || shellRect.width);
 
       const naturalWidth = Math.max(
         declaredNaturalWidth,
@@ -1509,19 +1491,8 @@ function useSceneTableFit(
     resizeObserver.observe(stage);
     resizeObserver.observe(table);
 
-    const sidebarRoot = document.querySelector<HTMLElement>("[data-project-sidebar-root]");
-    const sidebarObserver = sidebarRoot
-      ? new MutationObserver(scheduleMeasure)
-      : null;
-    sidebarObserver?.observe(sidebarRoot!, {
-      attributes: true,
-      attributeFilter: ["data-project-sidebar-open"],
-      subtree: true
-    });
-
     window.addEventListener("resize", scheduleMeasure);
     window.addEventListener("orientationchange", scheduleMeasure);
-    window.addEventListener("project-sidebar-layout", scheduleMeasure);
     window.visualViewport?.addEventListener("resize", scheduleMeasure);
     void document.fonts?.ready.then(scheduleMeasure);
     measure();
@@ -1530,10 +1501,8 @@ function useSceneTableFit(
       disposed = true;
       if (animationFrame) window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
-      sidebarObserver?.disconnect();
       window.removeEventListener("resize", scheduleMeasure);
       window.removeEventListener("orientationchange", scheduleMeasure);
-      window.removeEventListener("project-sidebar-layout", scheduleMeasure);
       window.visualViewport?.removeEventListener("resize", scheduleMeasure);
     };
   }, [declaredNaturalWidth, shellRef, stageRef, tableRef]);

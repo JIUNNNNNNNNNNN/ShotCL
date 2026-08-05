@@ -483,7 +483,7 @@ export default function StaffListPage() {
   }
 
   return (
-    <main className="staff-workspace mx-auto w-full max-w-6xl pb-20">
+    <section className="staff-workspace mx-auto w-full max-w-6xl pb-20">
       <section className="border border-field-border bg-field-section px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -692,7 +692,7 @@ export default function StaffListPage() {
           onConfirm={() => void confirmMemberDelete()}
         />
       ) : null}
-    </main>
+    </section>
   );
 }
 

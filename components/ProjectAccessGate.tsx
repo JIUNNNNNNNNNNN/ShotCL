@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useLayoutEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
-import { RightProjectSidebar } from "@/components/RightProjectSidebar";
+import { ProjectWorkspaceProvider } from "@/components/ProjectWorkspaceContext";
+import { ProjectWorkspaceShell } from "@/components/ProjectWorkspaceShell";
 import { clearProjectReadCache } from "@/lib/data/projects";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
@@ -78,10 +79,9 @@ export function ProjectAccessGate({
   return (
     <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>
       <ProjectPageActionsProvider>
-        <div className="min-w-0">
-          <div className="min-w-0">{children}</div>
-          <RightProjectSidebar projectName={projectName} />
-        </div>
+        <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
+          <ProjectWorkspaceShell>{children}</ProjectWorkspaceShell>
+        </ProjectWorkspaceProvider>
       </ProjectPageActionsProvider>
     </ProjectAccessContext.Provider>
   );

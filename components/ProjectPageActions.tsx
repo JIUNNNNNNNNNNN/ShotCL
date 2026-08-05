@@ -10,7 +10,6 @@ import {
   useState
 } from "react";
 import {
-  CalendarDays,
   Clapperboard,
   Map,
   Plus,
@@ -25,10 +24,8 @@ export type ProjectPageActionId =
   | "dailyPlanPdf"
   | "dailyPlanPortraitPdf"
   | "dailyPlanSave"
-  | "dailyPlanRounds"
   | "archiveDiagram"
   | "archiveStoryboard"
-  | "progressRounds"
   | "progressAddCut";
 
 export type ProjectPageActionOverride = {
@@ -77,10 +74,8 @@ const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   dailyPlanPdf: { label: "PDF 저장", icon: Printer },
   dailyPlanPortraitPdf: { label: "PDF 세로 저장", icon: Printer },
   dailyPlanSave: { label: "일촬표 저장", icon: Save, emphasis: "primary" },
-  dailyPlanRounds: { label: "회차 선택", icon: CalendarDays },
   archiveDiagram: { label: "부감도", icon: Map },
   archiveStoryboard: { label: "콘티", icon: Clapperboard },
-  progressRounds: { label: "회차 선택", icon: CalendarDays },
   progressAddCut: { label: "새 컷 추가", icon: Plus, emphasis: "primary" }
 };
 
@@ -88,7 +83,7 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
   dailyPlan: {
     title: "일촬표 작업",
     ariaLabel: "일촬표 작업 메뉴",
-    actionIds: ["dailyPlanPdf", "dailyPlanPortraitPdf", "dailyPlanSave", "dailyPlanRounds"]
+    actionIds: ["dailyPlanPdf", "dailyPlanPortraitPdf", "dailyPlanSave"]
   },
   archive: {
     title: "자료 유형",
@@ -98,7 +93,7 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
   progressDetail: {
     title: "진행도 작업",
     ariaLabel: "진행도 작업 메뉴",
-    actionIds: ["progressRounds", "progressAddCut"]
+    actionIds: ["progressAddCut"]
   }
 };
 

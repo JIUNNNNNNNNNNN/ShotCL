@@ -24,7 +24,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
   }
   return (
     <ProjectAccessGate
-      projectId={id}
+      projectId={projectId}
       projectName={projectName}
       role={role}
       accessPreferenceScope={getAccessPreferenceScope(projectSessionToken)}

@@ -645,7 +645,7 @@ export default function ProjectSceneListPage() {
   }
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
+    <section className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
       <section className="border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
           <div className="min-w-0">
@@ -781,7 +781,7 @@ export default function ProjectSceneListPage() {
       {!cellMergesMaterialized && cellMerges.length > 0 ? (
         <p className="sr-only">기존 셀 병합 표시를 호환 모드로 불러왔습니다.</p>
       ) : null}
-    </main>
+    </section>
   );
 }
 
