@@ -48,8 +48,6 @@ const notesTextareaClassName =
   "workspace-control h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border px-2 py-1 text-center text-xs leading-5 outline-none transition [overflow-wrap:anywhere] placeholder:text-center";
 const desktopGridClassName =
   "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
-const desktopEditableGridClassName =
-  "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)_2.5rem]";
 
 type StaffDisplaySection = ReturnType<typeof groupStaffMembersForDisplay>[number] & {
   sectionKey: string;
@@ -853,7 +851,6 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
                     canEdit={canEdit}
                     totalEpisodes={totalEpisodes}
                     onChange={onChange}
-                    onDelete={onRequestDelete}
                     onRoleInputRef={onRoleInputRef}
                     registerRow={interaction.registerRow}
                     onCardPointerDownCapture={interaction.onRowPointerDownCapture}
@@ -912,7 +909,6 @@ const StaffMemberRow = memo(function StaffMemberRow({
   canEdit,
   totalEpisodes,
   onChange,
-  onDelete,
   onRoleInputRef,
   registerRow,
   onCardPointerDownCapture,
@@ -929,7 +925,6 @@ const StaffMemberRow = memo(function StaffMemberRow({
   canEdit: boolean;
   totalEpisodes: number;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
-  onDelete: (member: ProjectStaffMember) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
   registerRow: (rowKey: string) => (element: HTMLElement | null) => void;
   onCardPointerDownCapture: (rowKey: string, event: ReactPointerEvent<HTMLElement>) => void;
@@ -946,11 +941,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   return (
     <article
       ref={registerRow(member.id)}
-      className={`staff-member-row relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition ${
-        canEdit
-          ? `grid-cols-[repeat(6,minmax(0,1fr))_2.25rem] ${desktopEditableGridClassName}`
-          : `grid-cols-6 ${desktopGridClassName}`
-      } workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "ring-2 ring-inset ring-field-primary/50 bg-field-primary/5" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
+      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "ring-2 ring-inset ring-field-primary/50 bg-field-primary/5" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}
@@ -1035,23 +1026,6 @@ const StaffMemberRow = memo(function StaffMemberRow({
           onChange(member.id, { excludedEpisodeNumbers });
         }}
       />
-      {canEdit ? (
-        <div className="workspace-border col-start-7 row-span-2 row-start-1 flex h-full min-w-0 items-center justify-center border-l p-0.5 md:col-start-auto md:row-span-1 md:row-start-auto">
-          <button
-            type="button"
-            disabled={isPending}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(member);
-            }}
-            className="grid h-8 w-8 shrink-0 place-items-center border border-field-danger/35 bg-field-input text-field-danger transition-colors hover:border-field-danger hover:bg-field-danger/10 active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-danger disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label={`${member.name || `${number}번 스탭`} 삭제`}
-          >
-            <X className="h-3 w-3" strokeWidth={2.5} aria-hidden />
-          </button>
-        </div>
-      ) : null}
     </article>
   );
 });
