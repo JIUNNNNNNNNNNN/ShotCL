@@ -240,6 +240,8 @@ type EditorTimetableRow =
 
 type DailyPlanPdfOrientation = DailyPlanDocumentOrientation;
 
+type DailyPlanPrintAction = "automatic" | "portrait";
+
 type DailyPlanPrintJob = {
   data: DailyPlanPreviewData;
   orientation: DailyPlanPdfOrientation;
@@ -419,6 +421,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [printJob, setPrintJob] = useState<DailyPlanPrintJob | null>(null);
   const [printLayout, setPrintLayout] = useState<DailyPlanPageLayout>("single");
   const [isPrinting, setIsPrinting] = useState(false);
+  const [activePrintAction, setActivePrintAction] = useState<DailyPlanPrintAction | null>(null);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
   const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
   const [isTimetableMutationPending, setIsTimetableMutationPending] = useState(false);
@@ -442,6 +445,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const editorInteractionRootRef = useRef<HTMLDivElement | null>(null);
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
+  const sidebarPortraitPrintRequestRef = useRef<() => void>(() => {});
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
   const printPageStyleRef = useRef<HTMLStyleElement | null>(null);
   const printCleanupTimeoutRef = useRef<number | null>(null);
@@ -1493,6 +1497,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const clearPrintPageStyle = useCallback(() => {
     printPageStyleRef.current?.remove();
     printPageStyleRef.current = null;
+    delete document.body.dataset.dailyPlanPrintActive;
   }, []);
 
   const clearPrintCleanupTimeout = useCallback(() => {
@@ -1508,6 +1513,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     clearPrintPageStyle();
     isPrintingRef.current = false;
     setIsPrinting(false);
+    setActivePrintAction(null);
   }, [clearPrintCleanupTimeout, clearPrintPageStyle]);
 
   const installPrintPageStyle = useCallback((orientation: DailyPlanPdfOrientation) => {
@@ -1515,14 +1521,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const style = document.createElement("style");
     style.dataset.dailyPlanPrintPage = orientation;
     style.media = "print";
-    style.textContent = `@page { size: A4 ${orientation}; margin: 10mm; background: #ffffff; }`;
+    style.textContent = `@page { size: A4 ${orientation}; margin: 0; background: #ffffff; }`;
     document.head.appendChild(style);
+    document.body.dataset.dailyPlanPrintActive = orientation;
     printPageStyleRef.current = style;
   }, [clearPrintPageStyle]);
 
-  async function handlePrint(previewDataSnapshot?: DailyPlanPreviewData) {
+  async function handlePrint(
+    action: DailyPlanPrintAction = "automatic",
+    previewDataSnapshot?: DailyPlanPreviewData
+  ) {
     if (isPrintingRef.current) return;
-    const orientation = documentOrientation;
+    const orientation = action === "portrait" ? "portrait" : documentOrientation;
     if (!orientation) {
       setErrorMessage("화면 방향을 확인한 후 다시 시도해주세요.");
       return;
@@ -1538,8 +1548,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       return;
     }
     setErrorMessage("");
+    setMessage("");
     isPrintingRef.current = true;
     setIsPrinting(true);
+    setActivePrintAction(action);
     setPrintLayout("single");
     installPrintPageStyle(orientation);
     try {
@@ -1568,6 +1580,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       setPrintLayout(nextLayout);
       await waitForAnimationFrames(2);
       window.print();
+      setMessage(action === "portrait" ? "세로 PDF 출력 창을 열었습니다." : "PDF 출력 창을 열었습니다.");
       if (isPrintingRef.current) {
         clearPrintCleanupTimeout();
         printCleanupTimeoutRef.current = window.setTimeout(() => {
@@ -1581,7 +1594,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   sidebarPrintRequestRef.current = () => {
-    void handlePrint();
+    void handlePrint("automatic");
+  };
+
+  sidebarPortraitPrintRequestRef.current = () => {
+    void handlePrint("portrait");
   };
 
   useEffect(() => {
@@ -1615,7 +1632,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       dailyPlanPdf: {
         onSelect: () => sidebarPrintRequestRef.current(),
         disabled: !canPrint || !documentOrientation || isPrinting,
-        pending: isPrinting
+        pending: activePrintAction === "automatic"
+      },
+      dailyPlanPortraitPdf: {
+        onSelect: () => sidebarPortraitPrintRequestRef.current(),
+        disabled: !canPrint || isPrinting,
+        pending: activePrintAction === "portrait",
+        hidden: documentOrientation !== "landscape"
       },
       dailyPlanSave: {
         onSelect: () => sidebarSaveRequestRef.current(),
@@ -1626,7 +1649,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         href: `/projects/${project.id}/daily-plans`
       }
     }
-  }), [canManageTimetable, canPrint, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
+  }), [activePrintAction, canManageTimetable, canPrint, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
   useProjectPageActionMenu(dailyPlanActionMenu);
 
   const isActorCardDragging = actorInteraction.isDragging;
@@ -2276,14 +2299,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
       </div>
 
-      {printJob ? (
+      {printJob && typeof document !== "undefined" ? createPortal(
         <PrintDailyPlanView
           data={printJob.data}
           orientation={printJob.orientation}
           density={printJob.density}
           layout={printLayout}
           rootRef={printDocumentRef}
-        />
+        />,
+        document.body
       ) : null}
       {typeof document !== "undefined" && hasActiveCardDrag ? createPortal(
         <div className="no-print contents">
@@ -3954,10 +3978,15 @@ function PrintDailyPlanView({
 }) {
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   return (
-    <section className="print-only daily-plan-print-staging" data-orientation={orientation}>
+    <section
+      className="print-daily-plan print-only daily-plan-print-staging"
+      data-testid="daily-plan-export-staging"
+      data-orientation={orientation}
+    >
       <div
         ref={rootRef}
         className="daily-plan-print-layout"
+        data-testid="daily-plan-export-document-root"
         data-orientation={orientation}
         data-print-layout={layout}
       >

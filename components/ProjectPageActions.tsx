@@ -23,6 +23,7 @@ export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail
 
 export type ProjectPageActionId =
   | "dailyPlanPdf"
+  | "dailyPlanPortraitPdf"
   | "dailyPlanSave"
   | "dailyPlanRounds"
   | "archiveDiagram"
@@ -72,6 +73,7 @@ type MenuDefinition = {
 
 const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   dailyPlanPdf: { label: "PDF 저장", icon: Printer },
+  dailyPlanPortraitPdf: { label: "PDF 세로 저장", icon: Printer },
   dailyPlanSave: { label: "일촬표 저장", icon: Save },
   dailyPlanRounds: { label: "회차 선택", icon: CalendarDays },
   archiveDiagram: { label: "부감도", icon: Map },
@@ -84,7 +86,7 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
   dailyPlan: {
     title: "일촬표 작업",
     ariaLabel: "일촬표 작업 메뉴",
-    actionIds: ["dailyPlanPdf", "dailyPlanSave", "dailyPlanRounds"]
+    actionIds: ["dailyPlanPdf", "dailyPlanPortraitPdf", "dailyPlanSave", "dailyPlanRounds"]
   },
   archive: {
     title: "자료 유형",
