@@ -11,7 +11,7 @@ import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
 
 type OpenDrawer = "navigation" | "actions" | null;
-const FLOATING_NAVIGATION_QUERY = "(min-width: 900px), (min-width: 768px) and (min-height: 600px)";
+const PERSISTENT_PROJECT_SHELL_QUERY = "(min-width: 1180px)";
 
 /** 프로젝트 내부만 좌측 navigation·중앙 page·우측 action으로 배치합니다. */
 export function ProjectWorkspaceShell({ children }: { children: React.ReactNode }) {
@@ -21,7 +21,6 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const menu = useCurrentProjectPageActionMenu();
   const { projectName } = useProjectWorkspace();
   const [openDrawer, setOpenDrawer] = useState<OpenDrawer>(null);
-  const floatingNavigation = useMediaQuery(FLOATING_NAVIGATION_QUERY);
   const navigationToggleRef = useRef<HTMLButtonElement | null>(null);
   const actionToggleRef = useRef<HTMLButtonElement | null>(null);
   const navigationDrawerRef = useRef<HTMLElement | null>(null);
@@ -40,25 +39,24 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
     actionDrawerRef,
     contentRef,
     navigationToggleRef,
-    actionToggleRef,
-    floatingNavigation
+    actionToggleRef
   });
 
   useEffect(() => {
-    const closeActionDrawerWhenItBecomesPersistent = () => {
+    const closeMobileDrawerWhenShellBecomesPersistent = () => {
       setOpenDrawer((current) => {
-        if (current === "actions" && window.matchMedia("(min-width: 1360px)").matches) return null;
+        if (current && window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY).matches) return null;
         return current;
       });
     };
-    closeActionDrawerWhenItBecomesPersistent();
-    window.addEventListener("resize", closeActionDrawerWhenItBecomesPersistent);
-    return () => window.removeEventListener("resize", closeActionDrawerWhenItBecomesPersistent);
+    closeMobileDrawerWhenShellBecomesPersistent();
+    window.addEventListener("resize", closeMobileDrawerWhenShellBecomesPersistent);
+    return () => window.removeEventListener("resize", closeMobileDrawerWhenShellBecomesPersistent);
   }, []);
 
   const pageTitle = getProjectPageTitle(pathname, searchParams);
   const hasActions = Boolean(menu);
-  const modalDrawerOpen = openDrawer === "actions" || (openDrawer === "navigation" && !floatingNavigation);
+  const modalDrawerOpen = openDrawer !== null;
 
   return (
     <div
@@ -66,6 +64,10 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
       data-project-shell
       data-project-shell-actions={hasActions ? "true" : "false"}
     >
+      <aside className="project-shell__navigation no-print" aria-label="프로젝트 전체 메뉴" inert={modalDrawerOpen}>
+        <ProjectNavigation />
+      </aside>
+
       <header className="project-shell__app-bar no-print" inert={modalDrawerOpen}>
         <div className="project-shell__mobile-home">
           <HomeButton embedded />
@@ -114,20 +116,18 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
       />
 
       {openDrawer === "navigation" ? (
-        <div className={`project-shell__drawer-layer no-print ${floatingNavigation ? "project-shell__drawer-layer--floating" : ""}`}>
-          {!floatingNavigation ? (
-            <button
-              type="button"
-              className="project-shell__drawer-backdrop"
-              aria-label="프로젝트 메뉴 닫기"
-              onClick={() => setOpenDrawer(null)}
-            />
-          ) : null}
+        <div className="project-shell__drawer-layer no-print">
+          <button
+            type="button"
+            className="project-shell__drawer-backdrop"
+            aria-label="프로젝트 메뉴 닫기"
+            onClick={() => setOpenDrawer(null)}
+          />
           <aside
             ref={navigationDrawerRef}
             id="project-navigation-drawer"
-            role={floatingNavigation ? undefined : "dialog"}
-            aria-modal={floatingNavigation ? undefined : "true"}
+            role="dialog"
+            aria-modal="true"
             aria-label="프로젝트 전체 메뉴"
             tabIndex={-1}
             className="project-shell__navigation-drawer"
@@ -175,8 +175,7 @@ function useAccessibleProjectDrawer({
   actionDrawerRef,
   contentRef,
   navigationToggleRef,
-  actionToggleRef,
-  floatingNavigation
+  actionToggleRef
 }: {
   openDrawer: OpenDrawer;
   onClose: () => void;
@@ -185,39 +184,12 @@ function useAccessibleProjectDrawer({
   contentRef: React.RefObject<HTMLElement | null>;
   navigationToggleRef: React.RefObject<HTMLButtonElement | null>;
   actionToggleRef: React.RefObject<HTMLButtonElement | null>;
-  floatingNavigation: boolean;
 }) {
   useEffect(() => {
     if (!openDrawer) return undefined;
     const drawer = openDrawer === "navigation" ? navigationDrawerRef.current : actionDrawerRef.current;
     const returnTarget = openDrawer === "navigation" ? navigationToggleRef.current : actionToggleRef.current;
     if (!drawer) return undefined;
-
-    if (openDrawer === "navigation" && floatingNavigation) {
-      const focusFrame = window.requestAnimationFrame(() => {
-        (getFocusableElements(drawer)[0] ?? drawer).focus();
-      });
-      const handleOutsidePointer = (event: PointerEvent) => {
-        const target = event.target;
-        if (!(target instanceof Node)) return;
-        if (drawer.contains(target) || navigationToggleRef.current?.contains(target)) return;
-        if (target instanceof Element && target.closest("[data-project-shell-portal]")) return;
-        onClose();
-      };
-      const handleEscape = (event: KeyboardEvent) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        onClose();
-      };
-      document.addEventListener("pointerdown", handleOutsidePointer);
-      window.addEventListener("keydown", handleEscape);
-      return () => {
-        window.cancelAnimationFrame(focusFrame);
-        document.removeEventListener("pointerdown", handleOutsidePointer);
-        window.removeEventListener("keydown", handleEscape);
-        window.requestAnimationFrame(() => returnTarget?.focus());
-      };
-    }
 
     const previousOverflow = document.body.style.overflow;
     const content = contentRef.current;
@@ -268,7 +240,20 @@ function useAccessibleProjectDrawer({
       window.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = previousOverflow;
       if (content) content.style.overflowY = previousContentOverflow;
-      window.requestAnimationFrame(() => returnTarget?.focus());
+      window.requestAnimationFrame(() => {
+        if (window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY).matches) {
+          const persistentTarget = openDrawer === "navigation"
+            ? document.querySelector<HTMLElement>(
+              '.project-shell__navigation [aria-current="page"], .project-shell__navigation a[href], .project-shell__navigation button'
+            )
+            : document.querySelector<HTMLElement>(
+              '.project-shell__action-panel a[href], .project-shell__action-panel button:not([disabled])'
+            );
+          persistentTarget?.focus();
+          return;
+        }
+        returnTarget?.focus();
+      });
     };
   }, [
     actionDrawerRef,
@@ -277,21 +262,8 @@ function useAccessibleProjectDrawer({
     navigationDrawerRef,
     navigationToggleRef,
     onClose,
-    openDrawer,
-    floatingNavigation
+    openDrawer
   ]);
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(false);
-  useLayoutEffect(() => {
-    const mediaQuery = window.matchMedia(query);
-    const update = () => setMatches(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener("change", update);
-    return () => mediaQuery.removeEventListener("change", update);
-  }, [query]);
-  return matches;
 }
 
 function getFocusableElements(root: HTMLElement) {

@@ -15,7 +15,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   BookOpen,
   CalendarDays,
-  ChevronDown,
   Copy,
   FilePenLine,
   House,
@@ -28,6 +27,10 @@ import {
   Users,
   type LucideIcon
 } from "lucide-react";
+import {
+  ProjectNavigationCardGrid,
+  type ProjectNavigationCardItem
+} from "@/components/ProjectNavigationCardGrid";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
@@ -81,7 +84,7 @@ const CONTEXT_MENU_WIDTH = 224;
 const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
 
-/** 프로젝트의 공통 기능과 회차를 floating navigation·모바일 drawer에서 함께 사용합니다. */
+/** 프로젝트의 공통 기능과 회차를 데스크톱 고정 패널·모바일 drawer에서 함께 사용합니다. */
 export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigationProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -103,8 +106,8 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
   const [duplicatingId, setDuplicatingId] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<"dailyPlans" | "progress", boolean>>({
-    dailyPlans: true,
-    progress: true
+    dailyPlans: false,
+    progress: false
   });
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const duplicateLockRef = useRef("");
@@ -113,13 +116,22 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
   const canManageDailyPlans = role !== "progress" && project?.accessRole !== "progress";
   const instanceId = drawer ? "drawer" : "panel";
+  const cardItems = useMemo<ProjectNavigationCardItem[]>(() => visibleItems.map((item) => {
+    const roundKind = item.id === "dailyPlans" || item.id === "progress" ? item.id : null;
+    return {
+      id: item.id,
+      label: item.label,
+      href: buildProjectNavigationHref(projectId, item.id),
+      icon: NAVIGATION_ICONS[item.id],
+      active: activeItem === item.id,
+      roundKind,
+      expanded: roundKind ? expandedGroups[roundKind] : false
+    };
+  }), [activeItem, expandedGroups, projectId, visibleItems]);
 
   useEffect(() => {
-    if (activeItem !== "dailyPlans" && activeItem !== "progress") return;
-    setExpandedGroups((current) => current[activeItem]
-      ? current
-      : { ...current, [activeItem]: true });
-  }, [activeItem]);
+    setExpandedGroups({ dailyPlans: false, progress: false });
+  }, [projectId]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -234,69 +246,54 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
     <>
       <nav
         aria-label="프로젝트 기능"
-        className={`min-h-0 min-w-0 overflow-y-auto overscroll-contain ${drawer ? "flex-1 px-3 pb-4" : "px-2 py-3"}`}
+        className={`project-navigation min-h-0 min-w-0 overflow-y-auto overscroll-contain ${drawer ? "flex-1" : "h-full"}`}
       >
         <Link
           href="/"
           onClick={(event) => guardLinkNavigation(event, "/")}
-          className="mb-3 flex min-h-11 min-w-0 items-center gap-2 border border-transparent px-2.5 py-2 text-sm font-bold text-field-subtle transition-colors hover:border-field-border hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+          className="project-navigation__home"
         >
           <House className="h-4 w-4 shrink-0" aria-hidden />
           <span>Home</span>
         </Link>
 
-        <div className="mb-3 min-w-0 border-b border-field-border px-2 pb-3">
-          <p className="break-words text-sm font-black leading-5 text-field-text" title={projectName}>
+        <div className="project-navigation__project-summary">
+          <p className="line-clamp-2 break-words text-sm font-black leading-5 text-field-text" title={projectName}>
             {projectName}
           </p>
           {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
           {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트 메뉴를 불러오지 못했습니다.")}</p> : null}
         </div>
 
-        <ul className="grid gap-1">
-          {visibleItems.map((item) => {
-            const Icon = NAVIGATION_ICONS[item.id];
-            const href = buildProjectNavigationHref(projectId, item.id);
-            const active = activeItem === item.id;
-            const roundKind = item.id === "dailyPlans" || item.id === "progress" ? item.id : null;
-            const expanded = roundKind ? expandedGroups[roundKind] : false;
-            return (
-              <li key={item.id} className="min-w-0">
-                <div className={`min-w-0 border transition-colors ${
-                  active
-                    ? "neon-selected text-field-primary"
-                    : "border-transparent text-field-subtle hover:border-field-border hover:bg-field-hover hover:text-field-text"
-                } ${roundKind ? "grid grid-cols-[minmax(0,1fr)_44px]" : "block"}`}>
-                  <Link
-                    href={href}
-                    onClick={(event) => guardLinkNavigation(event, href)}
-                    aria-current={active ? "page" : undefined}
-                    className="flex min-h-11 min-w-0 items-center gap-2 px-2.5 py-2 text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-                  >
-                    <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                    <span className="min-w-0 truncate">{item.label}</span>
-                  </Link>
-                  {roundKind ? (
-                    <button
-                      type="button"
-                      aria-label={`${item.label} 회차 목록 ${expanded ? "접기" : "펼치기"}`}
-                      aria-controls={`project-navigation-${instanceId}-rounds-${roundKind}`}
-                      aria-expanded={expanded}
-                      onClick={() => setExpandedGroups((current) => ({
-                        ...current,
-                        [roundKind]: !current[roundKind]
-                      }))}
-                      className="grid min-h-11 w-11 place-items-center border-l border-current/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-                    >
-                      <ChevronDown className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`} aria-hidden />
-                    </button>
-                  ) : null}
-                </div>
+        <ProjectNavigationCardGrid
+          items={cardItems}
+          instanceId={instanceId}
+          onLinkClick={guardLinkNavigation}
+          onToggleRounds={(kind) => setExpandedGroups((current) => ({
+            ...current,
+            [kind]: !current[kind]
+          }))}
+        />
 
-                {roundKind && expanded ? (
+        {(["dailyPlans", "progress"] as const).map((kind) => {
+          if (!visibleItems.some((item) => item.id === kind)) return null;
+          const expanded = expandedGroups[kind];
+          return (
+            <div
+              key={kind}
+              id={`project-navigation-${instanceId}-rounds-${kind}`}
+              className="project-navigation__round-accordion"
+              data-expanded={expanded ? "true" : "false"}
+              aria-hidden={!expanded}
+              inert={!expanded}
+            >
+              <div className="project-navigation__round-accordion-inner">
+                <section className="project-navigation__round-section" aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차 목록`}>
+                  <p className="project-navigation__round-heading">
+                    {kind === "dailyPlans" ? "일촬표 회차" : "진행도 회차"}
+                  </p>
                   <RoundNavigationList
-                    id={`project-navigation-${instanceId}-rounds-${roundKind}`}
-                    kind={roundKind}
+                    kind={kind}
                     projectId={projectId}
                     plans={sortedPlans}
                     pathname={pathname}
@@ -306,11 +303,11 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
                     onNavigate={notifyNavigation}
                     onOpenContextMenu={openContextMenu}
                   />
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+                </section>
+              </div>
+            </div>
+          );
+        })}
 
         {mutationError && !pendingDelete ? (
           <p role="alert" className="mt-3 border border-field-danger/60 bg-field-danger/10 px-2 py-1.5 text-[11px] font-bold leading-4 text-field-danger">
@@ -349,7 +346,6 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
 }
 
 function RoundNavigationList({
-  id,
   kind,
   projectId,
   plans,
@@ -360,7 +356,6 @@ function RoundNavigationList({
   onNavigate,
   onOpenContextMenu
 }: {
-  id: string;
   kind: "dailyPlans" | "progress";
   projectId: string;
   plans: DailyPlan[];
@@ -372,7 +367,7 @@ function RoundNavigationList({
   onOpenContextMenu: (plan: DailyPlan, clientX: number, clientY: number) => void;
 }) {
   return (
-    <ul id={id} className="ml-4 grid border-l border-field-border pl-2" aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차`}>
+    <ul className="project-navigation__round-list" aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차`}>
       {kind === "dailyPlans" && canManage ? (
         <li>
           <NavigationLink href={buildNewDailyPlanHref(projectId)} onNavigate={onNavigate} className="text-field-primary">
@@ -431,7 +426,7 @@ function NavigationLink({
         }
         onNavigate(href);
       }}
-      className={`flex min-h-11 min-w-0 items-center gap-1.5 px-2 py-1.5 text-xs font-semibold hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${className}`}
+      className={`flex min-h-11 min-w-0 items-center gap-1.5 rounded-[var(--ui-radius-control)] border border-transparent px-2 py-1.5 text-xs font-semibold hover:border-field-border hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${className}`}
     >
       {children}
     </Link>
@@ -540,8 +535,8 @@ function RoundNavigationLink({
       onPointerUp={cancelLongPress}
       onPointerCancel={cancelLongPress}
       onDragStart={(event) => event.preventDefault()}
-      className={`block min-h-11 min-w-0 select-none px-2 py-2.5 text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
-        active ? "bg-field-primary-soft text-field-primary" : "text-field-muted hover:bg-field-hover hover:text-field-text"
+      className={`block min-h-11 min-w-0 select-none rounded-[var(--ui-radius-control)] border px-2 py-2.5 text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+        active ? "border-field-primary bg-field-primary-soft text-field-primary" : "border-transparent text-field-muted hover:border-field-border hover:bg-field-hover hover:text-field-text"
       }`}
     >
       <span className="flex min-w-0 items-center gap-1.5">
