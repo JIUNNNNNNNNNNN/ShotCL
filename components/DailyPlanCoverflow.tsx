@@ -701,7 +701,7 @@ export function DailyPlanCoverflow({
         ref={selectionSlotRef}
         aria-hidden="true"
         data-carousel-selection-slot
-        className="pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 border-2 border-field-primary/45"
+        className="neon-selected pointer-events-none absolute left-1/2 top-1/2 z-0 aspect-[3/4] w-[140px] -translate-x-1/2 -translate-y-1/2 border-2"
       />
       <div className="pointer-events-none absolute inset-0 z-[1] [transform-style:preserve-3d]">
         {logicalItems.map((item) => (
@@ -776,7 +776,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
       aria-current={active ? "true" : undefined}
       tabIndex={tabIndex}
       className={`${className} flex aspect-[3/4] shrink-0 select-none items-center justify-center overflow-hidden rounded-[10px] border-2 bg-field-panel px-3 text-center outline-none transition-[border-color,background-color] hover:border-field-subtle hover:bg-field-hover focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 disabled:opacity-50 ${
-        active ? "border-field-primary/80 bg-field-primary/10" : "border-field-divider"
+        active ? "neon-selected" : "border-field-divider"
       } ${
         item.kind === "new"
           ? "text-5xl font-light leading-none text-field-text"
@@ -795,7 +795,7 @@ const CarouselCard = forwardRef<HTMLButtonElement, CarouselCardProps>(function C
             <span
               aria-hidden="true"
               data-progress-fill
-              className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-field-primary/20 transition-[height] duration-300 ease-out motion-reduce:transition-none"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-0 bg-field-primary-soft-strong transition-[height] duration-300 ease-out motion-reduce:transition-none"
               style={{ height: `${progressPercent}%` }}
             />
           ) : null}

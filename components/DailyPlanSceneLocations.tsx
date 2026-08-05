@@ -205,7 +205,7 @@ export function DailyPlanSceneLocations({
                       disabled={isAssignedElsewhere}
                       className={`grid min-h-10 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-3 text-center text-xs font-normal transition-colors disabled:cursor-not-allowed ${
                         isSelected
-                          ? "border-field-primary bg-field-primary/10 text-field-text"
+                          ? "neon-selected text-field-text"
                           : isAssignedElsewhere
                             ? "border-field-border bg-field-disabled text-field-panel"
                             : "border-field-border bg-field-input text-field-text hover:bg-field-hover"

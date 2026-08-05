@@ -465,7 +465,7 @@ export default function ProjectScenarioPage() {
           role={detectedSceneNumbers.length <= 2 ? "alert" : "status"}
           className={`border-l-2 px-2.5 py-1.5 text-[11px] font-bold leading-normal ${
             detectedSceneNumbers.length <= 2
-              ? "border-field-primary bg-field-primary/10 text-field-primary"
+              ? "border-status-warning/70 bg-status-warning/10 text-status-warning"
               : "border-field-divider bg-field-soft text-field-subtle"
           }`}
         >
@@ -522,7 +522,10 @@ export default function ProjectScenarioPage() {
                 const index = draftScenes.findIndex((item) => item.id === scene.id);
                 const expanded = expandedSceneId === scene.id;
                 return (
-                  <article key={scene.id} className="min-w-0 border border-field-border bg-field-panel">
+                  <article
+                    key={scene.id}
+                    className={`min-w-0 border bg-field-panel ${expanded ? "border-field-border border-l-2 border-l-field-primary" : "border-field-border"}`}
+                  >
                     <div className="flex min-w-0 items-center gap-1.5 px-2.5 py-2">
                       <button
                         type="button"
@@ -648,7 +651,7 @@ function ModeButton({
       onClick={onClick}
       className={`inline-flex min-h-8 items-center gap-1 px-2.5 text-[11px] font-bold transition ${
         active
-          ? "border border-field-primary bg-field-primary/15 text-field-text"
+          ? "neon-selected-strong border text-field-text"
           : "border border-transparent text-field-muted hover:bg-field-hover hover:text-field-text"
       }`}
     >

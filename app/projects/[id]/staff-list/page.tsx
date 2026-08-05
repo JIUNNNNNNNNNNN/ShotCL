@@ -941,7 +941,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   return (
     <article
       ref={registerRow(member.id)}
-      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "ring-2 ring-inset ring-field-primary/50 bg-field-primary/5" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
+      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}

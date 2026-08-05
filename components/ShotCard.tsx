@@ -167,7 +167,7 @@ export const ShotCard = memo(function ShotCard({
               }}
               className={cn(
                 "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-                hasStoryboard ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
+                hasStoryboard ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
             >
@@ -183,7 +183,7 @@ export const ShotCard = memo(function ShotCard({
               disabled={isOverheadLoading}
               className={cn(
                 "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55",
-                hasOverhead ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
+                hasOverhead ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
             >

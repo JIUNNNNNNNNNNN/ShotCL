@@ -2138,7 +2138,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </Button>
             <Button
               variant="secondary"
-              className="w-full !border-field-primary/70 !bg-field-primary/10 px-2 text-xs !text-field-primary hover:!border-field-secondary/80 hover:!bg-field-primary/15 hover:!text-field-secondary active:!bg-field-primary/15 disabled:!border-field-disabled disabled:!bg-field-disabled disabled:!text-field-panel sm:text-sm"
+              className="w-full !border-field-primary-border !bg-field-primary-soft px-2 text-xs !text-field-primary hover:!border-field-secondary hover:!bg-field-primary-soft-strong hover:!text-field-primary active:!bg-field-primary-soft-strong disabled:!border-field-border disabled:!bg-field-section disabled:!text-field-disabled disabled:!opacity-100 sm:text-sm"
               onClick={addMealTime}
             >
               <Plus className="h-4 w-4" aria-hidden />

@@ -95,9 +95,9 @@ export function HomeButton() {
       title={projectId ? "회차 선택 · 길게 누르면 메인 홈" : "메인 홈"}
       className={`no-print fixed left-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[70] flex h-10 w-10 select-none items-center justify-center rounded-md border bg-field-floating text-field-text shadow-floating transition-[background-color,border-color,transform] hover:border-field-primary/60 hover:bg-field-hover hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg md:left-5 md:h-11 md:w-11 ${
         isArmed
-          ? "scale-95 border-field-primary bg-field-primary/15 text-field-primary"
+          ? "neon-selected-strong scale-95 text-field-primary"
           : isPressing
-            ? "scale-90 border-field-primary/80 bg-field-primary/10 text-field-primary"
+            ? "neon-selected scale-90 text-field-primary"
             : "border-field-divider active:scale-95"
       }`}
       style={{ touchAction: "none", WebkitTouchCallout: "none" }}

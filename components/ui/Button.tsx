@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
 const variantClass: Record<ButtonVariant, string> = {
-  primary: "border-field-primary bg-field-primary font-semibold text-field-accent-foreground hover:border-field-secondary hover:bg-field-secondary active:border-field-strong active:bg-field-strong",
+  primary: "neon-primary font-semibold",
   secondary: "border-field-divider bg-field-input font-medium text-field-text hover:border-field-subtle hover:bg-field-hover",
-  ghost: "border-transparent bg-transparent font-medium text-field-subtle hover:border-field-border hover:bg-field-primary/10 hover:text-field-text",
+  ghost: "border-transparent bg-transparent font-medium text-field-subtle hover:border-field-border hover:bg-field-hover hover:text-field-text",
   danger: "border-field-danger/70 bg-field-input font-semibold text-field-danger hover:border-field-danger hover:bg-field-danger/10"
 };
 
@@ -23,7 +23,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg active:scale-[0.98] disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-section disabled:text-field-disabled disabled:opacity-100",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-section disabled:text-field-disabled disabled:opacity-100",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg active:scale-[0.98]",
+        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98]",
         variantClass[variant],
         className
       )}

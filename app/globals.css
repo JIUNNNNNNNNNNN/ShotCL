@@ -144,27 +144,37 @@
 
 :root {
   color-scheme: dark;
-  background: #080a08;
-  --ui-bg: #080a08;
-  --ui-bg-deep: #050605;
-  --ui-surface-1: #10120f;
-  --ui-surface-2: #151814;
-  --ui-surface-3: #1b1f19;
-  --ui-surface-4: #22271f;
-  --ui-accent: #d5ff40;
-  --ui-accent-hover: #e1ff72;
-  --ui-accent-active: #b7dd2d;
-  --ui-accent-soft: rgba(213, 255, 64, 0.1);
-  --ui-accent-border: rgba(213, 255, 64, 0.42);
-  --ui-on-accent: #090b08;
+  background: #121212;
+  --ui-bg: #121212;
+  --ui-bg-deep: #121212;
+  --ui-surface-1: #1e1e1e;
+  --ui-surface-2: #222222;
+  --ui-surface-3: #272727;
+  --ui-surface-4: #2d2d2d;
+  --accent-neon: #f0ff3d;
+  --accent-neon-hover: #f5ff70;
+  --accent-neon-active: #d9ea2d;
+  --accent-neon-soft: rgba(240, 255, 61, 0.14);
+  --accent-neon-soft-strong: rgba(240, 255, 61, 0.22);
+  --accent-neon-border: rgba(240, 255, 61, 0.72);
+  --accent-neon-focus: rgba(240, 255, 61, 0.42);
+  --on-accent-neon: #111111;
+  --ui-accent: var(--accent-neon);
+  --ui-accent-hover: var(--accent-neon-hover);
+  --ui-accent-active: var(--accent-neon-active);
+  --ui-accent-soft: var(--accent-neon-soft);
+  --ui-accent-soft-strong: var(--accent-neon-soft-strong);
+  --ui-accent-border: var(--accent-neon-border);
+  --ui-accent-focus: var(--accent-neon-focus);
+  --ui-on-accent: var(--on-accent-neon);
   --ui-text-primary: #f7f8f2;
   --ui-text-secondary: #c0c2b8;
   --ui-text-muted: #82877c;
-  --ui-text-disabled: #5e635a;
+  --ui-text-disabled: #6f6f6f;
   --ui-border-subtle: rgba(255, 255, 255, 0.09);
   --ui-border-default: rgba(255, 255, 255, 0.14);
   --ui-border-strong: rgba(255, 255, 255, 0.22);
-  --ui-control: #0d0f0c;
+  --ui-control: #252525;
   --ui-radius-control: 6px;
   --ui-radius-card: 10px;
   --ui-radius-panel: 14px;
@@ -176,16 +186,16 @@
   --ui-space-6: 24px;
   --ui-space-8: 32px;
   --ui-space-12: 48px;
-  --surface-00: var(--ui-bg);
-  --surface-01: var(--ui-surface-1);
-  --surface-02: var(--ui-surface-2);
-  --surface-03: var(--ui-control);
-  --surface-04: var(--ui-surface-3);
-  --surface-06: var(--ui-surface-3);
-  --surface-08: var(--ui-surface-3);
-  --surface-12: var(--ui-surface-4);
-  --surface-16: var(--ui-surface-4);
-  --surface-24: var(--ui-surface-2);
+  --surface-00: #121212;
+  --surface-01: #1e1e1e;
+  --surface-02: #222222;
+  --surface-03: #252525;
+  --surface-04: #272727;
+  --surface-06: #2c2c2c;
+  --surface-08: #2d2d2d;
+  --surface-12: #333333;
+  --surface-16: #353535;
+  --surface-24: #383838;
   --background: var(--surface-00);
   --section: var(--surface-01);
   --card: var(--surface-02);
@@ -214,7 +224,7 @@
   --field-elevated: var(--floating);
   --field-floating: var(--floating-high);
   --field-overlay: var(--overlay-panel);
-  --field-dialog: var(--ui-surface-2);
+  --field-dialog: var(--dialog);
   --field-line: var(--border-neutral);
   --field-divider: var(--border-strong);
   --field-text: var(--text-primary);
@@ -225,7 +235,9 @@
   --field-accent-hover: var(--ui-accent-hover);
   --field-accent-strong: var(--ui-accent-active);
   --field-accent-soft: var(--ui-accent-soft);
+  --field-accent-soft-strong: var(--ui-accent-soft-strong);
   --field-accent-border: var(--ui-accent-border);
+  --field-accent-focus: var(--ui-accent-focus);
   --field-accent-foreground: var(--ui-on-accent);
   --field-danger: #e25555;
   --status-ok: #9a8956;
@@ -390,6 +402,10 @@ button {
   accent-color: var(--field-accent);
 }
 
+.app-theme :where(input[type="checkbox"], input[type="radio"]):disabled {
+  accent-color: var(--ui-text-disabled);
+}
+
 .app-theme :where(input, textarea, select)::placeholder {
   color: var(--field-muted);
   opacity: 1;
@@ -412,35 +428,91 @@ button {
 }
 
 ::selection {
-  background: rgba(213, 255, 64, 0.24);
+  background: var(--accent-neon-soft-strong);
   color: var(--field-text);
 }
 
-:focus-visible {
-  outline-color: var(--field-accent);
+.app-theme :where(input, textarea, select):focus {
+  border-color: var(--accent-neon);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-neon-focus) !important;
+}
+
+.app-theme :where(button, a, summary):focus-visible {
+  border-color: var(--accent-neon);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-neon-focus) !important;
 }
 
 .app-background {
   min-width: 0;
   overflow-x: clip;
   background-color: var(--ui-bg);
-  background-image: radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.055) 0 0.55px, transparent 0.75px);
-  background-size: 4px 4px;
+  background-image: none;
 }
 
 .app-home-glow {
-  background-image:
-    radial-gradient(ellipse 58% 34% at 50% 92%, rgba(213, 255, 64, 0.11), transparent 72%),
-    radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.055) 0 0.55px, transparent 0.75px);
-  background-size: 100% 100%, 4px 4px;
+  background-image: none;
 }
 
-@media (max-width: 767px) {
-  .app-home-glow {
-    background-image:
-      radial-gradient(ellipse 82% 28% at 50% 88%, rgba(213, 255, 64, 0.1), transparent 74%),
-      radial-gradient(circle at 25% 20%, rgba(247, 248, 242, 0.05) 0 0.5px, transparent 0.7px);
+/* Generic accent utilities use one visible neon system instead of many weak opacity variants. */
+.app-theme :where(.bg-field-primary\/5, .bg-field-primary\/10) {
+  background-color: var(--accent-neon-soft) !important;
+}
+
+.app-theme :where(.bg-field-primary\/15, .bg-field-primary\/20) {
+  background-color: var(--accent-neon-soft-strong) !important;
+}
+
+.app-theme :where(.border-field-primary\/70, .border-field-primary\/80) {
+  border-color: var(--accent-neon-border) !important;
+}
+
+.app-theme :where(
+  .ring-field-primary\/20,
+  .ring-field-primary\/25,
+  .ring-field-primary\/30,
+  .ring-field-primary\/35
+) {
+  --tw-ring-color: var(--accent-neon-focus) !important;
+}
+
+.app-theme :where(
+  .ring-field-primary\/45,
+  .ring-field-primary\/50,
+  .ring-field-primary\/55,
+  .ring-field-primary\/70
+) {
+  --tw-ring-color: var(--accent-neon-border) !important;
+}
+
+.neon-primary {
+  border-color: var(--accent-neon);
+  background-color: var(--accent-neon);
+  color: var(--on-accent-neon);
+}
+
+@media (hover: hover) {
+  .neon-primary:hover {
+    border-color: var(--accent-neon-hover);
+    background-color: var(--accent-neon-hover);
   }
+}
+
+.neon-primary:active {
+  border-color: var(--accent-neon-active);
+  background-color: var(--accent-neon-active);
+}
+
+.neon-selected {
+  border-color: var(--accent-neon-border) !important;
+  background-color: var(--accent-neon-soft) !important;
+  color: var(--accent-neon);
+}
+
+.neon-selected-strong {
+  border-color: var(--accent-neon) !important;
+  background-color: var(--accent-neon-soft-strong) !important;
 }
 
 @layer components {
@@ -492,9 +564,25 @@ button {
 }
 
 .app-theme :where(button, input, textarea, select):disabled {
-  border-color: var(--ui-border-subtle);
-  background-color: var(--ui-surface-1);
-  color: var(--ui-text-disabled);
+  border-color: var(--ui-border-subtle) !important;
+  background-color: var(--ui-surface-1) !important;
+  color: var(--ui-text-disabled) !important;
+  opacity: 1 !important;
+}
+
+.app-theme :where(.neon-primary, .neon-selected, .neon-selected-strong):disabled {
+  border-color: var(--ui-border-subtle) !important;
+  background-color: var(--ui-surface-1) !important;
+  color: var(--ui-text-disabled) !important;
+  opacity: 1;
+}
+
+.app-theme label:has(input[type="file"]:disabled) {
+  border-color: var(--ui-border-subtle) !important;
+  background-color: var(--ui-surface-1) !important;
+  color: var(--ui-text-disabled) !important;
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 @layer components {
@@ -563,7 +651,10 @@ button {
 }
 
 .light-workspace :focus-visible {
-  outline-color: var(--workspace-accent);
+  border-color: var(--workspace-accent);
+  outline: 2px solid var(--workspace-accent);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 .light-workspace button:disabled {
@@ -904,18 +995,18 @@ button {
 
 .staff-workspace.workspace-primary-action,
 .staff-workspace .workspace-primary-action {
-  border-color: var(--workspace-accent-border);
+  border-color: var(--accent-neon);
   border-radius: var(--ui-radius-control);
-  background-color: var(--workspace-accent-soft);
-  color: var(--field-accent-strong);
+  background-color: var(--accent-neon);
+  color: var(--on-accent-neon);
 }
 
 @media (hover: hover) {
   .staff-workspace.workspace-primary-action:hover,
   .staff-workspace .workspace-primary-action:hover {
-    border-color: var(--workspace-accent);
-    background-color: rgba(213, 255, 64, 0.16);
-    color: var(--field-accent-strong);
+    border-color: var(--accent-neon-hover);
+    background-color: var(--accent-neon-hover);
+    color: var(--on-accent-neon);
   }
 }
 
@@ -1055,23 +1146,25 @@ button {
 
 .daily-plan-timetable-row[data-selected="true"] > td {
   box-shadow:
-    inset 0 1px rgba(213, 255, 64, 0.78),
-    inset 0 -1px rgba(213, 255, 64, 0.78);
-  background-image: linear-gradient(rgba(213, 255, 64, 0.06), rgba(213, 255, 64, 0.06));
+    inset 0 0 0 9999px var(--accent-neon-soft),
+    inset 0 1px var(--accent-neon-border),
+    inset 0 -1px var(--accent-neon-border);
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:first-child {
   box-shadow:
-    inset 1px 0 rgba(213, 255, 64, 0.78),
-    inset 0 1px rgba(213, 255, 64, 0.78),
-    inset 0 -1px rgba(213, 255, 64, 0.78);
+    inset 0 0 0 9999px var(--accent-neon-soft),
+    inset 1px 0 var(--accent-neon-border),
+    inset 0 1px var(--accent-neon-border),
+    inset 0 -1px var(--accent-neon-border);
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:last-child {
   box-shadow:
-    inset -1px 0 rgba(213, 255, 64, 0.78),
-    inset 0 1px rgba(213, 255, 64, 0.78),
-    inset 0 -1px rgba(213, 255, 64, 0.78);
+    inset 0 0 0 9999px var(--accent-neon-soft),
+    inset -1px 0 var(--accent-neon-border),
+    inset 0 1px var(--accent-neon-border),
+    inset 0 -1px var(--accent-neon-border);
 }
 
 .daily-plan-timetable-row[data-dragging="true"] {
@@ -1081,7 +1174,7 @@ button {
 
 @media (max-width: 1023px) {
   .daily-plan-timetable-row[data-selected="true"] {
-    outline: 1px solid rgba(213, 255, 64, 0.78);
+    outline: 1px solid var(--accent-neon-border);
     outline-offset: -1px;
   }
 

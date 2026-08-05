@@ -3020,7 +3020,7 @@ export default function ProjectStoryboardOverheadPage() {
                 ) : null}
                 {selectedArchiveType ? (
                   <>
-                    <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
+                    <label className="neon-primary inline-flex min-h-10 cursor-pointer items-center gap-1.5 border px-3 text-xs font-bold transition-colors">
                       <ImagePlus className="h-4 w-4" aria-hidden />
                       이미지
                       <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(selectedArchiveType, event)} />

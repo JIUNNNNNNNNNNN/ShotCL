@@ -552,7 +552,7 @@ function SelectionMark({ checked }: { checked: boolean }) {
     <span
       className={`grid h-5 w-5 shrink-0 place-items-center border ${
         checked
-          ? "border-field-primary bg-field-primary/15 text-field-primary"
+          ? "border-field-primary bg-field-primary text-field-accent-foreground"
           : "border-field-border bg-field-panel text-transparent"
       }`}
       aria-hidden

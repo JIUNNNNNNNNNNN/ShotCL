@@ -829,12 +829,12 @@ export default function HomePage() {
           aria-hidden
         >
           <div
-            className={`functional-circle absolute inset-0 border-2 border-field-primary/70 bg-field-primary/10 transition-[transform,background-color] duration-[260ms] ease-out ${
+            className={`functional-circle absolute inset-0 border-2 transition-[transform,background-color] duration-[260ms] ease-out ${
               selectedProjectId
-                ? "scale-[1.18] bg-field-primary/15 motion-safe:animate-[project-target-confirm_420ms_ease-out]"
+                ? "neon-selected-strong scale-[1.18] motion-safe:animate-[project-target-confirm_420ms_ease-out]"
                 : isProjectTargetEngaged
-                  ? "scale-[1.1] bg-field-primary/20"
-                  : "scale-100"
+                  ? "neon-selected-strong scale-[1.1]"
+                  : "neon-selected scale-100"
             }`}
           />
         </div>
@@ -885,13 +885,13 @@ export default function HomePage() {
                     if (projectSpinner.consumeSuppressedClick()) return;
                     projectSpinner.activateIndex(index);
                   }}
-                  className={`functional-circle flex h-full w-full flex-col items-center justify-center border bg-field-panel px-2 text-center text-field-text outline-none transition-[background-color,border-color,filter] duration-[240ms] ease-out ${
+                  className={`functional-circle flex h-full w-full flex-col items-center justify-center border bg-field-panel px-2 text-center text-field-text outline-none transition-[background-color,border-color] duration-[240ms] ease-out ${
                     isSelectedProject
-                      ? "border-field-primary !bg-field-primary/15 text-field-text motion-safe:animate-[project-bubble-confirm_240ms_ease-out]"
+                      ? "neon-selected-strong text-field-text"
                       : isActive
-                      ? "border-field-primary !bg-field-primary/15 text-field-text"
+                      ? "neon-selected-strong text-field-text"
                       : "border-field-border hover:border-field-divider hover:bg-field-hover"
-                  } active:brightness-90 focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
+                  } focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
                   aria-label={`${project.name} ${pickerTitle}`}
                   aria-pressed={isActive || isSelectedProject}
                 >
@@ -961,7 +961,7 @@ export default function HomePage() {
               aria-busy={isResolvingGo}
               className={`functional-circle relative z-20 aspect-square shrink-0 touch-none select-none outline-none cursor-grab active:cursor-grabbing transition-[width,opacity] duration-[360ms] ease-out focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-4 focus-visible:ring-offset-field-bg ${
                 isProjectRingOpen
-                  ? "w-[46%] opacity-80 sm:w-[50%] md:w-[62%] md:opacity-100"
+                  ? "w-[46%] opacity-100 sm:w-[50%] md:w-[62%]"
                   : "w-[min(90vw,21rem)] md:w-[min(82vw,22rem)]"
               }`}
               {...mainSpinner.pointerHandlers}
@@ -977,7 +977,7 @@ export default function HomePage() {
               <div className="functional-circle pointer-events-none absolute left-1/2 top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 border border-field-border bg-field-bg md:h-8 md:w-8" aria-hidden />
               <div
                 ref={mainTargetRef}
-                className={`functional-circle pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 border-2 border-field-primary/70 bg-field-primary/10 ${
+                className={`neon-selected functional-circle pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 border-2 ${
                   isProjectRingOpen
                     ? "left-[79%] h-16 w-16 md:h-[6.25rem] md:w-[6.25rem]"
                     : "left-[83%] h-[4.75rem] w-[4.75rem] md:h-[6.25rem] md:w-[6.25rem]"
@@ -1032,19 +1032,19 @@ export default function HomePage() {
                           if (mainSpinner.consumeSuppressedClick()) return;
                           mainSpinner.activateIndex(index);
                         }}
-                        className={`functional-circle flex items-center justify-center border px-2 text-center text-field-text outline-none transition-[transform,opacity,border-color,filter,background-color] duration-[260ms] ease-out ${item.colorClass} ${
+                        className={`functional-circle flex items-center justify-center border px-2 text-center text-field-text outline-none transition-[transform,opacity,border-color,background-color] duration-[260ms] ease-out ${item.colorClass} ${
                           isProjectRingOpen
                             ? "h-14 w-14 md:h-20 md:w-20"
                             : "h-[4.25rem] w-[4.25rem] sm:h-24 sm:w-24"
                         } ${
                           isEmphasized
                             ? isProjectRingOpen
-                              ? "z-20 scale-[0.86] border-field-primary !bg-field-primary/15 !text-field-text opacity-85 md:scale-[0.94] md:opacity-100"
-                              : "z-20 scale-[0.94] border-field-primary !bg-field-primary/15 !text-field-text opacity-100"
+                              ? "neon-selected-strong z-20 scale-[0.86] !text-field-text opacity-100 md:scale-[0.94]"
+                              : "neon-selected-strong z-20 scale-[0.94] !text-field-text opacity-100"
                             : isProjectRingOpen
                               ? "z-10 scale-[0.7] border-field-border opacity-55 hover:border-field-divider hover:opacity-75 md:scale-[0.82] md:opacity-70"
                               : "z-10 scale-[0.82] border-field-border opacity-70 hover:border-field-divider hover:opacity-90"
-                        } ${isSelected ? "motion-safe:animate-[main-selection-confirm_260ms_ease-out]" : ""} active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
+                        } active:scale-[0.9] focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg`}
                       >
                         <span
                           className={`font-display-strong font-black leading-[1.2] transition-[font-size,font-weight,transform] duration-[240ms] ease-out ${
@@ -1273,20 +1273,10 @@ export default function HomePage() {
           from { opacity: 0; transform: scale(0.96); }
           to { opacity: 1; transform: scale(1); }
         }
-        @keyframes main-selection-confirm {
-          0% { filter: brightness(1); }
-          45% { filter: brightness(0.86); }
-          100% { filter: brightness(0.95); }
-        }
         @keyframes project-target-confirm {
           0% { transform: scale(1.1); }
           55% { transform: scale(1.25); }
           100% { transform: scale(1.18); }
-        }
-        @keyframes project-bubble-confirm {
-          0% { filter: brightness(0.95); }
-          50% { filter: brightness(0.84); }
-          100% { filter: brightness(0.9); }
         }
       `}</style>
     </div>

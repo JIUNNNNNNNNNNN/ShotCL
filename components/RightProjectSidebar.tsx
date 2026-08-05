@@ -95,8 +95,8 @@ export function RightProjectSidebar({ projectName }: RightProjectSidebarProps) {
             : "invisible pointer-events-none -translate-y-2 scale-y-95 opacity-0"
         }`}
       >
-        <div className="overflow-hidden rounded-[10px] border border-field-divider bg-field-section shadow-floating">
-          <div className="flex items-start gap-3 border-b border-field-divider bg-field-section px-4 py-3">
+        <div className="overflow-hidden rounded-[10px] border border-field-divider bg-field-hover shadow-floating">
+          <div className="flex items-start gap-3 border-b border-field-divider bg-field-hover px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="font-display truncate text-lg font-black text-field-text">{projectName || "프로젝트"}</p>
               <p className="mt-0.5 text-xs font-bold text-field-muted">{menu.title}</p>
@@ -132,9 +132,9 @@ function PageActionItem({
   const Icon = action.icon;
   const sharedClassName = `flex min-h-10 w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.active
-      ? "border-field-primary/70 bg-field-primary/10 text-field-primary"
+      ? "neon-selected"
       : action.emphasis === "primary"
-      ? "border-field-primary bg-field-primary text-field-accent-foreground hover:border-field-secondary hover:bg-field-secondary active:bg-field-strong"
+      ? "neon-primary"
       : "border-field-border bg-transparent text-field-subtle hover:border-field-divider hover:bg-field-hover hover:text-field-text"
   }`;
   const content = (
@@ -176,7 +176,7 @@ function PageActionItem({
       disabled={action.disabled}
       aria-busy={action.pending || undefined}
       aria-pressed={action.active || undefined}
-      className={`${sharedClassName} disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100`}
+      className={`${sharedClassName} disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-section disabled:text-field-disabled disabled:opacity-100 disabled:active:scale-100`}
     >
       {content}
     </button>
