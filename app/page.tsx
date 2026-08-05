@@ -447,21 +447,14 @@ export default function HomePage() {
       }
 
       for (const projectId of candidateIds) {
-        const grant = await verifyProjectAccess(projectId);
-        if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
-        if (!grant) {
-          revokedProjectFound = true;
-          forgetProjectSelection(projectId);
-          if (isMountedRef.current) {
-            setProjects((current) => current.filter((project) => project.id !== projectId));
-          }
-          continue;
-        }
-
-        rememberProjectSelection(grant.projectId);
+        const verifiedProject = visibleById.get(projectId);
+        if (!verifiedProject) continue;
+        // 방금 access-list가 만료·공유 상태까지 서버에서 검증했으므로 같은
+        // project_access_sessions를 즉시 한 번 더 조회하지 않습니다.
+        rememberProjectSelection(verifiedProject.id);
         pushProjectRoute(
-          grant.projectId,
-          `/projects/${encodeURIComponent(grant.projectId)}?view=progress`,
+          verifiedProject.id,
+          `/projects/${encodeURIComponent(verifiedProject.id)}?view=progress`,
           "progress",
           attemptId
         );

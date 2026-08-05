@@ -31,6 +31,11 @@ type PendingDrag = {
   timer: number | null;
 };
 
+type RowDropMetric = {
+  itemId: string;
+  centerY: number;
+};
+
 export type SceneReorderCommitResult =
   | void
   | {
@@ -142,6 +147,7 @@ export function SceneReorderList({
   const onCommitRef = useRef(onCommit);
   const onCommitErrorRef = useRef(onCommitError);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const rowDropMetricsRef = useRef<RowDropMetric[]>([]);
   const pendingRef = useRef<PendingDrag | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const removePointerListenersRef = useRef<(() => void) | null>(null);
@@ -167,6 +173,7 @@ export function SceneReorderList({
       removePointerListenersRef.current = null;
       pendingRef.current = null;
       dragRef.current = null;
+      rowDropMetricsRef.current = [];
       document.body.style.removeProperty("user-select");
       document.body.style.removeProperty("cursor");
     },
@@ -182,6 +189,12 @@ export function SceneReorderList({
       if (pendingRef.current === pending) clearPending();
       return;
     }
+    rowDropMetricsRef.current = itemsRef.current.flatMap((item) => {
+      const row = rowRefs.current.get(item.id);
+      if (!row) return [];
+      const rect = row.getBoundingClientRect();
+      return [{ itemId: item.id, centerY: rect.top + window.scrollY + rect.height / 2 }];
+    });
     const next: DragState = {
       itemId: pending.itemId,
       pointerId: pending.pointerId,
@@ -198,25 +211,12 @@ export function SceneReorderList({
     document.body.style.cursor = "grabbing";
   }
 
-  function updateDrag(clientY: number) {
+  function updateDrag(clientY: number, pageY: number) {
     const current = dragRef.current;
     if (!current) return;
-    let targetId = current.itemId;
-    let insertAfter = false;
-    let closestDistance = Number.POSITIVE_INFINITY;
-
-    itemsRef.current.forEach((item) => {
-      const row = rowRefs.current.get(item.id);
-      if (!row) return;
-      const rect = row.getBoundingClientRect();
-      const center = rect.top + rect.height / 2;
-      const distance = Math.abs(clientY - center);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        targetId = item.id;
-        insertAfter = clientY >= center;
-      }
-    });
+    const target = findClosestRowDropMetric(rowDropMetricsRef.current, pageY);
+    const targetId = target?.itemId ?? current.itemId;
+    const insertAfter = target ? pageY >= target.centerY : false;
 
     const next = { ...current, currentY: clientY, targetId, insertAfter };
     dragRef.current = next;
@@ -232,6 +232,7 @@ export function SceneReorderList({
   function resetDragVisuals() {
     clearPending();
     dragRef.current = null;
+    rowDropMetricsRef.current = [];
     setDrag(null);
     document.body.style.removeProperty("user-select");
     document.body.style.removeProperty("cursor");
@@ -373,7 +374,7 @@ export function SceneReorderList({
 
       if (dragRef.current) {
         moveEvent.preventDefault();
-        updateDrag(moveEvent.clientY);
+        updateDrag(moveEvent.clientY, moveEvent.pageY);
       }
     };
 
@@ -453,4 +454,22 @@ export function SceneReorderList({
       })}
     </tbody>
   );
+}
+
+function findClosestRowDropMetric(metrics: RowDropMetric[], clientY: number) {
+  if (metrics.length === 0) return null;
+  let low = 0;
+  let high = metrics.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((metrics[middle]?.centerY ?? Number.POSITIVE_INFINITY) < clientY) low = middle + 1;
+    else high = middle;
+  }
+  const after = metrics[Math.min(low, metrics.length - 1)];
+  const before = metrics[Math.max(0, low - 1)];
+  if (!before) return after ?? null;
+  if (!after) return before;
+  return Math.abs(clientY - before.centerY) <= Math.abs(clientY - after.centerY)
+    ? before
+    : after;
 }

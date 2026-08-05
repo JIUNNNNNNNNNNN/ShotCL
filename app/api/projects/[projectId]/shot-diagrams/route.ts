@@ -269,25 +269,59 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
     const role = await getDiagramAccessRole(request, projectId);
     if (role !== "admin") return NextResponse.json({ error: "부감도 삭제는 Key staff만 할 수 있습니다." }, { status: 403 });
-    const archiveId = normalizeKeyPart(request.nextUrl.searchParams.get("archiveId"));
-    if (!archiveId) return NextResponse.json({ error: "부감도 자료 ID가 필요합니다." }, { status: 400 });
+    const body = request.headers.get("content-type")?.includes("application/json")
+      ? await request.json().catch(() => ({})) as { archiveIds?: unknown }
+      : {};
+    const requestedArchiveIds = Array.isArray(body.archiveIds)
+      ? body.archiveIds
+      : request.nextUrl.searchParams.getAll("archiveId");
+    const archiveIds = [...new Set(requestedArchiveIds.map(normalizeKeyPart).filter(Boolean))].slice(0, 250);
+    if (archiveIds.length === 0) return NextResponse.json({ error: "부감도 자료 ID가 필요합니다." }, { status: 400 });
+    const archiveRefs = archiveIds.map(toArchiveRef);
     const supabase = requireProjectAccessDb();
-    const { error: linkError } = await supabase
-      .from("shot_diagrams")
-      .delete()
-      .eq("project_id", projectId)
-      .eq("diagram_type", DIAGRAM_TYPE)
-      .contains("data", { kind: LINK_DATA_KIND, assetId: toArchiveRef(archiveId), source: "diagram" });
-    if (linkError) throw linkError;
+    if (archiveRefs.length === 1) {
+      const { error: linkError } = await supabase
+        .from("shot_diagrams")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("diagram_type", DIAGRAM_TYPE)
+        .contains("data", { kind: LINK_DATA_KIND, assetId: archiveRefs[0], source: "diagram" });
+      if (linkError) throw linkError;
+    } else {
+      const { data: linkedRows, error: linkLookupError } = await supabase
+        .from("shot_diagrams")
+        .select("id,data")
+        .eq("project_id", projectId)
+        .eq("diagram_type", DIAGRAM_TYPE)
+        .contains("data", { kind: LINK_DATA_KIND, source: "diagram" });
+      if (linkLookupError) throw linkLookupError;
+      const archiveRefSet = new Set(archiveRefs);
+      const linkedRowIds = (linkedRows ?? []).flatMap((row) => {
+        const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+          ? row.data as Record<string, unknown>
+          : {};
+        return typeof row.id === "string" && archiveRefSet.has(normalizeKeyPart(data.assetId))
+          ? [row.id]
+          : [];
+      });
+      if (linkedRowIds.length > 0) {
+        const { error: linkError } = await supabase
+          .from("shot_diagrams")
+          .delete()
+          .eq("project_id", projectId)
+          .in("id", linkedRowIds);
+        if (linkError) throw linkError;
+      }
+    }
     const { error } = await supabase
       .from("shot_diagrams")
       .delete()
       .eq("project_id", projectId)
       .eq("daily_plan_id", ARCHIVE_DAILY_PLAN_ID)
-      .eq("shot_ref", toArchiveRef(archiveId))
+      .in("shot_ref", archiveRefs)
       .eq("diagram_type", DIAGRAM_TYPE);
     if (error) throw error;
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, deleted: archiveIds.length });
   } catch (error) {
     return diagramErrorResponse(error, "부감도 자료를 삭제하지 못했습니다.");
   }

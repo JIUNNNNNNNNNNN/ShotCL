@@ -1,9 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
+import { clearProjectReadCache } from "@/lib/data/projects";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
 import {
@@ -41,6 +42,12 @@ export function ProjectAccessGate({
     `${progressPath}/storyboard-overhead`
   ]);
   const denied = role === "progress" && !progressReadablePaths.has(pathname);
+
+  // 서버 layout이 확정한 현재 권한을 cache보다 우선합니다. layout effect는
+  // 자식 페이지의 일반 data-loading effect보다 먼저 실행되며 render도 순수하게 유지합니다.
+  useLayoutEffect(() => {
+    clearProjectReadCache(projectId);
+  }, [projectId, role]);
 
   useEffect(() => {
     if (!role) return;

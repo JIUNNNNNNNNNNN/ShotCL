@@ -3837,20 +3837,35 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       });
     }
 
-    const handleViewportResize = () => scheduleSizeUpdate();
+    let observedContainerWidth = container.getBoundingClientRect().width;
+    const scheduleForContainerWidth = (nextWidth: number | undefined) => {
+      if (
+        nextWidth === undefined
+        || !Number.isFinite(nextWidth)
+        || nextWidth <= 0
+        || Math.abs(nextWidth - observedContainerWidth) < 0.01
+      ) return;
+      observedContainerWidth = nextWidth;
+      scheduleSizeUpdate();
+    };
+    const handleViewportResize = () => {
+      scheduleForContainerWidth(containerRef.current?.getBoundingClientRect().width);
+    };
 
     // 폰트가 늦게 로드되더라도 첫 paint 전에 A4 sheet의 scale과 높이를 확보합니다.
     updateSize(shouldCheckDensity);
 
     const observer = typeof ResizeObserver === "undefined"
       ? null
-      : new ResizeObserver(() => scheduleSizeUpdate());
+      : new ResizeObserver((entries) => {
+        scheduleForContainerWidth(entries[0]?.contentRect.width);
+      });
     observer?.observe(container);
     window.addEventListener("resize", handleViewportResize);
     window.addEventListener("orientationchange", handleViewportResize);
     window.visualViewport?.addEventListener("resize", handleViewportResize);
 
-    if ("fonts" in document) {
+    if ("fonts" in document && document.fonts.status !== "loaded") {
       void document.fonts.ready.then(
         () => {
           shouldCheckDensity = true;

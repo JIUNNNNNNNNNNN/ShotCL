@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -21,10 +22,6 @@ import {
 import { useParams } from "next/navigation";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import { ScenarioPdfSceneSegments } from "@/components/ScenarioPdfSceneSegments";
-import {
-  analyzeScenarioPdfImages
-} from "@/lib/client/scenarioPdfImages";
 import {
   deleteProjectReferenceAsset,
   listProjectReferenceAssets,
@@ -38,6 +35,11 @@ import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
 type ViewMode = "scenes" | "pdf";
+
+const ScenarioPdfSceneSegments = dynamic(
+  () => import("@/components/ScenarioPdfSceneSegments").then((module) => module.ScenarioPdfSceneSegments),
+  { ssr: false, loading: () => <PixelDogLoader size="md" /> }
+);
 
 export default function ProjectScenarioPage() {
   const params = useParams<{ id: string | string[] }>();
@@ -148,6 +150,7 @@ export default function ProjectScenarioPage() {
         const uploadedAsset = await uploadProjectReferenceAsset(projectId, "scenario", file);
         uploadedId = uploadedAsset.id;
         try {
+          const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
           const imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
           await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
             scenarioScenes: imageScenes
@@ -213,6 +216,7 @@ export default function ProjectScenarioPage() {
     setErrorMessage("");
     setStatusMessage("");
     try {
+      const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
       const imageScenes = await analyzeScenarioPdfImages(selectedAsset.publicUrl);
       const analyzed = await updateProjectReferenceAsset(projectId, selectedAsset.id, {
         scenarioScenes: imageScenes

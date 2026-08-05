@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   formatDailyPlanWeatherSummary,
   type DailyPlanPrintMeta
@@ -115,7 +116,7 @@ export function buildDailyPlanDocumentData({
 }
 
 /** 화면 미리보기와 PDF 출력이 함께 사용하는 canonical 일촬표 문서 진입점입니다. */
-export function DailyPlanDocument(props: DailyPlanDocumentProps) {
+export const DailyPlanDocument = memo(function DailyPlanDocument(props: DailyPlanDocumentProps) {
   const orientation = props.orientation ?? "landscape";
   const density = props.density ?? "normal";
   const pageLayout = props.pageLayout ?? "single";
@@ -126,7 +127,7 @@ export function DailyPlanDocument(props: DailyPlanDocumentProps) {
   ) : (
     <DailyPlanLandscapeDocument data={data} density={density} pageLayout={pageLayout} />
   );
-}
+});
 
 /** 기존 데스크톱 가로 문서 구조는 세로 문서와 독립적으로 유지합니다. */
 export function DailyPlanLandscapeDocument({

@@ -1066,7 +1066,13 @@ function EditableMediaField({
             <div key={image.path} className="relative h-32 w-32 shrink-0 border border-field-border bg-field-soft">
               <button type="button" onClick={() => onPreview(image)} className="h-full w-full">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
+                <img
+                  src={image.url}
+                  alt={`${title} ${label}`}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-contain"
+                />
               </button>
               <button
                 type="button"
@@ -1167,7 +1173,13 @@ function ReadOnlyMediaField({
           {images.map((image) => (
             <button key={image.path} type="button" onClick={() => onPreview(image)} className="h-32 w-32 shrink-0 border border-field-border bg-field-soft">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={image.url} alt={`${title} ${label}`} className="h-full w-full object-contain" />
+              <img
+                src={image.url}
+                alt={`${title} ${label}`}
+                loading="lazy"
+                decoding="async"
+                className="h-full w-full object-contain"
+              />
             </button>
           ))}
         </div> : <div className="grid min-h-32 place-items-center border border-dashed border-field-border text-[10px] text-field-muted">이미지 없음</div>}

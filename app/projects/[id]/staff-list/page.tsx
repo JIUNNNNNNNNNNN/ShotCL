@@ -417,6 +417,16 @@ export default function StaffListPage() {
     finishMemberDrag();
   }, [findPointerDropTarget, finishMemberDrag, moveMember]);
 
+  const handleNameClick = useCallback((
+    event: ReactMouseEvent<HTMLInputElement>,
+    memberId: string
+  ) => {
+    if (suppressedNameClickRef.current !== memberId) return;
+    event.preventDefault();
+    event.currentTarget.blur();
+    suppressedNameClickRef.current = null;
+  }, []);
+
   const registerMemberRoleInput = useCallback((id: string, input: HTMLInputElement | null) => {
     if (input) memberRoleInputRefs.current.set(id, input);
     else memberRoleInputRefs.current.delete(id);
@@ -667,18 +677,11 @@ export default function StaffListPage() {
                         onChange={updateMember}
                         onDelete={deleteMember}
                         onRoleInputRef={registerMemberRoleInput}
-                        onNamePointerDown={(event) => handleNamePointerDown(event, member.id)}
+                        onNamePointerDown={handleNamePointerDown}
                         onNamePointerMove={handleNamePointerMove}
                         onNamePointerUp={handleNamePointerEnd}
-                        onNamePointerCancel={() => {
-                          finishMemberDrag();
-                        }}
-                        onNameClick={(event) => {
-                          if (suppressedNameClickRef.current !== member.id) return;
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                          suppressedNameClickRef.current = null;
-                        }}
+                        onNamePointerCancel={finishMemberDrag}
+                        onNameClick={handleNameClick}
                       />
                     ))}
                   </div>
@@ -726,11 +729,17 @@ const StaffMemberRow = memo(function StaffMemberRow({
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
   onDelete: (member: ProjectStaffMember) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
-  onNamePointerDown: (event: ReactPointerEvent<HTMLInputElement>) => void;
+  onNamePointerDown: (
+    event: ReactPointerEvent<HTMLInputElement>,
+    memberId: string
+  ) => void;
   onNamePointerMove: (event: ReactPointerEvent<HTMLInputElement>) => void;
   onNamePointerUp: (event: ReactPointerEvent<HTMLInputElement>) => void;
   onNamePointerCancel: () => void;
-  onNameClick: (event: ReactMouseEvent<HTMLInputElement>) => void;
+  onNameClick: (
+    event: ReactMouseEvent<HTMLInputElement>,
+    memberId: string
+  ) => void;
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
   const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -769,11 +778,11 @@ const StaffMemberRow = memo(function StaffMemberRow({
           className={`${inputClassName} ${isDragging ? "cursor-grabbing select-none" : ""}`}
           value={member.name}
           onChange={(event) => onChange(member.id, { name: event.target.value })}
-          onPointerDown={canEdit ? onNamePointerDown : undefined}
+          onPointerDown={canEdit ? (event) => onNamePointerDown(event, member.id) : undefined}
           onPointerMove={canEdit ? onNamePointerMove : undefined}
           onPointerUp={canEdit ? onNamePointerUp : undefined}
           onPointerCancel={canEdit ? onNamePointerCancel : undefined}
-          onClick={canEdit ? onNameClick : undefined}
+          onClick={canEdit ? (event) => onNameClick(event, member.id) : undefined}
           readOnly={!canEdit}
           placeholder="이름"
           aria-label={`${number}번 이름`}

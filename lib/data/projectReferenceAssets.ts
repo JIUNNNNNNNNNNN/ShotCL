@@ -173,6 +173,24 @@ export async function listProjectReferenceAssets(
   return payload.assets ?? [];
 }
 
+/** 여러 자료 종류를 한 요청으로 조회합니다. 아카이브처럼 같은 테이블을 함께 보여주는 화면에서 사용합니다. */
+export async function listProjectReferenceAssetsByTypes(
+  projectId: string,
+  assetTypes: ProjectReferenceAssetType[],
+  dailyPlanId?: string
+): Promise<ProjectReferenceAsset[]> {
+  const normalizedTypes = [...new Set(assetTypes)];
+  if (normalizedTypes.length === 0) return [];
+  const query = new URLSearchParams({ types: normalizedTypes.join(",") });
+  if (dailyPlanId) query.set("dailyPlanId", dailyPlanId);
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets?${query}`, {
+    cache: "no-store"
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { assets?: ProjectReferenceAsset[] };
+  if (!response.ok) throw new Error(payload.error || "프로젝트 자료를 불러오지 못했습니다.");
+  return payload.assets ?? [];
+}
+
 export async function uploadProjectReferenceAsset(
   projectId: string,
   assetType: ProjectReferenceAssetType,

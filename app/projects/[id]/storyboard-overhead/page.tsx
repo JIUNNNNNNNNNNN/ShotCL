@@ -29,12 +29,11 @@ import {
   X
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import {
-  ArchiveImportDialog,
-  type ArchiveImportCommit,
-  type ArchiveImportProgressState,
-  type ArchiveImportSaveFailure,
-  type ArchiveImportSaveReport
+import type {
+  ArchiveImportCommit,
+  ArchiveImportProgressState,
+  ArchiveImportSaveFailure,
+  ArchiveImportSaveReport
 } from "@/components/ArchiveImportDialog";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
@@ -65,7 +64,7 @@ import { KeyedMutationQueue } from "@/lib/client/keyedMutationQueue";
 import {
   deleteProjectReferenceAssets,
   inspectProjectReferenceAssets,
-  listProjectReferenceAssets,
+  listProjectReferenceAssetsByTypes,
   ProjectReferenceAssetReorderError,
   ProjectReferenceAssetSceneCutError,
   reorderProjectReferenceAssets,
@@ -80,8 +79,9 @@ import {
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { getProject } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
+import { auditQuery } from "@/lib/queryAudit";
 import {
-  deleteOverheadDiagramArchive,
+  deleteOverheadDiagramArchives,
   listOverheadDiagramArchive,
   saveOverheadDiagramArchive
 } from "@/lib/data/shotMediaArchive";
@@ -97,6 +97,10 @@ import type {
 
 const ShotOverheadEditor = dynamic(
   () => import("@/components/ShotOverheadEditor").then((module) => module.ShotOverheadEditor),
+  { ssr: false, loading: () => <PixelDogLoader size="md" /> }
+);
+const ArchiveImportDialog = dynamic(
+  () => import("@/components/ArchiveImportDialog").then((module) => module.ArchiveImportDialog),
   { ssr: false, loading: () => <PixelDogLoader size="md" /> }
 );
 
@@ -461,12 +465,27 @@ export default function ProjectStoryboardOverheadPage() {
     setLoadedArchiveProjectId("");
     setIsLoading(true);
     try {
-      const [project, overheadAssets, storyboardAssets, diagrams, sceneResult] = await Promise.all([
-        getProject(projectId),
-        listProjectReferenceAssets(projectId, "overhead"),
-        listProjectReferenceAssets(projectId, "storyboard"),
-        listOverheadDiagramArchive(projectId),
-        getProjectSceneList(projectId)
+      const [project, archiveAssets, diagrams, sceneResult] = await Promise.all([
+        auditQuery(
+          "archive.loadProject",
+          "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
+          () => getProject(projectId)
+        ),
+        auditQuery(
+          "archive.loadReferenceAssets",
+          "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
+          () => listProjectReferenceAssetsByTypes(projectId, ["overhead", "storyboard"])
+        ),
+        auditQuery(
+          "archive.loadOverheadDiagrams",
+          "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
+          () => listOverheadDiagramArchive(projectId)
+        ),
+        auditQuery(
+          "archive.loadSceneList",
+          "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
+          () => getProjectSceneList(projectId)
+        )
           .then((value) => ({ value: value.items, error: "" }))
           .catch((error: unknown) => ({
             value: [] as ProjectSceneItem[],
@@ -474,6 +493,8 @@ export default function ProjectStoryboardOverheadPage() {
           }))
       ]);
       if (activeProjectIdRef.current !== requestedProjectId) return;
+      const overheadAssets = archiveAssets.filter((asset) => asset.assetType === "overhead");
+      const storyboardAssets = archiveAssets.filter((asset) => asset.assetType === "storyboard");
       setProjectName(project?.name ?? "프로젝트");
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
@@ -1876,15 +1897,15 @@ export default function ProjectStoryboardOverheadPage() {
           failures.push(error instanceof Error ? error.message : "선택한 이미지를 삭제하지 못했습니다.");
         }
       }
-      for (const item of action.diagrams) {
+      if (action.diagrams.length > 0) {
         try {
-          await deleteOverheadDiagramArchive(operationProjectId, item.id);
+          await deleteOverheadDiagramArchives(operationProjectId, action.diagrams.map((item) => item.id));
           if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          removeDiagramsFromLocalState([item.id]);
-          deletedCount += 1;
+          removeDiagramsFromLocalState(action.diagrams.map((item) => item.id));
+          deletedCount += action.diagrams.length;
         } catch (error) {
           if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          remainingDiagrams.push(item);
+          remainingDiagrams.push(...action.diagrams);
           failures.push(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
         }
       }
@@ -3123,9 +3144,10 @@ export default function ProjectStoryboardOverheadPage() {
                     </button>
                   </h3>
                   <div id={scenePanelId} hidden={collapsed} className={collapsed ? "hidden" : "grid min-w-0 gap-2"}>
-                  {groupArchiveItemsByCut(group.items).map((cutGroup) => {
+                  {collapsed ? null : groupArchiveItemsByCut(group.items).map((cutGroup) => {
                     const orderedAssets = cutGroup.items.flatMap((item) => item.kind === "asset" ? [item.asset] : []);
                     const orderedAssetIds = orderedAssets.map((asset) => asset.id);
+                    const visibleOrderByAssetId = new Map(orderedAssetIds.map((assetId, index) => [assetId, index + 1]));
                     const orderGroupKey = archiveOrderGroupKey(group.sceneId, cutGroup.cutNumber);
                     const completeOrderedAssetIds = completeArchiveOrderByGroupKey.get(orderGroupKey) ?? orderedAssetIds;
                     const groupInReorderMode = reorderModeGroupKey === orderGroupKey;
@@ -3213,7 +3235,7 @@ export default function ProjectStoryboardOverheadPage() {
                         && !pendingDeleteAsset
                         && !deletedAssetIdsRef.current.has(asset.id);
                       const assetReorderEnabled = dragDeleteEnabled && groupReorderEnabled;
-                      const visibleOrderNumber = orderedAssetIds.indexOf(asset.id) + 1;
+                      const visibleOrderNumber = visibleOrderByAssetId.get(asset.id) ?? 1;
                       const orderNumber = activeType === "all" && !query.trim()
                         ? visibleOrderNumber
                         : positiveArchiveSortOrder(asset.sortOrder) ?? visibleOrderNumber;

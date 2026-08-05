@@ -76,8 +76,6 @@ export async function listShots(projectId: string, dailyPlanId?: string): Promis
 
 /** 일촬표 동기화 결과나 수동 입력 컷을 프로젝트에 추가합니다. */
 export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft[], dailyPlanId?: string): Promise<Shot[]> {
-  const existingShots = await listShots(projectId, dailyPlanId);
-  const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
   if (await getSharedRole(projectId)) {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, {
       method: "POST",
@@ -88,6 +86,8 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
     if (!response.ok || !payload.shots) throw new Error(payload.error || "컷을 추가하지 못했습니다.");
     return payload.shots.map(shotFromRow);
   }
+  const existingShots = await listShots(projectId, dailyPlanId);
+  const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
   const supabase = getSupabaseBrowserClient();
 
   if (supabase) {

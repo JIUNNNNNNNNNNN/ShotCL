@@ -22,8 +22,11 @@ export type AccessibleProjectList = {
   preferenceScope: string;
 };
 const projectRequests = new Map<string, Promise<Project | null>>();
+const projectCache = new Map<string, { value: Project; expiresAt: number }>();
 const projectBasicInfoRequests = new Map<string, Promise<ProjectBasicInfo>>();
 const projectBasicInfoCache = new Map<string, { value: ProjectBasicInfo; expiresAt: number }>();
+const projectReadCacheGenerations = new Map<string, number>();
+const PROJECT_CACHE_MS = 15_000;
 const PROJECT_BASIC_INFO_CACHE_MS = 15_000;
 
 /** 프로젝트 목록을 최신 생성순으로 가져옵니다. */
@@ -116,16 +119,37 @@ async function loadSharedProjects(): Promise<Project[]> {
 
 /** 단일 프로젝트를 ID로 조회합니다. */
 export function getProject(projectId: string): Promise<Project | null> {
-  const existingRequest = projectRequests.get(projectId);
+  const cacheKey = normalizeProjectId(projectId);
+  const cached = projectCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value);
+  if (cached) projectCache.delete(cacheKey);
+
+  const existingRequest = projectRequests.get(cacheKey);
   if (existingRequest) return existingRequest;
 
-  const request = loadProject(projectId);
-  projectRequests.set(projectId, request);
+  const cacheGeneration = getProjectReadCacheGeneration(cacheKey);
+  const request = loadProject(projectId).then((project) => {
+    if (project && getProjectReadCacheGeneration(cacheKey) === cacheGeneration) {
+      cacheProject(cacheKey, project);
+    }
+    return project;
+  });
+  projectRequests.set(cacheKey, request);
   const clearRequest = () => {
-    if (projectRequests.get(projectId) === request) projectRequests.delete(projectId);
+    if (projectRequests.get(cacheKey) === request) projectRequests.delete(cacheKey);
   };
   void request.then(clearRequest, clearRequest);
   return request;
+}
+
+/** 서버 layout의 현재 권한 판정 전에 만들어진 프로젝트 단위 client read를 모두 비웁니다. */
+export function clearProjectReadCache(projectId: string) {
+  const cacheKey = normalizeProjectId(projectId);
+  projectReadCacheGenerations.set(cacheKey, getProjectReadCacheGeneration(cacheKey) + 1);
+  projectCache.delete(cacheKey);
+  projectRequests.delete(cacheKey);
+  projectBasicInfoCache.delete(cacheKey);
+  projectBasicInfoRequests.delete(cacheKey);
 }
 
 async function loadProject(projectId: string): Promise<Project | null> {
@@ -192,7 +216,9 @@ export async function createProject(input: ProjectInput): Promise<Project> {
     }
     const { data, error } = await supabase.from("projects").insert(projectInputToRow(input)).select("*").single();
     if (error) throw toReadableDataError(error, "프로젝트 생성에 실패했습니다. 환경변수 또는 DB 권한을 확인하세요.");
-    return projectFromRow(data);
+    const project = projectFromRow(data);
+    cacheProject(normalizeProjectId(project.id), project);
+    return project;
   }
 
   const now = new Date().toISOString();
@@ -210,6 +236,7 @@ export async function createProject(input: ProjectInput): Promise<Project> {
   };
 
   writeLocalBuckets({ projects: [project, ...projects] }, project.id);
+  cacheProject(normalizeProjectId(project.id), project);
   return project;
 }
 
@@ -223,8 +250,11 @@ export function getProjectBasicInfo(projectId: string): Promise<ProjectBasicInfo
   const existingRequest = projectBasicInfoRequests.get(cacheKey);
   if (existingRequest) return existingRequest;
 
+  const cacheGeneration = getProjectReadCacheGeneration(cacheKey);
   const request = loadProjectBasicInfo(projectId).then((value) => {
-    cacheProjectBasicInfo(cacheKey, value);
+    if (getProjectReadCacheGeneration(cacheKey) === cacheGeneration) {
+      cacheProjectBasicInfo(cacheKey, value);
+    }
     return value;
   });
   projectBasicInfoRequests.set(cacheKey, request);
@@ -269,6 +299,7 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
     ));
     writeLocalBuckets({ projects: nextProjects }, projects[projectIndex].id);
     cacheProjectBasicInfo(databaseProjectId, validation.value);
+    cacheProject(databaseProjectId, nextProjects[projectIndex]);
     return validation.value;
   }
 
@@ -292,7 +323,22 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
   }
   const savedBasicInfo = normalizeProjectBasicInfo(payload.basicInfo);
   cacheProjectBasicInfo(databaseProjectId, savedBasicInfo);
+  const cachedProject = projectCache.get(databaseProjectId);
+  if (cachedProject) {
+    cacheProject(databaseProjectId, { ...cachedProject.value, basicInfo: savedBasicInfo });
+  }
   return savedBasicInfo;
+}
+
+function cacheProject(projectId: string, value: Project) {
+  projectCache.set(projectId, {
+    value,
+    expiresAt: Date.now() + PROJECT_CACHE_MS
+  });
+}
+
+function getProjectReadCacheGeneration(projectId: string) {
+  return projectReadCacheGenerations.get(projectId) ?? 0;
 }
 
 function cacheProjectBasicInfo(projectId: string, value: ProjectBasicInfo) {

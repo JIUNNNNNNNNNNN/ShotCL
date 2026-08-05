@@ -124,38 +124,46 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
     }
 
     const ids = normalizedMembers.map((member) => member.id);
-    if (ids.length > 0) {
-      const { data: idRows, error: idError } = await supabase
-        .from("project_staff_members")
-        .select("id,project_id")
-        .in("id", ids);
-      if (idError) throw idError;
-      if ((idRows ?? []).some((row) => row.project_id !== projectId)) {
-        return NextResponse.json({ error: "다른 프로젝트의 스탭 행은 수정할 수 없습니다." }, { status: 409 });
-      }
-    }
     const departmentIds = normalizedDepartments.map((department) => department.id);
-    if (departmentIds.length > 0) {
-      const { data: departmentIdRows, error: departmentIdError } = await supabase
+    const [
+      idRowsResult,
+      departmentIdRowsResult,
+      existingRowsResult,
+      existingDepartmentRowsResult
+    ] = await Promise.all([
+      ids.length > 0
+        ? supabase
+          .from("project_staff_members")
+          .select("id,project_id")
+          .in("id", ids)
+        : Promise.resolve({ data: [], error: null }),
+      departmentIds.length > 0
+        ? supabase
+          .from("project_staff_departments")
+          .select("id,project_id")
+          .in("id", departmentIds)
+        : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("project_staff_members")
+        .select("id")
+        .eq("project_id", projectId),
+      supabase
         .from("project_staff_departments")
-        .select("id,project_id")
-        .in("id", departmentIds);
-      if (departmentIdError) throw departmentIdError;
-      if ((departmentIdRows ?? []).some((row) => row.project_id !== projectId)) {
-        return NextResponse.json({ error: "다른 프로젝트의 부서 옵션은 수정할 수 없습니다." }, { status: 409 });
-      }
+        .select("id")
+        .eq("project_id", projectId)
+    ]);
+    if (idRowsResult.error) throw idRowsResult.error;
+    if ((idRowsResult.data ?? []).some((row) => row.project_id !== projectId)) {
+      return NextResponse.json({ error: "다른 프로젝트의 스탭 행은 수정할 수 없습니다." }, { status: 409 });
     }
-
-    const { data: existingRows, error: existingError } = await supabase
-      .from("project_staff_members")
-      .select("id")
-      .eq("project_id", projectId);
-    if (existingError) throw existingError;
-    const { data: existingDepartmentRows, error: existingDepartmentError } = await supabase
-      .from("project_staff_departments")
-      .select("id")
-      .eq("project_id", projectId);
-    if (existingDepartmentError) throw existingDepartmentError;
+    if (departmentIdRowsResult.error) throw departmentIdRowsResult.error;
+    if ((departmentIdRowsResult.data ?? []).some((row) => row.project_id !== projectId)) {
+      return NextResponse.json({ error: "다른 프로젝트의 부서 옵션은 수정할 수 없습니다." }, { status: 409 });
+    }
+    if (existingRowsResult.error) throw existingRowsResult.error;
+    if (existingDepartmentRowsResult.error) throw existingDepartmentRowsResult.error;
+    const existingRows = existingRowsResult.data;
+    const existingDepartmentRows = existingDepartmentRowsResult.data;
 
     const departmentRows = normalizedDepartments.map((department, index) => ({
       id: department.id,
@@ -213,20 +221,24 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pro
       if (error) throw error;
     }
 
-    const { data: savedRows, error: savedError } = await supabase
-      .from("project_staff_members")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order")
-      .order("created_at");
-    if (savedError) throw savedError;
-    const { data: savedDepartmentRows, error: savedDepartmentError } = await supabase
-      .from("project_staff_departments")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order")
-      .order("created_at");
-    if (savedDepartmentError) throw savedDepartmentError;
+    const [savedRowsResult, savedDepartmentRowsResult] = await Promise.all([
+      supabase
+        .from("project_staff_members")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at"),
+      supabase
+        .from("project_staff_departments")
+        .select("*")
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at")
+    ]);
+    if (savedRowsResult.error) throw savedRowsResult.error;
+    if (savedDepartmentRowsResult.error) throw savedDepartmentRowsResult.error;
+    const savedRows = savedRowsResult.data;
+    const savedDepartmentRows = savedDepartmentRowsResult.data;
 
     return NextResponse.json({
       members: (savedRows ?? []).map(staffMemberResponseRow),

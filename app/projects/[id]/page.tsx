@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
-import { DailyPlanCoverflow, type DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
+import type { DailyPlanCarouselItem } from "@/components/DailyPlanCoverflow";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import {
   useProjectPageActionMenu,
@@ -13,20 +13,12 @@ import {
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
-import {
-  DailyPlanGatheringLocations,
-  type GatheringPhotoPreview
-} from "@/components/DailyPlanGatheringLocations";
+import type { GatheringPhotoPreview } from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
-import {
-  ProgressSceneDurationEditor,
-  type ProgressSceneDurationSaveInput
-} from "@/components/ProgressSceneDurationEditor";
+import type { ProgressSceneDurationSaveInput } from "@/components/ProgressSceneDurationEditor";
 import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
-import { ShotCard } from "@/components/ShotCard";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
-import { ShotReorderList } from "@/components/ShotReorderList";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
@@ -57,6 +49,28 @@ import { useProjectAccess } from "@/components/ProjectAccessGate";
 import type { DailyPlan, DailyPlanMealTime, Project, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
 type ProgressVisualBucket = "active" | "ok" | "omit";
+const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
+
+const DailyPlanCoverflow = dynamic(
+  () => import("@/components/DailyPlanCoverflow").then((module) => module.DailyPlanCoverflow),
+  { ssr: false }
+);
+const DailyPlanGatheringLocations = dynamic(
+  () => import("@/components/DailyPlanGatheringLocations").then((module) => module.DailyPlanGatheringLocations),
+  { ssr: false }
+);
+const ProgressSceneDurationEditor = dynamic(
+  () => import("@/components/ProgressSceneDurationEditor").then((module) => module.ProgressSceneDurationEditor),
+  { ssr: false }
+);
+const ShotCard = dynamic(
+  () => import("@/components/ShotCard").then((module) => module.ShotCard),
+  { ssr: false }
+);
+const ShotReorderList = dynamic(
+  () => import("@/components/ShotReorderList").then((module) => module.ShotReorderList),
+  { ssr: false }
+);
 
 const ShotEditorModal = dynamic(
   () => import("@/components/ShotEditorModal").then((module) => module.ShotEditorModal),
@@ -175,7 +189,13 @@ export default function ProjectDetailPage() {
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
   const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
   const shotsRef = useRef(shots);
+  const archiveAssetsRef = useRef<ProgressArchiveMediaAsset[]>([]);
   const sessionBucketByShotIdRef = useRef(sessionBucketByShotId);
+  const pendingStatusByShotIdRef = useRef(new Map<string, { version: number; status: ShotStatus }>());
+  const persistedStatusByShotIdRef = useRef(new Map<string, ShotStatus>());
+  const statusMutationVersionByShotIdRef = useRef(new Map<string, number>());
+  const statusMutationQueueByShotIdRef = useRef(new Map<string, Promise<Shot>>());
+  const selectedShotsRefreshVersionRef = useRef(0);
   const initializedBucketEntryRef = useRef("");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
 
@@ -191,6 +211,17 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     shotsRef.current = shots;
   }, [shots]);
+
+  useEffect(() => {
+    if (!isProgressView) return;
+    void Promise.all([
+      import("@/components/DailyPlanCoverflow"),
+      import("@/components/DailyPlanGatheringLocations"),
+      import("@/components/ProgressSceneDurationEditor"),
+      import("@/components/ShotCard"),
+      import("@/components/ShotReorderList")
+    ]);
+  }, [isProgressView]);
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
@@ -227,13 +258,18 @@ export default function ProjectDetailPage() {
       setProject(projectData);
       if (!projectData) {
         setDailyPlans([]);
+        shotsRef.current = [];
         setShots([]);
+        archiveAssetsRef.current = [];
+        persistedStatusByShotIdRef.current.clear();
         setArchiveMediaByShotId(new Map());
+        setMediaLinksByShotId(new Map());
         commitSessionBuckets(new Map());
         setErrorMessage("");
         return;
       }
       let shotsWithDiagrams = selectedShots;
+      let nextMediaLinksByShotId = new Map<string, ShotMediaLink[]>();
       if (selectedShots.length > 0) {
         try {
           const [diagrams, linksByRef] = await Promise.all([
@@ -249,18 +285,18 @@ export default function ProjectDetailPage() {
             )
           ]);
           shotsWithDiagrams = applyShotMediaLinks(selectedShots, linksByRef, diagrams);
-          setMediaLinksByShotId(new Map(selectedShots.map((shot) => [
+          nextMediaLinksByShotId = new Map(selectedShots.map((shot) => [
             shot.id,
             linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
-          ])));
+          ]));
         } catch {
           // 자료 연결 조회 실패가 진행표 자체를 막지 않도록 기존 컷 데이터는 그대로 표시합니다.
-          setMediaLinksByShotId(new Map());
+          nextMediaLinksByShotId = new Map();
         }
-      } else {
-        setMediaLinksByShotId(new Map());
       }
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       const selectedPlanForAssets = planData.find((plan) => plan.id === dailyPlanId) ?? null;
+      archiveAssetsRef.current = archiveAssets;
       setArchiveMediaByShotId(selectedPlanForAssets
         ? buildProgressArchiveMediaByShotId({
             shots: shotsWithDiagrams,
@@ -271,6 +307,12 @@ export default function ProjectDetailPage() {
           })
         : new Map());
       setDailyPlans(planData);
+      setMediaLinksByShotId(nextMediaLinksByShotId);
+      persistedStatusByShotIdRef.current = new Map(shotsWithDiagrams.map((shot) => [
+        shot.id,
+        shot.status
+      ]));
+      shotsRef.current = shotsWithDiagrams;
       setShots(shotsWithDiagrams);
       const shouldInitializeBuckets = initializedBucketEntryRef.current !== requestedEntryKey;
       const nextBuckets = reconcileSessionBuckets(
@@ -290,8 +332,14 @@ export default function ProjectDetailPage() {
   }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId]);
 
   useEffect(() => {
+    selectedShotsRefreshVersionRef.current += 1;
+    pendingStatusByShotIdRef.current.clear();
+    persistedStatusByShotIdRef.current.clear();
+    statusMutationVersionByShotIdRef.current.clear();
+    statusMutationQueueByShotIdRef.current.clear();
     initializedBucketEntryRef.current = "";
     commitSessionBuckets(new Map());
+    archiveAssetsRef.current = [];
     setArchiveMediaByShotId(new Map());
     setOkExpanded(false);
     setOmitExpanded(false);
@@ -302,34 +350,126 @@ export default function ProjectDetailPage() {
     refresh();
   }, [refresh]);
 
+  const nextOrderIndex = shots.length + 1;
+  const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
+  const rebuildArchiveMedia = useCallback((nextShots: Shot[]) => {
+    setArchiveMediaByShotId(selectedPlan
+      ? buildProgressArchiveMediaByShotId({
+          shots: nextShots,
+          assets: archiveAssetsRef.current,
+          timetableScenes: decodeDailyPlanMemo(selectedPlan.memo).timetableScenes,
+          dailyPlanId: selectedPlan.id,
+          episodeNumber: parseEpisodeNumber(selectedPlan.episode)
+        })
+      : new Map());
+  }, [selectedPlan]);
+
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
     const requestedEntryKey = progressEntryKey;
+    const refreshVersion = ++selectedShotsRefreshVersionRef.current;
     try {
       const refreshedShots = await auditQuery(
         "progress.realtime.reloadCuts",
         "app/projects/[id]/page.tsx:refreshSelectedShots",
         () => listShots(projectId, dailyPlanId)
       );
-      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      const nextShots = refreshedShots.map((shot) => (
-        preserveShotMedia(shot, shotsRef.current.find((item) => item.id === shot.id))
-      ));
+      if (
+        activeProgressEntryKeyRef.current !== requestedEntryKey
+        || selectedShotsRefreshVersionRef.current !== refreshVersion
+      ) return;
+      const currentById = new Map(shotsRef.current.map((shot) => [shot.id, shot]));
+      persistedStatusByShotIdRef.current = new Map(refreshedShots.map((shot) => [
+        shot.id,
+        shot.status
+      ]));
+      const nextShots = refreshedShots.map((shot) => {
+        const enrichedShot = preserveShotMedia(shot, currentById.get(shot.id));
+        const pendingStatus = pendingStatusByShotIdRef.current.get(shot.id);
+        return pendingStatus ? { ...enrichedShot, status: pendingStatus.status } : enrichedShot;
+      });
+      shotsRef.current = nextShots;
       setShots(nextShots);
+      rebuildArchiveMedia(nextShots);
+      setMediaLinksByShotId((current) => new Map(nextShots.map((shot) => [
+        shot.id,
+        current.get(shot.id) ?? []
+      ])));
       commitSessionBuckets(reconcileSessionBuckets(nextShots, sessionBucketByShotIdRef.current, false));
     } catch (error) {
-      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      if (
+        activeProgressEntryKeyRef.current !== requestedEntryKey
+        || selectedShotsRefreshVersionRef.current !== refreshVersion
+      ) return;
       setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
     }
-  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId]);
+  }, [commitSessionBuckets, dailyPlanId, progressEntryKey, projectId, rebuildArchiveMedia]);
 
   useEffect(() => {
     if (!projectId || !dailyPlanId) return undefined;
     return subscribeToShotChanges(projectId, refreshSelectedShots, dailyPlanId);
   }, [dailyPlanId, projectId, refreshSelectedShots]);
 
-  const nextOrderIndex = shots.length + 1;
-  const selectedPlan = dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null;
+  const refreshSelectedShotMedia = useCallback(async () => {
+    if (!projectId || !dailyPlanId) return;
+    const requestedEntryKey = progressEntryKey;
+    const currentShots = shotsRef.current;
+    selectedShotsRefreshVersionRef.current += 1;
+    if (currentShots.length === 0) {
+      setMediaLinksByShotId(new Map());
+      return;
+    }
+    const [diagrams, linksByRef] = await Promise.all([
+      auditQuery(
+        "progress.reloadOverheadDiagrams",
+        "app/projects/[id]/page.tsx:refreshSelectedShotMedia",
+        () => loadShotOverheadDiagrams(currentShots)
+      ),
+      auditQuery(
+        "progress.reloadMediaLinks",
+        "app/projects/[id]/page.tsx:refreshSelectedShotMedia",
+        () => loadShotMediaLinks(currentShots)
+      )
+    ]);
+    if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+    // Linked storyboard URLs are projected onto the shot model for rendering. Strip
+    // the previous projection before applying the newly fetched links so unlinking
+    // an asset does not keep the old URL alive through applyShotMediaLinks' legacy
+    // storyboard fallback.
+    const mediaBaselineShots = currentShots.map((shot) => {
+      const previousStoryboardLink = (mediaLinksByShotId.get(shot.id) ?? [])
+        .find((link) => link.mediaType === "storyboard");
+      return previousStoryboardLink?.publicUrl === shot.storyboardImageUrl
+        ? { ...shot, storyboardImageUrl: null }
+        : shot;
+    });
+    const refreshedMediaByShotId = new Map(
+      applyShotMediaLinks(mediaBaselineShots, linksByRef, diagrams).map((shot) => [shot.id, shot])
+    );
+    const nextShots = shotsRef.current.map((shot) => {
+      const refreshedMedia = refreshedMediaByShotId.get(shot.id);
+      return refreshedMedia
+        ? {
+            ...shot,
+            storyboardImageUrl: refreshedMedia.storyboardImageUrl,
+            overheadImageUrl: refreshedMedia.overheadImageUrl,
+            overheadDiagram: refreshedMedia.overheadDiagram
+          }
+        : shot;
+    });
+    shotsRef.current = nextShots;
+    setShots(nextShots);
+    rebuildArchiveMedia(nextShots);
+    commitSessionBuckets(reconcileSessionBuckets(
+      nextShots,
+      sessionBucketByShotIdRef.current,
+      false
+    ));
+    setMediaLinksByShotId(new Map(nextShots.map((shot) => [
+      shot.id,
+      linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
+    ])));
+  }, [commitSessionBuckets, dailyPlanId, mediaLinksByShotId, progressEntryKey, projectId, rebuildArchiveMedia]);
   const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
   const activeShots = useMemo(
     () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "active"),
@@ -400,21 +540,60 @@ export default function ProjectDetailPage() {
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     const requestedEntryKey = activeProgressEntryKeyRef.current;
+    const currentShot = shotsRef.current.find((shot) => shot.id === targetShot.id) ?? targetShot;
+    const mutationVersion = (statusMutationVersionByShotIdRef.current.get(targetShot.id) ?? 0) + 1;
+    statusMutationVersionByShotIdRef.current.set(targetShot.id, mutationVersion);
+    pendingStatusByShotIdRef.current.set(targetShot.id, { version: mutationVersion, status });
+    selectedShotsRefreshVersionRef.current += 1;
     setErrorMessage("");
-    setShots((current) => current.map((shot) => (shot.id === targetShot.id ? { ...shot, status } : shot)));
+    const optimisticShots = shotsRef.current.map((shot) => (
+      shot.id === targetShot.id ? { ...shot, status } : shot
+    ));
+    shotsRef.current = optimisticShots;
+    setShots(optimisticShots);
+
+    const previousMutation = statusMutationQueueByShotIdRef.current.get(targetShot.id);
+    const mutation = (previousMutation
+      ? previousMutation.catch(() => currentShot)
+      : Promise.resolve(currentShot)
+    ).then((latestShot) => updateShotStatus(latestShot, status));
+    statusMutationQueueByShotIdRef.current.set(targetShot.id, mutation);
 
     try {
-      const savedShot = await updateShotStatus(targetShot, status);
+      const savedShot = await mutation;
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      setShots((current) => current.map((shot) => (
+      persistedStatusByShotIdRef.current.set(targetShot.id, savedShot.status);
+      selectedShotsRefreshVersionRef.current += 1;
+      const pendingStatus = pendingStatusByShotIdRef.current.get(targetShot.id);
+      if (
+        pendingStatus?.version !== mutationVersion
+      ) return;
+      pendingStatusByShotIdRef.current.delete(targetShot.id);
+      const persistedShots = shotsRef.current.map((shot) => (
         shot.id === savedShot.id
-          ? preserveShotMedia(savedShot, shot)
+          ? { ...shot, status: savedShot.status, updatedAt: savedShot.updatedAt }
           : shot
-      )));
+      ));
+      shotsRef.current = persistedShots;
+      setShots(persistedShots);
     } catch (error) {
-      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      setShots((current) => current.map((shot) => (shot.id === targetShot.id ? targetShot : shot)));
+      const pendingStatus = pendingStatusByShotIdRef.current.get(targetShot.id);
+      if (
+        activeProgressEntryKeyRef.current !== requestedEntryKey
+        || pendingStatus?.version !== mutationVersion
+      ) return;
+      pendingStatusByShotIdRef.current.delete(targetShot.id);
+      const persistedStatus = persistedStatusByShotIdRef.current.get(targetShot.id) ?? currentShot.status;
+      const rolledBackShots = shotsRef.current.map((shot) => (
+        shot.id === targetShot.id ? { ...shot, status: persistedStatus } : shot
+      ));
+      shotsRef.current = rolledBackShots;
+      setShots(rolledBackShots);
       setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
+    } finally {
+      if (statusMutationQueueByShotIdRef.current.get(targetShot.id) === mutation) {
+        statusMutationQueueByShotIdRef.current.delete(targetShot.id);
+      }
     }
   }, []);
 
@@ -443,6 +622,7 @@ export default function ProjectDetailPage() {
 
       const createdShots = await createShotsFromDrafts(projectId, drafts, dailyPlanId);
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      selectedShotsRefreshVersionRef.current += 1;
 
       const currentShots = shotsRef.current;
       const currentById = new Map(currentShots.map((shot) => [shot.id, shot]));
@@ -451,9 +631,11 @@ export default function ProjectDetailPage() {
         ...currentShots.filter((shot) => !createdIds.has(shot.id)),
         ...createdShots.map((shot) => preserveShotMedia(shot, currentById.get(shot.id)))
       ].sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt));
+      createdShots.forEach((shot) => persistedStatusByShotIdRef.current.set(shot.id, shot.status));
 
       shotsRef.current = nextShots;
       setShots(nextShots);
+      rebuildArchiveMedia(nextShots);
       commitSessionBuckets(reconcileSessionBuckets(
         nextShots,
         sessionBucketByShotIdRef.current,
@@ -463,6 +645,7 @@ export default function ProjectDetailPage() {
       setIsAddOpen(false);
       setSuccessMessage("새 컷을 추가했습니다.");
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "컷을 추가하지 못했습니다.");
     } finally {
       setIsSaving(false);
@@ -471,27 +654,42 @@ export default function ProjectDetailPage() {
 
   async function handleSaveExistingShot(values: ShotEditorValues) {
     if (!projectId || !editingShot) return;
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
 
     setIsSaving(true);
     setErrorMessage("");
     setSuccessMessage("");
 
     try {
-      await updateShot(editingShot.id, {
-        sceneNumber: values.sceneNumber.trim() || "1",
-        cutNumber: values.cutNumber.trim() || "1",
-        title: editingShot.title,
+      const savedShot = await updateShot(editingShot.id, {
         description: values.description.trim(),
-        location: values.location.trim(),
-        characters: parseCharacters(values.charactersText),
-        memo: editingShot.memo,
-        orderIndex: editingShot.orderIndex,
-        status: editingShot.status
+        characters: parseCharacters(values.charactersText)
       }, projectId);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      selectedShotsRefreshVersionRef.current += 1;
 
+      const nextShots = shotsRef.current.map((shot) => (
+        shot.id === savedShot.id
+          ? {
+              ...shot,
+              description: savedShot.description,
+              characters: savedShot.characters,
+              updatedAt: savedShot.updatedAt
+            }
+          : shot
+      ));
+      shotsRef.current = nextShots;
+      setShots(nextShots);
+      rebuildArchiveMedia(nextShots);
+      commitSessionBuckets(reconcileSessionBuckets(
+        nextShots,
+        sessionBucketByShotIdRef.current,
+        false
+      ));
       setEditingShot(null);
-      await refresh();
+      setSuccessMessage("컷을 저장했습니다.");
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "컷을 저장하지 못했습니다.");
     } finally {
       setIsSaving(false);
@@ -565,6 +763,7 @@ export default function ProjectDetailPage() {
   async function handleDeleteShot(shot: Shot) {
     const shouldDelete = window.confirm(`"${shot.title}" 컷을 삭제할까요?`);
     if (!shouldDelete) return;
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
 
     setIsSaving(true);
     setErrorMessage("");
@@ -572,10 +771,30 @@ export default function ProjectDetailPage() {
 
     try {
       await deleteShot(shot);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      selectedShotsRefreshVersionRef.current += 1;
+      const nextShots = shotsRef.current.filter((item) => item.id !== shot.id);
+      pendingStatusByShotIdRef.current.delete(shot.id);
+      persistedStatusByShotIdRef.current.delete(shot.id);
+      statusMutationVersionByShotIdRef.current.delete(shot.id);
+      statusMutationQueueByShotIdRef.current.delete(shot.id);
+      shotsRef.current = nextShots;
+      setShots(nextShots);
+      rebuildArchiveMedia(nextShots);
+      setMediaLinksByShotId((current) => {
+        const next = new Map(current);
+        next.delete(shot.id);
+        return next;
+      });
+      commitSessionBuckets(reconcileSessionBuckets(
+        nextShots,
+        sessionBucketByShotIdRef.current,
+        false
+      ));
       setEditingShot(null);
       setSuccessMessage("컷을 삭제했습니다.");
-      await refresh();
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "컷을 삭제하지 못했습니다.");
     } finally {
       setIsSaving(false);
@@ -609,7 +828,7 @@ export default function ProjectDetailPage() {
       onOpen={setEditingShot}
       onOpenMedia={handleOpenMedia}
       onImagePreview={handleImagePreview}
-      archiveMedia={archiveMediaByShotId.get(shot.id) ?? []}
+      archiveMedia={archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
       onArchivePreview={handleArchivePreview}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
@@ -619,16 +838,25 @@ export default function ProjectDetailPage() {
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
 
-    const previousShots = shots;
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
+    const previousShots = shotsRef.current;
+    selectedShotsRefreshVersionRef.current += 1;
     setIsReordering(true);
     setErrorMessage("");
+    shotsRef.current = nextShots;
     setShots(nextShots);
 
     try {
       const savedShots = await reorderShots(projectId, dailyPlanId, nextShots.map((shot) => shot.id));
-      setShots((current) => savedShots.map((shot) => preserveShotMedia(shot, current.find((item) => item.id === shot.id))));
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      const persistedShots = mergeShotOrder(shotsRef.current, savedShots);
+      shotsRef.current = persistedShots;
+      setShots(persistedShots);
     } catch {
-      setShots(previousShots);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      const restoredShots = mergeShotOrder(shotsRef.current, previousShots);
+      shotsRef.current = restoredShots;
+      setShots(restoredShots);
       setErrorMessage("컷 순서를 저장하지 못했습니다.");
     } finally {
       setIsReordering(false);
@@ -640,6 +868,7 @@ export default function ProjectDetailPage() {
 
     const shouldReset = window.confirm("현재 회차의 컷 목록만 삭제합니다. 다른 회차와 프로젝트 정보는 유지됩니다. 계속할까요?");
     if (!shouldReset) return;
+    const requestedEntryKey = activeProgressEntryKeyRef.current;
 
     setIsSaving(true);
     setErrorMessage("");
@@ -647,10 +876,20 @@ export default function ProjectDetailPage() {
 
     try {
       await deleteAllShots(projectId, dailyPlanId);
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      selectedShotsRefreshVersionRef.current += 1;
+      pendingStatusByShotIdRef.current.clear();
+      persistedStatusByShotIdRef.current.clear();
+      statusMutationVersionByShotIdRef.current.clear();
+      statusMutationQueueByShotIdRef.current.clear();
+      shotsRef.current = [];
       setShots([]);
+      setArchiveMediaByShotId(new Map());
+      setMediaLinksByShotId(new Map());
+      commitSessionBuckets(new Map());
       setSuccessMessage("현재 회차의 컷 목록을 초기화했습니다. 다른 회차는 유지됩니다.");
-      await refresh();
     } catch (error) {
+      if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "컷 목록을 초기화하지 못했습니다.");
     } finally {
       setIsSaving(false);
@@ -871,7 +1110,7 @@ export default function ProjectDetailPage() {
           readOnly={progressOnly}
           onClose={() => setMediaPicker(null)}
           onSaved={async () => {
-            await refresh();
+            await refreshSelectedShotMedia();
           }}
         />
       ) : null}
@@ -968,6 +1207,19 @@ function preserveShotMedia(next: Shot, previous: Shot | undefined): Shot {
     overheadImageUrl: previous.overheadImageUrl ?? null,
     overheadDiagram: previous.overheadDiagram
   };
+}
+
+/** 순서 저장 응답은 orderIndex만 반영하여 동시에 바뀐 상태·자료 연결을 보존합니다. */
+function mergeShotOrder(currentShots: Shot[], orderedShots: Shot[]) {
+  const orderByShotId = new Map(orderedShots.map((shot) => [shot.id, shot.orderIndex]));
+  return currentShots
+    .map((shot) => {
+      const orderIndex = orderByShotId.get(shot.id);
+      return orderIndex === undefined || orderIndex === shot.orderIndex
+        ? shot
+        : { ...shot, orderIndex };
+    })
+    .sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt));
 }
 
 function EpisodeSelection({

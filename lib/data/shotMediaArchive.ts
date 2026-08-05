@@ -152,10 +152,20 @@ export async function saveOverheadDiagramArchive(
 }
 
 export async function deleteOverheadDiagramArchive(projectId: string, archiveId: string) {
-  const query = new URLSearchParams({ archiveId });
+  return deleteOverheadDiagramArchives(projectId, [archiveId]);
+}
+
+/** 선택한 직접 제작 부감도를 한 요청으로 삭제합니다. */
+export async function deleteOverheadDiagramArchives(projectId: string, archiveIds: string[]) {
+  const ids = [...new Set(archiveIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return;
   const response = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams?${query}`,
-    { method: "DELETE" }
+    `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archiveIds: ids })
+    }
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError;
   if (!response.ok) throw new Error(payload.error || "부감도 자료를 삭제하지 못했습니다.");

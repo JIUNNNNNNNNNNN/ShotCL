@@ -89,7 +89,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const progressMedia = request.nextUrl.searchParams.get("media") === "1";
     const assetType = normalizeAssetType(request.nextUrl.searchParams.get("type"));
-    if (!progressMedia && !assetType) {
+    const assetTypes = normalizeAssetTypes(request.nextUrl.searchParams.get("types"));
+    if (!progressMedia && !assetType && assetTypes.length === 0) {
       return NextResponse.json({ error: "자료 종류가 올바르지 않습니다." }, { status: 400 });
     }
 
@@ -102,7 +103,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
       .order("created_at", { ascending: false });
     query = progressMedia
       ? query.in("asset_type", ["storyboard", "overhead"])
-      : query.eq("asset_type", assetType as AssetType);
+      : assetTypes.length > 0
+        ? query.in("asset_type", assetTypes)
+        : query.eq("asset_type", assetType as AssetType);
     const dailyPlanId = cleanText(request.nextUrl.searchParams.get("dailyPlanId"), 500);
     if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
     const { data, error } = await query;
@@ -1944,6 +1947,11 @@ async function getMaterialRole(request: NextRequest, projectId: string) {
 
 function normalizeAssetType(value: unknown): AssetType | null {
   return value === "scenario" || value === "storyboard" || value === "overhead" ? value : null;
+}
+
+function normalizeAssetTypes(value: unknown): AssetType[] {
+  if (typeof value !== "string") return [];
+  return [...new Set(value.split(",").map((item) => normalizeAssetType(item.trim())).filter((item): item is AssetType => Boolean(item)))];
 }
 
 function isProgressArchiveMediaAsset(asset: ReturnType<typeof mapAssetRow>) {
