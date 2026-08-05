@@ -5,10 +5,17 @@ export type PreviewDisplayField = {
   value: unknown;
 };
 
+const previewPresenceWhitespacePattern = /[\s\u00a0\u200b-\u200d\u2060\ufeff]/g;
+
+/** 표시 문자열은 바꾸지 않고, 빈 행 판정에서만 공백·NBSP·zero-width 문자를 제거합니다. */
+export function normalizePreviewCellValueForPresence(value: string): string {
+  return value.replace(previewPresenceWhitespacePattern, "");
+}
+
 /** 행에 실제로 출력할 수 있는 값이 하나라도 있는지 공통 기준으로 판정합니다. */
 export function hasMeaningfulRowValue(value: unknown): boolean {
   if (value === null || value === undefined) return false;
-  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "string") return normalizePreviewCellValueForPresence(value).length > 0;
   if (typeof value === "number" || typeof value === "boolean") return true;
   if (Array.isArray(value)) return value.some(hasMeaningfulRowValue);
   if (typeof value === "object") {

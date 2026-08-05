@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import {
   formatDailyPlanWeatherSummary,
   type DailyPlanPrintMeta
@@ -58,6 +58,11 @@ type DailyPlanDocumentMainStaffRow = {
   contact: string;
 };
 
+type PortraitCallSheetDisplayRow = {
+  id: string;
+  cells: Record<string, unknown>;
+};
+
 /** 가로·세로 문서가 함께 소비하는 단일 정규화 결과입니다. */
 export type DailyPlanDocumentData = {
   plan: DailyPlanDraft;
@@ -83,8 +88,8 @@ export function buildDailyPlanDocumentData({
 }: Pick<DailyPlanDocumentProps, "plan" | "locations" | "meta" | "timetableRows" | "totalCutCount">): DailyPlanDocumentData {
   const printableLocations = buildDailyPlanPreviewLocationRows(locations);
   const printableTimetableRows = filterRenderablePreviewRows(timetableRows, getTimetableRowDisplayValues);
-  const starringRows = filterRenderablePreviewRows(meta.starring, getPersonDisplayValues);
-  const teamRows = filterRenderablePreviewRows(meta.teams, getTeamDisplayValues);
+  const starringRows = meta.starring.filter(hasMeaningfulActorPreviewData);
+  const teamRows = meta.teams.filter(hasMeaningfulDepartmentPreviewData);
   const printableMainStaffRows = filterRenderablePreviewRows(getPreviewMainStaffRows(plan, meta), (member) => [
     member.role,
     member.name,
@@ -120,7 +125,10 @@ export const DailyPlanDocument = memo(function DailyPlanDocument(props: DailyPla
   const orientation = props.orientation ?? "landscape";
   const density = props.density ?? "normal";
   const pageLayout = props.pageLayout ?? "single";
-  const data = buildDailyPlanDocumentData(props);
+  const data = useMemo(
+    () => buildDailyPlanDocumentData(props),
+    [props.locations, props.meta, props.plan, props.timetableRows, props.totalCutCount]
+  );
 
   return orientation === "portrait" ? (
     <DailyPlanPortraitDocument data={data} density={density} pageLayout={pageLayout} />
@@ -341,20 +349,26 @@ export function DailyPlanPortraitDocument({
   } = data;
   const summaryFields = createPortraitSummaryFields(timetableRows);
   const detailFields = createPortraitDetailFields(timetableRows);
-  const paddedStarringRows = padPortraitCallSheetRows(starringRows.map((person) => ({
-    name: person.name,
-    role: person.role,
-    callTime: person.callTime,
-    callLocation: person.callLocation,
-    notes: person.notes
-  })), 10);
-  const paddedTeamRows = padPortraitCallSheetRows(teamRows.map((team) => ({
-    team: team.team,
-    total: team.total,
-    callTime: team.callTime,
-    callLocation: team.callLocation,
-    notes: team.notes
-  })), 10);
+  const visibleStarringRows: PortraitCallSheetDisplayRow[] = starringRows.map((person) => ({
+    id: person.id,
+    cells: {
+      name: person.name,
+      role: person.role,
+      callTime: person.callTime,
+      callLocation: person.callLocation,
+      notes: person.notes
+    }
+  }));
+  const visibleTeamRows: PortraitCallSheetDisplayRow[] = teamRows.map((team) => ({
+    id: team.id,
+    cells: {
+      team: team.team,
+      total: team.total,
+      callTime: team.callTime,
+      callLocation: team.callLocation,
+      notes: team.notes
+    }
+  }));
 
   return (
     <article
@@ -529,7 +543,7 @@ export function DailyPlanPortraitDocument({
               { key: "callLocation", label: "Call Location", span: 2 },
               { key: "notes", label: "Notes", span: 5 }
             ]}
-            rows={paddedStarringRows}
+            rows={visibleStarringRows}
           />
           <PortraitCallSheetTable
             title="Team"
@@ -540,7 +554,7 @@ export function DailyPlanPortraitDocument({
               { key: "callLocation", label: "Call Location", span: 2 },
               { key: "notes", label: "Notes", span: 5 }
             ]}
-            rows={paddedTeamRows}
+            rows={visibleTeamRows}
           />
         </div>
       </section>
@@ -813,7 +827,7 @@ function PortraitCallSheetTable({
 }: {
   title: string;
   fields: Array<Omit<PreviewDisplayField, "value">>;
-  rows: Array<Record<string, string>>;
+  rows: PortraitCallSheetDisplayRow[];
 }) {
   return (
     <table data-portrait-table={title.toLowerCase()} className={sectionTableClass}>
@@ -826,25 +840,14 @@ function PortraitCallSheetTable({
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, index) => (
-          <tr key={`${title}-${index}`}>
-            <FixedCells fields={fields.map((field) => ({ ...field, value: row[field.key] }))} />
+        {rows.map((row) => (
+          <tr key={row.id} data-portrait-row-id={row.id}>
+            <FixedCells fields={fields.map((field) => ({ ...field, value: row.cells[field.key] }))} />
           </tr>
         ))}
       </tbody>
     </table>
   );
-}
-
-function padPortraitCallSheetRows(
-  rows: Array<Record<string, string>>,
-  minimumRowCount: number
-) {
-  if (rows.length >= minimumRowCount) return rows;
-  return [
-    ...rows,
-    ...Array.from({ length: minimumRowCount - rows.length }, () => ({} as Record<string, string>))
-  ];
 }
 
 function getPreviewMainStaffRows(plan: DailyPlanDraft, meta: DailyPlanPrintMeta) {
@@ -1028,6 +1031,14 @@ function getPersonDisplayValues(person: DailyPlanPrintMeta["starring"][number]) 
 
 function getTeamDisplayValues(team: DailyPlanPrintMeta["teams"][number]) {
   return [team.team, team.total, team.callTime, team.callLocation, team.notes];
+}
+
+function hasMeaningfulActorPreviewData(person: DailyPlanPrintMeta["starring"][number]) {
+  return getPersonDisplayValues(person).some(hasMeaningfulRowValue);
+}
+
+function hasMeaningfulDepartmentPreviewData(team: DailyPlanPrintMeta["teams"][number]) {
+  return getTeamDisplayValues(team).some(hasMeaningfulRowValue);
 }
 
 
