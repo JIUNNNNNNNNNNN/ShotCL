@@ -8,10 +8,12 @@ import { ArrowLeft, Plus, Save } from "lucide-react";
 import { PixelDogLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
+import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
 import {
   confirmUnsavedChangesNavigation,
   useUnsavedChangesGuard
 } from "@/hooks/useUnsavedChangesGuard";
+import { useSceneListViewportMode } from "@/hooks/useSceneListViewportMode";
 import {
   clearProjectSceneCells,
   createBlankProjectSceneItem,
@@ -74,6 +76,7 @@ export default function ProjectSceneListPage() {
   const projectId = useProjectId();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
+  const viewportMode = useSceneListViewportMode();
   const [project, setProject] = useState<Project | null>(null);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [items, setItems] = useState<ProjectSceneItem[]>([]);
@@ -638,7 +641,7 @@ export default function ProjectSceneListPage() {
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
               프로젝트
             </Link>
-            {canEdit ? (
+            {canEdit && viewportMode === "editor" ? (
               <button
                 type="button"
                 onClick={() => void save()}
@@ -658,23 +661,42 @@ export default function ProjectSceneListPage() {
           </p>
         ) : null}
 
-        <div className="light-workspace scene-workspace workspace-canvas">
-          <SceneListNativeTable
-            items={items}
-            actorRoles={actorRoles}
-            cellMerges={cellMerges}
-            canEdit={canEdit && !isSaving}
-            hasPendingMutation={isMergePersisting || isClearPersisting}
-            onUpdate={updateItem}
-            onReorderLocal={reorderLocal}
-            onReorderCommit={commitReorder}
-            onPersistMerges={persistMerges}
-            onClearCells={clearCells}
-            onDelete={deleteItem}
-            onError={setErrorMessage}
-            onCutValidationChange={updateCutInputError}
-          />
-          {canEdit ? (
+        <div className="light-workspace scene-workspace workspace-canvas min-w-0 max-w-full">
+          {viewportMode === null ? (
+            <div
+              data-scene-list-mode="pending"
+              className="grid min-h-40 w-full place-items-center border-b border-[#d2d2d2] bg-[#f5f5f5]"
+              role="status"
+              aria-label="씬리스트 화면 준비 중"
+            >
+              <PixelDogLoader size="sm" compact />
+            </div>
+          ) : viewportMode === "portrait" ? (
+            <SceneListPortraitReadOnly
+              items={items}
+              actorRoles={actorRoles}
+              cellMerges={cellMerges}
+            />
+          ) : (
+            <div data-scene-list-mode="editor">
+              <SceneListNativeTable
+                items={items}
+                actorRoles={actorRoles}
+                cellMerges={cellMerges}
+                canEdit={canEdit && !isSaving}
+                hasPendingMutation={isMergePersisting || isClearPersisting}
+                onUpdate={updateItem}
+                onReorderLocal={reorderLocal}
+                onReorderCommit={commitReorder}
+                onPersistMerges={persistMerges}
+                onClearCells={clearCells}
+                onDelete={deleteItem}
+                onError={setErrorMessage}
+                onCutValidationChange={updateCutInputError}
+              />
+            </div>
+          )}
+          {canEdit && viewportMode === "editor" ? (
             <div className="workspace-surface-subtle workspace-border border-t p-2">
               <button
                 type="button"
@@ -690,7 +712,7 @@ export default function ProjectSceneListPage() {
         </div>
       </section>
 
-      {(canEdit || scenarioReference) ? (
+      {viewportMode === "editor" && (canEdit || scenarioReference) ? (
         <details className="light-workspace scene-workspace workspace-surface workspace-border mt-3 overflow-hidden border">
           <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold">
             시나리오 참고
@@ -714,6 +736,17 @@ export default function ProjectSceneListPage() {
               </p>
             )}
           </div>
+        </details>
+      ) : null}
+
+      {viewportMode === "portrait" && scenarioReference ? (
+        <details className="light-workspace scene-workspace workspace-surface workspace-border mt-3 border">
+          <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold">
+            시나리오 참고
+          </summary>
+          <p className="workspace-border workspace-text min-w-0 whitespace-pre-wrap border-t p-3 text-[13px] font-medium leading-[1.5] [overflow-wrap:anywhere]">
+            {scenarioReference}
+          </p>
         </details>
       ) : null}
 
