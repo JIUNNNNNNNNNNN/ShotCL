@@ -56,6 +56,7 @@ import {
   normalizeDailyPlanLocationAssignments
 } from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
+import { filterRenderablePreviewRows } from "@/lib/dailyPlan/previewDisplay";
 import {
   DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
   getNextDailyPlanDocumentDensity,
@@ -5263,15 +5264,15 @@ function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
   );
 }
 
-function hasRenderableAdditionalScheduleValue(event: DailyPlanMealTime) {
-  return Boolean(
-    event.startTime.trim()
-    || event.endTime.trim()
-    || event.runtimeMinutes != null
-    || event.runtime?.trim()
-    || event.locationId?.trim()
-    || event.memo.trim()
-  );
+function getAdditionalSchedulePreviewValues(event: DailyPlanMealTime) {
+  return [
+    event.startTime,
+    event.endTime,
+    event.runtimeMinutes,
+    event.runtime,
+    event.locationId,
+    event.memo
+  ];
 }
 
 function getPersistedEditorTimetableRows(rows: EditorTimetableRow[]) {
@@ -5579,16 +5580,20 @@ function syncFirstCut(cuts: SceneCutInput[], patch: Partial<SceneCutInput>) {
 function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput[], meta: DailyPlanPrintMeta): DailyPlanPreviewData {
   const derivedMeta = deriveDailyPlanHeadcount(meta);
   const locations = (plan.shootingLocations ?? []).filter(isMeaningfulDailyPlanLocationCard);
-  const mealTimes = (plan.mealTimes ?? [])
-    .filter(hasRenderableAdditionalScheduleValue)
+  const mealTimes = filterRenderablePreviewRows(
+    plan.mealTimes ?? [],
+    getAdditionalSchedulePreviewValues
+  )
     .map((meal) => ({
       ...meal,
       startTime: formatTimeDisplay(meal.startTime),
       endTime: formatTimeDisplay(meal.endTime)
     }));
-  const previewScenes = scenes
-    .map((scene, sceneIndex) => {
-      const sceneNumber = scene.sceneNumber.trim() || String(sceneIndex + 1);
+  const previewScenes = filterRenderablePreviewRows(
+    scenes.map((scene) => {
+      // 빈 편집 행에 표시용 씬 번호를 합성하면 canonical 빈 행 필터를 통과하므로,
+      // 미리보기에서는 사용자가 입력하거나 선택한 씬 번호만 사용합니다.
+      const sceneNumber = scene.sceneNumber.trim();
       const startTime = formatTimeDisplay(scene.startTime);
       const endTime = formatTimeDisplay(scene.endTime);
       const normalizedTotalCuts = resolveEffectiveSceneCutCount({
@@ -5631,8 +5636,9 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         totalCuts: normalizedTotalCuts,
         cuts
       };
-    })
-    .filter((scene) => scene.sceneNumber || scene.mainLocation || scene.subLocation || scene.cuts.length > 0);
+    }),
+    getDailyPlanPreviewSceneValues
+  );
   const totalCutCount = sumSceneCutCounts(previewScenes.map((scene) => scene.totalCuts));
 
   return {
@@ -5655,6 +5661,25 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
       teams: derivedMeta.teams.map((team) => ({ ...team, callTime: formatTimeDisplay(team.callTime) }))
     }
   };
+}
+
+/** 실제 timetable cell에 출력되는 값만으로 완전히 빈 촬영 행을 판정합니다. */
+function getDailyPlanPreviewSceneValues(scene: DailyPlanPreviewScene) {
+  return [
+    scene.startTime,
+    scene.endTime,
+    scene.runtimeMinutes,
+    scene.runtime,
+    scene.mainLocation,
+    scene.subLocation,
+    scene.dayNight,
+    scene.sceneNumber,
+    scene.totalCuts,
+    scene.description,
+    scene.subject,
+    scene.shootingOrder,
+    scene.notes
+  ];
 }
 
 function sanitizeNumericInput(value: string, maxLength: number) {

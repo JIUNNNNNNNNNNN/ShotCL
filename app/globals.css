@@ -819,8 +819,25 @@ a[class*="min-h-"][class*="items-center"] {
       sans-serif;
   }
 
-  .daily-plan-live-preview .daily-plan-template {
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template {
     font-family: inherit;
+    font-weight: 400;
+  }
+
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template td,
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-normal {
+    font-weight: 400;
+  }
+
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template th,
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .daily-plan-preview-header,
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-bold,
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .font-black {
+    font-weight: 500;
+  }
+
+  .daily-plan-live-preview .daily-plan-preview-sheet .daily-plan-template .daily-plan-document-title {
+    font-weight: 700;
   }
 }
 
