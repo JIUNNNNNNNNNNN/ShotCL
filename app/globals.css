@@ -499,6 +499,10 @@ button {
     animation: ui-card-enter var(--motion-base) var(--ease-out-native);
   }
 
+  .scenario-mode-content {
+    animation: ui-page-enter var(--motion-base) var(--ease-out-native);
+  }
+
   :where(.ui-motion-surface, .ui-motion-menu, .ui-motion-dialog)[data-motion-state="closing"] {
     pointer-events: none;
     animation: ui-card-exit var(--motion-fast) var(--ease-in-native) forwards;
@@ -2317,6 +2321,7 @@ button {
     .ui-motion-surface,
     .ui-motion-menu,
     .ui-motion-dialog,
+    .scenario-mode-content,
     .ui-motion-presence,
     .ui-motion-presence__inner,
     .ui-accordion,

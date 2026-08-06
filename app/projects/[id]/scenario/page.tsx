@@ -2,17 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
-  Download,
-  ExternalLink,
-  FileText,
-  List,
-  Pencil,
   Plus,
-  RefreshCw,
   Save,
   Search,
   Trash2,
@@ -22,6 +17,10 @@ import {
 import { useParams } from "next/navigation";
 import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import {
+  useProjectPageActionMenu,
+  type ProjectPageActionMenuRegistration
+} from "@/components/ProjectPageActions";
 import { MotionPresence } from "@/components/ui/MotionPresence";
 import {
   deleteProjectReferenceAsset,
@@ -36,6 +35,10 @@ import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
 type ViewMode = "scenes" | "pdf";
+
+type ScenarioConfirmation =
+  | { kind: "asset-delete"; asset: ProjectReferenceAsset }
+  | { kind: "scene-delete"; sceneId: string; title: string };
 
 const ScenarioPdfSceneSegments = dynamic(
   () => import("@/components/ScenarioPdfSceneSegments").then((module) => module.ScenarioPdfSceneSegments),
@@ -55,15 +58,28 @@ export default function ProjectScenarioPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("scenes");
   const [query, setQuery] = useState("");
   const [draftScenes, setDraftScenes] = useState<ProjectScenarioScene[]>([]);
-  const [expandedSceneId, setExpandedSceneId] = useState("");
+  const [expandedSceneIds, setExpandedSceneIds] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] = useState<ScenarioConfirmation | null>(null);
+  const [confirmationError, setConfirmationError] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const actionHandlersRef = useRef({
+    viewScenes: () => {},
+    viewPdf: () => {},
+    edit: () => {},
+    share: () => {},
+    refresh: () => {},
+    delete: () => {}
+  });
   useUnsavedChangesGuard(hasChanges);
 
   const selectedAsset = useMemo(
@@ -71,9 +87,9 @@ export default function ProjectScenarioPage() {
     [assets, selectedId]
   );
 
-  const load = useCallback(async () => {
-    if (!projectId) return;
-    setIsLoading(true);
+  const load = useCallback(async ({ withLoader = true }: { withLoader?: boolean } = {}) => {
+    if (!projectId) return false;
+    if (withLoader) setIsLoading(true);
     try {
       const [project, scenarioAssets] = await Promise.all([
         auditQuery(
@@ -93,10 +109,12 @@ export default function ProjectScenarioPage() {
         ? current
         : scenarioAssets[0]?.id ?? "");
       setErrorMessage("");
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "시나리오 자료를 불러오지 못했습니다.");
+      return false;
     } finally {
-      setIsLoading(false);
+      if (withLoader) setIsLoading(false);
     }
   }, [projectId]);
 
@@ -108,17 +126,18 @@ export default function ProjectScenarioPage() {
     const scenes = selectedAsset?.scenarioScenes ?? [];
     const nextSelectedAssetId = selectedAsset?.id ?? "";
     const selectedAssetChanged = selectedAssetIdRef.current !== nextSelectedAssetId;
+    if (!selectedAssetChanged && hasChanges) return;
     setDraftScenes(scenes.map((scene) => ({ ...scene })));
-    setExpandedSceneId((current) => (
-      selectedAssetChanged || !scenes.some((scene) => scene.id === current)
-        ? ""
-        : current
-    ));
+    setExpandedSceneIds((current) => {
+      if (selectedAssetChanged) return new Set();
+      const validIds = new Set(scenes.map((scene) => scene.id));
+      return new Set(Array.from(current).filter((id) => validIds.has(id)));
+    });
     selectedAssetIdRef.current = nextSelectedAssetId;
     setIsEditing(false);
     setHasChanges(false);
     setQuery("");
-  }, [selectedAsset?.id, selectedAsset?.updatedAt]);
+  }, [hasChanges, selectedAsset?.id, selectedAsset?.updatedAt]);
 
   const filteredScenes = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
@@ -130,13 +149,6 @@ export default function ProjectScenarioPage() {
         .includes(normalizedQuery)
     );
   }, [draftScenes, query]);
-  const detectedSceneNumbers = useMemo(
-    () => draftScenes
-      .filter((scene) => scene.imageSegments.length > 0)
-      .map((scene) => scene.sceneNo),
-    [draftScenes]
-  );
-
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -166,7 +178,7 @@ export default function ProjectScenarioPage() {
           });
         }
       }
-      await load();
+      await load({ withLoader: false });
       if (uploadedId) setSelectedId(uploadedId);
       setViewMode("scenes");
       setStatusMessage(analysisWarning
@@ -180,13 +192,24 @@ export default function ProjectScenarioPage() {
     }
   }
 
-  async function handleDelete(asset: ProjectReferenceAsset) {
-    if (!projectId || !window.confirm(`"${asset.filename}"을 삭제할까요?`)) return;
+  async function deleteAsset(asset: ProjectReferenceAsset) {
+    if (!projectId) return;
+    setIsDeleting(true);
+    setConfirmationError("");
     try {
       await deleteProjectReferenceAsset(projectId, asset.id);
-      await load();
+      const remainingAssets = assets.filter((item) => item.id !== asset.id);
+      setAssets(remainingAssets);
+      setSelectedId((current) => current === asset.id ? remainingAssets[0]?.id ?? "" : current);
+      setPendingConfirmation(null);
+      const reloaded = await load({ withLoader: false });
+      setStatusMessage(reloaded
+        ? "시나리오 PDF를 삭제했습니다."
+        : "시나리오 PDF는 삭제했지만 목록을 새로고침하지 못했습니다.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "PDF를 삭제하지 못했습니다.");
+      setConfirmationError(error instanceof Error ? error.message : "PDF를 삭제하지 못했습니다.");
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -210,27 +233,62 @@ export default function ProjectScenarioPage() {
     }
   }
 
-  async function handleReanalyze() {
-    if (!projectId || !selectedAsset || !canEdit) return;
-    if (hasChanges && !window.confirm("저장하지 않은 변경사항을 버리고 자동 분할을 다시 실행할까요?")) return;
-    setIsAnalyzing(true);
+  async function handleRefresh() {
+    if (!projectId || isRefreshing) return;
+    setIsRefreshing(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    const refreshed = await load({ withLoader: false });
+    if (refreshed) setStatusMessage("시나리오 자료를 새로고침했습니다.");
+    setIsRefreshing(false);
+  }
+
+  async function handleShare() {
+    if (!projectId || !selectedAsset || isSharing) return;
+    setIsSharing(true);
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
-      const imageScenes = await analyzeScenarioPdfImages(selectedAsset.publicUrl);
-      const analyzed = await updateProjectReferenceAsset(projectId, selectedAsset.id, {
-        scenarioScenes: imageScenes
-      });
-      replaceAsset(analyzed);
-      setStatusMessage(analyzed.scenarioScenes.length > 0
-        ? "자동 씬 분할을 다시 실행했습니다."
-        : "자동 분할 결과가 없습니다. 원본 PDF 보기 또는 수동 씬 추가를 사용하세요.");
+      const scenarioUrl = new URL(
+        `/projects/${encodeURIComponent(projectId)}/scenario`,
+        window.location.origin
+      ).toString();
+      if (typeof navigator.share === "function") {
+        await navigator.share({
+          title: `${projectName} 시나리오`,
+          text: `${projectName} 시나리오`,
+          url: scenarioUrl
+        });
+        setStatusMessage("시나리오 페이지 공유를 완료했습니다.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(scenarioUrl);
+        setStatusMessage("시나리오 페이지 링크를 복사했습니다.");
+      } else {
+        throw new Error("이 브라우저에서는 공유 링크 복사를 지원하지 않습니다.");
+      }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "자동 씬 분할을 실행하지 못했습니다.");
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setErrorMessage(error instanceof Error ? error.message : "시나리오 페이지를 공유하지 못했습니다.");
     } finally {
-      setIsAnalyzing(false);
+      setIsSharing(false);
     }
+  }
+
+  function handleDownload() {
+    if (!selectedAsset || isDownloading) return;
+    setIsDownloading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    const anchor = document.createElement("a");
+    anchor.href = selectedAsset.publicUrl;
+    anchor.download = selectedAsset.filename;
+    anchor.target = "_blank";
+    anchor.rel = "noreferrer";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setStatusMessage("다운로드를 시작했습니다.");
+    window.setTimeout(() => setIsDownloading(false), 500);
   }
 
   function replaceAsset(asset: ProjectReferenceAsset) {
@@ -249,11 +307,20 @@ export default function ProjectScenarioPage() {
     setHasChanges(true);
   }
 
-  function removeScene(id: string) {
+  function requestRemoveScene(id: string) {
     const target = draftScenes.find((scene) => scene.id === id);
-    if (!target || !window.confirm(`"${target.title}" 씬을 삭제할까요? 저장 전까지 DB에는 반영되지 않습니다.`)) return;
+    if (!target) return;
+    setConfirmationError("");
+    setPendingConfirmation({ kind: "scene-delete", sceneId: id, title: target.title });
+  }
+
+  function removeScene(id: string) {
     setDraftScenes((current) => current.filter((scene) => scene.id !== id));
-    setExpandedSceneId((current) => current === id ? "" : current);
+    setExpandedSceneIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setHasChanges(true);
   }
 
@@ -271,11 +338,111 @@ export default function ProjectScenarioPage() {
   function cancelEditing() {
     const scenes = selectedAsset?.scenarioScenes ?? [];
     setDraftScenes(scenes.map((scene) => ({ ...scene })));
-    setExpandedSceneId((current) => scenes.some((scene) => scene.id === current) ? current : "");
+    const validIds = new Set(scenes.map((scene) => scene.id));
+    setExpandedSceneIds((current) => new Set(Array.from(current).filter((id) => validIds.has(id))));
     setIsEditing(false);
     setHasChanges(false);
     setErrorMessage("");
   }
+
+  function toggleScene(sceneId: string) {
+    setExpandedSceneIds((current) => {
+      const next = new Set(current);
+      if (next.has(sceneId)) next.delete(sceneId);
+      else next.add(sceneId);
+      return next;
+    });
+  }
+
+  async function confirmPendingAction() {
+    const pending = pendingConfirmation;
+    if (!pending) return;
+    if (pending.kind === "asset-delete") {
+      await deleteAsset(pending.asset);
+      return;
+    }
+    if (pending.kind === "scene-delete") {
+      removeScene(pending.sceneId);
+      setPendingConfirmation(null);
+      return;
+    }
+  }
+
+  actionHandlersRef.current = {
+    viewScenes: () => setViewMode("scenes"),
+    viewPdf: () => setViewMode("pdf"),
+    edit: () => {
+      setViewMode("scenes");
+      setIsEditing(true);
+    },
+    share: () => void handleShare(),
+    refresh: () => void handleRefresh(),
+    delete: () => {
+      if (!selectedAsset) return;
+      setConfirmationError("");
+      setPendingConfirmation({ kind: "asset-delete", asset: selectedAsset });
+    }
+  };
+
+  const scenarioActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
+    key: "scenario",
+    scopeKey: `scenario:${projectId ?? "unknown"}:${selectedAsset?.id ?? "empty"}`,
+    actions: {
+      scenarioScenesView: {
+        active: viewMode === "scenes",
+        onSelect: () => actionHandlersRef.current.viewScenes(),
+        disabled: !selectedAsset
+      },
+      scenarioFullView: {
+        active: viewMode === "pdf",
+        onSelect: () => actionHandlersRef.current.viewPdf(),
+        disabled: !selectedAsset
+      },
+      scenarioEdit: {
+        active: isEditing,
+        onSelect: () => actionHandlersRef.current.edit(),
+        hidden: !canEdit,
+        disabled: !selectedAsset || isSaving || isDeleting || isUploading || isRefreshing
+      },
+      scenarioShare: {
+        onSelect: () => actionHandlersRef.current.share(),
+        disabled: !selectedAsset || isSharing || isDeleting,
+        pending: isSharing
+      },
+      scenarioDownload: {
+        onSelect: handleDownload,
+        disabled: !selectedAsset || isDownloading || isDeleting,
+        pending: isDownloading,
+        closeDrawerOnSelect: false
+      },
+      scenarioRefresh: {
+        onSelect: () => actionHandlersRef.current.refresh(),
+        disabled: hasChanges || isRefreshing || isSaving || isDeleting || isUploading,
+        pending: isRefreshing,
+        closeDrawerOnSelect: false
+      },
+      scenarioDelete: {
+        onSelect: () => actionHandlersRef.current.delete(),
+        hidden: !canEdit,
+        disabled: !selectedAsset || isDeleting || isSaving || isUploading || isRefreshing,
+        pending: isDeleting
+      }
+    }
+  }), [
+    canEdit,
+    isDeleting,
+    isDownloading,
+    isEditing,
+    isRefreshing,
+    isSaving,
+    isSharing,
+    isUploading,
+    hasChanges,
+    projectId,
+    selectedAsset,
+    viewMode
+  ]);
+  useProjectPageActionMenu(scenarioActionMenu);
 
   if (isLoading) return <PageLoader />;
 
@@ -296,13 +463,15 @@ export default function ProjectScenarioPage() {
             <span className="sr-only">시나리오 PDF 선택</span>
             <select
               value={selectedId}
+              disabled={hasChanges || isSaving || isUploading || isRefreshing || isDeleting}
+              title={hasChanges ? "변경사항을 저장하거나 취소한 뒤 다른 PDF를 선택하세요." : undefined}
               onChange={(event) => {
                 setSelectedId(event.target.value);
                 setErrorMessage("");
                 setStatusMessage("");
               }}
               aria-label="시나리오 PDF 선택"
-              className="min-h-9 w-full min-w-0 truncate border border-field-border bg-field-input px-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+              className="min-h-9 w-full min-w-0 truncate border border-field-border bg-field-input px-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:cursor-not-allowed disabled:text-field-disabled"
             >
               {assets.map((asset) => (
                 <option key={asset.id} value={asset.id}>{asset.filename}</option>
@@ -316,38 +485,12 @@ export default function ProjectScenarioPage() {
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          {selectedAsset ? (
-            <>
-              <a
-                href={selectedAsset.publicUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`${selectedAsset.filename} 새 창에서 열기`}
-                title="원본 PDF 새 창"
-                className="grid h-9 w-9 place-items-center rounded-md border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-              >
-                <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-              </a>
-              <a
-                href={selectedAsset.publicUrl}
-                download={selectedAsset.filename}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`${selectedAsset.filename} 다운로드`}
-                title="다운로드"
-                className="grid h-9 w-9 place-items-center rounded-md border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-              >
-                <Download className="h-3.5 w-3.5" aria-hidden />
-              </a>
-            </>
-          ) : null}
-
           {canEdit ? (
             <>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
+                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasChanges}
                 aria-label={isUploading ? "PDF 업로드 중" : "PDF 업로드"}
                 title="PDF 업로드"
                 className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-2.5 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
@@ -363,88 +506,43 @@ export default function ProjectScenarioPage() {
                 className="sr-only"
                 onChange={handleUpload}
               />
-              {selectedAsset ? (
-                <button
-                  type="button"
-                  onClick={() => void handleDelete(selectedAsset)}
-                  aria-label={`${selectedAsset.filename} 삭제`}
-                  title="선택한 PDF 삭제"
-                  className="grid h-9 w-9 place-items-center border border-field-danger/50 bg-field-panel text-field-danger transition hover:bg-field-danger/10 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
-                >
-                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                </button>
-              ) : null}
             </>
           ) : null}
         </div>
       </div>
 
-      {selectedAsset ? (
+      {selectedAsset && viewMode === "scenes" ? (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <div className="inline-flex rounded-md border border-field-border bg-field-panel p-0.5">
-            <ModeButton active={viewMode === "scenes"} onClick={() => setViewMode("scenes")} icon={List}>
-              씬별 보기
-            </ModeButton>
-            <ModeButton active={viewMode === "pdf"} onClick={() => setViewMode("pdf")} icon={FileText}>
-              전체 PDF
-            </ModeButton>
-          </div>
+          <label className="relative min-w-[10rem] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-field-muted" aria-hidden />
+            <span className="sr-only">씬 검색</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="씬 번호·제목 검색"
+              className="min-h-9 w-full border border-field-border bg-field-input py-1.5 pl-8 pr-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+            />
+          </label>
 
-          {viewMode === "scenes" ? (
-            <label className="relative min-w-[10rem] flex-1 sm:max-w-xs">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-field-muted" aria-hidden />
-              <span className="sr-only">씬 검색</span>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="씬 번호·제목 검색"
-                className="min-h-9 w-full border border-field-border bg-field-input py-1.5 pl-8 pr-3 text-xs text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
-              />
-            </label>
-          ) : null}
-
-          {viewMode === "scenes" && canEdit ? (
+          {canEdit && isEditing ? (
             <div className="ml-auto flex items-center gap-1">
-              {isEditing ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={cancelEditing}
-                    disabled={isSaving}
-                    className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-2.5 text-[11px] font-bold text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95"
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden />
-                    취소
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveScenes()}
-                    disabled={isSaving || !hasChanges}
-                    className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-3 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
-                  >
-                    <Save className="h-3.5 w-3.5" aria-hidden />
-                    {isSaving ? "저장 중" : "저장"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-2.5 text-[11px] font-bold text-field-text transition hover:border-field-divider hover:bg-field-hover active:scale-95"
-                >
-                  <Pencil className="h-3.5 w-3.5" aria-hidden />
-                  편집
-                </button>
-              )}
               <button
                 type="button"
-                onClick={() => void handleReanalyze()}
-                disabled={isAnalyzing}
-                title="원본 PDF에서 자동 분할 다시 실행"
-                className="grid h-9 w-9 place-items-center border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 disabled:cursor-wait disabled:opacity-50"
+                onClick={cancelEditing}
+                disabled={isSaving}
+                className="inline-flex min-h-9 items-center gap-1 border border-field-border bg-field-panel px-2.5 text-[11px] font-bold text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95"
               >
-                {isAnalyzing ? <InlineLoader /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-                <span className="sr-only">자동 분할 다시 실행</span>
+                <X className="h-3.5 w-3.5" aria-hidden />
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveScenes()}
+                disabled={isSaving || !hasChanges}
+                className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-3 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <Save className="h-3.5 w-3.5" aria-hidden />
+                {isSaving ? "저장 중" : "저장"}
               </button>
             </div>
           ) : null}
@@ -461,34 +559,19 @@ export default function ProjectScenarioPage() {
           {statusMessage}
         </p>
       ) : null}
-      {selectedAsset && canEdit && detectedSceneNumbers.length > 0 ? (
-        <p
-          role={detectedSceneNumbers.length <= 2 ? "alert" : "status"}
-          className={`border-l-2 px-2.5 py-1.5 text-[11px] font-bold leading-normal ${
-            detectedSceneNumbers.length <= 2
-              ? "border-status-warning/70 bg-status-warning/10 text-status-warning"
-              : "border-field-divider bg-field-soft text-field-subtle"
-          }`}
-        >
-          감지된 씬: {detectedSceneNumbers.length}개 ·{" "}
-          {detectedSceneNumbers.map((sceneNo) => `S#${sceneNo}`).join(", ")}
-          {detectedSceneNumbers.length <= 2
-            ? " · 후반 씬 marker가 있다면 재분석 결과와 개발 로그를 확인하세요."
-            : ""}
-        </p>
-      ) : null}
       {hasChanges ? (
         <p className="text-right text-[11px] font-bold text-field-primary">
           저장하지 않은 변경사항이 있습니다.
         </p>
       ) : null}
 
-      {viewMode === "pdf" ? (
-        <FullPdfView asset={selectedAsset} canEdit={canEdit} />
-      ) : (
-        <section aria-label="씬별 시나리오 읽기" className="min-w-0">
+      <div key={viewMode} className="scenario-mode-content min-w-0">
+        {viewMode === "pdf" ? (
+          <FullPdfView asset={selectedAsset} canEdit={canEdit} />
+        ) : (
+          <section aria-label="씬별 시나리오 읽기" className="min-w-0">
           {!selectedAsset ? (
-            <EmptyState canEdit={canEdit} onAdd={addScene} hasAsset={false} />
+            <EmptyState canEdit={canEdit} hasAsset={false} />
           ) : draftScenes.length === 0 ? (
             <div className="grid min-h-[18rem] place-items-center border-y border-field-border px-4 py-8 text-center">
               <div className="max-w-lg">
@@ -497,13 +580,6 @@ export default function ProjectScenarioPage() {
                     || SCENARIO_MARKER_NOT_FOUND_MESSAGE}
                 </p>
                 <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("pdf")}
-                    className="min-h-9 border border-field-border bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-divider hover:bg-field-hover"
-                  >
-                    원본 PDF 보기
-                  </button>
                   {canEdit ? (
                     <button
                       type="button"
@@ -521,7 +597,7 @@ export default function ProjectScenarioPage() {
             <div className="grid min-w-0 gap-1.5">
               {filteredScenes.map((scene) => {
                 const index = draftScenes.findIndex((item) => item.id === scene.id);
-                const expanded = expandedSceneId === scene.id;
+                const expanded = expandedSceneIds.has(scene.id);
                 const panelId = `scenario-scene-${scene.id}`;
                 return (
                   <article
@@ -533,7 +609,7 @@ export default function ProjectScenarioPage() {
                         type="button"
                         aria-expanded={expanded}
                         aria-controls={panelId}
-                        onClick={() => setExpandedSceneId(expanded ? "" : scene.id)}
+                        onClick={() => toggleScene(scene.id)}
                         className="flex min-h-8 min-w-0 flex-1 items-center justify-center gap-2 text-center"
                       >
                         <ChevronDown
@@ -569,7 +645,7 @@ export default function ProjectScenarioPage() {
                           <SmallIconButton
                             label="씬 삭제"
                             danger
-                            onClick={() => removeScene(scene.id)}
+                            onClick={() => requestRemoveScene(scene.id)}
                             icon={Trash2}
                           />
                         </div>
@@ -631,36 +707,24 @@ export default function ProjectScenarioPage() {
               ) : null}
             </div>
           )}
-        </section>
-      )}
-    </div>
-  );
-}
+          </section>
+        )}
+      </div>
 
-function ModeButton({
-  active,
-  onClick,
-  icon: Icon,
-  children
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: typeof List;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex min-h-8 items-center gap-1 px-2.5 text-[11px] font-bold transition ${
-        active
-          ? "neon-selected-strong border text-field-text"
-          : "border border-transparent text-field-muted hover:bg-field-hover hover:text-field-text"
-      }`}
-    >
-      <Icon className="h-3.5 w-3.5" aria-hidden />
-      {children}
-    </button>
+      {pendingConfirmation ? (
+        <ScenarioConfirmationDialog
+          pending={pendingConfirmation}
+          error={confirmationError}
+          busy={isDeleting}
+          onCancel={() => {
+            if (isDeleting) return;
+            setConfirmationError("");
+            setPendingConfirmation(null);
+          }}
+          onConfirm={() => void confirmPendingAction()}
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -691,6 +755,185 @@ function SmallIconButton({
       <Icon className="h-3.5 w-3.5" aria-hidden />
     </button>
   );
+}
+
+function ScenarioConfirmationDialog({
+  pending,
+  error,
+  busy,
+  onCancel,
+  onConfirm
+}: {
+  pending: ScenarioConfirmation;
+  error: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cancelHandlerRef = useRef(onCancel);
+  const busyRef = useRef(busy);
+  cancelHandlerRef.current = onCancel;
+  busyRef.current = busy;
+  const title = pending.kind === "asset-delete"
+    ? "시나리오 PDF 삭제"
+    : "씬 삭제";
+  const description = pending.kind === "asset-delete"
+    ? `“${pending.asset.filename}” 파일을 삭제합니다. 삭제한 파일은 복구할 수 없습니다.`
+    : `“${pending.title}” 씬을 편집 목록에서 삭제합니다. 저장하기 전까지 서버 데이터에는 반영되지 않습니다.`;
+  const confirmLabel = busy ? "삭제 중" : "삭제";
+
+  useEffect(() => {
+    const previousActiveElement = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const previousOverflow = document.body.style.overflow;
+    const shellChildren = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-project-shell] > *")
+    );
+    const previousInert = shellChildren.map((element) => element.inert);
+    shellChildren.forEach((element) => {
+      element.inert = true;
+    });
+    document.body.style.overflow = "hidden";
+    let nestedFocusFrame = 0;
+    const focusFrame = window.requestAnimationFrame(() => {
+      nestedFocusFrame = window.requestAnimationFrame(() => cancelButtonRef.current?.focus());
+    });
+
+    function handleKeyDown(event: KeyboardEvent) {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        if (busyRef.current) return;
+        event.preventDefault();
+        cancelHandlerRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )).filter((element) => element.getClientRects().length > 0);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.cancelAnimationFrame(nestedFocusFrame);
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      shellChildren.forEach((element, index) => {
+        element.inert = previousInert[index];
+      });
+      window.requestAnimationFrame(() => {
+        if (isVisibleFocusTarget(previousActiveElement)) {
+          previousActiveElement.focus();
+          if (document.activeElement === previousActiveElement) return;
+        }
+        const actionId = pending.kind === "asset-delete"
+          ? "scenarioDelete"
+          : "scenarioEdit";
+        const targets = Array.from(document.querySelectorAll<HTMLElement>(
+          `[data-project-action-id="${actionId}"]`
+        ));
+        const visibleAction = targets.find(isVisibleFocusTarget);
+        if (visibleAction) {
+          visibleAction.focus();
+          if (document.activeElement === visibleAction) return;
+        }
+        document.querySelector<HTMLElement>(
+          'button[aria-label="페이지 작업 열기"], button[aria-label="페이지 작업 닫기"]'
+        )?.focus();
+        if (document.activeElement instanceof HTMLElement && document.activeElement !== document.body) return;
+        const fallbackTargets = Array.from(document.querySelectorAll<HTMLElement>(
+          '.project-shell__action-panel [data-project-action-id], #project-main-content button, #project-main-content a[href], #project-main-content input, #project-main-content select'
+        ));
+        fallbackTargets.find(isVisibleFocusTarget)?.focus();
+      });
+    };
+  }, [pending.kind]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      data-project-shell-portal
+      role="presentation"
+      className="fixed inset-0 z-[120] grid place-items-center bg-black/70 p-4"
+      onPointerDown={(event) => {
+        if (!busy && event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="scenario-confirmation-title"
+        aria-describedby="scenario-confirmation-description"
+        aria-busy={busy}
+        tabIndex={-1}
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-[var(--radius-dialog)] border border-field-divider bg-field-elevated p-4 shadow-dialog"
+      >
+        <h2 id="scenario-confirmation-title" className="text-base font-black text-field-text">
+          {title}
+        </h2>
+        <p id="scenario-confirmation-description" className="mt-2 text-sm leading-6 text-field-muted">
+          {description}
+        </p>
+        {error ? (
+          <p role="alert" className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">
+            {error}
+          </p>
+        ) : null}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            ref={cancelButtonRef}
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="min-h-11 rounded-[var(--radius-control)] border border-field-divider bg-field-panel px-3 py-2 text-sm font-bold text-field-text transition hover:bg-field-hover disabled:opacity-50"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onConfirm}
+            className="min-h-11 rounded-[var(--radius-control)] border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-white transition hover:brightness-95 disabled:opacity-50"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function isVisibleFocusTarget(element: HTMLElement | null): element is HTMLElement {
+  if (!element?.isConnected || element.getClientRects().length === 0) return false;
+  if (element.matches(":disabled, [aria-disabled=\"true\"]")) return false;
+  if (element.closest("[inert], [aria-hidden=\"true\"]")) return false;
+  const style = window.getComputedStyle(element);
+  return style.display !== "none" && style.visibility !== "hidden";
 }
 
 function FullPdfView({ asset, canEdit }: { asset: ProjectReferenceAsset | null; canEdit: boolean }) {

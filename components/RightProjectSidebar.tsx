@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 import Link from "next/link";
 import { LoaderCircle, X } from "lucide-react";
 import type {
+  ProjectPageActionGroup,
   ResolvedProjectPageAction,
   ResolvedProjectPageActionMenu
 } from "@/components/ProjectPageActions";
@@ -109,6 +110,31 @@ function ActionMenuItems({
   menu: ResolvedProjectPageActionMenu;
   onAction?: () => void;
 }) {
+  const usesGroups = menu.actions.some((action) => action.group);
+  if (usesGroups) {
+    const groups = groupActions(menu.actions);
+    return (
+      <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2.5" aria-label={menu.ariaLabel}>
+        {groups.map((group) => (
+          <section
+            key={group.key}
+            aria-label={ACTION_GROUP_LABELS[group.key]}
+            className={group.key === "manage" ? "mt-auto border-t border-field-divider pt-4" : "pb-4"}
+          >
+            <p className="mb-2 px-1 text-[11px] font-bold text-field-muted">
+              {ACTION_GROUP_LABELS[group.key]}
+            </p>
+            <div className="grid gap-2">
+              {group.actions.map((action) => (
+                <PageActionItem key={action.id} action={action} onAction={onAction} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </nav>
+    );
+  }
+
   return (
     <nav className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-2.5" aria-label={menu.ariaLabel}>
       {menu.actions.map((action) => (
@@ -116,6 +142,26 @@ function ActionMenuItems({
       ))}
     </nav>
   );
+}
+
+const ACTION_GROUP_LABELS: Record<ProjectPageActionGroup, string> = {
+  view: "보기",
+  document: "문서",
+  manage: "관리"
+};
+
+function groupActions(actions: ResolvedProjectPageAction[]) {
+  const groups: Array<{ key: ProjectPageActionGroup; actions: ResolvedProjectPageAction[] }> = [];
+  for (const action of actions) {
+    if (!action.group) continue;
+    const currentGroup = groups.find((group) => group.key === action.group);
+    if (currentGroup) {
+      currentGroup.actions.push(action);
+    } else {
+      groups.push({ key: action.group, actions: [action] });
+    }
+  }
+  return groups;
 }
 
 function PageActionItem({
@@ -126,12 +172,14 @@ function PageActionItem({
   onAction?: () => void;
 }) {
   const Icon = action.icon;
-  const sharedClassName = `flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
-    action.active
+  const sharedClassName = `flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
+    action.tone === "danger"
+      ? "border-field-danger/55 bg-transparent text-field-danger hover:border-field-danger hover:bg-field-danger/10 focus-visible:ring-field-danger"
+      : action.active
       ? "neon-selected"
       : action.emphasis === "primary"
       ? "neon-primary"
-      : "border-field-border bg-transparent text-field-subtle hover:border-field-divider hover:bg-field-hover hover:text-field-text"
+      : "border-field-border bg-transparent text-field-subtle hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:ring-field-primary"
   }`;
   const content = (
     <>
@@ -169,7 +217,7 @@ function PageActionItem({
       onClick={() => {
         if (action.disabled) return;
         action.onSelect?.();
-        onAction?.();
+        if (action.closeDrawerOnSelect !== false) onAction?.();
       }}
       disabled={action.disabled}
       aria-busy={action.pending || undefined}

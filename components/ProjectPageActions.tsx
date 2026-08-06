@@ -11,14 +11,24 @@ import {
 } from "react";
 import {
   Clapperboard,
+  Download,
+  FileText,
+  List,
   Map,
+  Pencil,
   Plus,
   Printer,
+  RefreshCw,
   Save,
+  Share2,
+  Trash2,
   type LucideIcon
 } from "lucide-react";
 
-export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail";
+export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail" | "scenario";
+
+export type ProjectPageActionGroup = "view" | "document" | "manage";
+export type ProjectPageActionTone = "default" | "danger";
 
 export type ProjectPageActionId =
   | "dailyPlanPdf"
@@ -26,7 +36,14 @@ export type ProjectPageActionId =
   | "dailyPlanSave"
   | "archiveDiagram"
   | "archiveStoryboard"
-  | "progressAddCut";
+  | "progressAddCut"
+  | "scenarioScenesView"
+  | "scenarioFullView"
+  | "scenarioEdit"
+  | "scenarioShare"
+  | "scenarioDownload"
+  | "scenarioRefresh"
+  | "scenarioDelete";
 
 export type ProjectPageActionOverride = {
   href?: string;
@@ -35,7 +52,10 @@ export type ProjectPageActionOverride = {
   disabled?: boolean;
   pending?: boolean;
   hidden?: boolean;
+  closeDrawerOnSelect?: boolean;
   emphasis?: "primary" | "secondary";
+  group?: ProjectPageActionGroup;
+  tone?: ProjectPageActionTone;
 };
 
 export type ProjectPageActionMenuRegistration = {
@@ -62,6 +82,8 @@ type ActionDefinition = {
   label: string;
   icon: LucideIcon;
   emphasis?: "primary" | "secondary";
+  group?: ProjectPageActionGroup;
+  tone?: ProjectPageActionTone;
 };
 
 type MenuDefinition = {
@@ -76,7 +98,14 @@ const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   dailyPlanSave: { label: "일촬표 저장", icon: Save, emphasis: "primary" },
   archiveDiagram: { label: "부감도", icon: Map },
   archiveStoryboard: { label: "콘티", icon: Clapperboard },
-  progressAddCut: { label: "새 컷 추가", icon: Plus, emphasis: "primary" }
+  progressAddCut: { label: "새 컷 추가", icon: Plus, emphasis: "primary" },
+  scenarioScenesView: { label: "씬별 보기", icon: List, group: "view" },
+  scenarioFullView: { label: "전체 보기", icon: FileText, group: "view" },
+  scenarioEdit: { label: "편집", icon: Pencil, group: "document" },
+  scenarioShare: { label: "공유", icon: Share2, group: "document" },
+  scenarioDownload: { label: "다운로드", icon: Download, group: "document" },
+  scenarioRefresh: { label: "새로고침", icon: RefreshCw, group: "document" },
+  scenarioDelete: { label: "삭제", icon: Trash2, group: "manage", tone: "danger" }
 };
 
 const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
@@ -94,6 +123,19 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
     title: "진행도 작업",
     ariaLabel: "진행도 작업 메뉴",
     actionIds: ["progressAddCut"]
+  },
+  scenario: {
+    title: "시나리오 작업",
+    ariaLabel: "시나리오 작업 메뉴",
+    actionIds: [
+      "scenarioScenesView",
+      "scenarioFullView",
+      "scenarioEdit",
+      "scenarioShare",
+      "scenarioDownload",
+      "scenarioRefresh",
+      "scenarioDelete"
+    ]
   }
 };
 
