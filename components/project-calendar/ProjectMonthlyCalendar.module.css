@@ -1,14 +1,15 @@
 .calendarShell {
   display: grid;
   min-width: 0;
-  gap: 16px;
+  gap: 10px;
   container-type: inline-size;
 }
 
 .calendarLayout {
   display: grid;
   min-width: 0;
-  gap: 14px;
+  align-items: start;
+  gap: 10px;
 }
 
 .calendarPanel,
@@ -22,16 +23,19 @@
 }
 
 .calendarPanel {
-  padding: clamp(10px, 1.4vw, 18px);
+  align-self: start;
+  padding: clamp(8px, 1vw, 12px);
 }
 
 .toolbar {
   display: flex;
+  box-sizing: border-box;
+  height: 48px;
   min-width: 0;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding-bottom: 12px;
+  gap: 8px;
+  padding: 0 2px 8px;
 }
 
 .toolbarTitle {
@@ -120,6 +124,7 @@
 }
 
 .weekdayGrid {
+  min-height: 26px;
   border-bottom: 1px solid var(--ui-border-default);
   color: var(--ui-text-muted);
   font-size: clamp(0.625rem, 1.2vw, 0.75rem);
@@ -129,8 +134,11 @@
 }
 
 .weekdayGrid span {
+  display: grid;
   min-width: 0;
-  padding: 7px 2px;
+  min-height: 26px;
+  place-items: center;
+  padding: 0 2px;
 }
 
 .dayGrid {
@@ -161,7 +169,7 @@
 .dayCell {
   position: relative;
   min-width: 0;
-  min-height: clamp(5.1rem, 7.6vw, 7.25rem);
+  min-height: 58px;
   overflow: hidden;
   background: var(--ui-surface-3);
 }
@@ -217,11 +225,11 @@
 
 .dayNumber {
   position: absolute;
-  top: 6px;
-  left: 7px;
+  top: 3px;
+  left: 5px;
   display: inline-flex;
-  min-width: 22px;
-  min-height: 22px;
+  min-width: 18px;
+  min-height: 18px;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
@@ -246,13 +254,13 @@
 .dayContent {
   position: absolute;
   z-index: 3;
-  top: 31px;
+  top: 22px;
   right: 3px;
-  bottom: 4px;
+  bottom: 3px;
   left: 3px;
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 1px;
   align-content: end;
   overflow: hidden;
   pointer-events: none;
@@ -269,31 +277,35 @@
 
 .shootingPlanRow {
   display: block;
+  box-sizing: border-box;
+  height: 16px;
   min-height: 16px;
   border-radius: 3px;
   background: var(--ui-on-accent);
-  padding: 2px 4px;
+  padding: 1px 4px;
   color: var(--ui-accent);
   font-size: clamp(0.5rem, 0.9vw, 0.62rem);
   font-weight: 800;
-  line-height: 1.15;
+  line-height: 14px;
   text-decoration: none;
   pointer-events: auto;
 }
 
 .eventBar {
   display: block;
+  box-sizing: border-box;
   width: calc(100% + 6px);
+  height: 16px;
   min-height: 16px;
   margin-inline: -3px;
   border: 0;
   border-radius: 0;
   background: var(--event-color);
-  padding: 2px 4px;
+  padding: 1px 4px;
   color: #080908;
   font-size: clamp(0.48rem, 0.88vw, 0.6rem);
   font-weight: 750;
-  line-height: 1.15;
+  line-height: 14px;
   text-align: left;
   pointer-events: auto;
 }
@@ -324,25 +336,33 @@
 }
 
 .moreButton {
+  position: absolute;
+  z-index: 4;
+  top: 3px;
+  right: 4px;
   width: fit-content;
   max-width: 100%;
   min-height: 16px;
   border: 0;
   background: transparent;
-  padding: 1px 3px;
-  color: inherit;
+  padding: 1px 2px;
+  color: var(--ui-text-muted);
   font-size: 0.55rem;
   font-weight: 800;
-  line-height: 1.15;
-  text-align: left;
+  line-height: 14px;
+  text-align: right;
   pointer-events: auto;
+}
+
+.dayCell[data-shooting="true"] .moreButton {
+  color: var(--ui-on-accent);
 }
 
 .detailPanel {
   align-self: start;
-  max-height: min(72dvh, 54rem);
-  overflow-y: auto;
-  padding: clamp(14px, 1.6vw, 20px);
+  max-height: none;
+  overflow: visible;
+  padding: clamp(10px, 1.2vw, 14px);
 }
 
 .detailContent {
@@ -697,7 +717,20 @@
     .detailPanel {
       position: sticky;
       top: 0;
+      max-height: min(70dvh, 38rem);
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
+
+    .dayCell {
+      min-height: 64px;
+    }
+  }
+}
+
+@container (min-width: 480px) and (max-width: 759px) {
+  .dayCell {
+    min-height: 60px;
   }
 }
 
@@ -707,12 +740,13 @@
   }
 
   .toolbar {
-    padding: 2px 2px 9px;
+    height: 46px;
+    padding: 0 1px 4px;
   }
 
   .toolbarButton {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 40px;
+    min-height: 40px;
   }
 
   .todayButton {
@@ -721,14 +755,20 @@
   }
 
   .dayCell {
-    min-height: clamp(4.35rem, 22vw, 5.1rem);
+    min-height: 58px;
   }
 
   .shootingPlanRow,
-  .eventBar,
+  .eventBar {
+    height: 16px;
+    min-height: 16px;
+    padding: 1px 2px;
+    font-size: 0.48rem;
+  }
+
   .moreButton {
-    min-height: 14px;
-    padding: 2px;
+    min-height: 16px;
+    padding: 1px 2px;
     font-size: 0.48rem;
   }
 
@@ -747,19 +787,25 @@
   }
 
   .toolbarButton {
-    min-width: 32px;
-    min-height: 34px;
+    min-width: 40px;
+    min-height: 40px;
   }
 
   .dayCell {
-    min-height: 5.1rem;
+    min-height: 58px;
   }
 
   .dayNumber {
-    top: 4px;
+    top: 3px;
     left: 4px;
-    min-width: 19px;
-    min-height: 19px;
+    min-width: 18px;
+    min-height: 18px;
+  }
+
+  .moreButton {
+    right: 2px;
+    padding-inline: 0;
+    font-size: 0.43rem;
   }
 }
 

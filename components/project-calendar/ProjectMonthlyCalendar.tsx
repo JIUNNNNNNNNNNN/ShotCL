@@ -454,21 +454,21 @@ export function ProjectMonthlyCalendar({
                           </button>
                         );
                       })}
-                      {dayEvents.length > visibleEventCount ? (
-                        <button
-                          type="button"
-                          className={styles.moreButton}
-                          data-calendar-interactive="true"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(clickEvent) => {
-                            clickEvent.stopPropagation();
-                            setSelectedDate(day.key);
-                          }}
-                        >
-                          +{dayEvents.length - visibleEventCount}개
-                        </button>
-                      ) : null}
                     </div>
+                    {dayEvents.length > visibleEventCount ? (
+                      <button
+                        type="button"
+                        className={styles.moreButton}
+                        data-calendar-interactive="true"
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          setSelectedDate(day.key);
+                        }}
+                      >
+                        +{dayEvents.length - visibleEventCount}개
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}

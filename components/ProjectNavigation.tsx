@@ -435,7 +435,7 @@ function NavigationLink({
         }
         onNavigate(href);
       }}
-      className={`flex min-h-11 min-w-0 items-center gap-1.5 rounded-[var(--ui-radius-control)] border border-transparent px-2 py-1.5 text-xs font-semibold hover:border-field-border hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${className}`}
+      className={`project-navigation__round-link flex min-w-0 items-center gap-1.5 rounded-[var(--ui-radius-control)] border border-transparent text-xs font-semibold hover:border-field-border hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${className}`}
     >
       {children}
     </Link>
@@ -544,7 +544,7 @@ function RoundNavigationLink({
       onPointerUp={cancelLongPress}
       onPointerCancel={cancelLongPress}
       onDragStart={(event) => event.preventDefault()}
-      className={`block min-h-11 min-w-0 select-none rounded-[var(--ui-radius-control)] border px-2 py-2.5 text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+      className={`project-navigation__round-link block min-w-0 select-none rounded-[var(--ui-radius-control)] border text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
         active ? "border-field-primary bg-field-primary-soft text-field-primary" : "border-transparent text-field-muted hover:border-field-border hover:bg-field-hover hover:text-field-text"
       }`}
     >
