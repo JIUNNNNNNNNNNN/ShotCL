@@ -17,6 +17,10 @@ import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { InlineLoader, PageLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import {
+  StaffEpisodeParticipation,
+  isStaffParticipationControlTarget
+} from "@/components/StaffEpisodeParticipation";
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import {
@@ -35,10 +39,6 @@ import {
   normalizeStaffDepartment,
   sortStaffMembers
 } from "@/lib/dailyPlan/staffList";
-import {
-  isStaffParticipatingInEpisode,
-  normalizeExcludedEpisodeNumbers
-} from "@/lib/staffParticipation";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
@@ -81,6 +81,9 @@ export default function StaffListPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
   const [pendingMemberDelete, setPendingMemberDelete] = useState<PendingStaffDelete | null>(null);
+  const [openParticipationMemberId, setOpenParticipationMemberId] = useState<string | null>(null);
+  const [participationSupportsHover, setParticipationSupportsHover] = useState(false);
+  const [participationUsesBottomSheet, setParticipationUsesBottomSheet] = useState(false);
   const [isDeletingMember, setIsDeletingMember] = useState(false);
   const [pendingSectionKeys, setPendingSectionKeys] = useState<Set<string>>(() => new Set());
   const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
@@ -164,6 +167,29 @@ export default function StaffListPage() {
   useEffect(() => {
     if (notesSummary.items.length === 0) setIsNotesSummaryOpen(false);
   }, [notesSummary.items.length]);
+
+  useEffect(() => {
+    const hoverQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const sheetQuery = window.matchMedia("(max-width: 640px), (hover: none), (pointer: coarse)");
+    const updateCapabilities = () => {
+      setParticipationSupportsHover(hoverQuery.matches);
+      setParticipationUsesBottomSheet(sheetQuery.matches);
+    };
+    updateCapabilities();
+    hoverQuery.addEventListener("change", updateCapabilities);
+    sheetQuery.addEventListener("change", updateCapabilities);
+    return () => {
+      hoverQuery.removeEventListener("change", updateCapabilities);
+      sheetQuery.removeEventListener("change", updateCapabilities);
+    };
+  }, []);
+
+  const handleParticipationOpenChange = useCallback((memberId: string, open: boolean) => {
+    setOpenParticipationMemberId((current) => (
+      open ? memberId : current === memberId ? null : current
+    ));
+    if (open) setIsNotesSummaryOpen(false);
+  }, []);
 
   const save = useCallback(async (
     sourceMembers: ProjectStaffMember[],
@@ -676,8 +702,12 @@ export default function StaffListPage() {
             isSaving={isSaving}
             pendingDeleteMemberId={pendingMemberDelete?.member.id ?? null}
             pendingSectionKeys={pendingSectionKeys}
+            openParticipationMemberId={openParticipationMemberId}
+            participationSupportsHover={participationSupportsHover}
+            participationUsesBottomSheet={participationUsesBottomSheet}
             onAddMember={addMember}
             onChange={updateMember}
+            onParticipationOpenChange={handleParticipationOpenChange}
             onRequestDelete={requestMemberDelete}
             onReorder={reorderMemberSection}
             onRoleInputRef={registerMemberRoleInput}
@@ -710,8 +740,12 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
   isSaving,
   pendingDeleteMemberId,
   pendingSectionKeys,
+  openParticipationMemberId,
+  participationSupportsHover,
+  participationUsesBottomSheet,
   onAddMember,
   onChange,
+  onParticipationOpenChange,
   onRequestDelete,
   onReorder,
   onRoleInputRef
@@ -722,8 +756,12 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
   isSaving: boolean;
   pendingDeleteMemberId: string | null;
   pendingSectionKeys: Set<string>;
+  openParticipationMemberId: string | null;
+  participationSupportsHover: boolean;
+  participationUsesBottomSheet: boolean;
   onAddMember: (department: string, afterMemberId?: string) => void;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
+  onParticipationOpenChange: (memberId: string, open: boolean) => void;
   onRequestDelete: (member: ProjectStaffMember) => void;
   onReorder: (sourceMemberId: string, orderedMemberIds: string[]) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
@@ -802,7 +840,12 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
     isDropAllowed,
     throttleWithAnimationFrame: true,
     onReorder: handleReorder,
-    onTrashDrop: handleTrashDrop
+    onTrashDrop: handleTrashDrop,
+    onDragStart: () => {
+      if (openParticipationMemberId !== null) {
+        onParticipationOpenChange(openParticipationMemberId, false);
+      }
+    }
   });
   const draggedMember = interaction.draggingRowKey
     ? memberById.get(interaction.draggingRowKey) ?? null
@@ -854,10 +897,15 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
                     showBottomBorder={index < section.members.length - 1}
                     isSelected={interaction.selectedRowKey === member.id}
                     isDragging={interaction.draggingRowKey === member.id}
+                    isWorkspaceDragging={interaction.draggingRowKey !== null}
                     isPending={pendingSectionKeys.has(section.sectionKey) || pendingDeleteMemberId === member.id}
                     canEdit={canEdit}
                     totalEpisodes={totalEpisodes}
+                    isParticipationOpen={openParticipationMemberId === member.id}
+                    participationSupportsHover={participationSupportsHover}
+                    participationUsesBottomSheet={participationUsesBottomSheet}
                     onChange={onChange}
+                    onParticipationOpenChange={onParticipationOpenChange}
                     onRoleInputRef={onRoleInputRef}
                     registerRow={interaction.registerRow}
                     onCardPointerDownCapture={interaction.onRowPointerDownCapture}
@@ -912,10 +960,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
   showBottomBorder,
   isSelected,
   isDragging,
+  isWorkspaceDragging,
   isPending,
   canEdit,
   totalEpisodes,
+  isParticipationOpen,
+  participationSupportsHover,
+  participationUsesBottomSheet,
   onChange,
+  onParticipationOpenChange,
   onRoleInputRef,
   registerRow,
   onCardPointerDownCapture,
@@ -928,10 +981,15 @@ const StaffMemberRow = memo(function StaffMemberRow({
   showBottomBorder: boolean;
   isSelected: boolean;
   isDragging: boolean;
+  isWorkspaceDragging: boolean;
   isPending: boolean;
   canEdit: boolean;
   totalEpisodes: number;
+  isParticipationOpen: boolean;
+  participationSupportsHover: boolean;
+  participationUsesBottomSheet: boolean;
   onChange: (id: string, patch: Partial<ProjectStaffMember>) => void;
+  onParticipationOpenChange: (memberId: string, open: boolean) => void;
   onRoleInputRef: (id: string, input: HTMLInputElement | null) => void;
   registerRow: (rowKey: string) => (element: HTMLElement | null) => void;
   onCardPointerDownCapture: (rowKey: string, event: ReactPointerEvent<HTMLElement>) => void;
@@ -940,6 +998,9 @@ const StaffMemberRow = memo(function StaffMemberRow({
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
   const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const handleParticipationOpenChange = useCallback((open: boolean) => {
+    onParticipationOpenChange(member.id, open);
+  }, [member.id, onParticipationOpenChange]);
 
   useEffect(() => {
     resizeNotesTextarea(notesInputRef.current);
@@ -957,7 +1018,10 @@ const StaffMemberRow = memo(function StaffMemberRow({
       data-dragging={isDragging ? "true" : "false"}
       aria-busy={isPending || undefined}
       style={{ WebkitTouchCallout: "none" }}
-      onPointerDownCapture={canEdit ? (event) => onCardPointerDownCapture(member.id, event) : undefined}
+      onPointerDownCapture={canEdit ? (event) => {
+        if (isStaffParticipationControlTarget(event.target)) return;
+        onCardPointerDownCapture(member.id, event);
+      } : undefined}
       onClickCapture={canEdit ? (event) => onCardClickCapture(member.id, event) : undefined}
       onContextMenu={canEdit ? (event) => onCardContextMenu(member.id, event) : undefined}
     >
@@ -1024,11 +1088,17 @@ const StaffMemberRow = memo(function StaffMemberRow({
           rows={1}
         />
       </label>
-      <EpisodeParticipationCells
-        member={member}
+      <StaffEpisodeParticipation
+        staffLabel={member.name.trim() || member.role.trim() || `${number}번 스탭`}
         totalEpisodes={totalEpisodes}
+        excludedEpisodeNumbers={member.excludedEpisodeNumbers}
         canEdit={canEdit}
+        interactionBlocked={isWorkspaceDragging || isPending}
+        supportsHover={participationSupportsHover}
+        useBottomSheet={participationUsesBottomSheet}
         departmentColor={departmentColor}
+        isOpen={isParticipationOpen}
+        onOpenChange={handleParticipationOpenChange}
         onChange={(excludedEpisodeNumbers) => {
           onChange(member.id, { excludedEpisodeNumbers });
         }}
@@ -1138,149 +1208,6 @@ function StaffDeleteConfirmationDialog({
       </div>
     </div>,
     document.body
-  );
-}
-
-function EpisodeParticipationCells({
-  member,
-  totalEpisodes,
-  canEdit,
-  departmentColor,
-  onChange
-}: {
-  member: ProjectStaffMember;
-  totalEpisodes: number;
-  canEdit: boolean;
-  departmentColor: { background: string; border: string };
-  onChange: (excludedEpisodeNumbers: number[]) => void;
-}) {
-  const pointerGestureRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    startScrollLeft: number;
-    moved: boolean;
-  } | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const suppressClickRef = useRef(false);
-  const episodeNumbers = useMemo(
-    () => Array.from({ length: totalEpisodes }, (_, index) => index + 1),
-    [totalEpisodes]
-  );
-
-  function toggleEpisode(episodeNumber: number) {
-    if (!canEdit) return;
-    const excluded = normalizeExcludedEpisodeNumbers(
-      member.excludedEpisodeNumbers,
-      totalEpisodes
-    );
-    onChange(excluded.includes(episodeNumber)
-      ? excluded.filter((value) => value !== episodeNumber)
-      : [...excluded, episodeNumber].sort((left, right) => left - right));
-  }
-
-  return (
-    <div className="col-span-2 flex h-8 min-w-0 items-center gap-1 overflow-hidden md:col-auto">
-      <span className="workspace-text-muted w-7 shrink-0 whitespace-nowrap text-center text-[9px] font-black leading-normal xl:w-auto">
-        <span className="xl:hidden">회차</span>
-        <span className="hidden xl:inline">참여 회차</span>
-      </span>
-      {episodeNumbers.length > 0 ? (
-        <div
-          ref={scrollContainerRef}
-          className="h-7 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none] [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] [&::-webkit-scrollbar]:hidden"
-          aria-label={`${member.name || "스탭"} 참여 회차`}
-          onDragStart={(event) => event.preventDefault()}
-          onScroll={() => {
-            if (!pointerGestureRef.current) return;
-            pointerGestureRef.current.moved = true;
-            suppressClickRef.current = true;
-          }}
-        >
-          <div
-            className="grid h-7 w-full min-w-full"
-            style={{
-              gridTemplateColumns: `repeat(${episodeNumbers.length}, minmax(24px, 1fr))`,
-              minWidth: `${episodeNumbers.length * 24}px`
-            }}
-          >
-            {episodeNumbers.map((episodeNumber) => {
-              const participating = isStaffParticipatingInEpisode(member, episodeNumber);
-              return (
-                <button
-                  key={episodeNumber}
-                  type="button"
-                  aria-pressed={participating}
-                  aria-label={`${episodeNumber}회차 ${participating ? "참여" : "비참여"}`}
-                  disabled={!canEdit}
-                  className={`workspace-border h-7 min-w-0 select-none whitespace-nowrap border-y border-r p-0 text-center text-[10px] font-black leading-none transition-[background-color,color,filter] first:border-l focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary ${
-                    canEdit ? "cursor-pointer active:brightness-95" : "cursor-default"
-                  } ${
-                    participating
-                      ? "opacity-100"
-                      : "workspace-inactive-cell"
-                  }`}
-                  style={participating ? {
-                    backgroundColor: departmentColor.border,
-                    color: "#151515"
-                  } : undefined}
-                  onPointerDown={(event) => {
-                    if (!event.isPrimary) return;
-                    suppressClickRef.current = false;
-                    pointerGestureRef.current = {
-                      pointerId: event.pointerId,
-                      startX: event.clientX,
-                      startY: event.clientY,
-                      startScrollLeft: scrollContainerRef.current?.scrollLeft ?? 0,
-                      moved: false
-                    };
-                  }}
-                  onPointerMove={(event) => {
-                    const gesture = pointerGestureRef.current;
-                    if (!gesture || gesture.pointerId !== event.pointerId) return;
-                    if (
-                      Math.hypot(
-                        event.clientX - gesture.startX,
-                        event.clientY - gesture.startY
-                      ) > 8
-                    ) {
-                      gesture.moved = true;
-                    }
-                  }}
-                  onPointerUp={(event) => {
-                    const gesture = pointerGestureRef.current;
-                    if (!gesture || gesture.pointerId !== event.pointerId) return;
-                    const scrolled = Math.abs(
-                      (scrollContainerRef.current?.scrollLeft ?? 0) - gesture.startScrollLeft
-                    ) > 4;
-                    suppressClickRef.current = gesture.moved || scrolled;
-                    pointerGestureRef.current = null;
-                  }}
-                  onPointerCancel={() => {
-                    suppressClickRef.current = true;
-                    pointerGestureRef.current = null;
-                  }}
-                  onClick={(event) => {
-                    if (suppressClickRef.current) {
-                      event.preventDefault();
-                      suppressClickRef.current = false;
-                      return;
-                    }
-                    toggleEpisode(episodeNumber);
-                  }}
-                >
-                  {episodeNumber}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <span className="workspace-inactive-cell grid h-7 min-w-0 flex-1 place-items-center border text-[10px] font-black">
-          -
-        </span>
-      )}
-    </div>
   );
 }
 
