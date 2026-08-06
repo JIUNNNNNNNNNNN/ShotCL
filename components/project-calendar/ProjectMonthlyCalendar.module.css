@@ -113,14 +113,19 @@
   min-width: 0;
 }
 
-.weekdayGrid,
-.dayGrid {
+.weekdayGrid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .weekRow {
-  display: contents;
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  background: var(--ui-border-default);
 }
 
 .weekdayGrid {
@@ -142,6 +147,8 @@
 }
 
 .dayGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1px;
   overflow: hidden;
   background: var(--ui-border-default);
@@ -169,7 +176,7 @@
 .dayCell {
   position: relative;
   min-width: 0;
-  min-height: 58px;
+  min-height: 72px;
   overflow: hidden;
   background: var(--ui-surface-3);
 }
@@ -184,17 +191,6 @@
 
 .dayCell[data-shooting="true"] {
   background: var(--ui-accent);
-}
-
-.dayCell[data-range-preview="true"]::after {
-  position: absolute;
-  z-index: 1;
-  inset: 2px;
-  border: 1px solid color-mix(in srgb, var(--ui-accent) 76%, transparent);
-  border-radius: var(--ui-radius-selection);
-  background: color-mix(in srgb, var(--ui-accent) 16%, transparent);
-  content: "";
-  pointer-events: none;
 }
 
 .dayButton {
@@ -254,14 +250,13 @@
 .dayContent {
   position: absolute;
   z-index: 3;
-  top: 22px;
+  top: auto;
   right: 3px;
-  bottom: 3px;
+  bottom: 2px;
   left: 3px;
-  display: grid;
+  display: block;
+  height: 15px;
   min-width: 0;
-  gap: 1px;
-  align-content: end;
   overflow: hidden;
   pointer-events: none;
 }
@@ -278,15 +273,15 @@
 .shootingPlanRow {
   display: block;
   box-sizing: border-box;
-  height: 16px;
-  min-height: 16px;
+  height: 15px;
+  min-height: 15px;
   border-radius: 3px;
   background: var(--ui-on-accent);
   padding: 1px 4px;
   color: var(--ui-accent);
   font-size: clamp(0.5rem, 0.9vw, 0.62rem);
   font-weight: 800;
-  line-height: 14px;
+  line-height: 13px;
   text-decoration: none;
   pointer-events: auto;
 }
@@ -294,38 +289,39 @@
 .eventBar {
   display: block;
   box-sizing: border-box;
-  width: calc(100% + 6px);
-  height: 16px;
-  min-height: 16px;
-  margin-inline: -3px;
+  width: 100%;
+  height: 15px;
+  min-height: 15px;
+  margin: 0;
   border: 0;
-  border-radius: 0;
+  border-radius: 2px;
   background: var(--event-color);
   padding: 1px 4px;
   color: #080908;
   font-size: clamp(0.48rem, 0.88vw, 0.6rem);
   font-weight: 750;
-  line-height: 14px;
+  line-height: 13px;
   text-align: left;
   pointer-events: auto;
+  transition: filter 120ms var(--ease-out-native), transform 120ms var(--ease-out-native);
 }
 
 .eventBar[data-segment-start="true"] {
-  width: calc(100% + 3px);
-  margin-left: 0;
-  border-radius: 3px 0 0 3px;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
 }
 
 .eventBar[data-segment-end="true"] {
-  width: calc(100% + 3px);
-  margin-right: 0;
-  border-radius: 0 3px 3px 0;
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
-.eventBar[data-segment-start="true"][data-segment-end="true"] {
-  width: 100%;
-  margin-inline: 0;
-  border-radius: 3px;
+.eventBar:hover {
+  filter: brightness(1.08);
+}
+
+.eventBar:active {
+  transform: translateY(1px);
 }
 
 .eventBarLabel {
@@ -333,6 +329,63 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.rangeLayer,
+.eventLayer {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  column-gap: 1px;
+  pointer-events: none;
+}
+
+.rangeLayer {
+  z-index: 1;
+  inset-block: 0;
+}
+
+.eventLayer {
+  z-index: 4;
+  top: 23px;
+  grid-template-rows: repeat(2, 15px);
+  row-gap: 1px;
+}
+
+.shootingPeriodRibbon,
+.dragRangeRibbon {
+  min-width: 0;
+  border-radius: 0;
+  pointer-events: none;
+}
+
+.shootingPeriodRibbon {
+  height: 3px;
+  align-self: start;
+  background: color-mix(in srgb, var(--ui-accent) 42%, transparent);
+}
+
+.dragRangeRibbon {
+  height: calc(100% - 6px);
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 58%, transparent);
+  background: color-mix(in srgb, var(--ui-accent) 12%, transparent);
+  transition: background-color 120ms var(--ease-out-native);
+}
+
+.shootingPeriodRibbon[data-segment-start="true"],
+.dragRangeRibbon[data-segment-start="true"] {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+
+.shootingPeriodRibbon[data-segment-end="true"],
+.dragRangeRibbon[data-segment-end="true"] {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
 }
 
 .moreButton {
@@ -495,29 +548,67 @@
   text-align: center;
 }
 
-.editorBackdrop {
+.editorLayer {
   position: fixed;
-  z-index: 90;
+  z-index: 72;
   inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  background: rgb(0 0 0 / 58%);
-  padding: 0;
+  pointer-events: none;
   animation: overlayEnter var(--motion-fast) var(--ease-out-native) both;
 }
 
+.editorLayer[data-presentation="sheet"] {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 28%);
+  padding: 8px 8px max(0px, env(safe-area-inset-bottom));
+  pointer-events: auto;
+}
+
 .editorDialog {
-  width: 100%;
-  max-height: min(88dvh, 48rem);
+  width: min(340px, calc(100vw - 32px));
+  max-height: var(--calendar-editor-max-height, min(72dvh, 560px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--ui-border-strong);
-  border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+  border-radius: var(--ui-radius-panel);
   background: var(--dialog);
-  padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+  padding: 14px;
   box-shadow: var(--shadow-dialog);
   color: var(--ui-text-primary);
-  animation: sheetEnter var(--motion-base) var(--ease-out-native) both;
+  pointer-events: auto;
+  animation: popoverEnter 180ms var(--ease-out-native) both;
+}
+
+.editorLayer[data-presentation="popover"] .editorDialog {
+  position: fixed;
+  top: var(--calendar-editor-top);
+  left: var(--calendar-editor-left);
+  visibility: hidden;
+}
+
+.editorLayer[data-presentation="popover"] .editorDialog[data-position-ready="true"] {
+  visibility: visible;
+}
+
+.editorLayer[data-presentation="sheet"] .editorDialog {
+  width: min(560px, calc(100vw - 16px));
+  max-height: min(72dvh, 560px);
+  border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+  padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+  animation-name: sheetEnter;
+}
+
+.editorLayer[data-motion-state="closing"] {
+  animation: overlayExit 140ms var(--ease-out-native) both;
+}
+
+.editorLayer[data-motion-state="closing"] .editorDialog {
+  animation: popoverExit 140ms var(--ease-out-native) both;
+}
+
+.editorLayer[data-presentation="sheet"][data-motion-state="closing"] .editorDialog {
+  animation-name: sheetExit;
 }
 
 .editorHeader,
@@ -534,13 +625,13 @@
 }
 
 .editorHeader {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .editorFooter {
-  margin-top: 16px;
+  margin-top: 12px;
   border-top: 1px solid var(--ui-border-default);
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 .editorTitle {
@@ -561,7 +652,7 @@
 .editorFields {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 8px;
 }
 
 .twoColumnFields {
@@ -590,11 +681,11 @@
 .editorInput {
   width: 100%;
   min-width: 0;
-  min-height: 40px;
+  min-height: 38px;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-control);
   background: var(--ui-control);
-  padding: 8px 10px;
+  padding: 7px 9px;
   color: var(--ui-text-primary);
   font: inherit;
   font-size: 0.78rem;
@@ -649,13 +740,13 @@
 .colorSwatches {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .colorSwatch {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   place-items: center;
   border: 2px solid transparent;
   border-radius: var(--ui-radius-control);
@@ -690,23 +781,6 @@
   gap: 18px;
 }
 
-@media (min-width: 768px) {
-  .editorBackdrop {
-    display: block;
-    padding: 12px;
-  }
-
-  .editorDialog {
-    position: fixed;
-    top: clamp(12px, var(--calendar-editor-top), calc(100dvh - 570px));
-    left: clamp(12px, var(--calendar-editor-left), calc(100vw - 372px));
-    width: min(360px, calc(100vw - 24px));
-    max-height: min(80dvh, 550px);
-    border-radius: var(--ui-radius-panel);
-    animation-name: popoverEnter;
-  }
-}
-
 @media (orientation: landscape) {
   @container (min-width: 760px) {
     .calendarLayout {
@@ -723,14 +797,14 @@
     }
 
     .dayCell {
-      min-height: 64px;
+      min-height: 76px;
     }
   }
 }
 
 @container (min-width: 480px) and (max-width: 759px) {
   .dayCell {
-    min-height: 60px;
+    min-height: 72px;
   }
 }
 
@@ -755,15 +829,25 @@
   }
 
   .dayCell {
-    min-height: 58px;
+    min-height: 66px;
   }
 
   .shootingPlanRow,
   .eventBar {
-    height: 16px;
-    min-height: 16px;
+    height: 14px;
+    min-height: 14px;
     padding: 1px 2px;
     font-size: 0.48rem;
+    line-height: 12px;
+  }
+
+  .eventLayer {
+    top: 22px;
+    grid-template-rows: repeat(2, 14px);
+  }
+
+  .dayContent {
+    height: 14px;
   }
 
   .moreButton {
@@ -772,9 +856,6 @@
     font-size: 0.48rem;
   }
 
-  .twoColumnFields {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 350px) {
@@ -792,7 +873,7 @@
   }
 
   .dayCell {
-    min-height: 58px;
+    min-height: 66px;
   }
 
   .dayNumber {
@@ -807,12 +888,16 @@
     padding-inline: 0;
     font-size: 0.43rem;
   }
+
+  .twoColumnFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .monthSurface,
   .detailContent,
-  .editorBackdrop,
+  .editorLayer,
   .editorDialog {
     animation: none !important;
   }
@@ -844,12 +929,27 @@
   to { opacity: 1; }
 }
 
+@keyframes overlayExit {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 @keyframes popoverEnter {
   from { opacity: 0; transform: translateY(5px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes popoverExit {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(3px); }
+}
+
 @keyframes sheetEnter {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sheetExit {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
 }

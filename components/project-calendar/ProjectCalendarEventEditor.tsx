@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -9,6 +11,7 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent
 } from "react";
+import { createPortal } from "react-dom";
 import { Check, MapPin, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
@@ -27,28 +30,43 @@ import type {
   ProjectCalendarEventUpdate
 } from "./types";
 
-type EditorAnchor = { x: number; y: number };
+type EditorPresentation = "popover" | "sheet";
+
+type EditorPosition = {
+  left: number;
+  top: number;
+  maxHeight: number;
+  placement: "left" | "right";
+  ready: boolean;
+};
 
 type ProjectCalendarEventEditorProps = {
   event?: ProjectCalendarEvent | null;
   initialStartDate: string;
   initialEndDate: string;
-  anchor: EditorAnchor;
+  anchorElement: HTMLElement;
+  presentation: EditorPresentation;
   readOnly?: boolean;
   mutationPending?: boolean;
   onCreate?: ProjectCalendarEventMutation;
   onUpdate?: ProjectCalendarEventUpdate;
   onDelete?: ProjectCalendarEventDelete;
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
 };
 
 const DEFAULT_COLOR: ProjectCalendarEventColor = "cyan";
+const DESKTOP_POPOVER_WIDTH = 340;
+const DESKTOP_POPOVER_MAX_HEIGHT = 520;
+const VIEWPORT_PADDING = 16;
+const POPOVER_GAP = 10;
+const CLOSE_DURATION_MS = 140;
 
 export function ProjectCalendarEventEditor({
   event,
   initialStartDate,
   initialEndDate,
-  anchor,
+  anchorElement,
+  presentation,
   readOnly = false,
   mutationPending = false,
   onCreate,
@@ -70,18 +88,131 @@ export function ProjectCalendarEventEditor({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [dismissHint, setDismissHint] = useState("");
+  const [isClosing, setIsClosing] = useState(false);
+  const [position, setPosition] = useState<EditorPosition>({
+    left: VIEWPORT_PADDING,
+    top: VIEWPORT_PADDING,
+    maxHeight: DESKTOP_POPOVER_MAX_HEIGHT,
+    placement: "right",
+    ready: presentation === "sheet"
+  });
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const isPending = mutationPending || isSubmitting;
   const isDirty = JSON.stringify(values) !== JSON.stringify(initialValues);
+  const isSheet = presentation === "sheet";
+
+  const closeWithMotion = useCallback((restoreFocus = true) => {
+    if (isClosing) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      onClose(restoreFocus);
+      return;
+    }
+    if (document.activeElement instanceof HTMLElement && dialogRef.current?.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    setIsClosing(true);
+    closeTimerRef.current = window.setTimeout(() => onClose(restoreFocus), CLOSE_DURATION_MS);
+  }, [isClosing, onClose]);
+
+  const updatePosition = useCallback(() => {
+    if (isSheet) return;
+    const panel = dialogRef.current;
+    if (!panel || !anchorElement.isConnected) {
+      onClose(false);
+      return;
+    }
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const viewportRight = viewportLeft + viewportWidth;
+    const viewportBottom = viewportTop + viewportHeight;
+    const width = Math.min(DESKTOP_POPOVER_WIDTH, viewportWidth - VIEWPORT_PADDING * 2);
+    const maxHeight = Math.max(
+      120,
+      Math.min(DESKTOP_POPOVER_MAX_HEIGHT, viewportHeight - VIEWPORT_PADDING * 2)
+    );
+    const measuredHeight = Math.min(panel.scrollHeight, maxHeight);
+    const anchorRect = anchorElement.getBoundingClientRect();
+    const calendarShell = anchorElement.closest<HTMLElement>("[data-project-calendar-shell]");
+    const detailPanel = calendarShell?.querySelector<HTMLElement>("[data-project-calendar-detail]");
+    const detailRect = detailPanel?.getBoundingClientRect();
+    const avoidDetailRight = detailRect && detailRect.left > anchorRect.right
+      ? Math.min(viewportRight - VIEWPORT_PADDING, detailRect.left - POPOVER_GAP)
+      : viewportRight - VIEWPORT_PADDING;
+    const rightLeft = anchorRect.right + POPOVER_GAP;
+    const leftLeft = anchorRect.left - POPOVER_GAP - width;
+    const canFitRight = rightLeft + width <= avoidDetailRight;
+    const canFitLeft = leftLeft >= viewportLeft + VIEWPORT_PADDING;
+    const placement: EditorPosition["placement"] = canFitRight || !canFitLeft ? "right" : "left";
+    const desiredLeft = placement === "right" ? rightLeft : leftLeft;
+    const left = Math.max(
+      viewportLeft + VIEWPORT_PADDING,
+      Math.min(desiredLeft, viewportRight - width - VIEWPORT_PADDING)
+    );
+    const desiredTop = anchorRect.top;
+    const top = Math.max(
+      viewportTop + VIEWPORT_PADDING,
+      Math.min(desiredTop, viewportBottom - measuredHeight - VIEWPORT_PADDING)
+    );
+
+    setPosition({ left, top, maxHeight, placement, ready: true });
+  }, [anchorElement, isSheet, onClose]);
 
   useEffect(() => {
-    const target = readOnly
-      ? dialogRef.current?.querySelector<HTMLElement>("button")
-      : titleInputRef.current;
-    target?.focus({ preventScroll: true });
-  }, [readOnly]);
+    // A desktop editor can mount from pointerup before the browser dispatches
+    // its trailing click. Waiting one frame keeps that click from returning
+    // focus to the date cell after we focus the title field.
+    const frame = window.requestAnimationFrame(() => {
+      const target = readOnly || isSheet
+        ? dialogRef.current?.querySelector<HTMLElement>("button")
+        : titleInputRef.current;
+      target?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isSheet, readOnly]);
+
+  useLayoutEffect(() => {
+    if (isSheet) return;
+    updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isSheet, updatePosition]);
+
+  useEffect(() => {
+    if (isSheet) return;
+    const handleOutsidePointerDown = (pointerEvent: PointerEvent) => {
+      const target = pointerEvent.target;
+      if (!(target instanceof Node) || dialogRef.current?.contains(target)) return;
+      if (isDirty && !readOnly) {
+        pointerEvent.preventDefault();
+        pointerEvent.stopPropagation();
+        setDismissHint("입력 중인 일정이 있습니다. 취소 또는 저장을 선택해주세요.");
+        return;
+      }
+      onClose(false);
+    };
+    document.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    window.visualViewport?.addEventListener("resize", updatePosition);
+    window.visualViewport?.addEventListener("scroll", updatePosition);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.visualViewport?.removeEventListener("resize", updatePosition);
+      window.visualViewport?.removeEventListener("scroll", updatePosition);
+    };
+  }, [isDirty, isSheet, onClose, readOnly, updatePosition]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!deleteConfirmationOpen) return;
@@ -104,10 +235,10 @@ export function ProjectCalendarEventEditor({
           setDismissHint("변경 내용을 취소하려면 취소 버튼을 눌러주세요.");
           return;
         }
-        onClose();
+        closeWithMotion();
         return;
       }
-      if (keyboardEvent.key !== "Tab") return;
+      if (!isSheet || keyboardEvent.key !== "Tab") return;
       const focusable = getFocusableElements(dialogRef.current);
       if (focusable.length === 0) return;
       const first = focusable[0];
@@ -127,7 +258,7 @@ export function ProjectCalendarEventEditor({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [deleteConfirmationOpen, isDirty, onClose, readOnly]);
+  }, [closeWithMotion, deleteConfirmationOpen, isDirty, isSheet, readOnly]);
 
   function updateValue<Key extends keyof ProjectCalendarEventInput>(
     key: Key,
@@ -153,7 +284,7 @@ export function ProjectCalendarEventEditor({
     try {
       if (event) await onUpdate?.(event.id, result.value as ProjectCalendarEventInput);
       else await onCreate?.(result.value as ProjectCalendarEventInput);
-      onClose();
+      closeWithMotion();
     } catch (error) {
       setErrors({ form: error instanceof Error ? error.message : "일정을 저장하지 못했습니다." });
     } finally {
@@ -167,7 +298,7 @@ export function ProjectCalendarEventEditor({
     setErrors({});
     try {
       await onDelete(event.id);
-      onClose();
+      closeWithMotion();
     } catch (error) {
       setDeleteConfirmationOpen(false);
       setErrors({ form: error instanceof Error ? error.message : "일정을 삭제하지 못했습니다." });
@@ -182,7 +313,7 @@ export function ProjectCalendarEventEditor({
       setDismissHint("입력 중인 일정이 있습니다. 취소 또는 저장을 선택해주세요.");
       return;
     }
-    onClose();
+    closeWithMotion();
   }
 
   function openDeleteConfirmation() {
@@ -196,20 +327,32 @@ export function ProjectCalendarEventEditor({
   }
 
   const editorStyle = {
-    "--calendar-editor-left": `${anchor.x}px`,
-    "--calendar-editor-top": `${anchor.y}px`
+    "--calendar-editor-left": `${position.left}px`,
+    "--calendar-editor-top": `${position.top}px`,
+    "--calendar-editor-max-height": `${position.maxHeight}px`
   } as CSSProperties;
 
-  return (
-    <div className={styles.editorBackdrop} onPointerDown={handleBackdropPointerDown}>
+  if (typeof document === "undefined") return null;
+
+  return createPortal((
+    <div
+      className={styles.editorLayer}
+      data-presentation={presentation}
+      data-motion-state={isClosing ? "closing" : "open"}
+      onPointerDown={isSheet ? handleBackdropPointerDown : undefined}
+      aria-hidden={isClosing || undefined}
+      inert={isClosing || undefined}
+    >
       <div
         ref={dialogRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={isSheet ? "true" : undefined}
         aria-labelledby="project-calendar-event-editor-title"
         aria-describedby={errors.form ? "project-calendar-event-editor-error" : undefined}
         className={styles.editorDialog}
         style={editorStyle}
+        data-placement={position.placement}
+        data-position-ready={position.ready}
         onPointerDown={(pointerEvent) => pointerEvent.stopPropagation()}
       >
         {deleteConfirmationOpen && event ? (
@@ -233,9 +376,8 @@ export function ProjectCalendarEventEditor({
                 <h2 id="project-calendar-event-editor-title" className={styles.editorTitle}>
                   {event ? (readOnly ? "일정 보기" : "일정 수정") : "새 일정"}
                 </h2>
-                <p className={styles.editorDescription}>변경 사항은 저장을 눌러야 반영됩니다.</p>
               </div>
-              <button type="button" className={styles.iconButton} onClick={onClose} aria-label="일정 편집창 닫기">
+              <button type="button" className={styles.iconButton} onClick={() => closeWithMotion()} aria-label="일정 편집창 닫기">
                 <X aria-hidden />
               </button>
             </header>
@@ -361,7 +503,7 @@ export function ProjectCalendarEventEditor({
                 </Button>
               ) : <span />}
               <div className={styles.editorActions}>
-                <Button type="button" variant="ghost" onClick={onClose} disabled={isPending}>
+                <Button type="button" variant="ghost" onClick={() => closeWithMotion()} disabled={isPending}>
                   {readOnly ? "닫기" : "취소"}
                 </Button>
                 {!readOnly ? (
@@ -375,7 +517,7 @@ export function ProjectCalendarEventEditor({
         )}
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function EditorField({

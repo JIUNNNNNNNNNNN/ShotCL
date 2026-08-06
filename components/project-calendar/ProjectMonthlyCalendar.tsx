@@ -21,6 +21,7 @@ import {
   CALENDAR_EVENT_COLORS,
   addDateOnlyMonths,
   buildCalendarEventDateIndex,
+  buildCalendarEventSegments,
   buildCalendarMonthFromDate,
   buildCalendarMonthDays,
   buildDailyPlanDateIndex,
@@ -32,6 +33,7 @@ import {
   normalizeUnorderedDateRange,
   parseDateOnly
 } from "@/lib/projectCalendar";
+import type { CalendarEventSegment } from "@/lib/projectCalendar";
 import styles from "./ProjectMonthlyCalendar.module.css";
 import { ProjectCalendarEventEditor } from "./ProjectCalendarEventEditor";
 import type {
@@ -44,13 +46,17 @@ import type {
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
 const DRAG_THRESHOLD_PX = 8;
-const MAX_CELL_EVENTS = 2;
+const MAX_EVENT_LANES = 2;
+const SYNTHETIC_CLICK_WINDOW_MS = 320;
+
+type EditorPresentation = "popover" | "sheet";
 
 type EditorState = {
   event: ProjectCalendarEvent | null;
   startDate: string;
   endDate: string;
-  anchor: { x: number; y: number };
+  anchorElement: HTMLElement;
+  presentation: EditorPresentation;
 };
 
 type DragState = {
@@ -60,6 +66,21 @@ type DragState = {
   startX: number;
   startY: number;
   dragging: boolean;
+};
+
+type VisibleEventSegment = CalendarEventSegment<ProjectCalendarEvent> & {
+  lane: number;
+  startColumn: number;
+  endColumn: number;
+};
+
+type VisibleWeekRange = {
+  startColumn: number;
+  endColumn: number;
+  startsRange: boolean;
+  endsRange: boolean;
+  startsSegment: boolean;
+  endsSegment: boolean;
 };
 
 export type ProjectMonthlyCalendarProps = {
@@ -103,8 +124,9 @@ export function ProjectMonthlyCalendar({
   const [editor, setEditor] = useState<EditorState | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
-  const suppressNextClickRef = useRef(false);
+  const suppressedClickRef = useRef<{ date: string | null; until: number } | null>(null);
   const suppressClickTimerRef = useRef<number | null>(null);
+  const lastPointerTypeRef = useRef<string>("mouse");
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const didInitializeRef = useRef(false);
@@ -143,6 +165,15 @@ export function ProjectMonthlyCalendar({
       endDate: lastDate
     } : null);
   }, [events, monthDays]);
+  const visibleRange = useMemo(() => {
+    const startDate = monthDays[0]?.key;
+    const endDate = monthDays.at(-1)?.key;
+    return startDate && endDate ? { startDate, endDate } : null;
+  }, [monthDays]);
+  const eventLayout = useMemo(
+    () => buildVisibleEventLayout(events, monthDays, visibleRange),
+    [events, monthDays, visibleRange]
+  );
 
   const selectedPlans = (dailyPlansByDate.get(selectedDate) ?? []).map((item) => item.plan);
   const indexedSelectedEvents = eventsByDate.get(selectedDate);
@@ -150,15 +181,17 @@ export function ProjectMonthlyCalendar({
     ? indexedSelectedEvents.map((item) => item.event)
     : events.filter((event) => selectedDate >= event.startDate && selectedDate <= event.endDate).sort(compareCalendarEvents);
   const selectedInPeriod = isDateInRange(selectedDate, normalizedShootingStart, normalizedShootingEnd);
+  const activePreviewRange = dragPreview
+    ?? (editor && !editor.event ? { startDate: editor.startDate, endDate: editor.endDate } : null);
 
   const cleanupDrag = useCallback((pointerId?: number) => {
     const grid = gridRef.current;
     const activePointerId = pointerId ?? dragRef.current?.pointerId;
+    dragRef.current = null;
+    setDragPreview(null);
     if (grid && activePointerId !== undefined && grid.hasPointerCapture(activePointerId)) {
       grid.releasePointerCapture(activePointerId);
     }
-    dragRef.current = null;
-    setDragPreview(null);
   }, []);
 
   useEffect(() => () => {
@@ -169,6 +202,7 @@ export function ProjectMonthlyCalendar({
   }, [cleanupDrag]);
 
   function setMonth(offset: -1 | 1) {
+    closeEditor(false);
     const nextMonth = shiftMonth(visibleMonth, offset);
     setMonthDirection(offset > 0 ? "next" : "previous");
     setVisibleMonth(nextMonth);
@@ -183,6 +217,7 @@ export function ProjectMonthlyCalendar({
   }
 
   function goToToday() {
+    closeEditor(false);
     const today = todayKey || getLocalTodayDateKey();
     const nextMonth = monthFromDateKey(today);
     const currentOrdinal = visibleMonth.year * 12 + visibleMonth.month;
@@ -192,46 +227,71 @@ export function ProjectMonthlyCalendar({
     setSelectedDate(today);
   }
 
-  function openCreateEditor(date: string, clientX: number, clientY: number, focusTarget: HTMLElement) {
-    setSelectedDate(date);
+  function openCreateEditor(
+    date: string,
+    focusTarget: HTMLElement,
+    presentation: EditorPresentation,
+    endDate = date,
+    anchorElement: HTMLElement = focusTarget,
+    selectedDateKey = date
+  ) {
+    setSelectedDate(selectedDateKey);
     if (!canEditEvents || !onCreateEvent) return;
     returnFocusRef.current = focusTarget;
     setEditor({
       event: null,
       startDate: date,
-      endDate: date,
-      anchor: buildEditorAnchor(clientX, clientY)
+      endDate,
+      anchorElement,
+      presentation
     });
   }
 
-  function openEventEditor(event: ProjectCalendarEvent, date: string, clientX: number, clientY: number, focusTarget: HTMLElement) {
+  function openEventEditor(
+    event: ProjectCalendarEvent,
+    date: string,
+    focusTarget: HTMLElement,
+    presentation: EditorPresentation
+  ) {
     setSelectedDate(date);
     returnFocusRef.current = focusTarget;
     setEditor({
       event,
       startDate: event.startDate,
       endDate: event.endDate,
-      anchor: buildEditorAnchor(clientX, clientY)
+      anchorElement: focusTarget,
+      presentation
     });
   }
 
-  function closeEditor() {
+  function closeEditor(restoreFocus = true) {
     setEditor(null);
-    window.requestAnimationFrame(() => returnFocusRef.current?.focus({ preventScroll: true }));
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => returnFocusRef.current?.focus({ preventScroll: true }));
+    }
   }
 
-  function handleDayClick(
-    pointerEvent: ReactPointerEvent<HTMLButtonElement> | React.MouseEvent<HTMLButtonElement>,
-    date: string
-  ) {
-    if (suppressNextClickRef.current) {
-      suppressNextClickRef.current = false;
+  function armSyntheticClickSuppression(date: string | null) {
+    suppressedClickRef.current = { date, until: performance.now() + SYNTHETIC_CLICK_WINDOW_MS };
+    if (suppressClickTimerRef.current !== null) window.clearTimeout(suppressClickTimerRef.current);
+    suppressClickTimerRef.current = window.setTimeout(() => {
+      suppressedClickRef.current = null;
+      suppressClickTimerRef.current = null;
+    }, SYNTHETIC_CLICK_WINDOW_MS);
+  }
+
+  function handleDayClick(clickEvent: React.MouseEvent<HTMLButtonElement>, date: string) {
+    const suppressed = suppressedClickRef.current;
+    if (suppressed && performance.now() <= suppressed.until && (!suppressed.date || suppressed.date === date)) {
+      suppressedClickRef.current = null;
       return;
     }
-    openCreateEditor(date, pointerEvent.clientX, pointerEvent.clientY, pointerEvent.currentTarget);
+    const presentation = resolveEditorPresentation(clickEvent.detail === 0 ? "keyboard" : lastPointerTypeRef.current);
+    openCreateEditor(date, clickEvent.currentTarget, presentation);
   }
 
   function handleGridPointerDown(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
+    lastPointerTypeRef.current = pointerEvent.pointerType;
     if (!canEditEvents || !onCreateEvent) return;
     if (pointerEvent.pointerType === "touch" || pointerEvent.button !== 0) return;
     const interactive = (pointerEvent.target as HTMLElement).closest("[data-calendar-interactive='true']");
@@ -240,7 +300,6 @@ export function ProjectMonthlyCalendar({
     const date = cell?.dataset.calendarDate;
     if (!date) return;
 
-    pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
     dragRef.current = {
       pointerId: pointerEvent.pointerId,
       startDate: date,
@@ -256,7 +315,13 @@ export function ProjectMonthlyCalendar({
     if (!drag || drag.pointerId !== pointerEvent.pointerId) return;
     const distance = Math.hypot(pointerEvent.clientX - drag.startX, pointerEvent.clientY - drag.startY);
     if (!drag.dragging && distance < DRAG_THRESHOLD_PX) return;
-    drag.dragging = true;
+    if (!drag.dragging) {
+      drag.dragging = true;
+      if (!pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
+        pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
+      }
+      setDragPreview(normalizeRange(drag.startDate, drag.currentDate));
+    }
     pointerEvent.preventDefault();
 
     const hovered = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)
@@ -272,20 +337,31 @@ export function ProjectMonthlyCalendar({
     if (!drag || drag.pointerId !== pointerEvent.pointerId) return;
     if (drag.dragging) {
       const range = normalizeRange(drag.startDate, drag.currentDate);
-      suppressNextClickRef.current = true;
-      if (suppressClickTimerRef.current !== null) window.clearTimeout(suppressClickTimerRef.current);
-      suppressClickTimerRef.current = window.setTimeout(() => {
-        suppressNextClickRef.current = false;
-        suppressClickTimerRef.current = null;
-      }, 0);
+      armSyntheticClickSuppression(null);
       setSelectedDate(range.endDate);
       if (canEditEvents && onCreateEvent) {
-        returnFocusRef.current = dateButtonRefs.current.get(range.endDate) ?? null;
-        setEditor({
-          event: null,
-          ...range,
-          anchor: buildEditorAnchor(pointerEvent.clientX, pointerEvent.clientY)
-        });
+        const anchorElement = dateButtonRefs.current.get(range.endDate)
+          ?? dateButtonRefs.current.get(range.startDate);
+        if (anchorElement) {
+          openCreateEditor(
+            range.startDate,
+            anchorElement,
+            resolveEditorPresentation(pointerEvent.pointerType),
+            range.endDate,
+            anchorElement,
+            range.endDate
+          );
+        }
+      }
+    } else {
+      const focusTarget = dateButtonRefs.current.get(drag.startDate);
+      if (focusTarget) {
+        armSyntheticClickSuppression(drag.startDate);
+        openCreateEditor(
+          drag.startDate,
+          focusTarget,
+          resolveEditorPresentation(pointerEvent.pointerType)
+        );
       }
     }
     cleanupDrag(pointerEvent.pointerId);
@@ -298,8 +374,7 @@ export function ProjectMonthlyCalendar({
 
   function handleGridLostPointerCapture(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
     if (dragRef.current?.pointerId !== pointerEvent.pointerId) return;
-    dragRef.current = null;
-    setDragPreview(null);
+    cleanupDrag(pointerEvent.pointerId);
   }
 
   function handleDayKeyboard(keyboardEvent: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
@@ -321,10 +396,14 @@ export function ProjectMonthlyCalendar({
   }
 
   return (
-    <section className={styles.calendarShell} aria-labelledby="shared-project-calendar-title">
+    <section
+      className={styles.calendarShell}
+      aria-labelledby="shared-project-calendar-title"
+      data-project-calendar-shell
+    >
       <h2 id="shared-project-calendar-title" className="sr-only">프로젝트 공유 일정</h2>
       <div className={styles.calendarLayout}>
-        <div className={styles.calendarPanel}>
+        <div className={styles.calendarPanel} data-project-calendar-panel>
           <div className={styles.toolbar}>
             <h3 className={styles.toolbarTitle}>{visibleMonth.year}년 {visibleMonth.month}월</h3>
             <div className={styles.toolbarActions} aria-label="달력 월 이동">
@@ -363,19 +442,30 @@ export function ProjectMonthlyCalendar({
                 onPointerCancel={handleGridPointerCancel}
                 onLostPointerCapture={handleGridLostPointerCapture}
               >
-              {Array.from({ length: 6 }, (_, weekIndex) => (
+              {Array.from({ length: 6 }, (_, weekIndex) => {
+                const weekDays = monthDays.slice(weekIndex * 7, weekIndex * 7 + 7);
+                const previewSegment = buildVisibleWeekRange(activePreviewRange, weekDays);
+                const shootingPeriodSegment = buildVisibleWeekRange(
+                  normalizedShootingStart && normalizedShootingEnd
+                    ? normalizeRange(normalizedShootingStart, normalizedShootingEnd)
+                    : null,
+                  weekDays
+                );
+                const visibleSegments = eventLayout.segmentsByWeek.get(weekIndex) ?? [];
+                return (
                 <div key={weekIndex} role="row" className={styles.weekRow}>
-                {monthDays.slice(weekIndex * 7, weekIndex * 7 + 7).map((day, dayIndex) => {
+                {weekDays.map((day, dayIndex) => {
                 const index = weekIndex * 7 + dayIndex;
                 const dayPlans = (dailyPlansByDate.get(day.key) ?? []).map((item) => item.plan);
                 const dayEventItems = eventsByDate.get(day.key) ?? [];
                 const dayEvents = dayEventItems.map((item) => item.event);
-                const visibleEventCount = dayPlans.length > 0 ? MAX_CELL_EVENTS - 1 : MAX_CELL_EVENTS;
+                const hiddenEventCount = dayEventItems.filter(({ event: calendarEvent }) => (
+                  (eventLayout.laneByEventId.get(calendarEvent.id) ?? MAX_EVENT_LANES) >= MAX_EVENT_LANES
+                )).length;
                 const period = isDateInRange(day.key, normalizedShootingStart, normalizedShootingEnd);
                 const selected = day.key === selectedDate;
                 const today = day.key === todayKey;
                 const shooting = dayPlans.length > 0;
-                const inPreview = Boolean(dragPreview && day.key >= dragPreview.startDate && day.key <= dragPreview.endDate);
                 const accessibleDescription = buildDayAccessibleLabel(day, {
                   period,
                   selected,
@@ -394,7 +484,6 @@ export function ProjectMonthlyCalendar({
                     data-shooting={shooting}
                     data-selected={selected}
                     data-today={today}
-                    data-range-preview={inPreview}
                     aria-selected={selected}
                   >
                     <button
@@ -419,43 +508,19 @@ export function ProjectMonthlyCalendar({
                           className={styles.shootingPlanRow}
                           data-calendar-interactive="true"
                           aria-label={`${dayPlans.map((plan) => plan.episodeLabel).join(", ")} 일촬표. 첫 일촬표 열기`}
-                          onPointerDown={(event) => event.stopPropagation()}
+                          onPointerDown={(event) => {
+                            lastPointerTypeRef.current = event.pointerType;
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => event.stopPropagation()}
                         >
                           {dayPlans.map((plan) => plan.episodeLabel).join(" · ")}
                         </Link>
                       ) : (
                         <span className={styles.shootingPlanRow}>{dayPlans.map((plan) => plan.episodeLabel).join(" · ")}</span>
                       )) : null}
-                      {dayEventItems.slice(0, visibleEventCount).map((eventItem) => {
-                        const calendarEvent = eventItem.event;
-                        const color = getEventColor(calendarEvent.colorKey);
-                        return (
-                          <button
-                            key={calendarEvent.id}
-                            type="button"
-                            className={styles.eventBar}
-                            style={{ "--event-color": color } as CSSProperties}
-                            data-calendar-interactive="true"
-                            data-segment-start={eventItem.startsSegment}
-                            data-segment-end={eventItem.endsSegment}
-                            aria-label={buildEventAccessibleLabel(calendarEvent)}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(clickEvent) => openEventEditor(
-                              calendarEvent,
-                              day.key,
-                              clickEvent.clientX,
-                              clickEvent.clientY,
-                              clickEvent.currentTarget
-                            )}
-                          >
-                            <span className={styles.eventBarLabel}>
-                              {eventItem.startsSegment ? `${calendarEvent.startTime ? `${calendarEvent.startTime} ` : ""}${calendarEvent.title}` : "\u00A0"}
-                            </span>
-                          </button>
-                        );
-                      })}
                     </div>
-                    {dayEvents.length > visibleEventCount ? (
+                    {hiddenEventCount > 0 ? (
                       <button
                         type="button"
                         className={styles.moreButton}
@@ -466,20 +531,100 @@ export function ProjectMonthlyCalendar({
                           setSelectedDate(day.key);
                         }}
                       >
-                        +{dayEvents.length - visibleEventCount}개
+                        +{hiddenEventCount}개
                       </button>
                     ) : null}
                   </div>
                 );
               })}
+
+                <div className={styles.rangeLayer} aria-hidden="true">
+                  {shootingPeriodSegment ? (
+                    <span
+                      className={styles.shootingPeriodRibbon}
+                      style={{
+                        gridColumn: `${shootingPeriodSegment.startColumn} / ${shootingPeriodSegment.endColumn + 1}`
+                      }}
+                      data-segment-start={shootingPeriodSegment.startsSegment}
+                      data-segment-end={shootingPeriodSegment.endsSegment}
+                      data-segment-kind={getRangeSegmentKind(
+                        shootingPeriodSegment.startsRange,
+                        shootingPeriodSegment.endsRange
+                      )}
+                    />
+                  ) : null}
+                  {previewSegment ? (
+                    <span
+                      className={styles.dragRangeRibbon}
+                      style={{
+                        gridColumn: `${previewSegment.startColumn} / ${previewSegment.endColumn + 1}`
+                      }}
+                      data-segment-start={previewSegment.startsSegment}
+                      data-segment-end={previewSegment.endsSegment}
+                      data-segment-kind={getRangeSegmentKind(
+                        previewSegment.startsRange,
+                        previewSegment.endsRange
+                      )}
+                    />
+                  ) : null}
                 </div>
-              ))}
+
+                <div className={styles.eventLayer} role="presentation">
+                  {visibleSegments.map((segment) => {
+                    const calendarEvent = segment.event;
+                    return (
+                      <button
+                        key={segment.key}
+                        type="button"
+                        className={styles.eventBar}
+                        style={{
+                          "--event-color": getEventColor(calendarEvent.colorKey),
+                          gridColumn: `${segment.startColumn} / ${segment.endColumn + 1}`,
+                          gridRow: segment.lane + 1
+                        } as CSSProperties}
+                        data-calendar-interactive="true"
+                        data-segment-start={segment.isEventStart}
+                        data-segment-end={segment.isEventEnd}
+                        data-segment-kind={getRangeSegmentKind(segment.isEventStart, segment.isEventEnd)}
+                        data-week-start={segment.startsAtWeekBoundary}
+                        data-week-end={segment.endsAtWeekBoundary}
+                        aria-label={buildEventAccessibleLabel(calendarEvent)}
+                        onPointerDown={(pointerEvent) => {
+                          lastPointerTypeRef.current = pointerEvent.pointerType;
+                          pointerEvent.stopPropagation();
+                        }}
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          openEventEditor(
+                            calendarEvent,
+                            segment.startDate,
+                            clickEvent.currentTarget,
+                            resolveEditorPresentation(clickEvent.detail === 0 ? "keyboard" : lastPointerTypeRef.current)
+                          );
+                        }}
+                      >
+                        <span className={styles.eventBarLabel}>
+                          {segment.isEventStart && calendarEvent.startTime ? `${calendarEvent.startTime} ` : ""}
+                          {calendarEvent.title}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                </div>
+              );
+              })}
               </div>
             </div>
           </div>
         </div>
 
-        <aside className={styles.detailPanel} aria-live="polite" aria-label="선택 날짜 정보">
+        <aside
+          className={styles.detailPanel}
+          aria-live="polite"
+          aria-label="선택 날짜 정보"
+          data-project-calendar-detail
+        >
           <div key={selectedDate} className={styles.detailContent}>
             <header className={styles.detailHeader}>
               <h3 className={styles.detailTitle}>{formatKoreanDate(selectedDate)}</h3>
@@ -515,13 +660,19 @@ export function ProjectMonthlyCalendar({
                   type="button"
                   className={styles.detailEventButton}
                   style={{ "--event-color": getEventColor(calendarEvent.colorKey) } as CSSProperties}
-                  onClick={(clickEvent) => openEventEditor(
-                    calendarEvent,
-                    selectedDate,
-                    clickEvent.clientX,
-                    clickEvent.clientY,
-                    clickEvent.currentTarget
-                  )}
+                  onPointerDown={(pointerEvent) => {
+                    lastPointerTypeRef.current = pointerEvent.pointerType;
+                    pointerEvent.stopPropagation();
+                  }}
+                  onClick={(clickEvent) => {
+                    clickEvent.stopPropagation();
+                    openEventEditor(
+                      calendarEvent,
+                      selectedDate,
+                      clickEvent.currentTarget,
+                      resolveEditorPresentation(clickEvent.detail === 0 ? "keyboard" : lastPointerTypeRef.current)
+                    );
+                  }}
                 >
                   <span className={styles.detailEventIndicator} aria-hidden />
                   <span className={styles.detailEventText}>
@@ -546,10 +697,12 @@ export function ProjectMonthlyCalendar({
 
       {editor ? (
         <ProjectCalendarEventEditor
+          key={`${editor.event?.id ?? "new"}:${editor.startDate}:${editor.endDate}:${editor.presentation}`}
           event={editor.event}
           initialStartDate={editor.startDate}
           initialEndDate={editor.endDate}
-          anchor={editor.anchor}
+          anchorElement={editor.anchorElement}
+          presentation={editor.presentation}
           readOnly={Boolean(editor.event) && !canEditEvents}
           mutationPending={mutationPending}
           onCreate={onCreateEvent}
@@ -582,12 +735,101 @@ function getEventColor(colorKey: ProjectCalendarEvent["colorKey"]) {
   return CALENDAR_EVENT_COLORS.find((color) => color.key === colorKey)?.hex ?? "#45F5D2";
 }
 
-function buildEditorAnchor(clientX: number, clientY: number) {
-  if (typeof window === "undefined") return { x: 12, y: 12 };
+function resolveEditorPresentation(pointerType: string): EditorPresentation {
+  if (pointerType === "touch") return "sheet";
+  if (typeof window !== "undefined" && window.innerWidth <= 600) return "sheet";
+  return "popover";
+}
+
+function buildVisibleEventLayout(
+  events: readonly ProjectCalendarEvent[],
+  monthDays: ReadonlyArray<{ key: string }>,
+  visibleRange: { startDate: string; endDate: string } | null
+) {
+  const laneByEventId = new Map<string, number>();
+  const segmentsByWeek = new Map<number, VisibleEventSegment[]>();
+  if (!visibleRange) return { laneByEventId, segmentsByWeek };
+
+  const normalizedEvents = events.flatMap((event) => {
+    const range = normalizeUnorderedDateRange(event.startDate, event.endDate);
+    if (!range || range.endDate < visibleRange.startDate || range.startDate > visibleRange.endDate) return [];
+    return [{ event, range }];
+  }).sort((first, second) => (
+    first.range.startDate.localeCompare(second.range.startDate)
+    || first.range.endDate.localeCompare(second.range.endDate)
+    || compareCalendarEvents(first.event, second.event)
+  ));
+  const laneRanges: Array<Array<{ startDate: string; endDate: string }>> = [];
+
+  normalizedEvents.forEach(({ event, range }) => {
+    let lane = laneRanges.findIndex((ranges) => ranges.every((candidate) => (
+      candidate.endDate < range.startDate || range.endDate < candidate.startDate
+    )));
+    if (lane < 0) {
+      lane = laneRanges.length;
+      laneRanges.push([]);
+    }
+    laneRanges[lane].push(range);
+    laneByEventId.set(event.id, lane);
+  });
+
+  const indexByDate = new Map(monthDays.map((day, index) => [day.key, index]));
+  normalizedEvents.forEach(({ event }) => {
+    const lane = laneByEventId.get(event.id) ?? MAX_EVENT_LANES;
+    if (lane >= MAX_EVENT_LANES) return;
+    buildCalendarEventSegments(event, visibleRange).forEach((segment) => {
+      const startIndex = indexByDate.get(segment.startDate);
+      const endIndex = indexByDate.get(segment.endDate);
+      if (startIndex === undefined || endIndex === undefined) return;
+      const weekIndex = Math.floor(startIndex / 7);
+      const visibleSegment: VisibleEventSegment = {
+        ...segment,
+        lane,
+        startColumn: startIndex % 7 + 1,
+        endColumn: endIndex % 7 + 1
+      };
+      segmentsByWeek.set(weekIndex, [...(segmentsByWeek.get(weekIndex) ?? []), visibleSegment]);
+    });
+  });
+  segmentsByWeek.forEach((segments) => segments.sort((first, second) => (
+    first.lane - second.lane
+    || first.startColumn - second.startColumn
+    || compareCalendarEvents(first.event, second.event)
+  )));
+
+  return { laneByEventId, segmentsByWeek };
+}
+
+function buildVisibleWeekRange(
+  range: { startDate: string; endDate: string } | null,
+  weekDays: ReadonlyArray<{ key: string }>
+): VisibleWeekRange | null {
+  const normalized = range && normalizeUnorderedDateRange(range.startDate, range.endDate);
+  const weekStart = weekDays[0]?.key;
+  const weekEnd = weekDays.at(-1)?.key;
+  if (!normalized || !weekStart || !weekEnd || normalized.endDate < weekStart || normalized.startDate > weekEnd) {
+    return null;
+  }
+  const visibleStart = normalized.startDate > weekStart ? normalized.startDate : weekStart;
+  const visibleEnd = normalized.endDate < weekEnd ? normalized.endDate : weekEnd;
+  const startColumn = weekDays.findIndex((day) => day.key === visibleStart) + 1;
+  const endColumn = weekDays.findIndex((day) => day.key === visibleEnd) + 1;
+  if (startColumn < 1 || endColumn < 1) return null;
   return {
-    x: Math.max(12, Math.min(clientX + 10, window.innerWidth - 372)),
-    y: Math.max(12, Math.min(clientY + 10, window.innerHeight - 570))
+    startColumn,
+    endColumn,
+    startsRange: visibleStart === normalized.startDate,
+    endsRange: visibleEnd === normalized.endDate,
+    startsSegment: visibleStart === normalized.startDate || startColumn === 1,
+    endsSegment: visibleEnd === normalized.endDate || endColumn === 7
   };
+}
+
+function getRangeSegmentKind(startsRange: boolean, endsRange: boolean) {
+  if (startsRange && endsRange) return "single";
+  if (startsRange) return "start";
+  if (endsRange) return "end";
+  return "middle";
 }
 
 function formatKoreanDate(dateKey: string) {
