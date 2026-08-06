@@ -127,7 +127,7 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
   return { ...readLocalSceneList(projectId), actorRoles: [] };
 }
 
-/** 저장 버튼을 누른 시점의 씬 행과 시나리오 참고만 한 번에 반영합니다. */
+/** 저장 버튼을 누른 시점의 씬 행과 메모만 한 번에 반영합니다. */
 export async function saveProjectSceneList(
   projectId: string,
   sceneList: ProjectSceneListSaveInput

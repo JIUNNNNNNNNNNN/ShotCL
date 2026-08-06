@@ -628,7 +628,20 @@ export default function ProjectSceneListPage() {
     scenarioReference
   ]);
 
-  if (isLoading || loadedProjectId !== projectId) return <PageLoader />;
+  if (isLoading || loadedProjectId !== projectId) {
+    return (
+      <div
+        data-scene-list-mode="loading"
+        className={viewportMode === "editor"
+          ? "light-workspace scene-workspace workspace-canvas"
+          : viewportMode === "portrait"
+            ? "scene-list-portrait-dark scene-list-portrait-workspace"
+            : "scene-list-responsive-pending"}
+      >
+        <PageLoader />
+      </div>
+    );
+  }
 
   if (!project) {
     return (
@@ -645,7 +658,13 @@ export default function ProjectSceneListPage() {
   }
 
   return (
-    <section className="mx-auto w-full min-w-0 max-w-[1480px] pb-20">
+    <section
+      data-scene-list-page
+      data-scene-list-viewport={viewportMode ?? "pending"}
+      className={`mx-auto w-full min-w-0 max-w-[1480px] pb-20 ${
+        viewportMode === "portrait" ? "scene-list-page--portrait" : ""
+      }`}
+    >
       <section className="border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
           <div className="min-w-0">
@@ -687,11 +706,17 @@ export default function ProjectSceneListPage() {
           </p>
         ) : null}
 
-        <div className="light-workspace scene-workspace workspace-canvas min-w-0 max-w-full">
+        <div className={`min-w-0 max-w-full ${
+          viewportMode === "editor"
+            ? "light-workspace scene-workspace workspace-canvas"
+            : viewportMode === "portrait"
+              ? "scene-list-portrait-dark scene-list-portrait-workspace"
+              : "scene-list-responsive-pending"
+        }`}>
           {viewportMode === null ? (
             <div
               data-scene-list-mode="pending"
-              className="grid min-h-40 w-full place-items-center border-b border-[#d2d2d2] bg-[#f5f5f5]"
+              className="scene-list-pending-state grid min-h-40 w-full place-items-center border-b"
               role="status"
               aria-label="씬리스트 화면 준비 중"
             >
@@ -743,7 +768,7 @@ export default function ProjectSceneListPage() {
       {viewportMode === "editor" && (canEdit || scenarioReference) ? (
         <details className="light-workspace scene-workspace workspace-surface workspace-border mt-3 overflow-hidden border">
           <summary className="workspace-button cursor-pointer border-0 px-3 py-2 text-sm font-bold">
-            시나리오 참고
+            메모
           </summary>
           <div className="workspace-border border-t p-3">
             {canEdit ? (
@@ -755,7 +780,8 @@ export default function ProjectSceneListPage() {
                   setIsDirty(true);
                 }}
                 rows={7}
-                aria-label="시나리오 참고"
+                aria-label="메모"
+                placeholder="메모"
                 className="workspace-control w-full resize-y border px-3 py-2 text-sm font-medium leading-6 outline-none disabled:cursor-not-allowed disabled:opacity-60"
               />
             ) : (
@@ -768,11 +794,11 @@ export default function ProjectSceneListPage() {
       ) : null}
 
       {viewportMode === "portrait" && scenarioReference ? (
-        <details className="mt-3 border border-field-divider bg-field-section text-field-text">
+        <details className="scene-list-portrait-dark scene-list-portrait-reference mt-3 overflow-hidden border">
           <summary className="cursor-pointer border-0 px-3 py-2 text-center text-sm font-bold">
             메모
           </summary>
-          <p className="min-w-0 whitespace-pre-wrap border-t border-field-divider p-3 text-center text-[13px] font-medium leading-[1.5] text-field-text [overflow-wrap:anywhere]">
+          <p className="min-w-0 whitespace-pre-wrap border-t p-3 text-left text-[13px] font-medium leading-[1.6] [overflow-wrap:anywhere]">
             {scenarioReference}
           </p>
         </details>

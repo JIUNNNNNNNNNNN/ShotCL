@@ -1010,7 +1010,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
       </td>
       <EditableTextCell
         value={item.props}
-        ariaLabel={`${item.sceneNo || index + 1} Scene Memo`}
+        ariaLabel={`${item.sceneNo || index + 1} Scene 메모`}
         editing={isEditing("memo")}
         canEdit={canEdit}
         multiline
@@ -1266,7 +1266,7 @@ function SceneTableHeaderRow({
         />
       ))}
       <SceneTableHeader label="Cut" description="총 컷수" />
-      <SceneTableHeader label="Memo" description="소품&특이사항" />
+      <SceneTableHeader label="메모" description="소품&특이사항" />
     </tr>
   );
 }

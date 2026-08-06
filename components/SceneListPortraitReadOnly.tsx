@@ -81,14 +81,14 @@ export function SceneListPortraitReadOnly({
   return (
     <div
       data-scene-list-mode="portrait"
-      className="box-border w-full max-w-full min-w-0 overflow-x-hidden bg-[#f5f5f5] text-[#151515]"
+      className="scene-list-portrait-content box-border w-full max-w-full min-w-0 overflow-x-hidden"
       role="region"
-      aria-label="모바일 세로 읽기 전용 씬리스트"
+      aria-label="좁은 화면 읽기 전용 씬리스트"
       aria-readonly="true"
       style={{ touchAction: "pan-y", WebkitTouchCallout: "none" } as CSSProperties}
     >
-      <p className="border-b border-[#d2d2d2] bg-[#eeeeee] px-3 py-1.5 text-center text-[11px] font-semibold leading-[1.4] text-[#666]">
-        세로 화면에서는 읽기만 가능합니다. 수정은 넓은 화면에서 진행하세요.
+      <p className="scene-list-portrait-notice border-b px-3 py-1.5 text-center text-[11px] font-semibold leading-[1.4]">
+        좁은 화면에서는 읽기만 가능합니다. 수정은 넓은 화면에서 진행하세요.
       </p>
 
       {rows.length > 0 ? (
@@ -105,7 +105,7 @@ export function SceneListPortraitReadOnly({
           ))}
         </div>
       ) : (
-        <p className="border-b border-[#d2d2d2] bg-white px-3 py-10 text-center text-[13px] font-semibold leading-[1.5] text-[#777]">
+        <p className="scene-list-portrait-empty border-b px-3 py-10 text-center text-[13px] font-semibold leading-[1.5]">
           등록된 씬이 없습니다.
         </p>
       )}
@@ -130,36 +130,60 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
   const sceneNumber = item.sceneNo || row.index + 1;
   const bodyId = `scene-portrait-body-${item.id}`;
   const actors = isExpanded ? getPortraitActors(item, actorRoles) : [];
-  const locationStyle = isExpanded
+  const hasLocation = Boolean(
+    row.location.contextValue.trim() || row.subLocation.contextValue.trim()
+  );
+  const semanticLocationStyle = hasLocation
     ? getLocationStyle({
         mainLocation: row.location.contextValue,
         subLocation: row.subLocation.contextValue
       }, locationStyles)
     : undefined;
+  const locationStyle = isExpanded ? semanticLocationStyle : undefined;
+  const headerLocation = row.location.contextValue.trim()
+    || row.subLocation.contextValue.trim();
+  const headerTiming = [
+    row.day.contextValue.trim(),
+    row.time.contextValue.trim(),
+    row.intExt.contextValue.trim()
+  ].filter(Boolean).join(" · ");
 
   return (
     <article
       role="listitem"
       data-scene-portrait-row-id={item.id}
       data-expanded={isExpanded ? "true" : "false"}
-      className={`box-border w-full max-w-full min-w-0 border bg-white ${
-        isExpanded ? "border-[#111111]" : "border-[#aeb3ae]"
-      }`}
+      className="scene-list-portrait-card box-border w-full max-w-full min-w-0 overflow-hidden border"
     >
       <button
         type="button"
         data-scene-portrait-toggle={item.id}
-        className={`grid min-h-12 w-full min-w-0 touch-pan-y grid-cols-[1.5rem_minmax(0,1fr)_1.5rem] items-center border-0 px-3 py-2 text-center ${
-          isExpanded ? "border-b border-[#111111] bg-[#d5ff40] text-[#111111]" : "bg-[#e7e7e7] text-[#252525]"
-        }`}
+        className="scene-list-portrait-card__toggle grid min-h-12 w-full min-w-0 touch-pan-y grid-cols-[1.5rem_minmax(0,1fr)_1.5rem] items-center border-0 px-3 py-2 text-center"
         aria-expanded={isExpanded}
         aria-controls={bodyId}
-        aria-label={`S#${sceneNumber} ${isExpanded ? "접기" : "펼치기"}`}
+        aria-label={`S#${sceneNumber}${headerLocation ? ` ${headerLocation}` : ""}${headerTiming ? ` ${headerTiming}` : ""} ${isExpanded ? "접기" : "펼치기"}`}
         onClick={() => onToggle(item.id)}
       >
         <span aria-hidden />
-        <span className="min-w-0 text-center text-[16px] font-black leading-[1.4] [overflow-wrap:anywhere]">
-          S#{sceneNumber}
+        <span className="flex min-w-0 flex-col items-center justify-center gap-0.5 text-center [overflow-wrap:anywhere]">
+          <span className="text-[16px] font-black leading-[1.35]">S#{sceneNumber}</span>
+          {headerLocation || headerTiming ? (
+            <span className="flex max-w-full min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-semibold leading-[1.35] text-field-subtle">
+              {headerLocation ? (
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                  {semanticLocationStyle ? (
+                    <span
+                      aria-hidden
+                      className="h-1.5 w-1.5 shrink-0 rounded-[1px] border border-black/20"
+                      style={{ backgroundColor: semanticLocationStyle.background }}
+                    />
+                  ) : null}
+                  <span className="truncate">{headerLocation}</span>
+                </span>
+              ) : null}
+              {headerTiming ? <span>{headerTiming}</span> : null}
+            </span>
+          ) : null}
         </span>
         <span className="text-center text-[20px] font-medium leading-none" aria-hidden>
           {isExpanded ? "−" : "+"}
@@ -172,12 +196,12 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
         data-expanded={isExpanded ? "true" : "false"}
         aria-hidden={!isExpanded}
         inert={!isExpanded}
-        className="ui-accordion min-w-0"
+        className="scene-list-portrait-card__body ui-accordion min-w-0"
       >
         <div className="ui-accordion-inner min-h-0">
-        <div className="min-w-0">
+          <div className="min-w-0">
           <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)]">
-            <PortraitField label="Scene" className="border-r border-[#d2d2d2]" valueClassName="text-[16px] font-black leading-[1.4]">
+            <PortraitField label="Scene" className="border-r border-field-border" valueClassName="text-[16px] font-black leading-[1.4]">
               {sceneNumber}
             </PortraitField>
             {row.locationPairMerged ? (
@@ -190,7 +214,7 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
               </PortraitField>
             ) : (
               <>
-                <PortraitField label="Location" className="border-r border-[#d2d2d2]" valueStyle={locationStyle}>
+                <PortraitField label="Location" className="border-r border-field-border" valueStyle={locationStyle}>
                   {row.location.contextValue}
                 </PortraitField>
                 <PortraitField label="Sub-Location" valueStyle={locationStyle}>
@@ -200,11 +224,11 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
             )}
           </div>
 
-          <div className="grid min-w-0 grid-cols-3 border-t border-[#d2d2d2]">
-            <PortraitField label="Day" className="border-r border-[#d2d2d2]">
+          <div className="grid min-w-0 grid-cols-3 border-t border-field-border">
+            <PortraitField label="Day" className="border-r border-field-border">
               {row.day.contextValue}
             </PortraitField>
-            <PortraitField label="Time · D/N" className="border-r border-[#d2d2d2]">
+            <PortraitField label="Time · D/N" className="border-r border-field-border">
               {row.time.contextValue}
             </PortraitField>
             <PortraitField label="Int/Ext">
@@ -212,21 +236,22 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
             </PortraitField>
           </div>
 
-          <PortraitField label="Content" className="border-t border-[#d2d2d2]">
+          <PortraitField label="Content" className="border-t border-field-border">
             {item.sceneContent}
           </PortraitField>
 
-          <PortraitField label="Characters" className="border-t border-[#d2d2d2]">
+          <PortraitField label="Characters" className="border-t border-field-border">
             <span className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-center gap-1 text-center">
               {actors.map(({ role, paletteIndex, state }) => {
                 const actorStyle = getActorStyle(paletteIndex);
                 return (
                   <span
                     key={role}
-                    className="box-border inline-flex max-w-full items-center justify-center border border-[#d2d2d2] px-1.5 py-1 text-center text-[13px] font-bold leading-[1.4] [overflow-wrap:anywhere]"
+                    data-actor-mode={state.mode}
+                    className="scene-list-portrait-actor box-border inline-flex max-w-full items-center justify-center border px-1.5 py-1 text-center text-[13px] font-bold leading-[1.4] [overflow-wrap:anywhere]"
                     style={state.mode === "color"
                       ? { backgroundColor: actorStyle.background, color: actorStyle.color }
-                      : { backgroundColor: "#fff", color: "#151515" }}
+                      : undefined}
                   >
                     {state.mode === "text" ? `${role}: ${state.text}` : role}
                   </span>
@@ -234,21 +259,28 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
               })}
             </span>
             {item.characterNotes ? (
-              <span className="mt-1.5 block w-full min-w-0 whitespace-pre-wrap border-t border-[#e1e1e1] pt-1.5 text-center text-[13px] font-medium leading-[1.5] text-[#555] [overflow-wrap:anywhere]">
+              <span className="scene-list-portrait-character-notes mt-1.5 block w-full min-w-0 whitespace-pre-wrap border-t pt-1.5 text-center text-[13px] font-medium leading-[1.5] [overflow-wrap:anywhere]">
                 {item.characterNotes}
               </span>
             ) : null}
           </PortraitField>
 
           <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)]">
-            <PortraitField label="Cut" className="border-t border-[#d2d2d2]" valueClassName="text-[14px] font-black leading-[1.4]">
+            <PortraitField label="Cut" className="border-t border-field-border" valueClassName="text-[14px] font-black leading-[1.4]">
               {item.cutCount == null ? "" : item.cutCount}
             </PortraitField>
-            <PortraitField label="메모" tone="dark" className="border border-[rgba(255,255,255,0.20)]">
-              {item.props}
+            <PortraitField
+              label="메모"
+              align="left"
+              className="border-l border-t border-field-divider"
+              valueClassName="text-[13px] font-medium leading-[1.6]"
+            >
+              <span className={item.props.trim() ? "" : "text-field-muted"}>
+                {item.props || "메모 없음"}
+              </span>
             </PortraitField>
           </div>
-        </div>
+          </div>
         </div>
       </div>
     </article>
@@ -261,35 +293,31 @@ function PortraitField({
   className = "",
   valueClassName = "text-[13px] font-semibold leading-[1.5]",
   valueStyle,
-  tone = "light"
+  align = "center"
 }: {
   label: string;
   children: ReactNode;
   className?: string;
   valueClassName?: string;
   valueStyle?: CSSProperties;
-  tone?: "light" | "dark";
+  align?: "center" | "left";
 }) {
-  const isDark = tone === "dark";
+  const isMemo = label === "메모";
   return (
     <div
       role="group"
-      data-scene-portrait-memo={isDark ? "true" : undefined}
-      className={`box-border flex min-w-0 flex-col text-center ${
-        isDark ? "bg-field-section text-field-text" : ""
-      } ${className}`}
+      data-scene-portrait-memo={isMemo ? "true" : undefined}
+      className={`scene-list-portrait-field box-border flex min-w-0 flex-col text-center ${className}`}
       aria-label={label}
     >
-      <span className={`flex min-h-7 items-center justify-center px-2 py-1 text-center text-[11px] font-bold leading-[1.4] ${
-        isDark
-          ? "border-b border-field-divider bg-field-section text-field-text"
-          : "bg-[#eeeeee] text-[#555]"
-      }`}>
+      <span className="scene-list-portrait-field__label flex min-h-7 items-center justify-center border-b px-2 py-1 text-center text-[11px] font-bold leading-[1.4]">
         {label}
       </span>
       <span
-        className={`flex min-h-9 min-w-0 flex-col items-center justify-center whitespace-pre-wrap px-2 py-2 text-center [overflow-wrap:anywhere] ${
-          isDark ? "bg-field-section text-field-text" : ""
+        className={`scene-list-portrait-field__value flex min-h-9 min-w-0 flex-col whitespace-pre-wrap px-2 py-2 [overflow-wrap:anywhere] ${
+          align === "left"
+            ? "items-start justify-center text-left"
+            : "items-center justify-center text-center"
         } ${valueClassName}`}
         style={valueStyle}
       >
