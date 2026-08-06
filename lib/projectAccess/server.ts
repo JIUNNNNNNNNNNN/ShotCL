@@ -42,7 +42,8 @@ export async function burnPasscodeVerification(passcode: string) {
   await Promise.all([hashPasscode(passcode), hashPasscode(passcode)]);
 }
 
-function hashSessionToken(token: string) {
+/** 브라우저 원본 session token은 DB에 저장하지 않고 SHA-256 hash만 사용합니다. */
+export function hashProjectSessionToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
@@ -93,9 +94,11 @@ export function getSessionToken(request: NextRequest) {
   return request.cookies.get(PROJECT_SESSION_COOKIE)?.value ?? null;
 }
 
-export function ensureSessionToken(request: NextRequest, response: NextResponse) {
-  const existing = getSessionToken(request);
-  const token = existing || randomBytes(32).toString("base64url");
+export function createProjectSessionToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function setProjectSessionCookie(response: NextResponse, token: string) {
   response.cookies.set(PROJECT_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -103,6 +106,12 @@ export function ensureSessionToken(request: NextRequest, response: NextResponse)
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS
   });
+}
+
+export function ensureSessionToken(request: NextRequest, response: NextResponse) {
+  const existing = getSessionToken(request);
+  const token = existing || createProjectSessionToken();
+  setProjectSessionCookie(response, token);
   return token;
 }
 
@@ -112,7 +121,7 @@ export async function saveAccessGrant(token: string, projectId: string, role: Sh
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000).toISOString();
   const { error } = await supabase.from("project_access_sessions").upsert(
     {
-      browser_token_hash: hashSessionToken(token),
+      browser_token_hash: hashProjectSessionToken(token),
       project_id: databaseProjectId,
       role,
       joined_at: new Date().toISOString(),
@@ -135,7 +144,7 @@ export async function getAccessGrantByToken(token: string | null, projectId: str
   const { data, error } = await supabase
     .from("project_access_sessions")
     .select("project_id,role,joined_at,expires_at,projects!inner(name,share_enabled)")
-    .eq("browser_token_hash", hashSessionToken(token))
+    .eq("browser_token_hash", hashProjectSessionToken(token))
     .eq("project_id", databaseProjectId)
     .gt("expires_at", new Date().toISOString())
     .maybeSingle();
@@ -168,7 +177,7 @@ export async function listAccessGrants(request: NextRequest) {
   const { data, error } = await supabase
     .from("project_access_sessions")
     .select("project_id,role,joined_at,expires_at,projects!inner(id,name,created_at,share_enabled)")
-    .eq("browser_token_hash", hashSessionToken(token))
+    .eq("browser_token_hash", hashProjectSessionToken(token))
     .gt("expires_at", new Date().toISOString())
     .eq("projects.share_enabled", true)
     .order("joined_at", { ascending: false });

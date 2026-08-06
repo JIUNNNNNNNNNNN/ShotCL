@@ -33,9 +33,11 @@ export function ProjectGuideMenu({
 
       <ProjectShootingCalendar
         projectId={projectId}
+        projectName={projectName}
         calendarInfo={calendarInfo}
         dailyPlans={dailyPlans}
         canManageEvents={role !== "progress"}
+        canManageInvites={role === "admin"}
       />
     </section>
   );

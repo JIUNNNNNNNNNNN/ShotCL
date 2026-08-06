@@ -6,6 +6,7 @@ import {
   type ProjectCalendarEventInput
 } from "@/components/project-calendar";
 import { SectionLoader } from "@/components/PixelDogLoader";
+import { ProjectStaffInviteCard } from "@/components/project-invites/ProjectStaffInviteCard";
 import {
   createProjectCalendarEvent,
   deleteProjectCalendarEvent,
@@ -19,9 +20,11 @@ import type { DailyPlan, ProjectCalendarInfo } from "@/lib/types";
 
 type ProjectShootingCalendarProps = {
   projectId: string;
+  projectName: string;
   calendarInfo?: ProjectCalendarInfo | null;
   dailyPlans: ReadonlyArray<Pick<DailyPlan, "id" | "shootingDate" | "episode">>;
   canManageEvents: boolean;
+  canManageInvites: boolean;
 };
 
 const BACKGROUND_REFRESH_INTERVAL_MS = 10_000;
@@ -32,9 +35,11 @@ const BACKGROUND_REFRESH_INTERVAL_MS = 10_000;
  */
 export function ProjectShootingCalendar({
   projectId,
+  projectName,
   calendarInfo,
   dailyPlans,
-  canManageEvents
+  canManageEvents,
+  canManageInvites
 }: ProjectShootingCalendarProps) {
   const [events, setEvents] = useState<ProjectCalendarEvent[]>([]);
   const [serverCanEdit, setServerCanEdit] = useState(canManageEvents);
@@ -173,6 +178,9 @@ export function ProjectShootingCalendar({
         onCreateEvent={createEvent}
         onUpdateEvent={updateEvent}
         onDeleteEvent={deleteEvent}
+        detailFooter={canManageInvites ? (
+          <ProjectStaffInviteCard projectId={projectId} projectName={projectName} />
+        ) : undefined}
       />
     </section>
   );

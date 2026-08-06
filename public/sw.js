@@ -1,4 +1,4 @@
-const CACHE_NAME = "today-storyboard-progress-v1";
+const CACHE_NAME = "today-storyboard-progress-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -18,8 +18,15 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+  const url = new URL(request.url);
 
-  if (request.method !== "GET" || request.mode === "navigate") {
+  if (
+    request.method !== "GET"
+    || request.mode === "navigate"
+    || url.origin !== self.location.origin
+    || url.pathname.startsWith("/api/")
+    || url.pathname.startsWith("/invite/")
+  ) {
     return;
   }
 
@@ -27,7 +34,14 @@ self.addEventListener("fetch", (event) => {
     caches.open(CACHE_NAME).then(async (cache) => {
       try {
         const response = await fetch(request);
-        cache.put(request, response.clone());
+        const cacheControl = response.headers.get("cache-control")?.toLowerCase() ?? "";
+        if (
+          response.ok
+          && !cacheControl.includes("no-store")
+          && !cacheControl.includes("private")
+        ) {
+          await cache.put(request, response.clone());
+        }
         return response;
       } catch {
         return cache.match(request);

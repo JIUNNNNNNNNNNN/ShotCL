@@ -15,7 +15,8 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode
 } from "react";
 import {
   CALENDAR_EVENT_COLORS,
@@ -93,6 +94,7 @@ export type ProjectMonthlyCalendarProps = {
   onCreateEvent?: ProjectCalendarEventMutation;
   onUpdateEvent?: ProjectCalendarEventUpdate;
   onDeleteEvent?: ProjectCalendarEventDelete;
+  detailFooter?: ReactNode;
 };
 
 /**
@@ -108,7 +110,8 @@ export function ProjectMonthlyCalendar({
   mutationPending = false,
   onCreateEvent,
   onUpdateEvent,
-  onDeleteEvent
+  onDeleteEvent,
+  detailFooter
 }: ProjectMonthlyCalendarProps) {
   const normalizedShootingStart = normalizeDateOnly(shootingStartDate);
   const normalizedShootingEnd = normalizeDateOnly(shootingEndDate);
@@ -619,13 +622,14 @@ export function ProjectMonthlyCalendar({
           </div>
         </div>
 
-        <aside
-          className={styles.detailPanel}
-          aria-live="polite"
-          aria-label="선택 날짜 정보"
-          data-project-calendar-detail
-        >
-          <div key={selectedDate} className={styles.detailContent}>
+        <div className={styles.detailColumn}>
+          <aside
+            className={styles.detailPanel}
+            aria-live="polite"
+            aria-label="선택 날짜 정보"
+            data-project-calendar-detail
+          >
+            <div key={selectedDate} className={styles.detailContent}>
             <header className={styles.detailHeader}>
               <h3 className={styles.detailTitle}>{formatKoreanDate(selectedDate)}</h3>
               <div className={styles.detailBadges}>
@@ -691,8 +695,10 @@ export function ProjectMonthlyCalendar({
                 <p className={styles.detailEmpty}>등록된 일정이 없습니다.</p>
               )}
             </section>
-          </div>
-        </aside>
+            </div>
+          </aside>
+          {detailFooter ? <div className={styles.detailFooter}>{detailFooter}</div> : null}
+        </div>
       </div>
 
       {editor ? (
