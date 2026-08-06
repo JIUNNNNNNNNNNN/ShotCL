@@ -1,143 +1,183 @@
 "use client";
 
-import Link from "next/link";
-import { CalendarDays } from "lucide-react";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  buildCalendarMonthDays,
-  buildProjectCalendarModel,
-  formatCalendarPeriod,
-  getLocalTodayDateKey
-} from "@/lib/projectCalendar";
+  ProjectMonthlyCalendar,
+  type ProjectCalendarEventInput
+} from "@/components/project-calendar";
+import { SectionLoader } from "@/components/PixelDogLoader";
+import {
+  createProjectCalendarEvent,
+  deleteProjectCalendarEvent,
+  listProjectCalendarEvents,
+  updateProjectCalendarEvent
+} from "@/lib/data/projectCalendarEvents";
+import { formatCalendarEpisodeLabel } from "@/lib/projectCalendar";
+import type { ProjectCalendarEvent } from "@/lib/projectCalendarEvents";
+import { buildDailyPlanRoundHref } from "@/lib/projectNavigation";
 import type { DailyPlan, ProjectCalendarInfo } from "@/lib/types";
-
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
 
 type ProjectShootingCalendarProps = {
   projectId: string;
   calendarInfo?: ProjectCalendarInfo | null;
-  dailyPlans: ReadonlyArray<Pick<DailyPlan, "shootingDate">>;
-  canEditBasicInfo: boolean;
+  dailyPlans: ReadonlyArray<Pick<DailyPlan, "id" | "shootingDate" | "episode">>;
+  canManageEvents: boolean;
 };
 
-/** 프로젝트 기본정보 기간과 저장된 일촬표 날짜를 함께 보여주는 읽기 전용 달력입니다. */
+const BACKGROUND_REFRESH_INTERVAL_MS = 10_000;
+
+/**
+ * 기본정보 촬영기간·실제 일촬표·사용자 공유 일정을 서로 다른 source로 유지한 채
+ * 프로젝트 Home의 한 달 월간 달력에 합성합니다.
+ */
 export function ProjectShootingCalendar({
   projectId,
   calendarInfo,
   dailyPlans,
-  canEditBasicInfo
+  canManageEvents
 }: ProjectShootingCalendarProps) {
-  const calendar = useMemo(
-    () => buildProjectCalendarModel({ calendarInfo, dailyPlans }),
-    [calendarInfo, dailyPlans]
-  );
-  const [todayKey, setTodayKey] = useState("");
-  useEffect(() => setTodayKey(getLocalTodayDateKey()), []);
-  const desktopColumns = Math.max(1, Math.min(3, calendar.months.length));
-  const tabletColumns = Math.max(1, Math.min(2, calendar.months.length));
+  const [events, setEvents] = useState<ProjectCalendarEvent[]>([]);
+  const [serverCanEdit, setServerCanEdit] = useState(canManageEvents);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(true);
+  const [isMutating, setIsMutating] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const loadVersionRef = useRef(0);
 
-  if (calendar.months.length === 0) {
-    return (
-      <section className="project-calendar-empty ui-motion-surface" aria-labelledby="project-calendar-empty-title">
-        <CalendarDays className="h-5 w-5 shrink-0 text-field-muted" aria-hidden />
-        <div className="min-w-0 flex-1 text-center">
-          <h2 id="project-calendar-empty-title" className="text-sm font-bold text-field-text">
-            촬영일이 아직 설정되지 않았습니다.
-          </h2>
-          {canEditBasicInfo ? (
-            <Link
-              href={`/projects/${encodeURIComponent(projectId)}/basic-info`}
-              className="mt-2 inline-flex min-h-9 items-center border border-field-border px-3 py-1.5 text-xs font-bold text-field-subtle transition-colors hover:border-field-primary/55 hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-            >
-              기본정보 설정
-            </Link>
-          ) : null}
-        </div>
-      </section>
-    );
+  const calendarDailyPlans = useMemo(() => dailyPlans.map((plan) => ({
+    id: plan.id,
+    shootingDate: plan.shootingDate,
+    episodeLabel: formatCalendarEpisodeLabel(plan.episode),
+    href: buildDailyPlanRoundHref(projectId, plan.id)
+  })), [dailyPlans, projectId]);
+
+  useEffect(() => {
+    let disposed = false;
+    let requestInFlight = false;
+    let lastLoadedAt = 0;
+    let backgroundRefreshEnabled = false;
+
+    setEvents([]);
+    setServerCanEdit(canManageEvents);
+    setIsLoadingEvents(true);
+    setSyncMessage("");
+
+    async function loadEvents(background = false) {
+      if (requestInFlight) return;
+      const now = Date.now();
+      if (background && now - lastLoadedAt < BACKGROUND_REFRESH_INTERVAL_MS) return;
+      requestInFlight = true;
+      const version = loadVersionRef.current + 1;
+      loadVersionRef.current = version;
+      try {
+        const result = await listProjectCalendarEvents(projectId);
+        if (disposed || loadVersionRef.current !== version) return;
+        setEvents(result.events);
+        setServerCanEdit(result.canEdit);
+        setSyncMessage("");
+        lastLoadedAt = Date.now();
+        backgroundRefreshEnabled = true;
+      } catch (error) {
+        if (disposed || loadVersionRef.current !== version) return;
+        backgroundRefreshEnabled = false;
+        setSyncMessage(error instanceof Error ? error.message : "프로젝트 일정을 불러오지 못했습니다.");
+      } finally {
+        requestInFlight = false;
+        if (!disposed && loadVersionRef.current === version) setIsLoadingEvents(false);
+      }
+    }
+
+    void loadEvents();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadEvents(true);
+    };
+    const refreshWhenFocused = () => void loadEvents(true);
+    const refreshTimer = window.setInterval(() => {
+      if (backgroundRefreshEnabled && document.visibilityState === "visible") {
+        void loadEvents(true);
+      }
+    }, BACKGROUND_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenFocused);
+    return () => {
+      disposed = true;
+      loadVersionRef.current += 1;
+      window.clearInterval(refreshTimer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenFocused);
+    };
+  }, [canManageEvents, projectId]);
+
+  async function createEvent(values: ProjectCalendarEventInput) {
+    setIsMutating(true);
+    try {
+      const event = await createProjectCalendarEvent(projectId, values);
+      setEvents((current) => upsertEvent(current, event));
+      setSyncMessage("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 일정을 저장하지 못했습니다.";
+      setSyncMessage(message);
+      throw error;
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function updateEvent(eventId: string, values: ProjectCalendarEventInput) {
+    setIsMutating(true);
+    try {
+      const event = await updateProjectCalendarEvent(projectId, eventId, values);
+      setEvents((current) => upsertEvent(current, event));
+      setSyncMessage("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 일정을 수정하지 못했습니다.";
+      setSyncMessage(message);
+      throw error;
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  async function deleteEvent(eventId: string) {
+    setIsMutating(true);
+    try {
+      const deletedId = await deleteProjectCalendarEvent(projectId, eventId);
+      setEvents((current) => current.filter((event) => event.id !== deletedId));
+      setSyncMessage("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 일정을 삭제하지 못했습니다.";
+      setSyncMessage(message);
+      throw error;
+    } finally {
+      setIsMutating(false);
+    }
+  }
+
+  if (isLoadingEvents) {
+    return <SectionLoader ariaLabel="프로젝트 일정 로딩 중" />;
   }
 
   return (
-    <section aria-labelledby="project-calendar-title" className="min-w-0">
-      <div className="mb-3 grid min-w-0 justify-items-center gap-2 px-0.5 text-center">
-        <div className="min-w-0 text-center">
-          <h2 id="project-calendar-title" className="font-display text-lg font-black text-field-text">
-            촬영 달력
-          </h2>
-          <p className="mt-0.5 text-xs font-medium text-field-muted">
-            {formatCalendarPeriod(calendar.rangeStart, calendar.rangeEnd)}
-          </p>
-        </div>
-        <p className="flex items-center justify-center gap-1.5 text-center text-xs font-semibold text-field-subtle">
-          <span className="h-2.5 w-2.5 border border-field-primary bg-field-primary" aria-hidden />
-          실제 촬영일
+    <section className="grid min-w-0 gap-3">
+      {syncMessage ? (
+        <p role="alert" className="border border-status-warning/45 bg-status-warning/10 px-3 py-2 text-xs font-semibold text-field-subtle">
+          {syncMessage}
         </p>
-      </div>
-
-      <div
-        className="project-calendar-grid"
-        data-month-count={calendar.months.length}
-        style={{
-          "--project-calendar-desktop-columns": desktopColumns,
-          "--project-calendar-tablet-columns": tabletColumns
-        } as CSSProperties}
-      >
-        {calendar.months.map((month) => (
-          <MonthCalendar
-            key={month.key}
-            month={month}
-            shootingDates={calendar.shootingDates}
-            shootingDateCounts={calendar.shootingDateCounts}
-            todayKey={todayKey}
-          />
-        ))}
-      </div>
+      ) : null}
+      <ProjectMonthlyCalendar
+        shootingStartDate={calendarInfo?.shootingStartDate}
+        shootingEndDate={calendarInfo?.shootingEndDate}
+        dailyPlans={calendarDailyPlans}
+        events={events}
+        canEditEvents={canManageEvents && serverCanEdit}
+        mutationPending={isMutating}
+        onCreateEvent={createEvent}
+        onUpdateEvent={updateEvent}
+        onDeleteEvent={deleteEvent}
+      />
     </section>
   );
 }
 
-function MonthCalendar({
-  month,
-  shootingDates,
-  shootingDateCounts,
-  todayKey
-}: {
-  month: { key: string; year: number; month: number; label: string };
-  shootingDates: Set<string>;
-  shootingDateCounts: Map<string, number>;
-  todayKey: string;
-}) {
-  const days = buildCalendarMonthDays(month);
-  return (
-    <article className="project-calendar-month ui-motion-surface text-center" aria-labelledby={`project-calendar-month-${month.key}`}>
-      <h3 id={`project-calendar-month-${month.key}`} className="project-calendar-month__title">
-        {month.label}
-      </h3>
-      <div className="project-calendar-weekdays" aria-hidden>
-        {WEEKDAYS.map((weekday) => <span key={weekday}>{weekday}</span>)}
-      </div>
-      <div className="project-calendar-days" role="grid" aria-label={`${month.label} 촬영 달력`}>
-        {days.map((day) => {
-          const isShootingDate = day.inCurrentMonth && shootingDates.has(day.key);
-          const isToday = day.inCurrentMonth && day.key === todayKey;
-          const shootingCount = shootingDateCounts.get(day.key) ?? 0;
-          const accessibleDate = `${day.year}년 ${day.month}월 ${day.day}일${isShootingDate ? ", 촬영일" : ""}`;
-          return (
-            <time
-              key={day.key}
-              role="gridcell"
-              dateTime={day.key}
-              aria-label={accessibleDate}
-              className={`project-calendar-day ${day.inCurrentMonth ? "" : "project-calendar-day--outside"} ${isToday && !isShootingDate ? "project-calendar-day--today" : ""} ${isShootingDate ? "project-calendar-day--shooting" : ""}`}
-            >
-              <span>{day.day}</span>
-              {isShootingDate && shootingCount > 1 ? (
-                <span className="project-calendar-day__count" aria-hidden>{shootingCount}회</span>
-              ) : null}
-            </time>
-          );
-        })}
-      </div>
-    </article>
-  );
+function upsertEvent(current: readonly ProjectCalendarEvent[], event: ProjectCalendarEvent) {
+  return [event, ...current.filter((candidate) => candidate.id !== event.id)];
 }

@@ -1,0 +1,809 @@
+.calendarShell {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  container-type: inline-size;
+}
+
+.calendarLayout {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+}
+
+.calendarPanel,
+.detailPanel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-surface-2);
+  box-shadow: var(--shadow-card);
+}
+
+.calendarPanel {
+  padding: clamp(10px, 1.4vw, 18px);
+}
+
+.toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.toolbarTitle {
+  min-width: 0;
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.toolbarActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbarButton,
+.iconButton {
+  display: inline-grid;
+  min-width: 40px;
+  min-height: 40px;
+  place-items: center;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  color: var(--ui-text-secondary);
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-fast) var(--ease-out-native);
+}
+
+.toolbarButton:hover,
+.iconButton:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-4);
+  color: var(--ui-text-primary);
+}
+
+.toolbarButton:active,
+.iconButton:active {
+  transform: translateY(1px);
+}
+
+.toolbarButton:focus-visible,
+.iconButton:focus-visible,
+.dayButton:focus-visible,
+.eventBar:focus-visible,
+.detailEventButton:focus-visible,
+.colorSwatch:focus-visible {
+  outline: 2px solid var(--ui-accent);
+  outline-offset: 2px;
+}
+
+.toolbarButton svg,
+.iconButton svg {
+  width: 17px;
+  height: 17px;
+}
+
+.todayButton {
+  width: auto;
+  padding: 0 11px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.calendarGrid,
+.weekdayGrid,
+.dayGrid {
+  min-width: 0;
+}
+
+.weekdayGrid,
+.dayGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.weekRow {
+  display: contents;
+}
+
+.weekdayGrid {
+  border-bottom: 1px solid var(--ui-border-default);
+  color: var(--ui-text-muted);
+  font-size: clamp(0.625rem, 1.2vw, 0.75rem);
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.weekdayGrid span {
+  min-width: 0;
+  padding: 7px 2px;
+}
+
+.dayGrid {
+  gap: 1px;
+  overflow: hidden;
+  background: var(--ui-border-default);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+}
+
+.monthSurface {
+  min-width: 0;
+  overflow: hidden;
+  animation-duration: var(--motion-base);
+  animation-timing-function: var(--ease-out-native);
+  animation-fill-mode: both;
+}
+
+.monthSurface[data-direction="next"] {
+  animation-name: monthEnterNext;
+}
+
+.monthSurface[data-direction="previous"] {
+  animation-name: monthEnterPrevious;
+}
+
+.dayCell {
+  position: relative;
+  min-width: 0;
+  min-height: clamp(5.1rem, 7.6vw, 7.25rem);
+  overflow: hidden;
+  background: var(--ui-surface-3);
+}
+
+.dayCell[data-outside="true"] {
+  background: color-mix(in srgb, var(--ui-surface-2) 84%, transparent);
+}
+
+.dayCell[data-period="true"] {
+  background: color-mix(in srgb, var(--ui-accent) 7%, var(--ui-surface-3));
+}
+
+.dayCell[data-shooting="true"] {
+  background: var(--ui-accent);
+}
+
+.dayCell[data-range-preview="true"]::after {
+  position: absolute;
+  z-index: 1;
+  inset: 2px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 76%, transparent);
+  border-radius: var(--ui-radius-selection);
+  background: color-mix(in srgb, var(--ui-accent) 16%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.dayButton {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.dayCell[data-outside="true"] .dayButton {
+  color: var(--ui-text-disabled);
+}
+
+.dayCell[data-shooting="true"] .dayButton {
+  color: var(--ui-on-accent);
+}
+
+.dayCell[data-selected="true"] .dayButton {
+  box-shadow: inset 0 0 0 2px var(--ui-text-primary), inset 0 0 0 4px var(--ui-surface-1);
+}
+
+.dayNumber {
+  position: absolute;
+  top: 6px;
+  left: 7px;
+  display: inline-flex;
+  min-width: 22px;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control);
+  font-size: clamp(0.65rem, 1.25vw, 0.78rem);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.dayCell[data-today="true"] .dayNumber {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-1);
+  color: var(--ui-text-primary);
+}
+
+.dayCell[data-shooting="true"] .dayNumber {
+  border-color: color-mix(in srgb, var(--ui-on-accent) 36%, transparent);
+  color: var(--ui-on-accent);
+}
+
+.dayContent {
+  position: absolute;
+  z-index: 3;
+  top: 31px;
+  right: 3px;
+  bottom: 4px;
+  left: 3px;
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  align-content: end;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.shootingPlanRow,
+.eventBar,
+.moreButton {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shootingPlanRow {
+  display: block;
+  min-height: 16px;
+  border-radius: 3px;
+  background: var(--ui-on-accent);
+  padding: 2px 4px;
+  color: var(--ui-accent);
+  font-size: clamp(0.5rem, 0.9vw, 0.62rem);
+  font-weight: 800;
+  line-height: 1.15;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+.eventBar {
+  display: block;
+  width: calc(100% + 6px);
+  min-height: 16px;
+  margin-inline: -3px;
+  border: 0;
+  border-radius: 0;
+  background: var(--event-color);
+  padding: 2px 4px;
+  color: #080908;
+  font-size: clamp(0.48rem, 0.88vw, 0.6rem);
+  font-weight: 750;
+  line-height: 1.15;
+  text-align: left;
+  pointer-events: auto;
+}
+
+.eventBar[data-segment-start="true"] {
+  width: calc(100% + 3px);
+  margin-left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.eventBar[data-segment-end="true"] {
+  width: calc(100% + 3px);
+  margin-right: 0;
+  border-radius: 0 3px 3px 0;
+}
+
+.eventBar[data-segment-start="true"][data-segment-end="true"] {
+  width: 100%;
+  margin-inline: 0;
+  border-radius: 3px;
+}
+
+.eventBarLabel {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.moreButton {
+  width: fit-content;
+  max-width: 100%;
+  min-height: 16px;
+  border: 0;
+  background: transparent;
+  padding: 1px 3px;
+  color: inherit;
+  font-size: 0.55rem;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: left;
+  pointer-events: auto;
+}
+
+.detailPanel {
+  align-self: start;
+  max-height: min(72dvh, 54rem);
+  overflow-y: auto;
+  padding: clamp(14px, 1.6vw, 20px);
+}
+
+.detailContent {
+  display: grid;
+  min-width: 0;
+  gap: 14px;
+  animation: detailEnter var(--motion-base) var(--ease-out-native) both;
+}
+
+.detailHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.detailTitle {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.detailBadges {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.detailBadge {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  padding: 3px 7px;
+  color: var(--ui-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.detailBadgePeriod {
+  border-color: color-mix(in srgb, var(--ui-accent) 38%, transparent);
+  background: color-mix(in srgb, var(--ui-accent) 8%, var(--ui-surface-3));
+  color: var(--ui-accent);
+}
+
+.detailSection {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+  border-top: 1px solid var(--ui-border-default);
+  padding-top: 12px;
+}
+
+.detailSectionTitle {
+  margin: 0;
+  color: var(--ui-text-muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.35;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.detailPlanLink,
+.detailEventButton,
+.detailEmpty {
+  min-width: 0;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  padding: 10px;
+  color: var(--ui-text-secondary);
+}
+
+.detailPlanLink {
+  display: grid;
+  gap: 2px;
+  text-decoration: none;
+}
+
+.detailPlanLink strong,
+.detailEventButton strong {
+  color: var(--ui-text-primary);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.detailPlanLink small,
+.detailEventButton small {
+  color: var(--ui-text-muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.detailEventButton {
+  position: relative;
+  display: grid;
+  width: 100%;
+  grid-template-columns: 4px minmax(0, 1fr);
+  gap: 9px;
+  border-color: var(--ui-border-default);
+  text-align: left;
+  transition: border-color var(--motion-fast) var(--ease-out-native), background-color var(--motion-fast) var(--ease-out-native);
+}
+
+.detailEventButton:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-4);
+}
+
+.detailEventIndicator {
+  min-height: 100%;
+  border-radius: 2px;
+  background: var(--event-color);
+}
+
+.detailEventText {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.detailEmpty {
+  color: var(--ui-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.editorBackdrop {
+  position: fixed;
+  z-index: 90;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 58%);
+  padding: 0;
+  animation: overlayEnter var(--motion-fast) var(--ease-out-native) both;
+}
+
+.editorDialog {
+  width: 100%;
+  max-height: min(88dvh, 48rem);
+  overflow-y: auto;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
+  background: var(--dialog);
+  padding: 16px 16px max(16px, env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-dialog);
+  color: var(--ui-text-primary);
+  animation: sheetEnter var(--motion-base) var(--ease-out-native) both;
+}
+
+.editorHeader,
+.editorFooter,
+.editorActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editorHeader,
+.editorFooter {
+  justify-content: space-between;
+}
+
+.editorHeader {
+  margin-bottom: 14px;
+}
+
+.editorFooter {
+  margin-top: 16px;
+  border-top: 1px solid var(--ui-border-default);
+  padding-top: 12px;
+}
+
+.editorTitle {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.editorDescription {
+  margin: 2px 0 0;
+  color: var(--ui-text-muted);
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.editorFields {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.twoColumnFields {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.editorField {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--ui-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.editorField small,
+.formError {
+  color: var(--field-danger);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.editorInput {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-control);
+  padding: 8px 10px;
+  color: var(--ui-text-primary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+  outline: 0;
+}
+
+.editorInput:focus {
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-accent) 20%, transparent);
+}
+
+.editorInput[readonly] {
+  color: var(--ui-text-secondary);
+}
+
+.locationInputWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.locationInputWrap svg {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 10px;
+  width: 15px;
+  height: 15px;
+  color: var(--ui-text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.locationInputWrap .editorInput {
+  padding-left: 32px;
+}
+
+.colorFieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+
+.colorFieldset legend {
+  margin-bottom: 6px;
+  color: var(--ui-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.colorSwatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.colorSwatch {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 2px solid transparent;
+  border-radius: var(--ui-radius-control);
+  background: var(--event-color);
+  color: #080908;
+}
+
+.colorSwatchSelected {
+  border-color: var(--ui-text-primary);
+  box-shadow: 0 0 0 2px var(--dialog);
+}
+
+.colorSwatch svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 3;
+}
+
+.formError,
+.dismissHint {
+  margin: 10px 0 0;
+}
+
+.dismissHint {
+  color: var(--ui-text-muted);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.deleteConfirmation {
+  display: grid;
+  gap: 18px;
+}
+
+@media (min-width: 768px) {
+  .editorBackdrop {
+    display: block;
+    padding: 12px;
+  }
+
+  .editorDialog {
+    position: fixed;
+    top: clamp(12px, var(--calendar-editor-top), calc(100dvh - 570px));
+    left: clamp(12px, var(--calendar-editor-left), calc(100vw - 372px));
+    width: min(360px, calc(100vw - 24px));
+    max-height: min(80dvh, 550px);
+    border-radius: var(--ui-radius-panel);
+    animation-name: popoverEnter;
+  }
+}
+
+@media (orientation: landscape) {
+  @container (min-width: 760px) {
+    .calendarLayout {
+      grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.55fr);
+      align-items: start;
+    }
+
+    .detailPanel {
+      position: sticky;
+      top: 0;
+    }
+  }
+}
+
+@media (max-width: 600px) {
+  .calendarPanel {
+    padding: 8px;
+  }
+
+  .toolbar {
+    padding: 2px 2px 9px;
+  }
+
+  .toolbarButton {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .todayButton {
+    min-width: 44px;
+    padding-inline: 8px;
+  }
+
+  .dayCell {
+    min-height: clamp(4.35rem, 22vw, 5.1rem);
+  }
+
+  .shootingPlanRow,
+  .eventBar,
+  .moreButton {
+    min-height: 14px;
+    padding: 2px;
+    font-size: 0.48rem;
+  }
+
+  .twoColumnFields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 350px) {
+  .toolbarTitle {
+    font-size: 0.9rem;
+  }
+
+  .toolbarActions {
+    gap: 2px;
+  }
+
+  .toolbarButton {
+    min-width: 32px;
+    min-height: 34px;
+  }
+
+  .dayCell {
+    min-height: 5.1rem;
+  }
+
+  .dayNumber {
+    top: 4px;
+    left: 4px;
+    min-width: 19px;
+    min-height: 19px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .monthSurface,
+  .detailContent,
+  .editorBackdrop,
+  .editorDialog {
+    animation: none !important;
+  }
+
+  .toolbarButton,
+  .iconButton,
+  .detailEventButton {
+    transition: none !important;
+  }
+}
+
+@keyframes monthEnterNext {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes monthEnterPrevious {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes detailEnter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes overlayEnter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popoverEnter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sheetEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}

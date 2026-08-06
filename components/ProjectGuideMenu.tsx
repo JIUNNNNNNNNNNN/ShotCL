@@ -7,7 +7,7 @@ type ProjectGuideMenuProps = {
   projectName: string;
   role: SharedProjectRole | null;
   calendarInfo?: ProjectCalendarInfo | null;
-  dailyPlans: ReadonlyArray<Pick<DailyPlan, "shootingDate">>;
+  dailyPlans: ReadonlyArray<Pick<DailyPlan, "id" | "shootingDate" | "episode">>;
 };
 
 /** 모든 진입 경로가 공유하는 프로젝트 홈의 요약과 촬영 일정입니다. */
@@ -35,7 +35,7 @@ export function ProjectGuideMenu({
         projectId={projectId}
         calendarInfo={calendarInfo}
         dailyPlans={dailyPlans}
-        canEditBasicInfo={role !== "progress"}
+        canManageEvents={role !== "progress"}
       />
     </section>
   );
