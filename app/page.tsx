@@ -8,6 +8,7 @@ import {
   RememberedProjectCard
 } from "@/components/RememberedProjectCard";
 import { MotionPresence } from "@/components/ui/MotionPresence";
+import { getGoTarget, GoTargetAccessDeniedError } from "@/lib/data/goTarget";
 import { listAccessibleProjects, verifyProjectAccess } from "@/lib/data/projects";
 import { projectFromRow } from "@/lib/data/mappers";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
@@ -23,6 +24,10 @@ import {
   readRememberedProjectSelection,
   rememberProjectSelection
 } from "@/lib/projectAccess/recentProject";
+import {
+  buildProgressRoundHref,
+  buildProjectNavigationHref
+} from "@/lib/projectNavigation";
 import type { Project } from "@/lib/types";
 
 type ContextualAction = "new" | "join";
@@ -349,10 +354,27 @@ export default function HomePage() {
       for (const projectId of candidateIds) {
         const verifiedProject = visibleById.get(projectId);
         if (!verifiedProject) continue;
+
+        let targetDailyPlanId: string | null;
+        try {
+          const target = await getGoTarget(verifiedProject.id);
+          if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
+          targetDailyPlanId = target.targetDailyPlanId;
+        } catch (error) {
+          if (error instanceof GoTargetAccessDeniedError) {
+            revokedProjectFound = true;
+            forgetProjectSelection(verifiedProject.id);
+            continue;
+          }
+          throw error;
+        }
+
         rememberProjectSelection(verifiedProject.id);
         pushProjectRoute(
           verifiedProject.id,
-          `/projects/${encodeURIComponent(verifiedProject.id)}?view=progress`,
+          targetDailyPlanId
+            ? buildProgressRoundHref(verifiedProject.id, targetDailyPlanId)
+            : buildProjectNavigationHref(verifiedProject.id, "progress"),
           attemptId
         );
         return;
