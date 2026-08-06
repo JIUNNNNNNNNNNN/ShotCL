@@ -2201,8 +2201,15 @@ button {
   width: 100%;
   height: 100%;
   border: 0;
-  background: rgba(0, 0, 0, 0.62);
   content: "";
+}
+
+.project-shell__drawer-backdrop {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.project-shell__action-drawer-overlay::before {
+  background: rgba(0, 0, 0, 0.62);
 }
 
 .project-shell__navigation-drawer,
@@ -2222,10 +2229,65 @@ button {
 
 .project-shell__navigation-drawer {
   left: 0;
-  width: min(360px, calc(100vw - 24px));
+  width: min(86vw, 320px);
+  width: min(86dvw, 320px);
+  max-width: calc(100vw - max(40px, env(safe-area-inset-right)));
+  max-width: calc(100dvw - max(40px, env(safe-area-inset-right)));
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   border-right: 1px solid var(--ui-border-default);
+  transition-duration: 160ms, 160ms;
+}
+
+.project-shell__navigation-drawer[data-open="true"] {
+  transition-duration: 200ms, 200ms;
+}
+
+.project-shell__drawer-layer {
+  transition:
+    opacity 160ms var(--ease-in-native),
+    visibility 0s linear 160ms;
+}
+
+.project-shell__drawer-layer[data-open="true"] {
+  transition:
+    opacity 200ms var(--ease-out-native),
+    visibility 0s linear 0s;
+}
+
+.project-shell__navigation-drawer :where(*) {
+  min-width: 0;
+}
+
+.project-shell__navigation-drawer-header {
+  display: flex;
+  height: 56px;
+  min-height: 56px;
+  flex: 0 0 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.project-shell__navigation-drawer-title {
+  overflow: hidden;
+  color: var(--ui-text-primary);
+  font-size: 0.875rem;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-shell__navigation-drawer-close {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
 }
 
 .project-shell__action-drawer {
@@ -2446,6 +2508,116 @@ button {
 .project-navigation__round-link {
   min-height: 44px;
   padding: 7px 8px;
+}
+
+/* The modal navigation drawer is denser than the desktop persistent panel. */
+.project-shell__navigation-drawer .project-navigation {
+  padding: 8px;
+}
+
+.project-shell__navigation-drawer .project-navigation__home {
+  min-height: 44px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+}
+
+.project-shell__navigation-drawer .project-navigation__home > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.project-shell__navigation-drawer .project-navigation__project-summary {
+  margin-bottom: 6px;
+  padding: 0 4px 7px;
+}
+
+.project-shell__navigation-drawer .project-navigation__project-summary > p:first-child {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.project-shell__navigation-drawer .project-navigation__menu-scroll {
+  overflow-x: hidden;
+  padding-right: 3px;
+  padding-bottom: 4px;
+}
+
+.project-shell__navigation-drawer .project-navigation__card-grid {
+  gap: 6px;
+}
+
+.project-shell__navigation-drawer .project-navigation__card {
+  min-height: 54px;
+}
+
+.project-shell__navigation-drawer .project-navigation__card-link {
+  min-height: 52px;
+  gap: 10px;
+  padding: 7px 14px;
+}
+
+.project-shell__navigation-drawer .project-navigation__card[data-has-rounds="true"] .project-navigation__card-link {
+  padding-right: 40px;
+  padding-left: 40px;
+}
+
+.project-shell__navigation-drawer .project-navigation__card-label {
+  line-height: 1.2;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.project-shell__navigation-drawer .project-navigation__card-chevron {
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+}
+
+.project-shell__navigation-drawer .project-navigation__card-chevron[data-expanded="true"] {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.project-shell__navigation-drawer .project-navigation__round-heading {
+  padding: 6px 8px;
+}
+
+.project-shell__navigation-drawer .project-navigation__round-list {
+  gap: 2px;
+  padding: 4px;
+}
+
+.project-shell__navigation-drawer .project-navigation__round-link {
+  min-height: 44px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 340px) {
+  .project-shell__navigation-drawer {
+    width: min(88vw, 296px);
+    width: min(88dvw, 296px);
+    max-width: calc(100vw - max(24px, env(safe-area-inset-right)));
+    max-width: calc(100dvw - max(24px, env(safe-area-inset-right)));
+  }
+}
+
+@media (min-width: 600px) and (max-width: 1179px) {
+  .project-shell__navigation-drawer {
+    width: clamp(300px, 40vw, 360px);
+    width: clamp(300px, 40dvw, 360px);
+    max-width: 360px;
+  }
+
+  .project-shell__navigation-drawer .project-navigation__home {
+    min-height: 46px;
+  }
+
+  .project-shell__navigation-drawer .project-navigation__card {
+    min-height: 56px;
+  }
+
+  .project-shell__navigation-drawer .project-navigation__card-link {
+    min-height: 54px;
+  }
 }
 
 @media (max-width: 899px) {

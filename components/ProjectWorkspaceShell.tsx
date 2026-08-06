@@ -132,19 +132,21 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             id="project-navigation-drawer"
             role="dialog"
             aria-modal={openDrawer === "navigation" ? "true" : undefined}
-            aria-label="프로젝트 전체 메뉴"
+            aria-labelledby="project-navigation-drawer-title"
             tabIndex={-1}
             data-side="left"
             data-open={openDrawer === "navigation" ? "true" : "false"}
             className="project-shell__navigation-drawer ui-drawer"
           >
-            <div className="flex min-h-14 items-center justify-between border-b border-field-divider px-3">
-              <p className="min-w-0 truncate text-sm font-black text-field-text">프로젝트 메뉴</p>
+            <div className="project-shell__navigation-drawer-header">
+              <p id="project-navigation-drawer-title" className="project-shell__navigation-drawer-title">
+                프로젝트 메뉴
+              </p>
               <button
                 type="button"
                 onClick={closeDrawer}
                 aria-label="프로젝트 메뉴 닫기"
-                className="project-shell__bar-button"
+                className="project-shell__bar-button project-shell__navigation-drawer-close"
               >
                 <X aria-hidden />
               </button>
@@ -276,6 +278,7 @@ function getFocusableElements(root: HTMLElement) {
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
   )).filter((element) => (
     !element.hasAttribute("aria-hidden")
+    && !element.closest('[inert], [aria-hidden="true"]')
     && element.getClientRects().length > 0
     && window.getComputedStyle(element).visibility !== "hidden"
   ));
