@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader } from "@/components/PixelDogLoader";
 import { ProjectBasicInfoForm } from "@/components/ProjectBasicInfoForm";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { Card } from "@/components/ui/Card";
@@ -61,7 +61,7 @@ export default function ProjectBasicInfoPage() {
     router.replace(`/projects/${project.id}`);
   }, [project, router, updateProjectBasicInfo]);
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading) return <PageLoader />;
   if (!project || !basicInfo) {
     return (
       <Card className="border-field-danger text-field-danger">

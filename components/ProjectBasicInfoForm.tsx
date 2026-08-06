@@ -180,8 +180,8 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
 
   return (
     <form noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-center justify-center gap-2 px-1 text-center">
+        <div className="min-w-0 text-center">
           <p className="font-display text-xl font-black text-field-text md:text-2xl">프로젝트 기본정보</p>
           <p className="mt-1 truncate text-sm text-field-muted">{projectName}</p>
         </div>
@@ -190,7 +190,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         </span>
       </div>
 
-      <section className="border border-field-border bg-field-panel p-3 md:p-5">
+      <section className="ui-motion-surface rounded-[var(--radius-card)] border border-field-border bg-field-panel p-3 md:p-5">
         <div className="grid gap-3 md:grid-cols-[0.55fr_1fr_1fr]">
           <label className="grid gap-1.5">
             <span className="text-xs font-bold text-field-subtle">총회차</span>
@@ -218,11 +218,12 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         </div>
       </section>
 
-      <section className="border border-field-border bg-field-panel p-3 md:p-5">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold text-field-text">메인 스태프</h2>
-            <p className="text-[11px] text-field-muted">
+      <section className="ui-motion-surface rounded-[var(--radius-card)] border border-field-border bg-field-panel p-3 md:p-5">
+        <div className="mb-2 grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center gap-2">
+          <span aria-hidden />
+          <div className="min-w-0 text-center">
+            <h2 className="text-center text-sm font-bold text-field-text">메인 스태프</h2>
+            <p className="text-center text-[11px] text-field-muted">
               인원·직책 중복 제한 없음 · 일촬표 표시는 회차별 최대 3명
             </p>
           </div>
@@ -275,11 +276,12 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         ) : null}
       </section>
 
-      <section className="border border-field-border bg-field-panel p-3 md:p-5">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-sm font-bold text-field-text">배우 정보</h2>
-            <p className="truncate text-[11px] text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
+      <section className="ui-motion-surface rounded-[var(--radius-card)] border border-field-border bg-field-panel p-3 md:p-5">
+        <div className="mb-2 grid grid-cols-[2.25rem_minmax(0,1fr)_auto] items-center gap-2">
+          <span aria-hidden />
+          <div className="min-w-0 text-center">
+            <h2 className="text-center text-sm font-bold text-field-text">배우 정보</h2>
+            <p className="truncate text-center text-[11px] text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
           </div>
           <Button
             type="button"
@@ -352,7 +354,7 @@ const StaffFields = memo(function StaffFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid min-w-0 gap-1.5 rounded-[10px] border border-field-border bg-field-soft/50 p-2">
+    <div className="grid min-w-0 gap-1.5 rounded-[var(--radius-card)] border border-field-border bg-field-soft/50 p-2">
       <div className="flex items-center justify-between gap-1">
         <label className="inline-flex min-w-0 items-center gap-1 text-[10px] font-bold text-field-subtle">
           <input
@@ -479,7 +481,7 @@ function EpisodeSelectionField({
               role="dialog"
               aria-modal="true"
               aria-label={`${member.name || member.role || "메인 스태프"} 참여 회차 선택`}
-              className="flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden border border-field-border bg-field-dialog shadow-dialog"
+              className="ui-motion-dialog flex max-h-[min(78dvh,42rem)] w-full max-w-md flex-col overflow-hidden rounded-[var(--radius-dialog)] border border-field-border bg-field-dialog shadow-dialog"
             >
               <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
                 <div className="min-w-0">
@@ -574,7 +576,7 @@ const ActorFields = memo(function ActorFields({
   onDelete: (index: number) => void;
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-[10px] border border-field-border bg-field-soft/50 p-2">
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.5rem] items-center gap-2 rounded-[var(--radius-card)] border border-field-border bg-field-soft/50 p-2">
       <input
         className={fieldClass}
         value={actor.role}

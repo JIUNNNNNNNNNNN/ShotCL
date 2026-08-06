@@ -257,7 +257,7 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
           <span>Home</span>
         </Link>
 
-        <div className="project-navigation__project-summary">
+        <div className="project-navigation__project-summary text-center">
           <p className="line-clamp-2 break-words text-sm font-black leading-5 text-field-text" title={projectName}>
             {projectName}
           </p>
@@ -566,15 +566,15 @@ function PlanContextMenu({
       data-project-shell-portal
       role="menu"
       aria-label={`${formatDailyPlanEpisodeLabel(menu.plan.episode)} 일촬표 메뉴`}
-      className="fixed z-[100] grid w-56 gap-1 border border-field-divider bg-field-elevated p-1.5 text-field-text shadow-floating"
+      className="ui-motion-menu fixed z-[100] grid w-56 gap-1 rounded-[var(--radius-menu)] border border-field-divider bg-field-elevated p-1.5 text-field-text shadow-floating"
       style={{ left: menu.x, top: menu.y }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <button type="button" role="menuitem" disabled={disabled} onClick={onDuplicate} className="flex min-h-9 items-center gap-2 px-2.5 text-left text-xs font-bold hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50">
+      <button type="button" role="menuitem" disabled={disabled} onClick={onDuplicate} className="flex min-h-9 items-center justify-center gap-2 rounded-[var(--radius-control)] px-2.5 text-center text-xs font-bold hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50">
         <Copy className="h-3.5 w-3.5" aria-hidden />
         복사해서 새 일촬표 만들기
       </button>
-      <button type="button" role="menuitem" disabled={disabled} onClick={onDelete} className="flex min-h-9 items-center gap-2 px-2.5 text-left text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger disabled:opacity-50">
+      <button type="button" role="menuitem" disabled={disabled} onClick={onDelete} className="flex min-h-9 items-center justify-center gap-2 rounded-[var(--radius-control)] px-2.5 text-center text-xs font-bold text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger disabled:opacity-50">
         <Trash2 className="h-3.5 w-3.5" aria-hidden />
         삭제
       </button>

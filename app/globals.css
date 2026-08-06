@@ -190,6 +190,17 @@
   --ui-radius-card: 10px;
   --ui-radius-panel: 14px;
   --ui-radius-landing: 20px;
+  --radius-control: var(--ui-radius-control);
+  --radius-card: var(--ui-radius-card);
+  --radius-selection: var(--ui-radius-card);
+  --radius-menu: var(--ui-radius-card);
+  --radius-dialog: var(--ui-radius-panel);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  --ease-out-native: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-native: cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard-native: cubic-bezier(0.2, 0, 0, 1);
   --ui-space-1: 4px;
   --ui-space-2: 8px;
   --ui-space-3: 12px;
@@ -379,14 +390,249 @@ button {
 
   .app-theme :where(button, a, input, textarea, select, summary) {
     transition-property: color, background-color, border-color, box-shadow, opacity;
-    transition-duration: 140ms;
-    transition-timing-function: ease-out;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--ease-out-native);
   }
 
   @media (prefers-reduced-motion: reduce) {
     .app-theme :where(button, a, input, textarea, select, summary, [role="dialog"], [role="menu"]) {
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+/*
+ * Canonical UI motion is intentionally short and limited to opacity/transform.
+ * Data loading and route changes are never delayed by these entry animations.
+ */
+@keyframes ui-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ui-card-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(3px) scale(0.99);
+  }
+}
+
+@keyframes ui-panel-left-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ui-panel-right-enter {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ui-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ui-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ui-presence-enter {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@layer components {
+  .ui-motion-surface {
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  .ui-motion-menu {
+    transform-origin: top center;
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  .ui-motion-dialog {
+    transform-origin: center;
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  :where(.ui-motion-surface, .ui-motion-menu, .ui-motion-dialog)[data-motion-state="closing"] {
+    pointer-events: none;
+    animation: ui-card-exit var(--motion-fast) var(--ease-in-native) forwards;
+  }
+
+  .ui-motion-presence {
+    display: grid;
+    grid-template-rows: 1fr;
+    min-width: 0;
+    opacity: 1;
+    transform-origin: top center;
+    transform: translateY(0) scale(1);
+    animation: ui-presence-enter var(--motion-base) var(--ease-out-native);
+    transition:
+      grid-template-rows var(--motion-fast) var(--ease-in-native),
+      opacity var(--motion-fast) var(--ease-in-native),
+      transform var(--motion-fast) var(--ease-in-native);
+  }
+
+  .ui-motion-presence > .ui-motion-presence__inner {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .ui-motion-presence[data-motion-state="closing"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(3px) scale(0.99);
+    animation: none;
+  }
+
+  .ui-motion-presence[data-motion-state="closing"] > .ui-motion-presence__inner {
+    overflow: hidden;
+  }
+
+  /* Reusable height animation: the inner wrapper is the only clipped element. */
+  .ui-accordion {
+    display: grid;
+    grid-template-rows: 0fr;
+    min-width: 0;
+    opacity: 0;
+    transition:
+      grid-template-rows var(--motion-base) var(--ease-standard-native),
+      opacity var(--motion-fast) var(--ease-out-native);
+  }
+
+  .ui-accordion[data-expanded="true"] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+
+  .ui-accordion > .ui-accordion-inner {
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      opacity var(--motion-fast) var(--ease-out-native),
+      transform var(--motion-base) var(--ease-out-native);
+  }
+
+  .ui-accordion[data-expanded="true"] > .ui-accordion-inner {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Keep drawers mounted with data-open when an exit transition is required. */
+  .ui-drawer {
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      transform var(--motion-fast) var(--ease-in-native),
+      opacity var(--motion-fast) var(--ease-in-native);
+  }
+
+  .ui-drawer[data-side="left"] {
+    transform: translateX(-100%);
+  }
+
+  .ui-drawer[data-side="right"] {
+    transform: translateX(100%);
+  }
+
+  .ui-drawer[data-open="true"] {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
+    transition-duration: var(--motion-base), var(--motion-fast);
+    transition-timing-function: var(--ease-out-native), var(--ease-out-native);
+  }
+
+  /* Common cards and home contextual panels share one restrained mount motion. */
+  .app-theme :where(
+    .field-card,
+    #new-project-panel,
+    #join-project-panel,
+    #remembered-projects-panel,
+    .project-navigation__card
+  ) {
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  /* Anchored menus and popovers enter from their own visual origin. */
+  .app-theme :where(
+    [role="menu"],
+    [role="listbox"],
+    [data-memo-popover],
+    [data-weather-region-popover],
+    [data-shooting-order-popover]
+  ) {
+    transform-origin: top center;
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  /* Modal scrims fade; the surface inside receives the card motion. */
+  .app-theme :where([role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]) {
+    animation: ui-overlay-enter var(--motion-fast) var(--ease-out-native);
+  }
+
+  .app-theme :where([role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"])
+    > :where(section, article, form, div[class*="bg-field-dialog"], div[class*="bg-field-panel"], div[class*="bg-field-elevated"]) {
+    transform-origin: center;
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
+  }
+
+  /* Conditional accordion bodies use the same visual entry without measuring height. */
+  .app-theme :where(
+    [data-scene-portrait-body],
+    div[id^="archive-scene-"]:not([hidden]),
+    h3:has(> button[aria-expanded="true"]) + div:not([hidden])
+  ) {
+    transform-origin: top center;
+    animation: ui-card-enter var(--motion-base) var(--ease-out-native);
   }
 }
 
@@ -890,7 +1136,7 @@ button {
 .light-workspace.workspace-popup,
 .light-workspace .workspace-popup {
   border-color: #cfcfcf;
-  border-radius: 0;
+  border-radius: var(--radius-menu);
   background-color: var(--workspace-surface);
   color: var(--workspace-text);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
@@ -1188,6 +1434,7 @@ button {
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:first-child {
+  border-radius: var(--radius-selection) 0 0 var(--radius-selection);
   box-shadow:
     inset 0 0 0 9999px var(--accent-neon-soft),
     inset 1px 0 var(--accent-neon-border),
@@ -1196,6 +1443,7 @@ button {
 }
 
 .daily-plan-timetable-row[data-selected="true"] > td:last-child {
+  border-radius: 0 var(--radius-selection) var(--radius-selection) 0;
   box-shadow:
     inset 0 0 0 9999px var(--accent-neon-soft),
     inset -1px 0 var(--accent-neon-border),
@@ -1210,6 +1458,7 @@ button {
 
 @media (max-width: 1023px) {
   .daily-plan-timetable-row[data-selected="true"] {
+    border-radius: var(--radius-selection);
     outline: 1px solid var(--accent-neon-border);
     outline-offset: -1px;
   }
@@ -1614,7 +1863,8 @@ button {
 .project-calendar-empty {
   display: flex;
   min-width: 0;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
   gap: 12px;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-card);
@@ -1655,6 +1905,7 @@ button {
   font-size: 0.925rem;
   font-weight: 700;
   line-height: 1.35;
+  text-align: center;
 }
 
 .project-calendar-weekdays,
@@ -1758,6 +2009,7 @@ button {
   overflow: hidden;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-surface-1);
+  animation: ui-panel-left-enter var(--motion-base) var(--ease-out-native);
 }
 
 .project-shell__app-bar {
@@ -1786,7 +2038,11 @@ button {
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface-3);
   color: var(--ui-text-secondary);
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-fast) var(--ease-out-native);
 }
 
 .project-shell__bar-button:hover {
@@ -1833,6 +2089,10 @@ button {
   max-width: 100%;
 }
 
+.project-shell__page > * {
+  animation: ui-page-enter var(--motion-base) var(--ease-out-native);
+}
+
 .project-shell__action-panel {
   display: none;
   min-width: 0;
@@ -1840,6 +2100,7 @@ button {
   overflow: hidden;
   background: var(--bg-surface-1);
   border-left: 1px solid var(--border-subtle);
+  animation: ui-panel-right-enter var(--motion-base) var(--ease-out-native);
 }
 
 .project-shell__drawer-layer,
@@ -1847,6 +2108,22 @@ button {
   position: fixed;
   inset: 0;
   z-index: 90;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--ease-in-native),
+    visibility 0s linear var(--motion-fast);
+}
+
+.project-shell__drawer-layer[data-open="true"],
+.project-shell__action-drawer-overlay[data-open="true"] {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    opacity var(--motion-base) var(--ease-out-native),
+    visibility 0s linear 0s;
 }
 
 .project-shell__drawer-backdrop,
@@ -1881,7 +2158,6 @@ button {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   border-right: 1px solid var(--ui-border-default);
-  animation: project-shell-drawer-left-in 180ms ease-out;
 }
 
 .project-shell__action-drawer {
@@ -1890,21 +2166,6 @@ button {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   border-left: 1px solid var(--ui-border-default);
-  animation: project-shell-drawer-right-in 180ms ease-out;
-}
-
-@keyframes project-shell-drawer-left-in {
-  from {
-    opacity: 0;
-    transform: translateX(-14px);
-  }
-}
-
-@keyframes project-shell-drawer-right-in {
-  from {
-    opacity: 0;
-    transform: translateX(14px);
-  }
 }
 
 .project-navigation {
@@ -1925,7 +2186,10 @@ button {
   color: var(--ui-text-secondary);
   font-size: 0.875rem;
   font-weight: 700;
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native);
 }
 
 .project-navigation__home:hover {
@@ -1950,6 +2214,7 @@ button {
   margin-bottom: 12px;
   padding: 0 4px 12px;
   border-bottom: 1px solid var(--ui-border-default);
+  text-align: center;
 }
 
 .project-navigation__card-grid {
@@ -1969,7 +2234,12 @@ button {
   background: var(--ui-surface-2);
   color: var(--ui-text-secondary);
   box-shadow: var(--shadow-card);
-  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native),
+    box-shadow var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-fast) var(--ease-out-native);
 }
 
 .project-navigation__card:hover {
@@ -2033,7 +2303,10 @@ button {
   border-radius: var(--ui-radius-control);
   background: color-mix(in srgb, var(--ui-surface-4) 92%, transparent);
   color: currentColor;
-  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native);
 }
 
 .project-navigation__card-disclosure:hover {
@@ -2050,7 +2323,7 @@ button {
 .project-navigation__card-chevron {
   width: 16px;
   height: 16px;
-  transition: transform 180ms ease;
+  transition: transform var(--motion-base) var(--ease-standard-native);
 }
 
 .project-navigation__card-chevron[data-expanded="true"] {
@@ -2061,24 +2334,35 @@ button {
   display: grid;
   grid-template-rows: 0fr;
   min-width: 0;
-  margin-top: 0;
   opacity: 0;
-  transition: grid-template-rows 190ms ease, opacity 160ms ease, margin-top 190ms ease;
+  transition:
+    grid-template-rows var(--motion-base) var(--ease-standard-native),
+    opacity var(--motion-fast) var(--ease-out-native);
 }
 
 .project-navigation__round-accordion[data-expanded="true"] {
   grid-template-rows: 1fr;
-  margin-top: 10px;
   opacity: 1;
 }
 
 .project-navigation__round-accordion-inner {
   min-height: 0;
   overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-base) var(--ease-out-native);
+}
+
+.project-navigation__round-accordion[data-expanded="true"] .project-navigation__round-accordion-inner {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .project-navigation__round-section {
   min-width: 0;
+  margin-top: 10px;
   overflow: hidden;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-card);
@@ -2154,13 +2438,52 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .app-theme :where(
+    .ui-motion-surface,
+    .ui-motion-menu,
+    .ui-motion-dialog,
+    .ui-motion-presence,
+    .ui-motion-presence__inner,
+    .ui-accordion,
+    .ui-accordion-inner,
+    .ui-drawer,
+    .field-card,
+    #new-project-panel,
+    #join-project-panel,
+    #remembered-projects-panel,
+    [role="menu"],
+    [role="listbox"],
+    [role="dialog"],
+    [role="alertdialog"],
+    [data-memo-popover],
+    [data-weather-region-popover],
+    [data-shooting-order-popover],
+    [data-scene-portrait-body],
+    div[id^="archive-scene-"]
+  ),
+  .project-shell__navigation,
+  .project-shell__action-panel,
+  .project-shell__drawer-layer,
+  .project-shell__action-drawer-overlay,
+  .project-shell__drawer-backdrop,
+  .project-shell__action-drawer-overlay::before,
+  .project-shell__page > *,
   .project-navigation__card,
   .project-navigation__card-chevron,
   .project-navigation__round-accordion,
+  .project-navigation__round-accordion-inner,
   .project-shell__navigation-drawer,
   .project-shell__action-drawer {
-    transition: none;
-    animation: none;
+    transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+
+  .project-navigation__round-accordion-inner {
+    transform: none;
+  }
+
+  .ui-accordion > .ui-accordion-inner {
+    transform: none;
   }
 }
 

@@ -5,7 +5,7 @@ import { flushSync } from "react-dom";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save } from "lucide-react";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
 import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
@@ -628,7 +628,7 @@ export default function ProjectSceneListPage() {
     scenarioReference
   ]);
 
-  if (isLoading || loadedProjectId !== projectId) return <PixelDogLoader size="lg" />;
+  if (isLoading || loadedProjectId !== projectId) return <PageLoader />;
 
   if (!project) {
     return (
@@ -674,7 +674,7 @@ export default function ProjectSceneListPage() {
                 disabled={isSaving || isMergePersisting || isClearPersisting || !isDirty}
                 className="scene-list-edit-action inline-flex min-h-9 items-center gap-1 rounded-md border border-field-primary bg-field-primary px-3 text-xs font-semibold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary active:bg-field-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
+                {isSaving ? <InlineLoader /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
               </button>
             ) : null}
@@ -695,7 +695,7 @@ export default function ProjectSceneListPage() {
               role="status"
               aria-label="씬리스트 화면 준비 중"
             >
-              <PixelDogLoader size="sm" compact />
+              <SectionLoader className="min-h-40" />
             </div>
           ) : viewportMode === "portrait" ? (
             <SceneListPortraitReadOnly

@@ -2,11 +2,12 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { InlineLoader } from "@/components/PixelDogLoader";
 import {
   RememberedProjectActions,
   RememberedProjectCard
 } from "@/components/RememberedProjectCard";
+import { MotionPresence } from "@/components/ui/MotionPresence";
 import { listAccessibleProjects, verifyProjectAccess } from "@/lib/data/projects";
 import { projectFromRow } from "@/lib/data/mappers";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
@@ -599,9 +600,9 @@ export default function HomePage() {
       <section
         id="new-project-panel"
         aria-labelledby="new-project-panel-title"
-        className="min-w-0 max-w-full rounded-[18px] border border-field-divider bg-field-panel p-4 shadow-card min-[1180px]:col-start-3 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:self-center"
+        className="ui-motion-surface min-w-0 max-w-full rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-4 shadow-card"
       >
-        <h2 id="new-project-panel-title" className="font-display text-sm font-black text-field-text">
+        <h2 id="new-project-panel-title" className="font-display text-center text-sm font-black text-field-text">
           새 프로젝트
         </h2>
         <form onSubmit={handleCreateProject} className="mt-4 grid min-w-0 gap-3">
@@ -679,9 +680,9 @@ export default function HomePage() {
       <section
         id="join-project-panel"
         aria-labelledby="join-project-panel-title"
-        className="min-w-0 max-w-full rounded-[18px] border border-field-divider bg-field-panel p-4 shadow-card min-[1180px]:col-start-1 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:self-center"
+        className="ui-motion-surface min-w-0 max-w-full rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-4 shadow-card"
       >
-        <h2 id="join-project-panel-title" className="font-display text-sm font-black text-field-text">
+        <h2 id="join-project-panel-title" className="font-display text-center text-sm font-black text-field-text">
           프로젝트 참여
         </h2>
         <form onSubmit={handleJoinProject} className="mt-4 grid min-w-0 gap-3">
@@ -741,7 +742,7 @@ export default function HomePage() {
       <section
         id="remembered-projects-panel"
         aria-labelledby="remembered-projects-title"
-        className="min-w-0 max-w-full rounded-[18px] border border-field-divider bg-field-panel p-4 shadow-card min-[1180px]:col-start-3 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:max-h-[min(34rem,calc(100dvh-7rem))] min-[1180px]:self-center min-[1180px]:overflow-y-auto"
+        className="ui-motion-surface min-w-0 max-w-full rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-4 text-center shadow-card min-[1180px]:max-h-[min(34rem,calc(100dvh-7rem))] min-[1180px]:overflow-y-auto"
       >
         <h2 id="remembered-projects-title" className="font-display text-sm font-black text-field-text">
           이전에 참여한 프로젝트
@@ -749,7 +750,7 @@ export default function HomePage() {
         <div className="mt-3 min-w-0">
           {isLoading ? (
             <div className="flex min-h-14 items-center justify-center">
-              <PixelDogLoader size="xs" compact />
+              <InlineLoader />
             </div>
           ) : errorMessage ? (
             <p role="alert" className="break-words py-2 text-xs font-bold leading-5 text-field-danger">
@@ -817,7 +818,7 @@ export default function HomePage() {
                     : undefined}
                 aria-busy={isGoPending || undefined}
                 onClick={(event) => handleActionClick(action.id, event.currentTarget)}
-                className={`group min-h-[7.25rem] min-w-0 max-w-full rounded-[18px] border px-5 py-5 text-left shadow-card outline-none transition-[transform,background-color,border-color,box-shadow] duration-150 min-[1180px]:col-start-2 ${desktopRowClass} ${
+                className={`ui-motion-surface group min-h-[7.25rem] min-w-0 max-w-full rounded-[var(--radius-card)] border px-5 py-5 text-center shadow-card outline-none transition-[transform,background-color,border-color,box-shadow] duration-[var(--motion-fast)] min-[1180px]:col-start-2 ${desktopRowClass} ${
                   isSelected || isGoPending
                     ? "neon-selected-strong"
                     : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"
@@ -826,18 +827,33 @@ export default function HomePage() {
                 <span className={`font-display-strong block text-2xl font-black leading-none ${isSelected || isGoPending ? "text-field-primary" : "text-field-text"}`}>
                   {action.label}
                 </span>
-                <span className="mt-3 flex min-h-5 items-center text-xs font-bold text-field-muted">
-                  {isGoPending ? <PixelDogLoader size="xs" compact /> : action.description}
+                <span className="mt-3 flex min-h-5 items-center justify-center text-center text-xs font-bold text-field-muted">
+                  {isGoPending ? <InlineLoader /> : action.description}
                 </span>
               </button>
 
-              {action.id === "new" && selectedAction === "new"
-                ? renderNewProjectForm()
-                : null}
-              {action.id === "join" && selectedAction === "join" ? (
+              {action.id === "new" ? (
+                <MotionPresence
+                  show={selectedAction === "new"}
+                  className="min-[1180px]:col-start-3 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:self-center"
+                >
+                  {renderNewProjectForm()}
+                </MotionPresence>
+              ) : null}
+              {action.id === "join" ? (
                 <>
-                  {renderJoinForm()}
-                  {renderRememberedProjects()}
+                  <MotionPresence
+                    show={selectedAction === "join"}
+                    className="min-[1180px]:col-start-1 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:self-center"
+                  >
+                    {renderJoinForm()}
+                  </MotionPresence>
+                  <MotionPresence
+                    show={selectedAction === "join"}
+                    className="min-[1180px]:col-start-3 min-[1180px]:row-span-3 min-[1180px]:row-start-1 min-[1180px]:self-center"
+                  >
+                    {renderRememberedProjects()}
+                  </MotionPresence>
                 </>
               ) : null}
             </div>

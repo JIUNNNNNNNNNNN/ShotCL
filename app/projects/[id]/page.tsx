@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import {
   useProjectPageActionMenu,
   type ProjectPageActionMenuRegistration
@@ -879,7 +879,7 @@ export default function ProjectDetailPage() {
   }
 
   if (isWorkspaceLoading || isLoading) {
-    return <PixelDogLoader size="lg" />;
+    return <PageLoader />;
   }
 
   if (!project) {
@@ -1245,7 +1245,7 @@ function ModalLoadingFallback() {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-field-bg/80">
       <div className="border border-field-divider bg-field-dialog p-4 shadow-dialog">
-        <PixelDogLoader size="sm" compact />
+        <SectionLoader className="!min-h-16" />
       </div>
     </div>
   );

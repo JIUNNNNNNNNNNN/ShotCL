@@ -14,9 +14,9 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
   const progressMessage = getDailyProgressMessage(progressPercent);
 
   return (
-    <section className="mb-3 border border-field-border bg-field-section p-3" aria-label="일일 촬영 진행률">
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
+    <section className="ui-motion-surface mb-3 rounded-[var(--radius-card)] border border-field-border bg-field-section p-3 text-center" aria-label="일일 촬영 진행률">
+      <div className="grid justify-items-center gap-1">
+        <div className="min-w-0 text-center">
           <h2 className="break-words text-sm font-bold leading-[1.35] text-field-text">
             {progressMessage}
           </h2>
@@ -41,7 +41,7 @@ export function DailyProgressSummary({ progress }: DailyProgressSummaryProps) {
           style={{ width: `${progressPercent}%` }}
         />
       </div>
-      <p className="mt-2 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] font-normal leading-5 text-field-muted">
+      <p className="mt-2 flex flex-wrap justify-center gap-x-2 gap-y-0.5 text-[11px] font-normal leading-5 text-field-muted">
         <span>OK <strong className="tabular-nums text-status-ok">{progress.okCutCount}</strong></span>
         <span aria-hidden>·</span>
         <span>OMIT <strong className="tabular-nums text-field-danger">{progress.omitCutCount}</strong></span>

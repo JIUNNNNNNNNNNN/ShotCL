@@ -292,13 +292,13 @@ export function ShotReorderList({
               }}
               aria-grabbed={isDragging}
               className={cn(
-                "relative select-none  [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
+                "relative select-none rounded-[var(--radius-selection)] [-webkit-touch-callout:none] [&_[contenteditable='true']]:select-text [&_input]:select-text [&_textarea]:select-text",
                 !disabled && "cursor-grab",
-                isDragging && "z-50 cursor-grabbing opacity-95 ring-2 ring-field-primary",
+                isDragging && "z-50 cursor-grabbing overflow-hidden ring-2 ring-field-primary",
                 isDropTarget
                   && (dragState?.insertAfter
-                    ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:bg-field-primary"
-                    : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:bg-field-primary")
+                    ? "after:absolute after:-bottom-1.5 after:left-5 after:right-5 after:h-1 after:rounded-full after:bg-field-primary"
+                    : "before:absolute before:-top-1.5 before:left-5 before:right-5 before:h-1 before:rounded-full before:bg-field-primary")
               )}
               style={isDragging ? {
                 transform: `translate3d(0, ${dragState.currentY - dragState.startY}px, 0) scale(1.015)`,

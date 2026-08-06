@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader } from "@/components/PixelDogLoader";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -33,7 +33,7 @@ export default function DailyPlansPage() {
     router.replace(target);
   }, [dailyPlans, error, isLoading, project, router]);
 
-  if (isLoading) return <PixelDogLoader />;
+  if (isLoading) return <PageLoader />;
 
   if (!project) {
     return (

@@ -20,8 +20,9 @@ import {
   X
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { MotionPresence } from "@/components/ui/MotionPresence";
 import {
   deleteProjectReferenceAsset,
   listProjectReferenceAssets,
@@ -38,7 +39,7 @@ type ViewMode = "scenes" | "pdf";
 
 const ScenarioPdfSceneSegments = dynamic(
   () => import("@/components/ScenarioPdfSceneSegments").then((module) => module.ScenarioPdfSceneSegments),
-  { ssr: false, loading: () => <PixelDogLoader size="md" /> }
+  { ssr: false, loading: () => <SectionLoader /> }
 );
 
 export default function ProjectScenarioPage() {
@@ -276,7 +277,7 @@ export default function ProjectScenarioPage() {
     setErrorMessage("");
   }
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading) return <PageLoader />;
 
   return (
     <div className="grid w-full min-w-0 gap-2">
@@ -351,7 +352,7 @@ export default function ProjectScenarioPage() {
                 title="PDF 업로드"
                 className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-2.5 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
-                {isUploading ? <PixelDogLoader size="xs" compact /> : <Upload className="h-3.5 w-3.5" aria-hidden />}
+                {isUploading ? <InlineLoader /> : <Upload className="h-3.5 w-3.5" aria-hidden />}
                 <span className="hidden sm:inline">{isUploading ? "분석 중" : "+ PDF"}</span>
               </button>
               <input
@@ -442,7 +443,7 @@ export default function ProjectScenarioPage() {
                 title="원본 PDF에서 자동 분할 다시 실행"
                 className="grid h-9 w-9 place-items-center border border-field-border bg-field-panel text-field-muted transition hover:border-field-divider hover:bg-field-hover hover:text-field-text active:scale-95 disabled:cursor-wait disabled:opacity-50"
               >
-                {isAnalyzing ? <PixelDogLoader size="xs" compact /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                {isAnalyzing ? <InlineLoader /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                 <span className="sr-only">자동 분할 다시 실행</span>
               </button>
             </div>
@@ -521,17 +522,19 @@ export default function ProjectScenarioPage() {
               {filteredScenes.map((scene) => {
                 const index = draftScenes.findIndex((item) => item.id === scene.id);
                 const expanded = expandedSceneId === scene.id;
+                const panelId = `scenario-scene-${scene.id}`;
                 return (
                   <article
                     key={scene.id}
-                    className={`min-w-0 border bg-field-panel ${expanded ? "border-field-border border-l-2 border-l-field-primary" : "border-field-border"}`}
+                    className={`ui-motion-surface min-w-0 overflow-hidden rounded-[var(--radius-card)] border bg-field-panel ${expanded ? "border-field-border border-l-2 border-l-field-primary" : "border-field-border"}`}
                   >
                     <div className="flex min-w-0 items-center gap-1.5 px-2.5 py-2">
                       <button
                         type="button"
                         aria-expanded={expanded}
+                        aria-controls={panelId}
                         onClick={() => setExpandedSceneId(expanded ? "" : scene.id)}
-                        className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left"
+                        className="flex min-h-8 min-w-0 flex-1 items-center justify-center gap-2 text-center"
                       >
                         <ChevronDown
                           className={`h-4 w-4 shrink-0 text-field-muted transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -540,7 +543,7 @@ export default function ProjectScenarioPage() {
                         <span className="shrink-0 rounded-md border border-field-border bg-field-soft px-2 py-0.5 text-xs font-semibold text-field-subtle">
                           S#{scene.sceneNo || index + 1}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold leading-normal text-field-text">
+                        <span className="min-w-0 flex-1 truncate text-center text-sm font-bold leading-normal text-field-text">
                           {scene.title || `Scene ${index + 1}`}
                         </span>
                         {scene.pageStart ? (
@@ -573,8 +576,8 @@ export default function ProjectScenarioPage() {
                       ) : null}
                     </div>
 
-                    {expanded ? (
-                      <div className="border-t border-field-border px-3 py-3 sm:px-4">
+                    <MotionPresence show={expanded} id={panelId} className="border-t border-field-border">
+                      <div className="px-3 py-3 sm:px-4">
                         <div className="grid gap-2">
                           {isEditing ? (
                             <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
@@ -605,7 +608,7 @@ export default function ProjectScenarioPage() {
                           />
                         </div>
                       </div>
-                    ) : null}
+                    </MotionPresence>
                   </article>
                 );
               })}

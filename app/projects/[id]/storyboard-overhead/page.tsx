@@ -37,7 +37,7 @@ import type {
 } from "@/components/ArchiveImportDialog";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
   useProjectPageActionMenu,
@@ -45,6 +45,7 @@ import {
 } from "@/components/ProjectPageActions";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { Card } from "@/components/ui/Card";
+import { MotionPresence } from "@/components/ui/MotionPresence";
 import {
   createArchiveCropSession,
   createArchiveCropSource,
@@ -97,11 +98,11 @@ import type {
 
 const ShotOverheadEditor = dynamic(
   () => import("@/components/ShotOverheadEditor").then((module) => module.ShotOverheadEditor),
-  { ssr: false, loading: () => <PixelDogLoader size="md" /> }
+  { ssr: false, loading: () => <SectionLoader /> }
 );
 const ArchiveImportDialog = dynamic(
   () => import("@/components/ArchiveImportDialog").then((module) => module.ArchiveImportDialog),
-  { ssr: false, loading: () => <PixelDogLoader size="md" /> }
+  { ssr: false, loading: () => <SectionLoader /> }
 );
 
 type ArchiveType = Extract<ProjectReferenceAssetType, "overhead" | "storyboard">;
@@ -2938,7 +2939,7 @@ export default function ProjectStoryboardOverheadPage() {
     openMetadata(asset, event);
   }
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading) return <PageLoader />;
 
   return (
     <>
@@ -2962,7 +2963,7 @@ export default function ProjectStoryboardOverheadPage() {
         ) : null}
         {isPreparing || progressMessage ? (
           <div className="grid justify-items-center gap-2 py-2">
-            <PixelDogLoader size="sm" />
+            <SectionLoader className="!min-h-16" />
             <p className="text-xs text-field-muted">{progressMessage}</p>
           </div>
         ) : null}
@@ -3133,7 +3134,7 @@ export default function ProjectStoryboardOverheadPage() {
                     <button
                       type="button"
                       onClick={() => toggleSceneCollapsed(group.key)}
-                      className="flex min-h-9 w-full items-center gap-1.5 px-1 text-left text-sm font-bold text-field-text hover:text-field-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/35"
+                      className="flex min-h-9 w-full items-center justify-center gap-1.5 px-1 text-center text-sm font-bold text-field-text hover:text-field-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/35"
                       aria-expanded={!collapsed}
                       aria-controls={scenePanelId}
                     >
@@ -3143,8 +3144,9 @@ export default function ProjectStoryboardOverheadPage() {
                       <span>{group.label}</span>
                     </button>
                   </h3>
-                  <div id={scenePanelId} hidden={collapsed} className={collapsed ? "hidden" : "grid min-w-0 gap-2"}>
-                  {collapsed ? null : groupArchiveItemsByCut(group.items).map((cutGroup) => {
+                  <MotionPresence show={!collapsed} id={scenePanelId} className="min-w-0">
+                  <div className="grid min-w-0 gap-2">
+                  {groupArchiveItemsByCut(group.items).map((cutGroup) => {
                     const orderedAssets = cutGroup.items.flatMap((item) => item.kind === "asset" ? [item.asset] : []);
                     const orderedAssetIds = orderedAssets.map((asset) => asset.id);
                     const visibleOrderByAssetId = new Map(orderedAssetIds.map((assetId, index) => [assetId, index + 1]));
@@ -3169,8 +3171,8 @@ export default function ProjectStoryboardOverheadPage() {
                         data-archive-reorder-zone={orderGroupKey}
                         className="grid min-w-0 gap-1.5"
                       >
-                        <div className="flex min-h-8 items-center justify-between gap-2">
-                          <h4 className="flex items-center gap-1.5 text-xs font-bold text-field-muted">
+                        <div className="relative flex min-h-8 items-center justify-center gap-2 text-center">
+                          <h4 className="flex items-center justify-center gap-1.5 text-center text-xs font-bold text-field-muted">
                             <span>{cutGroup.label}</span>
                             {pendingReorderGroupKeys.has(orderGroupKey) ? (
                               <span className="h-2 w-2 bg-field-primary" title="순서 저장 중" aria-label="순서 저장 중" />
@@ -3184,7 +3186,7 @@ export default function ProjectStoryboardOverheadPage() {
                                 cancelActiveReorderDrag();
                                 exitReorderMode(orderGroupKey);
                               }}
-                              className="min-h-8 border border-field-primary bg-field-panel px-3 text-[11px] font-bold text-field-primary transition-colors hover:bg-field-hover hover:text-field-text"
+                              className="min-h-8 border border-field-primary bg-field-panel px-3 text-[11px] font-bold text-field-primary transition-colors hover:bg-field-hover hover:text-field-text sm:absolute sm:right-0"
                             >
                               완료
                             </button>
@@ -3200,7 +3202,7 @@ export default function ProjectStoryboardOverheadPage() {
                           <article
                             key={key}
                             onContextMenu={(event) => event.preventDefault()}
-                            className={`relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-field-panel p-2 transition ${
+                            className={`ui-motion-surface relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition ${
                               selected
                                 ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
                                 : "border-field-border"
@@ -3216,7 +3218,7 @@ export default function ProjectStoryboardOverheadPage() {
                                 }
                                 openDiagram(diagram, false);
                               }}
-                              className="grid min-w-0 aspect-[4/3] touch-pan-y place-items-center bg-field-soft"
+                              className="grid min-w-0 aspect-[4/3] touch-pan-y place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft"
                               aria-pressed={selectionMode && !diagram.legacy ? selected : undefined}
                             >
                               <ShotOverheadPreview diagram={diagram.diagram} label="부감도 미리보기" />
@@ -3244,7 +3246,7 @@ export default function ProjectStoryboardOverheadPage() {
                           key={key}
                           data-archive-reorder-item={asset.id}
                           data-archive-reorder-group={orderGroupKey}
-                          className={`relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 border bg-field-panel p-2 transition-[transform,border-color,background-color,opacity] ${
+                          className={`ui-motion-surface relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition-[transform,border-color,background-color,opacity] ${
                             selected
                               ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
                               : "border-field-border"
@@ -3295,7 +3297,7 @@ export default function ProjectStoryboardOverheadPage() {
                               });
                             }}
                             onContextMenu={(event) => openAssetContextMenu(asset, event)}
-                            className={`grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden bg-field-soft p-1 ${
+                            className={`grid min-w-0 max-w-full aspect-[4/3] touch-pan-y place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft p-1 ${
                               dragDeleteEnabled ? "cursor-grab active:cursor-grabbing" : ""
                             } ${groupInReorderMode ? "archive-reorder-jiggle" : ""}`}
                             style={{ WebkitTouchCallout: "none" }}
@@ -3331,6 +3333,7 @@ export default function ProjectStoryboardOverheadPage() {
                     );
                   })}
                   </div>
+                  </MotionPresence>
                 </section>
                 );
               })}
@@ -3351,7 +3354,7 @@ export default function ProjectStoryboardOverheadPage() {
                 return (
                   <article
                     key={asset.id}
-                    className={`flex min-w-0 items-center gap-2 border bg-field-panel p-2 transition-[transform,border-color,background-color] ${
+                    className={`ui-motion-surface flex min-w-0 items-center gap-2 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition-[transform,border-color,background-color] ${
                       selected
                         ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
                         : "border-field-border"
@@ -3378,7 +3381,7 @@ export default function ProjectStoryboardOverheadPage() {
                           window.open(asset.publicUrl, "_blank", "noopener,noreferrer");
                         }
                       }}
-                      className="flex min-w-0 flex-1 touch-pan-y items-center gap-3 p-1 text-left"
+                      className="flex min-w-0 flex-1 touch-pan-y items-center justify-center gap-3 p-1 text-center"
                       aria-pressed={selectionMode ? selected : undefined}
                     >
                       {detectArchiveCropSourceKind({
@@ -3387,9 +3390,9 @@ export default function ProjectStoryboardOverheadPage() {
                       }) === "pdf"
                         ? <FileText className="h-7 w-7 shrink-0 text-field-subtle" aria-hidden />
                         : <FileImage className="h-7 w-7 shrink-0 text-field-subtle" aria-hidden />}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-bold text-field-text">{archiveDisplayName(asset)}</span>
-                        <span className="block text-[11px] text-field-subtle underline underline-offset-2">원본 보기</span>
+                      <span className="min-w-0 flex-1 text-center">
+                        <span className="block truncate text-center text-xs font-bold text-field-text">{archiveDisplayName(asset)}</span>
+                        <span className="block text-center text-[11px] text-field-subtle underline underline-offset-2">원본 보기</span>
                       </span>
                     </button>
                     {canEdit && asset.assetType === "storyboard" && detectArchiveCropSourceKind({ mimeType: asset.mimeType, filename: asset.filename }) ? (
@@ -3415,7 +3418,7 @@ export default function ProjectStoryboardOverheadPage() {
       {reorderOverlay && typeof document !== "undefined" ? createPortal(
         <div
           ref={reorderOverlayRef}
-          className="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden rounded-[10px] border-2 border-field-primary bg-field-soft p-1"
+          className="pointer-events-none fixed z-[100] grid place-items-center overflow-hidden rounded-[var(--radius-card)] border-2 border-field-primary bg-field-soft p-1"
           style={{
             width: reorderOverlay.width,
             height: reorderOverlay.height,
@@ -3550,8 +3553,8 @@ export default function ProjectStoryboardOverheadPage() {
 
 function ArchiveCutText({ cutNo, typeLabel }: { cutNo: string; typeLabel?: string }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-1 px-1">
-      <p className="truncate text-[11px] font-bold text-field-muted">
+    <div className="flex min-w-0 items-center justify-center gap-1 px-1 text-center">
+      <p className="truncate text-center text-[11px] font-bold text-field-muted">
         {cutNo ? `C#${cutNo}` : "컷 미지정"}
       </p>
       {typeLabel ? <span className="shrink-0 text-[10px] text-field-muted">{typeLabel}</span> : null}

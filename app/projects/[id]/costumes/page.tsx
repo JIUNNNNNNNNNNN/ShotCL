@@ -3,7 +3,7 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ImagePlus, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { Button } from "@/components/ui/Button";
@@ -633,7 +633,7 @@ export default function ProjectCostumesPage() {
     }
   }
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading) return <PageLoader />;
 
   return (
     <>
@@ -698,7 +698,7 @@ export default function ProjectCostumesPage() {
         ) : null}
 
         {isFiltering ? (
-          <div className="py-8"><PixelDogLoader size="sm" /></div>
+          <SectionLoader className="min-h-24" />
         ) : filteredScenes.length === 0 ? (
           <div className="rounded-[10px] border border-field-border bg-field-panel px-4 py-12 text-center text-sm text-field-muted">
             {scenes.length === 0 ? "등록된 의상 씬이 없습니다." : "선택한 일촬표에 포함된 의상 씬이 없습니다."}
@@ -721,16 +721,16 @@ export default function ProjectCostumesPage() {
                   + (draft?.hairFiles.length ?? 0);
               }, 0);
               return (
-                <section key={scene.id} className="overflow-hidden border border-field-border bg-field-panel">
+                <section key={scene.id} className="ui-motion-surface overflow-hidden rounded-[var(--radius-card)] border border-field-border bg-field-panel">
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5 bg-field-light px-2.5 py-1.5">
                     <button
                       type="button"
                       onClick={() => toggleScene(scene.id)}
-                      className="flex min-h-9 min-w-[150px] flex-1 items-center gap-1.5 text-left"
+                      className="flex min-h-9 min-w-[150px] flex-1 items-center justify-center gap-1.5 text-center"
                       aria-expanded={expanded}
                     >
                       <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "" : "-rotate-90"}`} aria-hidden />
-                      <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="flex min-w-0 flex-1 flex-wrap items-baseline justify-center gap-x-2 gap-y-0.5 text-center">
                         <strong className="break-words text-sm font-bold text-field-text">{sceneLabel(scene)}</strong>
                         <span className="text-[11px] text-field-muted">{scene.items.length}명 · 이미지 {imageCount}장</span>
                       </span>
@@ -759,8 +759,14 @@ export default function ProjectCostumesPage() {
                     ) : null}
                   </div>
 
-                  {expanded ? (
-                    <div className="border-t border-field-border p-1.5 sm:p-2">
+                  <div
+                    data-expanded={expanded ? "true" : "false"}
+                    aria-hidden={!expanded}
+                    inert={!expanded}
+                    className="ui-accordion"
+                  >
+                    <div className="ui-accordion-inner min-h-0">
+                    <div className="border-t border-field-border p-1.5 text-left sm:p-2">
                       {scene.items.length > 0 ? (
                         <div className="mb-1 hidden grid-cols-[minmax(140px,.72fr)_minmax(300px,1.5fr)_minmax(300px,1.5fr)_40px] gap-2 px-2 text-[10px] font-bold text-field-muted lg:grid">
                           <span>배역 / 제공자</span>
@@ -808,7 +814,8 @@ export default function ProjectCostumesPage() {
                         </div>
                       ) : null}
                     </div>
-                  ) : null}
+                    </div>
+                  </div>
                 </section>
               );
             })}

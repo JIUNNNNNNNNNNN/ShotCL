@@ -166,8 +166,16 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
         </span>
       </button>
 
-      {isExpanded ? (
-        <div id={bodyId} data-scene-portrait-body={item.id} className="min-w-0">
+      <div
+        id={bodyId}
+        data-scene-portrait-body={item.id}
+        data-expanded={isExpanded ? "true" : "false"}
+        aria-hidden={!isExpanded}
+        inert={!isExpanded}
+        className="ui-accordion min-w-0"
+      >
+        <div className="ui-accordion-inner min-h-0">
+        <div className="min-w-0">
           <div className="grid min-w-0 grid-cols-[4.5rem_minmax(0,1fr)_minmax(0,1fr)]">
             <PortraitField label="Scene" className="border-r border-[#d2d2d2]" valueClassName="text-[16px] font-black leading-[1.4]">
               {sceneNumber}
@@ -241,7 +249,8 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
             </PortraitField>
           </div>
         </div>
-      ) : null}
+        </div>
+      </div>
     </article>
   );
 });

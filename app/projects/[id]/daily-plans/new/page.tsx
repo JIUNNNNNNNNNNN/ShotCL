@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { PageLoader } from "@/components/PixelDogLoader";
 import { Card } from "@/components/ui/Card";
 import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
@@ -18,7 +18,7 @@ import type {
 
 const DailyPlanEditor = dynamic(
   () => import("@/components/DailyPlanEditor").then((module) => module.DailyPlanEditor),
-  { ssr: false, loading: () => <PixelDogLoader size="lg" /> }
+  { ssr: false, loading: () => <PageLoader /> }
 );
 
 function useProjectId() {
@@ -66,7 +66,7 @@ export default function NewDailyPlanPage() {
   }, [projectId]);
 
   if (isLoading) {
-    return <PixelDogLoader size="lg" />;
+    return <PageLoader />;
   }
 
   if (!project) {

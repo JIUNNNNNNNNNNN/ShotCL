@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Check, Search, Unlink, X } from "lucide-react";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { SectionLoader } from "@/components/PixelDogLoader";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { listProjectReferenceAssets } from "@/lib/data/projectReferenceAssets";
 import {
@@ -142,7 +142,7 @@ export function ShotArchivePicker({
             <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-disabled focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
           </label>
           {selected ? (
-            <div className="neon-selected flex items-center justify-between gap-2 rounded-[10px] border px-3 py-2">
+            <div className="neon-selected flex items-center justify-between gap-2 rounded-[var(--radius-card)] border px-3 py-2">
               <p className="min-w-0 truncate text-xs font-bold text-field-primary">현재 연결: {selected.filename}</p>
               {!readOnly ? (
                 <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1  border border-field-danger/60 bg-field-panel px-2 text-[11px] font-bold text-field-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger">
@@ -155,7 +155,7 @@ export function ShotArchivePicker({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          {isLoading ? <PixelDogLoader size="md" /> : errorMessage ? (
+          {isLoading ? <SectionLoader /> : errorMessage ? (
             <p role="alert" className="border border-field-danger bg-field-danger/10 p-3 text-sm font-normal text-field-danger">{errorMessage}</p>
           ) : filtered.length === 0 ? (
             <p className="py-10 text-center text-sm font-normal text-field-muted">선택할 {mediaType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
@@ -168,10 +168,11 @@ export function ShotArchivePicker({
                     key={`${asset.source}-${asset.id}`}
                     type="button"
                     disabled={readOnly || isSaving}
+                    aria-pressed={isSelected}
                     onClick={() => selectAsset(asset)}
-                    className={`relative grid min-w-0 gap-1 border p-1.5 text-left transition-colors disabled:cursor-default ${isSelected ? "border-field-primary/80 bg-field-primary/10 ring-2 ring-field-primary/20" : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"}`}
+                    className={`relative grid min-w-0 gap-1 rounded-[var(--radius-card)] border p-1.5 text-center transition-colors disabled:cursor-default ${isSelected ? "border-field-primary/80 bg-field-primary/10 ring-2 ring-field-primary/20" : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"}`}
                   >
-                    <div className="grid aspect-[4/3] w-full place-items-center bg-field-soft">
+                    <div className="grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft">
                       {asset.publicUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -185,11 +186,11 @@ export function ShotArchivePicker({
                         <ShotOverheadPreview diagram={asset.diagram} label={`${asset.title} 부감도`} />
                       ) : null}
                     </div>
-                    <p className="truncate px-1 text-xs font-bold text-field-text">{asset.title}</p>
-                    <p className="truncate px-1 text-[10px] font-normal text-field-muted">
+                    <p className="truncate px-1 text-center text-xs font-bold text-field-text">{asset.title}</p>
+                    <p className="truncate px-1 text-center text-[10px] font-normal text-field-muted">
                       {[asset.sceneNo && `S#${asset.sceneNo}`, asset.cutNo && `C#${asset.cutNo}`, asset.memo].filter(Boolean).join(" · ") || "태그 없음"}
                     </p>
-                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center border border-field-primary/80 bg-field-elevated text-field-primary"><Check className="h-4 w-4" aria-hidden /></span> : null}
+                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[var(--radius-control)] border border-field-primary/80 bg-field-elevated text-field-primary"><Check className="h-4 w-4" aria-hidden /></span> : null}
                   </button>
                 );
               })}

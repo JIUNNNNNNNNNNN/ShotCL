@@ -38,9 +38,9 @@ export function ProjectShootingCalendar({
 
   if (calendar.months.length === 0) {
     return (
-      <section className="project-calendar-empty" aria-labelledby="project-calendar-empty-title">
+      <section className="project-calendar-empty ui-motion-surface" aria-labelledby="project-calendar-empty-title">
         <CalendarDays className="h-5 w-5 shrink-0 text-field-muted" aria-hidden />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 text-center">
           <h2 id="project-calendar-empty-title" className="text-sm font-bold text-field-text">
             촬영일이 아직 설정되지 않았습니다.
           </h2>
@@ -59,8 +59,8 @@ export function ProjectShootingCalendar({
 
   return (
     <section aria-labelledby="project-calendar-title" className="min-w-0">
-      <div className="mb-3 flex min-w-0 flex-wrap items-end justify-between gap-2 px-0.5">
-        <div className="min-w-0">
+      <div className="mb-3 grid min-w-0 justify-items-center gap-2 px-0.5 text-center">
+        <div className="min-w-0 text-center">
           <h2 id="project-calendar-title" className="font-display text-lg font-black text-field-text">
             촬영 달력
           </h2>
@@ -68,7 +68,7 @@ export function ProjectShootingCalendar({
             {formatCalendarPeriod(calendar.rangeStart, calendar.rangeEnd)}
           </p>
         </div>
-        <p className="flex items-center gap-1.5 text-xs font-semibold text-field-subtle">
+        <p className="flex items-center justify-center gap-1.5 text-center text-xs font-semibold text-field-subtle">
           <span className="h-2.5 w-2.5 border border-field-primary bg-field-primary" aria-hidden />
           실제 촬영일
         </p>
@@ -109,7 +109,7 @@ function MonthCalendar({
 }) {
   const days = buildCalendarMonthDays(month);
   return (
-    <article className="project-calendar-month" aria-labelledby={`project-calendar-month-${month.key}`}>
+    <article className="project-calendar-month ui-motion-surface text-center" aria-labelledby={`project-calendar-month-${month.key}`}>
       <h3 id={`project-calendar-month-${month.key}`} className="project-calendar-month__title">
         {month.label}
       </h3>

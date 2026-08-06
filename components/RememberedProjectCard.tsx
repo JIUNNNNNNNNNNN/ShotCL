@@ -170,15 +170,15 @@ export function RememberedProjectCard({
         }
         onOpen(project);
       }}
-      className="flex min-h-11 min-w-0 touch-pan-y select-none items-center justify-between gap-3 rounded-[10px] border border-field-divider bg-field-panel px-3 py-2 text-left transition-[border-color,background-color,transform] hover:border-field-subtle hover:bg-field-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+      className="ui-motion-surface flex min-h-14 min-w-0 touch-pan-y select-none flex-col items-center justify-center gap-0.5 rounded-[var(--radius-card)] border border-field-divider bg-field-panel px-3 py-2 text-center transition-[border-color,background-color,transform] hover:border-field-subtle hover:bg-field-hover active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       style={{ WebkitTouchCallout: "none" }}
       aria-label={`${project.name} 프로젝트 홈 열기`}
       aria-busy={isOpening}
     >
-      <span className="min-w-0 break-words text-xs font-black leading-5 text-field-text [overflow-wrap:anywhere]">
+      <span className="min-w-0 break-words text-center text-xs font-black leading-5 text-field-text [overflow-wrap:anywhere]">
         <span className="font-display">{project.name}</span>
       </span>
-      <span className="shrink-0 text-[9px] font-bold text-field-muted">
+      <span className="shrink-0 text-center text-[9px] font-bold text-field-muted">
         {isOpening ? "확인 중" : project.accessRole === "admin" ? "Key staff" : "Staff"}
       </span>
     </button>
@@ -235,7 +235,7 @@ export function RememberedProjectActions({
           aria-modal="true"
           aria-labelledby="remembered-project-removal-title"
           aria-describedby="remembered-project-removal-description"
-          className="max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-dialog p-4 shadow-dialog"
+          className="ui-motion-dialog max-h-[min(28rem,calc(100dvh-2rem))] w-full max-w-sm overflow-y-auto rounded-[var(--radius-dialog)] border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
         >
           <h2 id="remembered-project-removal-title" className="text-sm font-black text-field-text">
             프로젝트 목록에서 지우기
@@ -274,7 +274,7 @@ export function RememberedProjectActions({
     <div
       role="menu"
       aria-label={`${menuTarget.project.name} 프로젝트 메뉴`}
-      className="fixed z-[80] w-44 border border-field-divider bg-field-elevated p-1"
+      className="ui-motion-menu fixed z-[80] w-44 rounded-[var(--radius-menu)] border border-field-divider bg-field-elevated p-1"
       style={{ left: menuTarget.left, top: menuTarget.top }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => {
@@ -287,7 +287,7 @@ export function RememberedProjectActions({
         type="button"
         role="menuitem"
         onClick={() => onRequestRemoval(menuTarget.project)}
-        className="flex min-h-11 w-full items-center rounded-[8px] px-3 text-left text-xs font-black text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+        className="flex min-h-11 w-full items-center justify-center rounded-[var(--radius-control)] px-3 text-center text-xs font-black text-field-danger hover:bg-field-danger hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
       >
         목록에서 지우기
       </button>

@@ -89,7 +89,7 @@ import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
 import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { MemoPopoverField } from "@/components/MemoPopoverField";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { InlineLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
@@ -1785,7 +1785,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 }
               />
               <Button variant="secondary" onClick={handleLoadOpenMeteo} disabled={isWeatherLoading || !plan.shootingDate || !weatherLookupSource}>
-                {isWeatherLoading ? <PixelDogLoader size="xs" compact /> : "날씨 자동 입력"}
+                {isWeatherLoading ? <InlineLoader /> : "날씨 자동 입력"}
               </Button>
             </div>
 
@@ -1828,7 +1828,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
                   return (
                     <div
-                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 rounded-[10px] border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
+                      className={`grid min-h-[48px] min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.3fr)_auto] items-center gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-1.5 transition-colors max-md:grid-cols-[minmax(0,1fr)_auto] ${
                         isDragging ? "border-field-primary bg-field-primary/10" : "border-field-border"
                       }`}
                       role="group"
@@ -1908,7 +1908,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             </label>
                           ) : isSearching ? (
                             <div className="flex min-h-9 min-w-0 items-center justify-center overflow-hidden rounded-md border border-field-border bg-field-input">
-                              <PixelDogLoader size="xs" compact />
+                              <InlineLoader />
                             </div>
                           ) : (
                             <div
@@ -2008,7 +2008,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <tr
                         key={meal.id}
                         ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
-                        className={`daily-plan-timetable-row bg-field-soft align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                        className={`daily-plan-timetable-row bg-field-soft align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-[var(--radius-card)] max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                         data-selected={isSelected ? "true" : undefined}
                         data-dragging={isDragging ? "true" : undefined}
                         style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
@@ -2049,7 +2049,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <tr
                       key={scene.id}
                       ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
-                      className={`daily-plan-timetable-row align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                      className={`daily-plan-timetable-row align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-[var(--radius-card)] max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                       data-selected={isSelected ? "true" : undefined}
                       data-dragging={isDragging ? "true" : undefined}
                       style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
@@ -2159,7 +2159,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               {isStaffOpen ? "스태프&배우 접기" : "스태프&배우 열기"}
             </Button>
           </div>
-          {isStaffOpen ? <div className="mt-5 grid min-w-0 gap-5 text-center lg:grid-cols-2">
+          <div
+            data-expanded={isStaffOpen ? "true" : "false"}
+            aria-hidden={!isStaffOpen}
+            inert={!isStaffOpen}
+            className="ui-accordion"
+          >
+          <div className="ui-accordion-inner min-h-0">
+          <div className="mt-5 grid min-w-0 gap-5 text-center lg:grid-cols-2">
             <section className="min-w-0 border border-field-border bg-field-panel p-4 text-center">
               <div className="flex flex-col items-center justify-center gap-3 text-center">
                 <div>
@@ -2180,7 +2187,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <div
                       key={person.id}
                       ref={actorInteraction.registerRow(rowKey) as React.Ref<HTMLDivElement>}
-                      className={`grid w-full min-w-0 max-w-full items-center gap-2 border p-2 text-center transition-colors md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] ${
+                      className={`grid w-full min-w-0 max-w-full items-center gap-2 rounded-[var(--radius-card)] border p-2 text-center transition-colors md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] ${
                         isSelected
                           ? "border-field-primary bg-field-primary/10"
                           : "border-field-border bg-field-panel"
@@ -2296,7 +2303,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 ) : null}
               </div>
             </section>
-          </div> : null}
+          </div>
+          </div>
+          </div>
         </section>
 
         </div>
@@ -2319,7 +2328,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         <div className="no-print contents">
           {activeCardInteraction.insertion ? (
             <div
-              className="pointer-events-none fixed z-[128] h-0.5 bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              className="pointer-events-none fixed z-[128] h-0.5 rounded-full bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               style={{
                 left: activeCardInteraction.insertion.left,
                 top: activeCardInteraction.insertion.top,
@@ -2330,7 +2339,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           ) : null}
           {activeCardInteraction.ghost ? (
             <div
-              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[10px] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-semibold text-field-text shadow-floating"
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-center text-sm font-semibold text-field-text shadow-floating"
               style={{
                 left: activeCardInteraction.ghost.left,
                 top: activeCardInteraction.ghost.top,
@@ -3788,7 +3797,7 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
       {orientation ? (
         <ScaledDailyPlanPreview key={orientation} data={data} orientation={orientation} />
       ) : (
-        <PixelDogLoader size="sm" />
+        <SectionLoader />
       )}
     </section>
   );

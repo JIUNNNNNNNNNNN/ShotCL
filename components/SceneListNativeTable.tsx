@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { SceneReorderList, type SceneReorderRowProps } from "@/components/SceneReorderList";
 import {
+  SCENE_LIST_MERGE_COLUMNS,
   buildSceneListMergeLayout,
   createSceneListCellMergeFromRange,
   getSceneListCellMergeState,
@@ -762,13 +763,41 @@ const SceneNativeRow = memo(function SceneNativeRow({
     if (state?.kind === "covered") return null;
     const cell = { sceneId: item.id, column };
     const selected = isCellInResolvedRange(cell, resolvedSelection);
+    const rowSpan = state?.kind === "anchor" ? state.rowSpan : 1;
+    const colSpan = state?.kind === "anchor" ? state.colSpan : 1;
+    const columnIndex = SCENE_LIST_MERGE_COLUMNS.indexOf(column);
+    const selectionEdges = selected && resolvedSelection
+      ? {
+          top: index === resolvedSelection.rowStartIndex,
+          right: columnIndex + colSpan - 1 === resolvedSelection.columnEndIndex,
+          bottom: index + rowSpan - 1 === resolvedSelection.rowEndIndex,
+          left: columnIndex === resolvedSelection.columnStartIndex
+        }
+      : null;
+    const selectionShadows = selectionEdges
+      ? [
+          "inset 0 0 0 9999px rgba(213,255,64,.24)",
+          selectionEdges.top ? "inset 0 2px rgba(17,17,17,.88)" : null,
+          selectionEdges.right ? "inset -2px 0 rgba(17,17,17,.88)" : null,
+          selectionEdges.bottom ? "inset 0 -2px rgba(17,17,17,.88)" : null,
+          selectionEdges.left ? "inset 2px 0 rgba(17,17,17,.88)" : null
+        ].filter(Boolean).join(", ")
+      : undefined;
+    const selectionRadius = selectionEdges
+      ? [
+          selectionEdges.top && selectionEdges.left ? "var(--radius-selection)" : "0",
+          selectionEdges.top && selectionEdges.right ? "var(--radius-selection)" : "0",
+          selectionEdges.bottom && selectionEdges.right ? "var(--radius-selection)" : "0",
+          selectionEdges.bottom && selectionEdges.left ? "var(--radius-selection)" : "0"
+        ].join(" ")
+      : undefined;
     const columnKey = column as SceneEditableColumn;
     const editor = isEditing(columnKey);
     return (
       <td
         key={column}
-        rowSpan={state?.kind === "anchor" ? state.rowSpan : undefined}
-        colSpan={state?.kind === "anchor" ? state.colSpan : undefined}
+        rowSpan={state?.kind === "anchor" ? rowSpan : undefined}
+        colSpan={state?.kind === "anchor" ? colSpan : undefined}
         data-scene-merge-scene-id={item.id}
         data-scene-merge-column={column}
         aria-selected={selected || undefined}
@@ -776,9 +805,8 @@ const SceneNativeRow = memo(function SceneNativeRow({
         className="relative h-9 border-b border-r border-[#d6d6d6] bg-white p-0 align-middle outline-none"
         style={{
           ...style,
-          boxShadow: selected
-            ? "inset 0 0 0 2px rgba(17,17,17,.88), inset 0 0 0 9999px rgba(213,255,64,.24)"
-            : undefined
+          borderRadius: selectionRadius,
+          boxShadow: selectionShadows
         }}
         onPointerDown={(event) => onBeginSelection(event, cell)}
         onContextMenu={(event) => onMergeContextMenu(event, cell)}
@@ -1024,12 +1052,12 @@ function areSceneNativeRowPropsEqual(
     const nextState = getSceneListCellMergeState(next.mergeLayout, next.item.id, column);
     if (!sameMergeCellState(previousState, nextState)) return false;
     const cell = { sceneId: previous.item.id, column };
-    if (
-      isCellInResolvedRange(cell, previous.resolvedSelection)
-      !== isCellInResolvedRange(cell, next.resolvedSelection)
-    ) {
+    const wasSelected = isCellInResolvedRange(cell, previous.resolvedSelection);
+    const isSelected = isCellInResolvedRange(cell, next.resolvedSelection);
+    if (wasSelected !== isSelected) {
       return false;
     }
+    if (wasSelected && !sameResolvedSelectionBounds(previous.resolvedSelection, next.resolvedSelection)) return false;
   }
 
   const previousStyle = previous.trProps.style;
@@ -1043,6 +1071,18 @@ function areSceneNativeRowPropsEqual(
     && previousStyle?.zIndex === nextStyle?.zIndex
     && previousStyle?.touchAction === nextStyle?.touchAction
   );
+}
+
+function sameResolvedSelectionBounds(
+  previous: SceneListResolvedCellRange | null,
+  next: SceneListResolvedCellRange | null
+) {
+  if (previous === next) return true;
+  if (!previous || !next) return false;
+  return previous.rowStartIndex === next.rowStartIndex
+    && previous.rowEndIndex === next.rowEndIndex
+    && previous.columnStartIndex === next.columnStartIndex
+    && previous.columnEndIndex === next.columnEndIndex;
 }
 
 function sameMergeCellState(

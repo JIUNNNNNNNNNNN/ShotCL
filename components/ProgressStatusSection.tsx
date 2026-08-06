@@ -35,7 +35,7 @@ export function ProgressStatusSection({
 
   return (
     <section
-      className={cn("overflow-hidden border border-field-divider bg-field-section", className)}
+      className={cn("ui-motion-surface overflow-hidden rounded-[var(--radius-card)] border border-field-divider bg-field-section", className)}
       aria-label={`${label} 컷`}
     >
       <h3>
@@ -44,18 +44,28 @@ export function ProgressStatusSection({
           aria-expanded={expanded}
           aria-controls={contentId}
           onClick={() => onExpandedChange(!expanded)}
-          className="flex min-h-11 w-full items-center gap-2 border-0 bg-field-section px-3 py-2.5 text-left text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary"
+          className="relative flex min-h-11 w-full items-center justify-center gap-2 border-0 bg-field-section px-10 py-2.5 text-center text-sm font-bold text-field-text transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary"
         >
           <span className={kind === "ok" ? "text-status-ok" : "text-field-danger"}>{label}</span>
           <span className="tabular-nums text-field-subtle">{safeCount}</span>
           <ChevronDown
-            className={cn("ml-auto h-4 w-4 shrink-0 text-field-muted transition-transform", expanded && "rotate-180")}
+            className={cn("absolute right-3 h-4 w-4 shrink-0 text-field-muted transition-transform", expanded && "rotate-180")}
             aria-hidden
           />
         </button>
       </h3>
-      <div id={contentId} hidden={!expanded} className="border-t border-field-divider bg-field-panel p-2">
-        {children}
+      <div
+        id={contentId}
+        data-expanded={expanded ? "true" : "false"}
+        aria-hidden={!expanded}
+        inert={!expanded}
+        className="ui-accordion"
+      >
+        <div className="ui-accordion-inner min-h-0">
+          <div className="border-t border-field-divider bg-field-panel p-2">
+            {children}
+          </div>
+        </div>
       </div>
     </section>
   );

@@ -38,32 +38,35 @@ export function RightProjectSidebar({
         <ActionMenuItems menu={menu} />
       </aside>
 
-      {drawerOpen ? (
-        <div
-          className="project-shell__action-drawer-overlay no-print"
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) onDrawerClose();
-          }}
+      <div
+        className="project-shell__action-drawer-overlay no-print"
+        data-open={drawerOpen ? "true" : "false"}
+        aria-hidden={!drawerOpen}
+        inert={!drawerOpen}
+        role="presentation"
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) onDrawerClose();
+        }}
+      >
+        <aside
+          ref={drawerRef}
+          id="project-action-drawer"
+          role="dialog"
+          aria-modal={drawerOpen ? "true" : undefined}
+          aria-label={menu.ariaLabel}
+          tabIndex={-1}
+          data-side="right"
+          data-open={drawerOpen ? "true" : "false"}
+          className="project-shell__action-drawer ui-drawer"
         >
-          <aside
-            ref={drawerRef}
-            id="project-action-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label={menu.ariaLabel}
-            tabIndex={-1}
-            className="project-shell__action-drawer"
-          >
-            <ActionMenuHeader
-              projectName={projectName}
-              menu={menu}
-              onClose={onDrawerClose}
-            />
-            <ActionMenuItems menu={menu} onAction={onDrawerClose} />
-          </aside>
-        </div>
-      ) : null}
+          <ActionMenuHeader
+            projectName={projectName}
+            menu={menu}
+            onClose={onDrawerClose}
+          />
+          <ActionMenuItems menu={menu} onAction={onDrawerClose} />
+        </aside>
+      </div>
     </>
   );
 }
@@ -123,7 +126,7 @@ function PageActionItem({
   onAction?: () => void;
 }) {
   const Icon = action.icon;
-  const sharedClassName = `flex min-h-11 w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
+  const sharedClassName = `flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.active
       ? "neon-selected"
       : action.emphasis === "primary"
@@ -135,7 +138,7 @@ function PageActionItem({
       {action.pending
         ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
         : <Icon className="h-4 w-4 shrink-0" aria-hidden />}
-      <span className="min-w-0 whitespace-normal break-words leading-5">{action.label}</span>
+      <span className="min-w-0 whitespace-normal break-words text-center leading-5">{action.label}</span>
     </>
   );
 

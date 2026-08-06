@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { SectionLoader } from "@/components/PixelDogLoader";
 import { loadScenarioPdfDocument } from "@/lib/client/scenarioPdfImages";
 import { auditQuery } from "@/lib/queryAudit";
 import type { ProjectScenarioImageSegment } from "@/lib/types";
@@ -116,7 +116,7 @@ export function ScenarioPdfSceneSegments({
     <div className="relative mx-auto w-full max-w-5xl bg-white">
       {state === "loading" ? (
         <div className="absolute inset-x-0 top-8 z-10 flex justify-center">
-          <PixelDogLoader size="md" />
+          <SectionLoader className="!min-h-20" />
         </div>
       ) : null}
       <div

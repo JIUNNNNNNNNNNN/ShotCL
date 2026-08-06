@@ -115,8 +115,12 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
         drawerRef={actionDrawerRef}
       />
 
-      {openDrawer === "navigation" ? (
-        <div className="project-shell__drawer-layer no-print">
+      <div
+        className="project-shell__drawer-layer no-print"
+        data-open={openDrawer === "navigation" ? "true" : "false"}
+        aria-hidden={openDrawer !== "navigation"}
+        inert={openDrawer !== "navigation"}
+      >
           <button
             type="button"
             className="project-shell__drawer-backdrop"
@@ -127,10 +131,12 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             ref={navigationDrawerRef}
             id="project-navigation-drawer"
             role="dialog"
-            aria-modal="true"
+            aria-modal={openDrawer === "navigation" ? "true" : undefined}
             aria-label="프로젝트 전체 메뉴"
             tabIndex={-1}
-            className="project-shell__navigation-drawer"
+            data-side="left"
+            data-open={openDrawer === "navigation" ? "true" : "false"}
+            className="project-shell__navigation-drawer ui-drawer"
           >
             <div className="flex min-h-14 items-center justify-between border-b border-field-divider px-3">
               <p className="min-w-0 truncate text-sm font-black text-field-text">프로젝트 메뉴</p>
@@ -145,8 +151,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             </div>
             <ProjectNavigation drawer onNavigate={() => setOpenDrawer(null)} />
           </aside>
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }

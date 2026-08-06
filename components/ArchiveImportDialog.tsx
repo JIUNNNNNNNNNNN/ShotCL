@@ -1531,11 +1531,11 @@ function OverheadCropWorkflow({
                 else next.add(page.id);
                 return next;
               })}
-              className={`relative grid gap-1 border p-1.5 text-left transition-colors ${selected ? "border-field-primary/70 bg-field-primary/10" : "border-field-border bg-field-soft hover:border-field-divider hover:bg-field-hover"}`}
+              className={`relative grid gap-1 rounded-[var(--radius-card)] border p-1.5 text-center transition-colors ${selected ? "border-field-primary/70 bg-field-primary/10 ring-2 ring-field-primary/35" : "border-field-border bg-field-soft hover:border-field-divider hover:bg-field-hover"}`}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={page.previewUrl} alt={`${page.index + 1}페이지 미리보기`} draggable={false} className="block aspect-[4/3] h-auto w-full select-none object-contain" />
-              <span className="truncate px-1 text-[11px] text-field-muted">{page.index + 1}. {page.name}</span>
+              <span className="truncate px-1 text-center text-[11px] text-field-muted">{page.index + 1}. {page.name}</span>
               {selected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center bg-field-primary text-field-accent-foreground"><Check className="h-4 w-4" aria-hidden /></span> : null}
             </button>
           );

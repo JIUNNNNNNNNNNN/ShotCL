@@ -20,7 +20,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
     <article
       onClick={() => onOpen(item)}
       className={cn(
-        "grid cursor-pointer gap-2 border border-field-border border-l-2 border-l-field-primary bg-field-panel px-3 py-2.5 text-field-text transition-[background-color,border-color,transform] hover:bg-field-hover active:scale-[0.995]",
+        "ui-motion-surface grid cursor-pointer gap-2 rounded-[var(--radius-card)] border border-field-border border-l-2 border-l-field-primary bg-field-panel px-3 py-2.5 text-center text-field-text transition-[background-color,border-color,transform] hover:bg-field-hover active:scale-[0.995]",
         item.imageUrl && "grid-cols-[4.5rem_minmax(0,1fr)]"
       )}
       aria-label={`${title} 기타일정 상세 보기`}
@@ -44,8 +44,8 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
         </button>
       ) : null}
 
-      <div className="grid min-w-0 gap-1.5 sm:grid-cols-[max-content_minmax(0,1fr)] sm:items-center sm:gap-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-nowrap">
+      <div className="grid min-w-0 justify-items-center gap-1.5 sm:grid-cols-[max-content_minmax(0,1fr)] sm:items-center sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 sm:flex-nowrap">
           <span className="shrink-0 rounded-md border border-field-primary/70 bg-field-primary/10 px-2 py-1 text-[10px] font-semibold text-field-primary">
             기타일정
           </span>
@@ -56,7 +56,7 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
             </span>
           ) : null}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 text-center">
           <p className="truncate text-sm font-bold leading-5 text-field-text">{title}</p>
           {item.progressMemo?.trim() ? (
             <p className="mt-0.5 truncate text-[11px] leading-4 text-field-muted">{item.progressMemo.trim()}</p>

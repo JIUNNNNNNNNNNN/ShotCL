@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
-import { PixelDogLoader } from "@/components/PixelDogLoader";
+import { InlineLoader, PageLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
@@ -469,7 +469,7 @@ export default function StaffListPage() {
     }
   }, [canEdit, finishSectionMutation, pendingMemberDelete, projectId, setSectionPending]);
 
-  if (isLoading) return <PixelDogLoader size="lg" />;
+  if (isLoading) return <PageLoader />;
 
   if (!project) {
     return (
@@ -510,7 +510,7 @@ export default function StaffListPage() {
                 disabled={isSaving || pendingSectionKeys.size > 0 || !isDirty}
                 className="inline-flex h-9 items-center gap-1.5 rounded-md border border-field-primary bg-field-primary px-3 text-xs font-semibold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary active:scale-95 active:bg-field-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isSaving ? <PixelDogLoader size="xs" compact /> : <Save className="h-3.5 w-3.5" aria-hidden />}
+                {isSaving ? <InlineLoader /> : <Save className="h-3.5 w-3.5" aria-hidden />}
                 저장
               </button>
             ) : null}
@@ -596,11 +596,16 @@ export default function StaffListPage() {
             ) : null}
           </div>
         </div>
-        {canEdit && isDepartmentsOpen ? (
+        {canEdit ? (
           <div
             id="staff-departments-panel"
-            className="workspace-divider mt-1.5 flex flex-wrap items-center gap-1.5 border-t px-1 pt-2"
+            data-expanded={isDepartmentsOpen ? "true" : "false"}
+            aria-hidden={!isDepartmentsOpen}
+            inert={!isDepartmentsOpen}
+            className="ui-accordion"
           >
+            <div className="ui-accordion-inner min-h-0">
+            <div className="workspace-divider mt-1.5 flex flex-wrap items-center justify-center gap-1.5 border-t px-1 pt-2 text-center">
             {departments.map((department, index) => (
               <DepartmentChip
                 key={department.id}
@@ -655,6 +660,8 @@ export default function StaffListPage() {
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden />
               </button>
+            </div>
+            </div>
             </div>
           </div>
         ) : null}
@@ -867,7 +874,7 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
         <div className="no-print contents" data-drag-source="staff-card">
           {interaction.insertion ? (
             <div
-              className="pointer-events-none fixed z-[128] h-0.5 bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
+              className="pointer-events-none fixed z-[128] h-0.5 rounded-full bg-field-primary shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               style={{
                 left: interaction.insertion.left,
                 top: interaction.insertion.top,
@@ -878,7 +885,7 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
           ) : null}
           {interaction.ghost ? (
             <div
-              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[10px] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-sm font-semibold text-field-text shadow-floating"
+              className="pointer-events-none fixed z-[129] flex max-h-28 items-center justify-center overflow-hidden rounded-[var(--radius-card)] border border-field-primary/80 bg-field-floating/95 px-4 py-3 text-center text-sm font-semibold text-field-text shadow-floating"
               style={{
                 left: interaction.ghost.left,
                 top: interaction.ghost.top,
@@ -941,7 +948,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   return (
     <article
       ref={registerRow(member.id)}
-      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
+      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "rounded-[var(--radius-selection)] neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "rounded-[var(--radius-selection)] scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}

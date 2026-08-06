@@ -81,7 +81,7 @@ export const ShotCard = memo(function ShotCard({
       onClick={handleCardOpen}
       aria-label={progressOnly ? `${cutLabel} 상세 보기` : `${cutLabel} 수정`}
       className={cn(
-        "relative grid min-w-0 cursor-pointer gap-2 overflow-hidden  border p-2 transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
+        "ui-motion-surface relative grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[var(--radius-card)] border p-2 text-center transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
         isOk
           ? "border-status-ok/80 bg-status-ok/10 after:pointer-events-none after:absolute after:inset-x-3 after:top-1/2 after:z-10 after:h-[2px] after:-translate-y-1/2 after:bg-status-ok/55 after:content-['']"
           : isOmit
@@ -151,14 +151,14 @@ export const ShotCard = memo(function ShotCard({
         ) : null}
 
         <div className="min-w-0 px-0.5">
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="relative flex min-w-0 flex-wrap items-center justify-center gap-1.5 sm:flex-nowrap">
           <h2 className="min-w-0 truncate text-sm font-bold leading-5 text-field-text">
             {cutLabel}
           </h2>
           <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center justify-center gap-1 sm:ml-auto">
             <button
               type="button"
               onClick={(event) => {
@@ -193,7 +193,7 @@ export const ShotCard = memo(function ShotCard({
           </div>
         </div>
 
-        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11px] font-normal text-field-muted">
+        <div className="mt-0.5 flex min-w-0 items-center justify-center gap-2 text-center text-[11px] font-normal text-field-muted">
           {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
           {shot.location ? <p className="min-w-0 flex-1 truncate text-field-muted">장소 {shot.location}</p> : null}
           {!shot.location && shot.memo ? <p className="min-w-0 flex-1 truncate">{shot.memo}</p> : null}
@@ -259,7 +259,7 @@ function ArchiveMediaStrip({
   ) => void;
 }) {
   return (
-    <div className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 border-t border-field-divider/80 pt-2">
+    <div className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 border-t border-field-divider/80 pt-2 text-center">
       <span className="text-[10px] font-bold text-field-muted">
         {label} {assets.length}
       </span>

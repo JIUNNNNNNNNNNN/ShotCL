@@ -1,35 +1,62 @@
-type PixelDogLoaderProps = {
-  size?: "xs" | "sm" | "md" | "lg";
-  compact?: boolean;
+type LoaderLevel = "page" | "section" | "inline";
+
+type LoaderProps = {
   className?: string;
+  ariaLabel?: string;
 };
 
-const loaderSizes = {
-  xs: 52,
-  sm: 92,
-  md: 124,
-  lg: 156
-} as const;
+type PixelDogLoaderProps = LoaderProps & {
+  level?: LoaderLevel;
+};
 
-/** 이미지 없이 SVG 픽셀 블록으로 만든 단순한 검은 강아지 로더입니다. */
+const loaderPresentation: Record<LoaderLevel, { wrapper: string; graphic: string }> = {
+  page: {
+    wrapper: "grid h-full min-h-[calc(100dvh_-_6rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] w-full min-w-0 place-items-center min-[1180px]:min-h-[calc(100dvh_-_3.25rem)]",
+    graphic: "w-[clamp(44px,4vw,52px)]"
+  },
+  section: {
+    wrapper: "grid min-h-24 w-full min-w-0 place-items-center",
+    graphic: "w-8 md:w-9"
+  },
+  inline: {
+    wrapper: "inline-grid h-[18px] w-[18px] shrink-0 place-items-center align-middle",
+    graphic: "w-full"
+  }
+};
+
+/** 현재 중앙 content 영역 전체를 기다릴 때 사용하는 44~52px loader입니다. */
+export function PageLoader(props: LoaderProps) {
+  return <PixelDogLoader level="page" {...props} />;
+}
+
+/** card나 section 일부를 기다릴 때 사용하는 32~36px loader입니다. */
+export function SectionLoader(props: LoaderProps) {
+  return <PixelDogLoader level="section" {...props} />;
+}
+
+/** button과 짧은 pending 상태를 위한 18px loader입니다. */
+export function InlineLoader(props: LoaderProps) {
+  return <PixelDogLoader level="inline" {...props} />;
+}
+
+/** 이미지 없이 SVG 픽셀 블록으로 만든 단순한 검은 강아지 loader입니다. */
 export function PixelDogLoader({
-  size = "md",
-  compact = false,
-  className = ""
+  level = "section",
+  className = "",
+  ariaLabel = "로딩 중"
 }: PixelDogLoaderProps) {
-  const width = loaderSizes[size];
+  const presentation = loaderPresentation[level];
 
   return (
     <div
       role="status"
-      aria-label="로딩 중"
-      className={`${compact ? "inline-flex min-h-0 w-auto" : "flex min-h-[8rem] w-full"} items-center justify-center ${className}`}
+      aria-label={ariaLabel}
+      data-loader-level={level}
+      className={`${presentation.wrapper} ${className}`}
     >
       <svg
         viewBox="0 0 96 58"
-        width={width}
-        height={Math.round(width * 0.604)}
-        className="pixel-dog-loader block"
+        className={`pixel-dog-loader block h-auto max-w-full ${presentation.graphic}`}
         shapeRendering="crispEdges"
         aria-hidden="true"
       >
