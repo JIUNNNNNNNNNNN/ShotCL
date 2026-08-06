@@ -421,9 +421,13 @@ export function DailyPlanPortraitDocument({
               </tr>
               <tr>
                 <PortraitMainStaffCells member={compactMainStaffRows[2]} />
-                <td colSpan={2} className={`${cellClass} ${crewCellClass} font-black`}>Total Crew</td>
-                <td colSpan={3} className={`${cellClass} ${crewCellClass} daily-plan-document-stat font-black`}>
-                  {getPreviewCellText(meta.totalCrew)}
+                <td colSpan={2} className={`${cellClass} ${crewCellClass} daily-plan-portrait-total-crew-cell`}>
+                  <span className="daily-plan-portrait-total-crew-label">Total Crew</span>
+                </td>
+                <td colSpan={3} className={`${cellClass} ${crewCellClass} daily-plan-portrait-total-crew-cell`}>
+                  <span className="daily-plan-portrait-total-crew-value">
+                    {getPreviewCellText(meta.totalCrew)}
+                  </span>
                 </td>
               </tr>
             </tbody>
