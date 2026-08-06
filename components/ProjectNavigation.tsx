@@ -19,6 +19,7 @@ import {
   FilePenLine,
   House,
   Images,
+  LayoutDashboard,
   ListChecks,
   Plus,
   Shirt,
@@ -41,6 +42,7 @@ import {
   buildDailyPlanRoundHref,
   buildNewDailyPlanHref,
   buildProgressRoundHref,
+  buildProjectBasePath,
   buildProjectNavigationHref,
   getVisibleProjectNavigationItems,
   isDailyPlanRoundActive,
@@ -116,18 +118,30 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
   const canManageDailyPlans = role !== "progress" && project?.accessRole !== "progress";
   const instanceId = drawer ? "drawer" : "panel";
-  const cardItems = useMemo<ProjectNavigationCardItem[]>(() => visibleItems.map((item) => {
-    const roundKind = item.id === "dailyPlans" || item.id === "progress" ? item.id : null;
-    return {
-      id: item.id,
-      label: item.label,
-      href: buildProjectNavigationHref(projectId, item.id),
-      icon: NAVIGATION_ICONS[item.id],
-      active: activeItem === item.id,
-      roundKind,
-      expanded: roundKind ? expandedGroups[roundKind] : false
-    };
-  }), [activeItem, expandedGroups, projectId, visibleItems]);
+  const projectHomeHref = buildProjectBasePath(projectId);
+  const cardItems = useMemo<ProjectNavigationCardItem[]>(() => [
+    {
+      id: "projectHome",
+      label: "Home",
+      href: projectHomeHref,
+      icon: LayoutDashboard,
+      active: activeItem === null && pathname.replace(/\/$/u, "") === projectHomeHref,
+      roundKind: null,
+      expanded: false
+    },
+    ...visibleItems.map((item) => {
+      const roundKind = item.id === "dailyPlans" || item.id === "progress" ? item.id : null;
+      return {
+        id: item.id,
+        label: item.label,
+        href: buildProjectNavigationHref(projectId, item.id),
+        icon: NAVIGATION_ICONS[item.id],
+        active: activeItem === item.id,
+        roundKind,
+        expanded: roundKind ? expandedGroups[roundKind] : false
+      };
+    })
+  ], [activeItem, expandedGroups, pathname, projectHomeHref, projectId, visibleItems]);
 
   useEffect(() => {
     setExpandedGroups({ dailyPlans: false, progress: false });
@@ -242,19 +256,45 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
     }
   }
 
+  function renderRoundContent(kind: "dailyPlans" | "progress") {
+    return (
+      <section
+        className="project-navigation__round-section"
+        aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차 목록`}
+      >
+        <p className="project-navigation__round-heading">
+          {kind === "dailyPlans" ? "일촬표 회차" : "진행도 회차"}
+        </p>
+        <RoundNavigationList
+          kind={kind}
+          projectId={projectId}
+          plans={sortedPlans}
+          pathname={pathname}
+          searchParams={searchParams}
+          canManage={canManageDailyPlans}
+          isBusy={Boolean(duplicatingId) || isDeleting}
+          onNavigate={notifyNavigation}
+          onOpenContextMenu={openContextMenu}
+        />
+      </section>
+    );
+  }
+
   return (
     <>
       <nav
         aria-label="프로젝트 기능"
-        className={`project-navigation min-h-0 min-w-0 overflow-y-auto overscroll-contain ${drawer ? "flex-1" : "h-full"}`}
+        className={`project-navigation min-h-0 min-w-0 ${drawer ? "flex-1" : "h-full"}`}
       >
         <Link
           href="/"
           onClick={(event) => guardLinkNavigation(event, "/")}
+          aria-label="Main"
+          title="Main"
           className="project-navigation__home"
         >
           <House className="h-4 w-4 shrink-0" aria-hidden />
-          <span>Home</span>
+          <span>Main</span>
         </Link>
 
         <div className="project-navigation__project-summary text-center">
@@ -265,55 +305,24 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
           {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트 메뉴를 불러오지 못했습니다.")}</p> : null}
         </div>
 
-        <ProjectNavigationCardGrid
-          items={cardItems}
-          instanceId={instanceId}
-          onLinkClick={guardLinkNavigation}
-          onToggleRounds={(kind) => setExpandedGroups((current) => ({
-            ...current,
-            [kind]: !current[kind]
-          }))}
-        />
+        <div className="project-navigation__menu-scroll">
+          <ProjectNavigationCardGrid
+            items={cardItems}
+            instanceId={instanceId}
+            onLinkClick={guardLinkNavigation}
+            onToggleRounds={(kind) => setExpandedGroups((current) => ({
+              ...current,
+              [kind]: !current[kind]
+            }))}
+            renderRoundContent={renderRoundContent}
+          />
 
-        {(["dailyPlans", "progress"] as const).map((kind) => {
-          if (!visibleItems.some((item) => item.id === kind)) return null;
-          const expanded = expandedGroups[kind];
-          return (
-            <div
-              key={kind}
-              id={`project-navigation-${instanceId}-rounds-${kind}`}
-              className="project-navigation__round-accordion"
-              data-expanded={expanded ? "true" : "false"}
-              aria-hidden={!expanded}
-              inert={!expanded}
-            >
-              <div className="project-navigation__round-accordion-inner">
-                <section className="project-navigation__round-section" aria-label={`${kind === "dailyPlans" ? "일촬표" : "진행도"} 회차 목록`}>
-                  <p className="project-navigation__round-heading">
-                    {kind === "dailyPlans" ? "일촬표 회차" : "진행도 회차"}
-                  </p>
-                  <RoundNavigationList
-                    kind={kind}
-                    projectId={projectId}
-                    plans={sortedPlans}
-                    pathname={pathname}
-                    searchParams={searchParams}
-                    canManage={canManageDailyPlans}
-                    isBusy={Boolean(duplicatingId) || isDeleting}
-                    onNavigate={notifyNavigation}
-                    onOpenContextMenu={openContextMenu}
-                  />
-                </section>
-              </div>
-            </div>
-          );
-        })}
-
-        {mutationError && !pendingDelete ? (
-          <p role="alert" className="mt-3 border border-field-danger/60 bg-field-danger/10 px-2 py-1.5 text-[11px] font-bold leading-4 text-field-danger">
-            {mutationError}
-          </p>
-        ) : null}
+          {mutationError && !pendingDelete ? (
+            <p role="alert" className="mt-3 border border-field-danger/60 bg-field-danger/10 px-2 py-1.5 text-[11px] font-bold leading-4 text-field-danger">
+              {mutationError}
+            </p>
+          ) : null}
+        </div>
       </nav>
 
       {contextMenu && typeof document !== "undefined" ? createPortal(

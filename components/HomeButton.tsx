@@ -7,7 +7,7 @@ import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard"
 
 const LONG_PRESS_MS = 700;
 
-/** 짧게 누르면 현재 프로젝트 메뉴, 길게 누르면 메인 화면으로 이동합니다. */
+/** 짧게 누르면 프로젝트 Home, 길게 누르면 앱 Main으로 이동합니다. */
 export function HomeButton({ embedded = false }: { embedded?: boolean } = {}) {
   const pathname = usePathname();
   const router = useRouter();
@@ -91,8 +91,8 @@ export function HomeButton({ embedded = false }: { embedded?: boolean } = {}) {
     <button
       ref={buttonRef}
       type="button"
-      aria-label={projectId ? "프로젝트 메뉴로 이동, 길게 누르면 메인 홈으로 이동" : "메인 홈으로 이동"}
-      title={projectId ? "프로젝트 메뉴 · 길게 누르면 메인 홈" : "메인 홈"}
+      aria-label={projectId ? "프로젝트 Home으로 이동, 길게 누르면 Main으로 이동" : "Main으로 이동"}
+      title={projectId ? "프로젝트 Home · 길게 누르면 Main" : "Main"}
       className={`no-print flex h-11 w-11 shrink-0 select-none items-center justify-center rounded-md border bg-field-floating text-field-text shadow-floating transition-[background-color,border-color,transform] hover:border-field-primary/60 hover:bg-field-hover hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
         embedded
           ? "relative"

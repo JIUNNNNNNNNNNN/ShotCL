@@ -93,7 +93,7 @@ export function resolveActiveProjectNavigationItem(
 export function getProjectPageTitle(pathname: string, searchParams: ProjectSearchParams) {
   const route = parseProjectPath(pathname);
   if (!route) return "프로젝트";
-  if (!route.remainder) return isProgressQuery(searchParams) ? "진행도" : "프로젝트 메뉴";
+  if (!route.remainder) return isProgressQuery(searchParams) ? "진행도" : "Home";
   if (route.remainder === "basic-info") return "기본정보";
   if (route.remainder === "daily-plans") return "일촬표";
   if (route.remainder === "daily-plans/new") return "새 일촬표";

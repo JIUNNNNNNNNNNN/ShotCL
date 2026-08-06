@@ -2169,8 +2169,20 @@ button {
 }
 
 .project-navigation {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 12px;
+}
+
+.project-navigation__menu-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .project-navigation__home {
@@ -2219,7 +2231,7 @@ button {
 
 .project-navigation__card-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   min-width: 0;
 }
@@ -2227,7 +2239,7 @@ button {
 .project-navigation__card {
   position: relative;
   min-width: 0;
-  min-height: 104px;
+  min-height: 74px;
   overflow: hidden;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-card);
@@ -2257,14 +2269,27 @@ button {
 
 .project-navigation__card-link {
   display: flex;
+  width: 100%;
   min-width: 0;
-  min-height: 102px;
+  min-height: 72px;
   align-items: center;
   justify-content: center;
-  flex-direction: column;
-  gap: 9px;
-  padding: 12px 8px;
+  gap: 10px;
+  padding: 13px 14px;
   text-align: center;
+}
+
+.project-navigation__card-toggle {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-navigation__card[data-has-rounds="true"] .project-navigation__card-link {
+  padding-right: 58px;
+  padding-left: 58px;
 }
 
 .project-navigation__card-link:focus-visible {
@@ -2276,51 +2301,24 @@ button {
 }
 
 .project-navigation__card-icon {
-  width: 25px;
-  height: 25px;
+  width: 22px;
+  height: 22px;
   flex: 0 0 auto;
 }
 
 .project-navigation__card-label {
-  width: 100%;
+  min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 800;
   line-height: 1.35;
   text-align: center;
 }
 
-.project-navigation__card-disclosure {
-  position: absolute;
-  z-index: 3;
-  top: 6px;
-  right: 6px;
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid var(--ui-border-default);
-  border-radius: var(--ui-radius-control);
-  background: color-mix(in srgb, var(--ui-surface-4) 92%, transparent);
-  color: currentColor;
-  transition:
-    border-color var(--motion-fast) var(--ease-out-native),
-    background-color var(--motion-fast) var(--ease-out-native),
-    color var(--motion-fast) var(--ease-out-native);
-}
-
-.project-navigation__card-disclosure:hover {
-  border-color: var(--ui-accent-border);
-  background: var(--ui-surface-4);
-  color: var(--ui-accent);
-}
-
-.project-navigation__card-disclosure:focus-visible {
-  outline: 2px solid var(--ui-accent-focus);
-  outline-offset: 2px;
-}
-
 .project-navigation__card-chevron {
+  position: absolute;
+  top: 28px;
+  right: 26px;
   width: 16px;
   height: 16px;
   transition: transform var(--motion-base) var(--ease-standard-native);
@@ -2330,43 +2328,15 @@ button {
   transform: rotate(180deg);
 }
 
-.project-navigation__round-accordion {
-  display: grid;
-  grid-template-rows: 0fr;
-  min-width: 0;
-  opacity: 0;
-  transition:
-    grid-template-rows var(--motion-base) var(--ease-standard-native),
-    opacity var(--motion-fast) var(--ease-out-native);
-}
-
-.project-navigation__round-accordion[data-expanded="true"] {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-
-.project-navigation__round-accordion-inner {
-  min-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transform: translateY(-4px);
-  transition:
-    opacity var(--motion-fast) var(--ease-out-native),
-    transform var(--motion-base) var(--ease-out-native);
-}
-
-.project-navigation__round-accordion[data-expanded="true"] .project-navigation__round-accordion-inner {
-  opacity: 1;
-  transform: translateY(0);
+.project-navigation__card-accordion {
+  width: 100%;
 }
 
 .project-navigation__round-section {
   min-width: 0;
-  margin-top: 10px;
   overflow: hidden;
-  border: 1px solid var(--ui-border-default);
-  border-radius: var(--ui-radius-card);
-  background: var(--ui-surface-2);
+  border-top: 1px solid var(--ui-border-default);
+  background: color-mix(in srgb, var(--ui-surface-3) 72%, var(--ui-surface-2));
 }
 
 .project-navigation__round-heading {
@@ -2382,7 +2352,7 @@ button {
   display: grid;
   min-width: 0;
   gap: 3px;
-  padding: 5px;
+  padding: 7px;
 }
 
 @media (max-width: 899px) {
@@ -2431,12 +2401,6 @@ button {
   }
 }
 
-@media (max-width: 339px) {
-  .project-navigation__card-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .app-theme :where(
     .ui-motion-surface,
@@ -2470,16 +2434,10 @@ button {
   .project-shell__page > *,
   .project-navigation__card,
   .project-navigation__card-chevron,
-  .project-navigation__round-accordion,
-  .project-navigation__round-accordion-inner,
   .project-shell__navigation-drawer,
   .project-shell__action-drawer {
     transition-duration: 0.01ms !important;
     animation: none !important;
-  }
-
-  .project-navigation__round-accordion-inner {
-    transform: none;
   }
 
   .ui-accordion > .ui-accordion-inner {
