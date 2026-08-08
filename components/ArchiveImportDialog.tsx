@@ -353,8 +353,8 @@ export function ArchiveImportDialog({
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
       <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
         <header className="flex items-center justify-between border-b border-field-border px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="font-display truncate text-lg font-black text-field-text">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display break-words text-lg font-black text-field-text [overflow-wrap:anywhere]">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
             <p className="truncate text-xs text-field-subtle">{sourceLabel} · {pages.length}페이지/이미지</p>
           </div>
           <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center border border-field-border bg-field-input text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25 disabled:bg-field-disabled disabled:text-field-panel" aria-label="가져오기 닫기">

@@ -4,12 +4,20 @@ import { useSyncExternalStore } from "react";
 
 export type SceneListViewportMode = "portrait" | "editor";
 
-export const SCENE_LIST_EDITOR_MIN_WIDTH_PX = 1024;
-export const SCENE_LIST_READ_ONLY_MEDIA_QUERY =
-  `(max-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX - 1}px)`;
+export const SCENE_LIST_EDITOR_MIN_WIDTH_PX = 1100;
+/**
+ * The editor needs the center workspace, not merely a wide outer viewport.
+ * 1100–1439px and low-height wide screens use App Shell drawers, while a
+ * persistent three-panel shell needs 1800px before the natural table is safe.
+ */
+export const SCENE_LIST_EDITOR_MEDIA_QUERY = [
+  `(min-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX}px) and (max-width: 1439px)`,
+  "(min-width: 1440px) and (max-height: 699px)",
+  "(min-width: 1800px) and (min-height: 700px)"
+].join(", ");
 
 const subscribeToPortraitMode = (onStoreChange: () => void) => {
-  const mediaQuery = window.matchMedia(SCENE_LIST_READ_ONLY_MEDIA_QUERY);
+  const mediaQuery = window.matchMedia(SCENE_LIST_EDITOR_MEDIA_QUERY);
   if (typeof mediaQuery.addEventListener === "function") {
     mediaQuery.addEventListener("change", onStoreChange);
   } else {
@@ -26,7 +34,7 @@ const subscribeToPortraitMode = (onStoreChange: () => void) => {
 };
 
 const getPortraitSnapshot = () =>
-  window.matchMedia(SCENE_LIST_READ_ONLY_MEDIA_QUERY).matches;
+  !window.matchMedia(SCENE_LIST_EDITOR_MEDIA_QUERY).matches;
 
 const getServerPortraitSnapshot = () => null;
 

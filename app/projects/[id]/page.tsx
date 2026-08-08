@@ -1228,7 +1228,7 @@ function EpisodeSelection({
     <section className="flex min-h-[min(24rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
       <Card className="w-full max-w-md text-center">
         {invalidSelection ? <p role="alert" className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-semibold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
-        <h1 className="font-display text-xl font-black text-field-text">진행도</h1>
+        <h1 className="ui-density-heading font-display font-black text-field-text">진행도</h1>
         <p className="mt-3 text-sm leading-6 text-field-muted">
           {sortedPlans.length === 0
             ? "진행 가능한 일촬표가 없습니다."

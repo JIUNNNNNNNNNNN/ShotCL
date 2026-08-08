@@ -161,7 +161,7 @@ export function DailyPlanSceneLocations({
         title={selectedLabel || "장소명 선택"}
         onClick={openPicker}
       >
-        <span className={`min-w-0 flex-1 truncate text-center ${selectedLabel ? "" : "text-field-muted"}`}>
+        <span className={`min-w-0 flex-1 break-words text-center leading-4 [overflow-wrap:anywhere] ${selectedLabel ? "" : "text-field-muted"}`}>
           {selectedLabel || "장소명 선택"}
         </span>
       </button>
@@ -212,9 +212,9 @@ export function DailyPlanSceneLocations({
                       }`}
                       onClick={() => togglePickerOption(option)}
                     >
-                      <span className="truncate text-center">{option.name}</span>
+                      <span className="break-words text-center leading-4 [overflow-wrap:anywhere]">{option.name}</span>
                       {status ? (
-                        <span className="max-w-28 truncate text-center text-[10px] text-field-muted" title={status}>
+                        <span className="max-w-28 break-words text-center text-[10px] leading-4 text-field-muted [overflow-wrap:anywhere]" title={status}>
                           {status}
                         </span>
                       ) : null}

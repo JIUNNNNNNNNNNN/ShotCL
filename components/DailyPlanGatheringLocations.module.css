@@ -6,7 +6,7 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--ui-card-gap);
   align-items: center;
 }
 
@@ -49,7 +49,9 @@
   gap: 2px;
   font-size: 11px;
   line-height: 1.2;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }
 
 @container (min-width: 480px) and (max-width: 559px) {
@@ -112,6 +114,28 @@
 
   .actions {
     padding-left: 12px;
+  }
+}
+
+@media (max-height: 699px) {
+  @container (min-width: 560px) {
+    .layout {
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: var(--ui-card-gap);
+    }
+
+    .actions {
+      grid-column: 1 / -1;
+      height: auto;
+      max-height: none;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: minmax(44px, auto);
+      gap: var(--ui-card-gap);
+      padding-top: var(--ui-card-gap);
+      padding-left: 0;
+      border-top: 1px solid var(--field-line);
+      border-left: 0;
+    }
   }
 }
 

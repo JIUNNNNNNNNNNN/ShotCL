@@ -182,8 +182,8 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
     <form noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
       <div className="flex flex-wrap items-center justify-center gap-2 px-1 text-center">
         <div className="min-w-0 text-center">
-          <p className="font-display text-xl font-black text-field-text md:text-2xl">프로젝트 기본정보</p>
-          <p className="mt-1 truncate text-sm text-field-muted">{projectName}</p>
+          <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>
+          <p className="mt-1 break-words text-sm text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
         </div>
         <span className="rounded-md border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
           프로젝트 공통 정보
@@ -281,7 +281,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
           <span aria-hidden />
           <div className="min-w-0 text-center">
             <h2 className="text-center text-sm font-bold text-field-text">배우 정보</h2>
-            <p className="truncate text-center text-[11px] text-field-muted">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
+            <p className="break-words text-center text-[11px] text-field-muted [overflow-wrap:anywhere]">역할과 배우 이름은 씬리스트·의상 자료의 기본값으로 사용됩니다.</p>
           </div>
           <Button
             type="button"
@@ -362,7 +362,7 @@ const StaffFields = memo(function StaffFields({
             checked={member.includeInDailyPlan}
             onChange={(event) => onChange(index, "includeInDailyPlan", event.currentTarget.checked)}
           />
-          <span className="truncate">일촬표 반영</span>
+          <span className="break-words [overflow-wrap:anywhere]">일촬표 반영</span>
         </label>
         <button
           type="button"
@@ -461,7 +461,7 @@ function EpisodeSelectionField({
         disabled={!totalEpisodes}
         onClick={onOpen}
       >
-        <span className="min-w-0 flex-1 truncate">
+        <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
           {totalEpisodes
             ? formatMainStaffEpisodeSummary(selectedEpisodes)
             : "총회차를 먼저 입력하세요"}
@@ -486,7 +486,7 @@ function EpisodeSelectionField({
               <div className="flex items-center justify-between border-b border-field-border px-4 py-3">
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-field-text">참여 회차</p>
-                  <p className="truncate text-xs text-field-muted">
+                  <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">
                     {member.role || "직책 미입력"} · {member.name || "이름 미입력"}
                   </p>
                 </div>

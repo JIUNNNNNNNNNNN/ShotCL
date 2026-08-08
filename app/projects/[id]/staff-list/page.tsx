@@ -43,11 +43,9 @@ import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 
 const inputClassName =
-  "workspace-control h-8 w-full min-w-0 border px-2 text-center text-xs outline-none transition placeholder:text-center";
+  "workspace-control h-auto min-h-[var(--ui-compact-control-height)] w-full min-w-0 border px-2 py-1.5 text-center text-xs outline-none transition placeholder:text-center";
 const notesTextareaClassName =
-  "workspace-control h-8 min-h-8 max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border px-2 py-1 text-center text-xs leading-5 outline-none transition [overflow-wrap:anywhere] placeholder:text-center";
-const desktopGridClassName =
-  "md:grid-cols-[minmax(5.5rem,0.8fr)_minmax(4.5rem,0.55fr)_minmax(7.25rem,0.95fr)_minmax(7.5rem,1fr)_minmax(7.5rem,1.25fr)_minmax(9rem,1.5fr)]";
+  "workspace-control h-auto min-h-[var(--ui-compact-control-height)] max-h-40 w-full min-w-0 resize-none overflow-y-hidden whitespace-pre-wrap border px-2 py-1.5 text-center text-xs leading-5 outline-none transition [overflow-wrap:anywhere] placeholder:text-center";
 
 type StaffDisplaySection = ReturnType<typeof groupStaffMembersForDisplay>[number] & {
   sectionKey: string;
@@ -517,8 +515,8 @@ export default function StaffListPage() {
               <Users className="h-4 w-4" aria-hidden />
             </div>
             <div className="min-w-0">
-              <h1 className="font-display text-xl font-black text-field-text">스탭 리스트</h1>
-              <p className="truncate text-xs text-field-muted">{project.name} · 프로젝트 공통</p>
+              <h1 className="ui-density-heading font-display font-black text-field-text">스탭 리스트</h1>
+              <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{project.name} · 프로젝트 공통</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
@@ -560,12 +558,12 @@ export default function StaffListPage() {
       ) : null}
 
       <section className="workspace-surface workspace-border mt-3 border px-2.5 py-2">
-        <div className={`grid h-8 items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
+        <div className={`grid min-h-[var(--ui-compact-control-height)] items-center gap-2 ${canEdit ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"}`}>
           {canEdit ? (
             <button
               type="button"
               onClick={() => setIsDepartmentsOpen((current) => !current)}
-              className="workspace-button flex h-8 min-w-0 items-center justify-between gap-2 border px-2 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+                  className="workspace-button flex min-h-[var(--ui-compact-control-height)] min-w-0 items-center justify-between gap-2 border px-2 py-1 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-expanded={isDepartmentsOpen}
               aria-controls="staff-departments-panel"
             >
@@ -576,7 +574,7 @@ export default function StaffListPage() {
               />
             </button>
           ) : null}
-          <div ref={notesSummaryRef} className="relative h-8 min-w-0">
+          <div ref={notesSummaryRef} className="relative min-h-[var(--ui-compact-control-height)] min-w-0">
             <button
               type="button"
               onClick={() => {
@@ -584,7 +582,7 @@ export default function StaffListPage() {
                   setIsNotesSummaryOpen((current) => !current);
                 }
               }}
-              className="workspace-button group flex h-8 w-full min-w-0 items-center gap-1.5 border px-2 text-left text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              className="workspace-button group flex min-h-[var(--ui-compact-control-height)] w-full min-w-0 items-center gap-1.5 border px-2 py-1 text-left text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               aria-label={notesSummary.fullText ? `특이사항 요약: ${notesSummary.fullText}` : "특이사항 없음"}
               aria-expanded={notesSummary.items.length > 0 ? isNotesSummaryOpen : undefined}
               aria-controls={notesSummary.items.length > 0 ? "staff-notes-summary-popover" : undefined}
@@ -865,17 +863,17 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
             >
               <div className="overflow-hidden">
                 <header
-                  className="workspace-header workspace-border flex h-7 items-center border-b px-2.5 text-xs font-black"
+                  className="workspace-header workspace-border flex min-h-[var(--ui-compact-control-height)] items-center border-b px-2.5 py-1 text-xs font-black"
                   style={{ color: departmentColor.border }}
                 >
                   <span className="flex min-w-0 items-center gap-1">
-                    <span className="truncate">{section.name || "미분류"}</span>
+                    <span className="break-words leading-4 [overflow-wrap:anywhere]">{section.name || "미분류"}</span>
                     {canEdit && section.name ? (
                       <button
                         type="button"
                         disabled={pendingSectionKeys.has(section.sectionKey)}
                         onClick={() => onAddMember(section.name)}
-                        className="workspace-button grid h-5 w-5 shrink-0 place-items-center border p-0 transition-colors active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="staff-department-add-button workspace-button grid h-5 w-5 shrink-0 place-items-center border p-0 transition-colors active:scale-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--workspace-accent-border)] disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label={`${section.name} 부서에 인원 추가`}
                       >
                         <Plus className="h-2.5 w-2.5" strokeWidth={2.5} aria-hidden />
@@ -1009,7 +1007,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   return (
     <article
       ref={registerRow(member.id)}
-      className={`staff-member-row relative grid grid-cols-6 items-center gap-1.5 overflow-visible p-1.5 text-center transition ${desktopGridClassName} workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "rounded-[var(--radius-selection)] neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "rounded-[var(--radius-selection)] scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
+      className={`staff-member-row staff-member-row-grid relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "rounded-[var(--radius-selection)] neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "rounded-[var(--radius-selection)] scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}
       data-staff-department={member.department}
@@ -1025,7 +1023,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
       onClickCapture={canEdit ? (event) => onCardClickCapture(member.id, event) : undefined}
       onContextMenu={canEdit ? (event) => onCardContextMenu(member.id, event) : undefined}
     >
-      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="staff-member-field staff-member-field--role flex min-w-0 items-center">
         <span className="sr-only">{number}번 직책</span>
         <input
           ref={(input) => onRoleInputRef(member.id, input)}
@@ -1038,7 +1036,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           maxLength={100}
         />
       </label>
-      <label className="col-span-1 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="staff-member-field staff-member-field--name flex min-w-0 items-center">
         <span className="sr-only">{number}번 이름</span>
         <input
           className={inputClassName}
@@ -1049,7 +1047,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           aria-label={`${number}번 이름`}
         />
       </label>
-      <label className="col-span-3 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="staff-member-field staff-member-field--phone flex min-w-0 items-center">
         <span className="sr-only">{number}번 연락처</span>
         <input
           className={inputClassName}
@@ -1062,7 +1060,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           aria-label={`${number}번 연락처`}
         />
       </label>
-      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="staff-member-field staff-member-field--location flex min-w-0 items-center">
         <span className="sr-only">{number}번 사는곳</span>
         <input
           className={inputClassName}
@@ -1073,7 +1071,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
           aria-label={`${number}번 사는곳`}
         />
       </label>
-      <label className="col-span-2 flex min-h-8 min-w-0 items-center md:col-auto">
+      <label className="staff-member-field staff-member-field--notes flex min-w-0 items-center">
         <span className="sr-only">{number}번 특이사항</span>
         <textarea
           ref={notesInputRef}

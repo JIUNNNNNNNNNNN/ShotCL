@@ -516,7 +516,7 @@ export function DailyPlanGatheringLocations({
     >
       <div className="flex min-h-9 items-center justify-between gap-3 border-b border-field-border px-3 py-2">
         <h2 id="gathering-locations-title" className="text-sm font-bold text-field-text">집합장소</h2>
-        {message ? <p className="min-w-0 truncate text-[11px] font-normal text-field-muted" role="status">{message}</p> : null}
+        {message ? <p className="min-w-0 break-words text-right text-[11px] font-normal text-field-muted [overflow-wrap:anywhere]" role="status">{message}</p> : null}
       </div>
 
       {!hasContent ? (
@@ -707,7 +707,7 @@ function GatheringPlaceRow({
           ) : null}
           {failedPhoto ? (
             <div className="mt-2 flex min-w-0 items-center gap-1.5">
-              <p className="min-w-0 flex-1 truncate text-[11px] text-field-danger" title={failedPhoto.error}>
+              <p className="min-w-0 flex-1 break-words text-[11px] text-field-danger [overflow-wrap:anywhere]" title={failedPhoto.error}>
                 {failedPhoto.originalFilename || "사진"} 업로드 실패
               </p>
               <Button variant="secondary" className="!min-h-8 shrink-0 px-2 py-1 text-[11px]" onClick={() => onRetryPhoto(failedPhoto)}>

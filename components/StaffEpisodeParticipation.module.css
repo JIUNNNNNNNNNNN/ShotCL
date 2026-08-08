@@ -1,6 +1,6 @@
 .root {
   display: flex;
-  grid-column: span 2 / span 2;
+  grid-column: 1 / -1;
   align-items: center;
   gap: 4px;
   width: 100%;
@@ -14,7 +14,7 @@
   outline-offset: 2px;
 }
 
-@media (min-width: 768px) {
+@container staff-workspace (min-width: 1040px) {
   .root {
     grid-column: auto;
   }
@@ -382,6 +382,24 @@
 }
 
 @media (pointer: coarse) {
+  .root {
+    min-height: 44px;
+    height: auto;
+  }
+
+  .segmentedControl,
+  .summaryButton,
+  .emptyValue,
+  .segment {
+    min-height: 44px;
+    height: 44px;
+  }
+
+  .closeButton {
+    width: 44px;
+    height: 44px;
+  }
+
   .gridEpisode {
     min-height: 44px;
   }

@@ -699,7 +699,7 @@ export function ShotOverheadEditor({
         <header className="flex items-center justify-between gap-3 border-b border-field-divider px-3 py-2.5 sm:px-4">
           <div className="min-w-0">
             <p className="text-[11px] font-normal text-field-muted">S#{shot.sceneNumber || "-"} / C#{shot.cutNumber || "-"}</p>
-            <h2 className="truncate text-base font-bold text-field-text">{readOnly ? "부감도 보기" : "부감도 편집"} · {shot.description || shot.title}</h2>
+            <h2 className="break-words text-base font-bold text-field-text [overflow-wrap:anywhere]">{readOnly ? "부감도 보기" : "부감도 편집"} · {shot.description || shot.title}</h2>
           </div>
           <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="부감도 닫기">
             <X className="h-5 w-5" aria-hidden />

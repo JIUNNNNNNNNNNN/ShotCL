@@ -57,9 +57,9 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
           ) : null}
         </div>
         <div className="min-w-0 text-center">
-          <p className="truncate text-sm font-bold leading-5 text-field-text">{title}</p>
+          <p className="break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">{title}</p>
           {item.progressMemo?.trim() ? (
-            <p className="mt-0.5 truncate text-[11px] leading-4 text-field-muted">{item.progressMemo.trim()}</p>
+            <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-4 text-field-muted [overflow-wrap:anywhere]">{item.progressMemo.trim()}</p>
           ) : null}
         </div>
       </div>

@@ -668,7 +668,7 @@ export default function ProjectSceneListPage() {
       <section className="border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
           <div className="min-w-0">
-            <h1 className="font-display truncate text-lg font-black text-field-text">
+            <h1 className="ui-density-heading font-display break-words font-black text-field-text [overflow-wrap:anywhere]">
               {project.name} 씬리스트
             </h1>
             {isMergePersisting || isClearPersisting ? (

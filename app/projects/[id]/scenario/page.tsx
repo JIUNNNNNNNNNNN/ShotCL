@@ -449,11 +449,11 @@ export default function ProjectScenarioPage() {
   return (
     <div className="grid w-full min-w-0 gap-2">
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-field-border pb-2">
-        <div className="mr-1 min-w-0 shrink-0">
-          <h1 className="font-display text-base font-bold leading-normal text-field-text sm:text-lg">
+        <div className="mr-1 min-w-0 flex-[0_1_14rem]">
+          <h1 className="ui-density-heading font-display font-bold leading-normal text-field-text">
             시나리오
           </h1>
-          <p className="hidden max-w-40 truncate text-[11px] leading-normal text-field-muted sm:block">
+          <p className="break-words text-[11px] leading-normal text-field-muted [overflow-wrap:anywhere]">
             {projectName}
           </p>
         </div>
@@ -479,7 +479,7 @@ export default function ProjectScenarioPage() {
             </select>
           </label>
         ) : (
-          <p className="min-w-0 flex-1 truncate text-xs text-field-muted">
+          <p className="min-w-0 flex-1 break-words text-xs text-field-muted [overflow-wrap:anywhere]">
             등록된 PDF가 없습니다.
           </p>
         )}
@@ -496,7 +496,7 @@ export default function ProjectScenarioPage() {
                 className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-2.5 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
                 {isUploading ? <InlineLoader /> : <Upload className="h-3.5 w-3.5" aria-hidden />}
-                <span className="hidden sm:inline">{isUploading ? "분석 중" : "+ PDF"}</span>
+                <span>{isUploading ? "분석 중" : "+ PDF"}</span>
               </button>
               <input
                 ref={fileInputRef}
@@ -619,7 +619,7 @@ export default function ProjectScenarioPage() {
                         <span className="shrink-0 rounded-md border border-field-border bg-field-soft px-2 py-0.5 text-xs font-semibold text-field-subtle">
                           S#{scene.sceneNo || index + 1}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-center text-sm font-bold leading-normal text-field-text">
+                        <span className="min-w-0 flex-1 break-words text-center text-sm font-bold leading-normal text-field-text [overflow-wrap:anywhere]">
                           {scene.title || `Scene ${index + 1}`}
                         </span>
                         {scene.pageStart ? (

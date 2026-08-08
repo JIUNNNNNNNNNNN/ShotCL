@@ -4,7 +4,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -120,10 +119,7 @@ export function SceneListNativeTable({
   onCutValidationChange: (id: string, message: string) => void;
 }) {
   const tableRef = useRef<HTMLTableElement | null>(null);
-  const fitShellRef = useRef<HTMLDivElement | null>(null);
-  const fitStageRef = useRef<HTMLDivElement | null>(null);
   const tableNaturalWidth = sceneTableBaseWidth + actorRoles.length * sceneActorColumnWidth;
-  const fit = useSceneTableFit(fitShellRef, fitStageRef, tableRef, tableNaturalWidth);
   const orderedSceneIds = useStableSceneIds(items);
   const mergeLayout = useMemo(
     () => buildSceneListMergeLayout(orderedSceneIds, cellMerges),
@@ -444,65 +440,16 @@ export function SceneListNativeTable({
   return (
     <>
       <div
-        ref={fitShellRef}
         data-scene-table-scroller
-        data-scene-table-fit-shell
-        data-scene-table-scale={fit.scale.toFixed(4)}
-        className="workspace-surface relative w-full max-w-full min-w-0 overflow-clip"
-        style={fit.ready ? { height: `${fit.scaledHeight}px` } : undefined}
+        className="workspace-surface relative w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]"
         onContextMenu={(event) => event.preventDefault()}
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) closeSelection();
         }}
       >
-        {fit.ready ? (
-          <div
-            data-scene-table-sticky-header
-            aria-hidden="true"
-            className="pointer-events-auto sticky top-0 z-[60] overflow-visible"
-            style={{
-              height: `${fit.headerHeight * fit.scale}px`,
-              marginBottom: `${-fit.headerHeight * fit.scale}px`
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-          >
-            <div
-              className="origin-top-left"
-              style={{
-                width: `${tableNaturalWidth}px`,
-                transform: `scale(${fit.scale})`,
-                transformOrigin: "left top"
-              }}
-            >
-              <table
-                role="presentation"
-                className="table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
-                style={{ width: `${tableNaturalWidth}px`, minWidth: `${tableNaturalWidth}px` }}
-              >
-                <SceneTableColGroup actorRoles={actorRoles} />
-                <thead className="bg-[#eeeeee] text-[11px] font-black leading-4">
-                  <SceneTableHeaderRow actorRoles={actorRoles} actorStyles={actorStyles} />
-                </thead>
-              </table>
-            </div>
-          </div>
-        ) : null}
         <div
-          ref={fitStageRef}
-          data-scene-table-fit-stage
-          className="origin-top-left"
-          style={{
-            position: fit.ready ? "absolute" : "relative",
-            left: fit.ready ? 0 : undefined,
-            top: fit.ready ? 0 : undefined,
-            width: `${tableNaturalWidth}px`,
-            transform: fit.ready ? `scale(${fit.scale})` : undefined,
-            transformOrigin: "left top"
-          }}
+          className="relative"
+          style={{ width: `${tableNaturalWidth}px` }}
         >
           <table
             ref={tableRef}
@@ -511,14 +458,14 @@ export function SceneListNativeTable({
             style={{ width: `${tableNaturalWidth}px`, minWidth: `${tableNaturalWidth}px` }}
           >
             <SceneTableColGroup actorRoles={actorRoles} />
-            <thead className="pointer-events-none bg-[#eeeeee] text-[11px] font-black leading-4 opacity-0">
+            <thead className="sticky top-0 z-[60] bg-[#eeeeee] text-[11px] font-black leading-4">
               <SceneTableHeaderRow actorRoles={actorRoles} actorStyles={actorStyles} />
             </thead>
 
             <SceneReorderList
               items={items}
               disabled={!canEdit || Boolean(menu) || hasPendingMutation}
-              fitScale={fit.scale}
+              fitScale={1}
               onReorder={onReorderLocal}
               validateReorder={(next, previous) => {
                 const validation = validateSceneListReorderWithMerges(
@@ -818,7 +765,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
         }}
       >
         {editor ? renderMergeEditor(column, value, item, patchKey, onUpdate, onEditEnd) : (
-          <span className="block min-h-9 truncate px-1.5 py-2 text-center font-semibold" title={value}>
+          <span className="block min-h-9 whitespace-normal break-words px-1.5 py-2 text-center font-semibold [overflow-wrap:anywhere]" title={value}>
             {value}
           </span>
         )}
@@ -1434,16 +1381,6 @@ function isCellInResolvedRange(
   return Boolean(range?.sceneIds.includes(cell.sceneId) && range.columns.includes(cell.column));
 }
 
-type SceneTableFitState = {
-  ready: boolean;
-  scale: number;
-  naturalWidth: number;
-  naturalHeight: number;
-  headerHeight: number;
-  scaledHeight: number;
-  availableWidth: number;
-};
-
 function useStableSceneIds(items: ProjectSceneItem[]) {
   const nextIds = items.map((item) => item.id);
   const stableIdsRef = useRef(nextIds);
@@ -1455,99 +1392,6 @@ function useStableSceneIds(items: ProjectSceneItem[]) {
     stableIdsRef.current = nextIds;
   }
   return stableIdsRef.current;
-}
-
-function useSceneTableFit(
-  shellRef: React.RefObject<HTMLDivElement | null>,
-  stageRef: React.RefObject<HTMLDivElement | null>,
-  tableRef: React.RefObject<HTMLTableElement | null>,
-  declaredNaturalWidth: number
-) {
-  const [fit, setFit] = useState<SceneTableFitState>({
-    ready: false,
-    scale: 1,
-    naturalWidth: declaredNaturalWidth,
-    naturalHeight: 0,
-    headerHeight: 44,
-    scaledHeight: 0,
-    availableWidth: declaredNaturalWidth
-  });
-
-  useLayoutEffect(() => {
-    const shell = shellRef.current;
-    const stage = stageRef.current;
-    const table = tableRef.current;
-    if (!shell || !stage || !table) return undefined;
-
-    let animationFrame = 0;
-    let disposed = false;
-
-    const measure = () => {
-      animationFrame = 0;
-      if (disposed) return;
-      const shellRect = shell.getBoundingClientRect();
-      const availableWidth = Math.max(1, shell.clientWidth || shellRect.width);
-
-      const naturalWidth = Math.max(
-        declaredNaturalWidth,
-        table.offsetWidth,
-        table.scrollWidth
-      );
-      const naturalHeight = Math.max(stage.offsetHeight, stage.scrollHeight, table.offsetHeight);
-      const headerHeight = table.tHead?.offsetHeight || 44;
-      const scale = Math.max(0.01, Math.min(1, availableWidth / naturalWidth));
-      const appliedScale = Math.floor(scale * 10_000) / 10_000;
-      const next: SceneTableFitState = {
-        ready: true,
-        scale: appliedScale,
-        naturalWidth,
-        naturalHeight,
-        headerHeight,
-        scaledHeight: Math.ceil(naturalHeight * appliedScale),
-        availableWidth
-      };
-
-      setFit((current) => (
-        current.ready === next.ready
-        && Math.abs(current.scale - next.scale) < 0.0001
-        && Math.abs(current.naturalWidth - next.naturalWidth) < 1
-        && Math.abs(current.naturalHeight - next.naturalHeight) < 1
-        && Math.abs(current.headerHeight - next.headerHeight) < 1
-        && Math.abs(current.scaledHeight - next.scaledHeight) < 1
-        && Math.abs(current.availableWidth - next.availableWidth) < 1
-          ? current
-          : next
-      ));
-    };
-
-    const scheduleMeasure = () => {
-      if (disposed) return;
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(measure);
-    };
-
-    const resizeObserver = new ResizeObserver(scheduleMeasure);
-    resizeObserver.observe(shell);
-    resizeObserver.observe(stage);
-    resizeObserver.observe(table);
-
-    window.addEventListener("resize", scheduleMeasure);
-    window.addEventListener("orientationchange", scheduleMeasure);
-    window.visualViewport?.addEventListener("resize", scheduleMeasure);
-    void document.fonts?.ready.then(scheduleMeasure);
-    measure();
-
-    return () => {
-      disposed = true;
-      if (animationFrame) window.cancelAnimationFrame(animationFrame);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
-      window.removeEventListener("orientationchange", scheduleMeasure);
-      window.visualViewport?.removeEventListener("resize", scheduleMeasure);
-    };
-  }, [declaredNaturalWidth, shellRef, stageRef, tableRef]);
-
-  return fit;
 }
 
 function isLocationMergeColumn(column: ProjectSceneMergeColumn) {

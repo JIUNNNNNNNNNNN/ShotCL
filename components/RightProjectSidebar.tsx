@@ -82,9 +82,9 @@ function ActionMenuHeader({
   onClose?: () => void;
 }) {
   return (
-    <div className="flex min-w-0 items-start gap-2 border-b border-field-divider px-3 py-3">
+    <div className="project-action-menu__header flex min-w-0 items-start border-b border-field-divider">
       <div className="min-w-0 flex-1">
-        <p className="font-display line-clamp-2 break-words text-base font-black leading-5 text-field-text" title={projectName || "프로젝트"}>
+        <p className="font-display break-words text-base font-black leading-5 text-field-text [overflow-wrap:anywhere]" title={projectName || "프로젝트"}>
           {projectName || "프로젝트"}
         </p>
         <p className="mt-0.5 text-xs font-bold text-field-muted">{menu.title}</p>
@@ -114,17 +114,17 @@ function ActionMenuItems({
   if (usesGroups) {
     const groups = groupActions(menu.actions);
     return (
-      <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2.5" aria-label={menu.ariaLabel}>
+      <nav className="project-action-menu__items flex min-h-0 flex-1 flex-col overflow-y-auto" aria-label={menu.ariaLabel}>
         {groups.map((group) => (
           <section
             key={group.key}
             aria-label={ACTION_GROUP_LABELS[group.key]}
-            className={group.key === "manage" ? "mt-auto border-t border-field-divider pt-4" : "pb-4"}
+            className={group.key === "manage" ? "mt-auto border-t border-field-divider pt-[var(--ui-section-gap)]" : "pb-[var(--ui-section-gap)]"}
           >
             <p className="mb-2 px-1 text-[11px] font-bold text-field-muted">
               {ACTION_GROUP_LABELS[group.key]}
             </p>
-            <div className="grid gap-2">
+            <div className="grid gap-[var(--ui-card-gap)]">
               {group.actions.map((action) => (
                 <PageActionItem key={action.id} action={action} onAction={onAction} />
               ))}
@@ -136,7 +136,7 @@ function ActionMenuItems({
   }
 
   return (
-    <nav className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto p-2.5" aria-label={menu.ariaLabel}>
+    <nav className="project-action-menu__items grid min-h-0 flex-1 content-start overflow-y-auto" aria-label={menu.ariaLabel}>
       {menu.actions.map((action) => (
         <PageActionItem key={action.id} action={action} onAction={onAction} />
       ))}
@@ -172,7 +172,7 @@ function PageActionItem({
   onAction?: () => void;
 }) {
   const Icon = action.icon;
-  const sharedClassName = `flex min-h-11 w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
+  const sharedClassName = `project-action-menu__item flex w-full items-center justify-center rounded-md border text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.tone === "danger"
       ? "border-field-danger/55 bg-transparent text-field-danger hover:border-field-danger hover:bg-field-danger/10 focus-visible:ring-field-danger"
       : action.active
@@ -184,8 +184,8 @@ function PageActionItem({
   const content = (
     <>
       {action.pending
-        ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
-        : <Icon className="h-4 w-4 shrink-0" aria-hidden />}
+        ? <LoaderCircle className="project-action-menu__icon shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+        : <Icon className="project-action-menu__icon shrink-0" aria-hidden />}
       <span className="min-w-0 whitespace-normal break-words text-center leading-5">{action.label}</span>
     </>
   );

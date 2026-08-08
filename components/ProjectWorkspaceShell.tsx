@@ -11,7 +11,7 @@ import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
 
 type OpenDrawer = "navigation" | "actions" | null;
-const PERSISTENT_PROJECT_SHELL_QUERY = "(min-width: 1180px)";
+const PERSISTENT_PROJECT_SHELL_QUERY = "(min-width: 1440px) and (min-height: 700px)";
 
 /** 프로젝트 내부만 좌측 navigation·중앙 page·우측 action으로 배치합니다. */
 export function ProjectWorkspaceShell({ children }: { children: React.ReactNode }) {
@@ -43,15 +43,16 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   });
 
   useEffect(() => {
+    const persistentShellQuery = window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY);
     const closeMobileDrawerWhenShellBecomesPersistent = () => {
       setOpenDrawer((current) => {
-        if (current && window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY).matches) return null;
+        if (current && persistentShellQuery.matches) return null;
         return current;
       });
     };
     closeMobileDrawerWhenShellBecomesPersistent();
-    window.addEventListener("resize", closeMobileDrawerWhenShellBecomesPersistent);
-    return () => window.removeEventListener("resize", closeMobileDrawerWhenShellBecomesPersistent);
+    persistentShellQuery.addEventListener("change", closeMobileDrawerWhenShellBecomesPersistent);
+    return () => persistentShellQuery.removeEventListener("change", closeMobileDrawerWhenShellBecomesPersistent);
   }, []);
 
   const pageTitle = getProjectPageTitle(pathname, searchParams);
@@ -83,9 +84,9 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
         >
           {openDrawer === "navigation" ? <X aria-hidden /> : <Menu aria-hidden />}
         </button>
-        <div className="min-w-0 text-center">
-          <p className="truncate text-[11px] font-semibold text-field-muted">{projectName}</p>
-          <h1 className="truncate text-sm font-black text-field-text">{pageTitle}</h1>
+        <div className="min-w-0 text-center leading-tight">
+          <p className="break-words text-[11px] font-semibold text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
+          <h1 className="break-words text-sm font-black text-field-text [overflow-wrap:anywhere]">{pageTitle}</h1>
         </div>
         {hasActions ? (
           <button

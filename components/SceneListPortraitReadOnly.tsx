@@ -178,7 +178,7 @@ const PortraitSceneCard = memo(function PortraitSceneCard({
                       style={{ backgroundColor: semanticLocationStyle.background }}
                     />
                   ) : null}
-                  <span className="truncate">{headerLocation}</span>
+                  <span className="break-words [overflow-wrap:anywhere]">{headerLocation}</span>
                 </span>
               ) : null}
               {headerTiming ? <span>{headerTiming}</span> : null}

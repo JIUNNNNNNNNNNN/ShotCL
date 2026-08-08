@@ -11,7 +11,7 @@ type PixelDogLoaderProps = LoaderProps & {
 
 const loaderPresentation: Record<LoaderLevel, { wrapper: string; graphic: string }> = {
   page: {
-    wrapper: "grid h-full min-h-[calc(100dvh_-_6rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom))] w-full min-w-0 place-items-center min-[1180px]:min-h-[calc(100dvh_-_3.25rem)]",
+    wrapper: "pixel-dog-loader-page grid h-full w-full min-w-0 place-items-center",
     graphic: "w-[clamp(44px,4vw,52px)]"
   },
   section: {

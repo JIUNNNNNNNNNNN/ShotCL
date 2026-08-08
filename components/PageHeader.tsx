@@ -8,9 +8,9 @@ type PageHeaderProps = {
 export function PageHeader({ title, description, actions }: PageHeaderProps) {
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <div className="flex min-w-0 items-center gap-2 text-xs">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs">
         <span className="rounded-md border border-field-divider bg-field-soft px-3 py-1.5 font-semibold text-field-text">{title}</span>
-        {description ? <span className="max-w-[min(52vw,28rem)] truncate font-normal text-field-subtle">{description}</span> : null}
+        {description ? <span className="min-w-0 break-words font-normal text-field-subtle [overflow-wrap:anywhere]">{description}</span> : null}
       </div>
       {actions ? <div className="shrink-0">{actions}</div> : null}
     </div>

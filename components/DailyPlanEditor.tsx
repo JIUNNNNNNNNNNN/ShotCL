@@ -281,14 +281,14 @@ const compactInputClass =
   "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/20 [&::-webkit-date-and-time-value]:text-center";
 
 const centeredSelectClass = `${compactInputClass} daily-plan-dropdown-no-indicator appearance-none [text-align-last:center]`;
-const timetableInputClass = `${compactInputClass} max-w-full overflow-hidden text-center text-ellipsis whitespace-nowrap`;
+const timetableInputClass = `${compactInputClass} max-w-full text-center`;
 const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
 const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
-const timetableFieldLabelBaseClass = "mb-1 min-h-6 select-none items-center justify-center whitespace-nowrap text-[11px] font-black leading-4 text-field-subtle max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
+const timetableFieldLabelBaseClass = "mb-1 min-h-6 select-none items-center justify-center break-words text-center text-[11px] font-black leading-4 text-field-subtle [overflow-wrap:anywhere] max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
 const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden max-lg:flex`;
-const mobileTimetableLabelClass = "mb-1 hidden text-[11px] font-black text-field-subtle max-lg:block max-md:mb-0 max-md:text-[8px] max-md:leading-[1.25]";
-const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5  max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[34px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[34px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
+const mobileTimetableLabelClass = "mb-1 hidden break-words text-[11px] font-black text-field-subtle [overflow-wrap:anywhere] max-lg:block max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
+const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[44px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[44px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[44px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 const staffDepartmentGridClass =
   "grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
 
@@ -1883,7 +1883,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="block min-w-0">
                               <span className="sr-only">촬영장소 {index + 1} 상세 메모</span>
                               <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
+                                className={`${inputClass} !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={location.detail}
                                 onCommit={(value) => updateLocation(index, { detail: value })}
                                 placeholder="상세 위치 / 메모"
@@ -1894,7 +1894,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             <label className="block min-w-0">
                               <span className="sr-only">촬영장소 {index + 1} 상세주소</span>
                               <DraftInput
-                                className={`${inputClass} truncate whitespace-nowrap !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
+                                className={`${inputClass} !min-h-9 !px-1.5 !text-[10px] md:!px-2 md:!text-[13px]`}
                                 value={getDailyPlanManualAddress(location)}
                                 onCommit={(value) => {
                                   updateLocation(index, {
@@ -1917,7 +1917,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                               }`}
                               title={locationAddress || undefined}
                             >
-                              <span className="line-clamp-2 min-w-0 flex-1 break-words text-center leading-[1.25]">
+                              <span className="min-w-0 flex-1 break-words text-center leading-[1.25] [overflow-wrap:anywhere]">
                                 {locationAddress || (addressSearchLocationId === location.id ? addressSearchMessage : "") || "실제 촬영 주소"}
                               </span>
                             </div>
@@ -2247,10 +2247,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 {effectivePrintMeta.teams.map((team, index) => (
                   <div
                     key={team.id}
-                    className={`${staffDepartmentGridClass} rounded-[10px] border border-field-border bg-field-panel p-0.5 text-center sm:p-1 md:p-2 max-md:[&_button]:min-h-[32px] max-md:[&_button]:px-0.5 max-md:[&_button]:py-1 max-md:[&_button]:!text-[9px] max-md:[&_input]:min-h-[32px] max-md:[&_input]:px-0.5 max-md:[&_input]:py-1 max-md:[&_input]:!text-[9px]`}
+                    className={`${staffDepartmentGridClass} rounded-[10px] border border-field-border bg-field-panel p-0.5 text-center sm:p-1 md:p-2 max-md:[&_button]:min-h-[44px] max-md:[&_button]:px-0.5 max-md:[&_button]:py-1 max-md:[&_button]:!text-[10px] max-md:[&_input]:min-h-[44px] max-md:[&_input]:px-0.5 max-md:[&_input]:py-1 max-md:[&_input]:!text-[10px]`}
                     data-testid="daily-plan-staff-department-row"
                   >
-                    <div className="flex min-h-[32px] min-w-0 max-w-full items-center justify-center whitespace-nowrap bg-field-soft px-0.5 text-[8px] font-black tracking-[-0.03em] text-field-text sm:text-[10px] md:min-h-[38px] md:px-2 md:text-sm">
+                    <div className="flex min-h-[44px] min-w-0 max-w-full items-center justify-center break-words bg-field-soft px-0.5 text-center text-[10px] font-black leading-[1.3] tracking-[-0.02em] text-field-text [overflow-wrap:anywhere] md:px-2 md:text-sm">
                       {team.team || "미분류"}
                     </div>
                     <TeamCountInput
@@ -2289,7 +2289,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         }));
                         return (
                           <div key={point.id} className="grid gap-1 border-b border-field-border pb-2 md:grid-cols-[minmax(7rem,1fr)_auto] md:items-center">
-                            <p className="min-w-0 truncate text-xs font-normal text-field-text">{point.locationName}</p>
+                            <p className="min-w-0 break-words text-xs font-normal text-field-text [overflow-wrap:anywhere]">{point.locationName}</p>
                             <GatheringPhotoStrip
                               photos={point.photos}
                               locationName={point.locationName}
@@ -2578,7 +2578,7 @@ function EpisodeField({
   if (mobile) {
     return (
       <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
-        <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">회차</span>
+        <span className="break-words text-center text-[10px] font-black leading-[1.4] text-field-subtle">회차</span>
         {hasConstrainedOptions ? (
           <select
             aria-label="회차"
@@ -2663,9 +2663,9 @@ function MobileInfoField({
   const sanitize = numeric ? (nextValue: string) => sanitizeNumericInput(nextValue, 4) : undefined;
   return (
     <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
-      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
+      <span className="break-words text-center text-[10px] font-black leading-[1.4] text-field-subtle [overflow-wrap:anywhere]">{label}</span>
       <DraftInput
-        className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 truncate px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
+        className={`${compactInputClass} h-auto min-h-[34px] max-w-full min-w-0 px-1 py-1.5 text-[11px] leading-[1.35] ${type === "date" ? "appearance-none" : ""}`}
         type={type}
         min={min}
         max={max}
@@ -2693,7 +2693,7 @@ function MobileTotalCrewField({
 }) {
   return (
     <label className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1">
-      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">총 인원</span>
+      <span className="break-words text-center text-[10px] font-black leading-[1.4] text-field-subtle">총 인원</span>
       <TotalCrewInput
         value={value}
         overrideValue={overrideValue}
@@ -2797,7 +2797,7 @@ function TeamCountInput({
 function MobileInfoTimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <div className="grid min-w-0 gap-0.5 overflow-hidden rounded-md border border-field-border bg-field-panel p-1 max-md:[&_input]:h-auto max-md:[&_input]:min-h-[34px] max-md:[&_input]:max-w-full max-md:[&_input]:min-w-0 max-md:[&_input]:px-1 max-md:[&_input]:py-1.5 max-md:[&_input]:text-[11px] max-md:[&_input]:leading-[1.35]">
-      <span className="truncate text-center text-[10px] font-black leading-[1.4] text-field-subtle">{label}</span>
+      <span className="break-words text-center text-[10px] font-black leading-[1.4] text-field-subtle [overflow-wrap:anywhere]">{label}</span>
       <TimeWheelPicker label={label} value={value} onChange={onChange} compact showLabel={false} />
     </div>
   );
@@ -3287,7 +3287,7 @@ function ShootingOrderField({
               {draftValidation.error ? (
                 <p className="text-[11px] font-normal leading-[1.35] text-field-danger">{draftValidation.error}</p>
               ) : draftNumbers.length > 0 ? (
-                <p className="truncate text-center text-[11px] font-normal leading-[1.35] text-field-muted">
+                <p className="break-words text-center text-[11px] font-normal leading-[1.35] text-field-muted [overflow-wrap:anywhere]">
                   {draftNumbers.join("-")}
                 </p>
               ) : null}
@@ -3624,7 +3624,7 @@ function SceneCastSelector({
         aria-label={ariaLabel}
         title={ariaLabel}
       >
-        <span className="line-clamp-2 break-words">{selectedValues.join(", ") || "배역 선택"}</span>
+        <span className="break-words [overflow-wrap:anywhere]">{selectedValues.join(", ") || "배역 선택"}</span>
       </button>
       {isOpen ? (
         <>

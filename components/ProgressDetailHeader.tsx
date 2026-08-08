@@ -15,9 +15,9 @@ export function ProgressDetailHeader({
   action
 }: ProgressDetailHeaderProps) {
   return (
-    <div className="relative z-30 mb-3 flex min-w-0 items-start justify-between" aria-label="진행 페이지 이동 메뉴">
+    <div className="relative z-30 mb-[var(--ui-section-gap)] flex min-w-0 items-start justify-between gap-[var(--ui-card-gap)]" aria-label="진행 페이지 이동 메뉴">
       <div className="min-w-0 flex-1 pr-3 text-left md:text-center">
-        <h1 className="max-w-full break-words text-xl font-black leading-[1.25] text-field-text md:text-2xl">
+        <h1 className="ui-density-heading max-w-full break-words font-black leading-[1.25] text-field-text">
           {projectName}
         </h1>
         <p className="mt-1 text-sm font-black leading-[1.35] text-field-subtle">

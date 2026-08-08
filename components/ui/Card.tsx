@@ -5,7 +5,7 @@ export function Card({ children, className }: { children: React.ReactNode; class
   return (
     <section
       className={cn(
-        "field-card ui-motion-surface min-w-0 p-3 text-center md:p-4 [&_input]:text-left [&_select]:text-left [&_textarea]:text-left",
+        "field-card ui-density-card ui-motion-surface min-w-0 text-center [&_input]:text-left [&_select]:text-left [&_textarea]:text-left",
         className
       )}
     >

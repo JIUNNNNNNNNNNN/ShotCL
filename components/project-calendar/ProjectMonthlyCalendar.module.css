@@ -1,7 +1,7 @@
 .calendarShell {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: var(--ui-panel-gap);
   container-type: inline-size;
 }
 
@@ -9,7 +9,7 @@
   display: grid;
   min-width: 0;
   align-items: start;
-  gap: 10px;
+  gap: var(--ui-panel-gap);
 }
 
 .calendarPanel,
@@ -30,7 +30,7 @@
   min-width: 0;
   min-height: 0;
   align-self: start;
-  gap: 10px;
+  gap: var(--ui-panel-gap);
 }
 
 .detailPanel,
@@ -43,13 +43,13 @@
 
 .calendarPanel {
   align-self: start;
-  padding: clamp(8px, 1vw, 12px);
+  padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
 }
 
 .toolbar {
   display: flex;
   box-sizing: border-box;
-  height: 48px;
+  min-height: var(--ui-calendar-toolbar-height);
   min-width: 0;
   align-items: center;
   justify-content: space-between;
@@ -77,8 +77,8 @@
 .toolbarButton,
 .iconButton {
   display: inline-grid;
-  min-width: 40px;
-  min-height: 40px;
+  min-width: var(--ui-control-height);
+  min-height: var(--ui-control-height);
   place-items: center;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-control);
@@ -115,8 +115,8 @@
 
 .toolbarButton svg,
 .iconButton svg {
-  width: 17px;
-  height: 17px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
 }
 
 .todayButton {
@@ -148,7 +148,7 @@
 }
 
 .weekdayGrid {
-  min-height: 26px;
+  min-height: var(--ui-calendar-weekday-height);
   border-bottom: 1px solid var(--ui-border-default);
   color: var(--ui-text-muted);
   font-size: clamp(0.625rem, 1.2vw, 0.75rem);
@@ -160,7 +160,7 @@
 .weekdayGrid span {
   display: grid;
   min-width: 0;
-  min-height: 26px;
+  min-height: var(--ui-calendar-weekday-height);
   place-items: center;
   padding: 0 2px;
 }
@@ -195,7 +195,7 @@
 .dayCell {
   position: relative;
   min-width: 0;
-  min-height: 72px;
+  min-height: var(--ui-calendar-day-min-height);
   overflow: hidden;
   background: var(--ui-surface-3);
 }
@@ -434,13 +434,13 @@
   align-self: start;
   max-height: none;
   overflow: visible;
-  padding: clamp(10px, 1.2vw, 14px);
+  padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
 }
 
 .detailContent {
   display: grid;
   min-width: 0;
-  gap: 14px;
+  gap: var(--ui-section-gap);
   animation: detailEnter var(--motion-base) var(--ease-out-native) both;
 }
 
@@ -455,6 +455,8 @@
   font-size: clamp(1rem, 1.8vw, 1.2rem);
   font-weight: 750;
   line-height: 1.4;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .detailBadges {
@@ -516,6 +518,8 @@
   display: grid;
   gap: 2px;
   text-decoration: none;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .detailPlanLink strong,
@@ -558,6 +562,8 @@
   display: grid;
   min-width: 0;
   gap: 2px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .detailEmpty {
@@ -586,7 +592,7 @@
 
 .editorDialog {
   width: min(340px, calc(100vw - 32px));
-  max-height: var(--calendar-editor-max-height, min(72dvh, 560px));
+  max-height: var(--calendar-editor-max-height, min(72dvh, calc(100dvh - (var(--ui-dialog-safe-margin) * 2))));
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--ui-border-strong);
@@ -612,7 +618,7 @@
 
 .editorLayer[data-presentation="sheet"] .editorDialog {
   width: min(560px, calc(100vw - 16px));
-  max-height: min(72dvh, 560px);
+  max-height: min(72dvh, calc(100dvh - (var(--ui-dialog-safe-margin) * 2)));
   border-radius: var(--ui-radius-panel) var(--ui-radius-panel) 0 0;
   padding: 14px 14px max(14px, env(safe-area-inset-bottom));
   animation-name: sheetEnter;
@@ -800,38 +806,34 @@
   gap: 18px;
 }
 
-@media (orientation: landscape) {
-  @container (min-width: 760px) {
+@media (min-height: 700px) {
+  @container (min-width: 860px) {
     .calendarLayout {
       grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.55fr);
       align-items: start;
-    }
-
-    .dayCell {
-      min-height: 76px;
     }
   }
 }
 
 @container (min-width: 480px) and (max-width: 759px) {
   .dayCell {
-    min-height: 72px;
+    min-height: var(--ui-calendar-day-min-height);
   }
 }
 
 @media (max-width: 600px) {
   .calendarPanel {
-    padding: 8px;
+    padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
   }
 
   .toolbar {
-    height: 46px;
+    min-height: var(--ui-calendar-toolbar-height);
     padding: 0 1px 4px;
   }
 
   .toolbarButton {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--ui-control-height);
+    min-height: var(--ui-control-height);
   }
 
   .todayButton {
@@ -840,7 +842,7 @@
   }
 
   .dayCell {
-    min-height: 66px;
+    min-height: var(--ui-calendar-day-min-height);
   }
 
   .shootingPlanRow,
@@ -879,12 +881,12 @@
   }
 
   .toolbarButton {
-    min-width: 40px;
-    min-height: 40px;
+    min-width: var(--ui-control-height);
+    min-height: var(--ui-control-height);
   }
 
   .dayCell {
-    min-height: 66px;
+    min-height: var(--ui-calendar-day-min-height);
   }
 
   .dayNumber {

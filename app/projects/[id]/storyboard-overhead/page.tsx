@@ -2949,8 +2949,8 @@ export default function ProjectStoryboardOverheadPage() {
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="font-display truncate text-xl font-bold text-field-text">부감도&콘티 아카이브</h1>
-            <p className="truncate text-xs text-field-muted">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
+            <h1 className="ui-density-heading font-display break-words font-bold text-field-text [overflow-wrap:anywhere]">부감도&콘티 아카이브</h1>
+            <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
           {!canEdit ? <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span> : null}
         </div>

@@ -23,7 +23,7 @@ export function Button({ variant = "primary", className, children, ...props }: B
     <button
       type="button"
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-section disabled:text-field-disabled disabled:opacity-100",
+        "ui-density-control inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98] disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-section disabled:text-field-disabled disabled:opacity-100",
         variantClass[variant],
         className
       )}
@@ -46,7 +46,7 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98]",
+        "ui-density-control inline-flex items-center justify-center gap-1.5 rounded-md border px-3 py-2 text-sm leading-[1.35] transition-[background-color,border-color,color,transform] focus-visible:outline-none active:scale-[0.98]",
         variantClass[variant],
         className
       )}

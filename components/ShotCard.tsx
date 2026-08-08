@@ -92,7 +92,7 @@ export const ShotCard = memo(function ShotCard({
       <div className="grid min-w-0 max-w-full gap-2 overflow-hidden">
         <div className={cn("grid min-w-0 max-w-full gap-2 overflow-hidden", hasPrimaryMedia && "sm:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] sm:items-center")}>
         {hasPrimaryMedia ? (
-          <div className={cn("grid h-36 w-full max-w-full min-w-0 overflow-visible  gap-1.5 sm:h-32", primaryStoryboardImageUrl && (primaryOverheadImageUrl || hasOverheadDiagram) ? "grid-cols-2" : "grid-cols-1")}>
+          <div className={cn("grid h-[min(9rem,25dvh)] w-full max-w-full min-w-0 overflow-visible gap-1.5 sm:h-[min(8rem,22dvh)]", primaryStoryboardImageUrl && (primaryOverheadImageUrl || hasOverheadDiagram) ? "grid-cols-2" : "grid-cols-1")}>
             {primaryStoryboardImageUrl ? (
               <button
                 type="button"
@@ -151,14 +151,14 @@ export const ShotCard = memo(function ShotCard({
         ) : null}
 
         <div className="min-w-0 px-0.5">
-        <div className="relative flex min-w-0 flex-wrap items-center justify-center gap-1.5 sm:flex-nowrap">
-          <h2 className="min-w-0 truncate text-sm font-bold leading-5 text-field-text">
+        <div className="relative flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+          <h2 className="min-w-0 break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">
             {cutLabel}
           </h2>
           <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
             <span className="font-display">{statusLabel}</span>
           </p>
-          <div className="flex shrink-0 items-center justify-center gap-1 sm:ml-auto">
+          <div className="flex flex-wrap items-center justify-center gap-1 sm:ml-auto">
             <button
               type="button"
               onClick={(event) => {
@@ -166,7 +166,7 @@ export const ShotCard = memo(function ShotCard({
                 onOpenMedia(shot, "storyboard");
               }}
               className={cn(
-                "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+                "ui-density-control inline-flex items-center gap-1 border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
                 hasStoryboard ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
@@ -182,7 +182,7 @@ export const ShotCard = memo(function ShotCard({
               }}
               disabled={isOverheadLoading}
               className={cn(
-                "inline-flex min-h-7 items-center gap-1  border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55",
+                "ui-density-control inline-flex items-center gap-1 border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55",
                 hasOverhead ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
               )}
               title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
@@ -193,10 +193,10 @@ export const ShotCard = memo(function ShotCard({
           </div>
         </div>
 
-        <div className="mt-0.5 flex min-w-0 items-center justify-center gap-2 text-center text-[11px] font-normal text-field-muted">
-          {shot.characters.length > 0 ? <p className="max-w-[35%] shrink-0 truncate">등장 {shot.characters.join(", ")}</p> : null}
-          {shot.location ? <p className="min-w-0 flex-1 truncate text-field-muted">장소 {shot.location}</p> : null}
-          {!shot.location && shot.memo ? <p className="min-w-0 flex-1 truncate">{shot.memo}</p> : null}
+        <div className="mt-0.5 grid min-w-0 gap-1 text-center text-[11px] font-normal leading-4 text-field-muted sm:grid-cols-2">
+          {shot.characters.length > 0 ? <p className="min-w-0 break-words [overflow-wrap:anywhere]">등장 {shot.characters.join(", ")}</p> : null}
+          {shot.location ? <p className="min-w-0 break-words text-field-muted [overflow-wrap:anywhere]">장소 {shot.location}</p> : null}
+          {!shot.location && shot.memo ? <p className="min-w-0 break-words sm:col-span-2 [overflow-wrap:anywhere]">{shot.memo}</p> : null}
         </div>
       </div>
       </div>
@@ -223,7 +223,7 @@ export const ShotCard = memo(function ShotCard({
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
             className={cn(
-              "min-h-[38px]  border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
               isOk ? "border-status-ok/80 bg-status-ok/10 text-status-ok" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
             )}
           >
@@ -235,7 +235,7 @@ export const ShotCard = memo(function ShotCard({
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "min-h-[38px]  border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
               isOmit ? "border-field-danger bg-field-danger text-field-text" : "border-field-danger/60 bg-field-input text-field-danger"
             )}
           >

@@ -51,7 +51,7 @@ export default function DailyPlansPage() {
     return (
       <section className="flex min-h-[min(28rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
         <Card className="w-full max-w-md text-center">
-          <h1 className="font-display text-xl font-black text-field-text">{project.name}</h1>
+          <h1 className="ui-density-heading break-words font-display font-black text-field-text [overflow-wrap:anywhere]">{project.name}</h1>
           <p className="mt-3 text-sm leading-6 text-field-muted">아직 저장된 일촬표가 없습니다.</p>
           <ButtonLink
             href={buildNewDailyPlanHref(project.id)}
@@ -67,7 +67,7 @@ export default function DailyPlansPage() {
   return (
     <section className="flex min-h-[min(24rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
       <Card className="w-full max-w-md text-center">
-        <h1 className="font-display text-xl font-black text-field-text">{project.name}</h1>
+        <h1 className="ui-density-heading break-words font-display font-black text-field-text [overflow-wrap:anywhere]">{project.name}</h1>
         <p className="mt-3 text-sm leading-6 text-field-muted">
           좌측 일촬표 메뉴에서 회차를 선택하세요.
         </p>

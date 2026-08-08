@@ -116,8 +116,8 @@ export function ShotArchivePicker({
       <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
         <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
           <div className="min-w-0">
-            <h2 className="font-display truncate text-lg font-bold text-field-text">아카이브에서 선택</h2>
-            <p className="truncate text-xs font-normal text-field-muted">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
+            <h2 className="font-display break-words text-lg font-bold text-field-text">아카이브에서 선택</h2>
+            <p className="break-words text-xs font-normal text-field-muted [overflow-wrap:anywhere]">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
           </div>
           <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
             <X className="h-5 w-5" aria-hidden />

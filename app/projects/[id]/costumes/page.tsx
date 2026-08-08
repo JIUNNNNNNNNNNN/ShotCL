@@ -640,8 +640,8 @@ export default function ProjectCostumesPage() {
       <div className="mx-auto grid w-full max-w-6xl gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display truncate text-xl font-bold text-field-text">의상</h1>
-            <p className="truncate text-xs text-field-muted">{projectName} · 씬별 의상표</p>
+            <h1 className="ui-density-heading font-display break-words font-bold text-field-text">의상</h1>
+            <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{projectName} · 씬별 의상표</p>
           </div>
           <label className="min-w-0 flex-1 sm:max-w-[280px]">
             <span className="sr-only">일촬표 씬 필터</span>
@@ -1192,7 +1192,7 @@ function ReadOnlyValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-[9px] font-bold leading-4 text-field-muted lg:hidden">{label}</dt>
-      <dd className="line-clamp-2 whitespace-pre-wrap break-words text-xs leading-5 text-field-text">{value || "미입력"}</dd>
+      <dd className="whitespace-pre-wrap break-words text-xs leading-5 text-field-text [overflow-wrap:anywhere]">{value || "미입력"}</dd>
     </div>
   );
 }

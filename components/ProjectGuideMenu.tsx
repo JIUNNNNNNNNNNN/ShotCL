@@ -21,7 +21,7 @@ export function ProjectGuideMenu({
   return (
     <section className="mx-auto grid w-full max-w-[92rem] min-w-0 gap-4 py-1 sm:gap-5 sm:py-2">
       <header className="min-w-0 border-b border-field-divider pb-3">
-        <h1 className="font-display-strong break-words text-2xl leading-tight text-field-text sm:text-[1.75rem]">
+        <h1 className="ui-density-heading font-display-strong break-words leading-tight text-field-text">
           {projectName}
         </h1>
         <p className="mt-1 text-sm leading-5 text-field-subtle">

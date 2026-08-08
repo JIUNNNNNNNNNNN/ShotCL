@@ -120,7 +120,7 @@ function SceneDurationRow({
   return (
     <div className="grid min-w-0 gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <div className="min-w-0">
-        <p className="truncate text-sm font-bold text-field-text">{row.sceneLabel || "씬"}</p>
+        <p className="break-words text-sm font-bold text-field-text [overflow-wrap:anywhere]">{row.sceneLabel || "씬"}</p>
         {!canEdit ? (
           <p className="mt-0.5 text-xs text-field-muted">
             {committedMinutes === null ? "예정 시간 미입력" : `예정 ${committedMinutes}분`}

@@ -298,7 +298,7 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
         </Link>
 
         <div className="project-navigation__project-summary text-center">
-          <p className="line-clamp-2 break-words text-sm font-black leading-5 text-field-text" title={projectName}>
+          <p className="break-words text-sm font-black leading-5 text-field-text [overflow-wrap:anywhere]" title={projectName}>
             {projectName}
           </p>
           {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
@@ -549,7 +549,7 @@ function RoundNavigationLink({
       }`}
     >
       <span className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate font-bold">{formatDailyPlanEpisodeLabel(plan.episode)}</span>
+        <span className="min-w-0 flex-1 break-words font-bold leading-4 [overflow-wrap:anywhere]">{formatDailyPlanEpisodeLabel(plan.episode)}</span>
         <span className="shrink-0 text-[10px] tabular-nums opacity-75">{formatDailyPlanCardDate(plan.shootingDate)}</span>
       </span>
     </Link>
