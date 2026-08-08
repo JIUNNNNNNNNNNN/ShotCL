@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { MotionPresence } from "@/components/ui/MotionPresence";
-import { mapSettledWithConcurrency, optimizeArchiveImage } from "@/lib/client/archiveMedia";
 import {
   GatheringPhotoMutationError,
   saveDailyPlanGatheringPhotoDraft
@@ -318,6 +317,9 @@ export function DailyPlanGatheringLocations({
     generation: number
   ) {
     if (!isCurrentUpload(planSnapshot.id, generation)) return;
+    const { mapSettledWithConcurrency, optimizeArchiveImage } = await import(
+      "@/lib/client/archiveMedia"
+    );
     let preparedCount = 0;
     setUploadProgress(`사진 준비 중 0 / ${photos.length}`);
     const results = await mapSettledWithConcurrency(
@@ -769,7 +771,7 @@ function GatheringPlaceMedia({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={primaryPhoto.url}
+          src={primaryPhoto.thumbnailUrl || primaryPhoto.url}
           alt={`${locationName} 집합장소 위치`}
           width={960}
           height={540}

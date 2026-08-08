@@ -49,45 +49,67 @@ export function ScenarioPdfSceneSegments({
         () => loadScenarioPdfDocument(pdfUrl)
       );
       try {
-        for (let index = 0; index < renderSegments.length; index += 1) {
-          if (cancelled) return;
-          const segment = renderSegments[index];
-          const target = containerRef.current?.querySelector<HTMLCanvasElement>(
-            `[data-segment-index="${index}"]`
-          );
-          if (!target || segment.pageIndex < 0 || segment.pageIndex >= pdfDocument.numPages) continue;
-          canvases.push(target);
-          const page = await pdfDocument.getPage(segment.pageIndex + 1);
-          const pixelRatio = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
-          const viewport = page.getViewport({ scale: pixelRatio });
-          const source = window.document.createElement("canvas");
-          source.width = Math.ceil(viewport.width);
-          source.height = Math.ceil(viewport.height);
-          const sourceContext = source.getContext("2d", { alpha: false });
-          if (!sourceContext) throw new Error("PDF canvas를 생성하지 못했습니다.");
-          await page.render({ canvas: source, canvasContext: sourceContext, viewport }).promise;
+        const segmentsByPage = new Map<
+          number,
+          Array<{ index: number; segment: ProjectScenarioImageSegment }>
+        >();
+        renderSegments.forEach((segment, index) => {
+          if (segment.pageIndex < 0 || segment.pageIndex >= pdfDocument.numPages) return;
+          const pageSegments = segmentsByPage.get(segment.pageIndex) ?? [];
+          pageSegments.push({ index, segment });
+          segmentsByPage.set(segment.pageIndex, pageSegments);
+        });
+        const pixelRatio = Math.min(3, Math.max(2, window.devicePixelRatio || 1));
 
-          const startY = Math.floor(clamp(segment.startYRatio, 0, 1) * source.height);
-          const endY = Math.ceil(clamp(segment.endYRatio, 0, 1) * source.height);
-          const cropHeight = Math.max(1, endY - startY);
-          target.width = source.width;
-          target.height = cropHeight;
-          const targetContext = target.getContext("2d", { alpha: false });
-          if (!targetContext) throw new Error("PDF crop canvas를 생성하지 못했습니다.");
-          targetContext.fillStyle = "#ffffff";
-          targetContext.fillRect(0, 0, target.width, target.height);
-          targetContext.drawImage(
-            source,
-            0,
-            startY,
-            source.width,
-            cropHeight,
-            0,
-            0,
-            source.width,
-            cropHeight
-          );
-          page.cleanup();
+        for (const [pageIndex, pageSegments] of segmentsByPage) {
+          if (cancelled) return;
+          const targets = pageSegments.flatMap(({ index, segment }) => {
+            const target = containerRef.current?.querySelector<HTMLCanvasElement>(
+              `[data-segment-index="${index}"]`
+            );
+            return target ? [{ segment, target }] : [];
+          });
+          if (targets.length === 0) continue;
+          targets.forEach(({ target }) => canvases.push(target));
+
+          const page = await pdfDocument.getPage(pageIndex + 1);
+          const source = window.document.createElement("canvas");
+          try {
+            const viewport = page.getViewport({ scale: pixelRatio });
+            source.width = Math.ceil(viewport.width);
+            source.height = Math.ceil(viewport.height);
+            const sourceContext = source.getContext("2d", { alpha: false });
+            if (!sourceContext) throw new Error("PDF canvas를 생성하지 못했습니다.");
+            await page.render({ canvas: source, canvasContext: sourceContext, viewport }).promise;
+            if (cancelled) return;
+
+            targets.forEach(({ segment, target }) => {
+              const startY = Math.floor(clamp(segment.startYRatio, 0, 1) * source.height);
+              const endY = Math.ceil(clamp(segment.endYRatio, 0, 1) * source.height);
+              const cropHeight = Math.max(1, endY - startY);
+              target.width = source.width;
+              target.height = cropHeight;
+              const targetContext = target.getContext("2d", { alpha: false });
+              if (!targetContext) throw new Error("PDF crop canvas를 생성하지 못했습니다.");
+              targetContext.fillStyle = "#ffffff";
+              targetContext.fillRect(0, 0, target.width, target.height);
+              targetContext.drawImage(
+                source,
+                0,
+                startY,
+                source.width,
+                cropHeight,
+                0,
+                0,
+                source.width,
+                cropHeight
+              );
+            });
+          } finally {
+            source.width = 1;
+            source.height = 1;
+            page.cleanup();
+          }
         }
         if (!cancelled) setState("ready");
       } finally {

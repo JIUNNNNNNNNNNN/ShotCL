@@ -42,6 +42,7 @@ export default function NewDailyPlanPage() {
     if (!projectId) return;
 
     async function loadProject() {
+      void import("@/components/DailyPlanEditor").catch(() => undefined);
       try {
         const [data, basicInfo, staffList, sceneList] = await Promise.all([
           getProject(projectId),

@@ -571,27 +571,27 @@ export default function ProjectCostumesPage() {
         throw new Error(`이미지 저장 실패 항목: ${uploadFailures.join(" / ")}`);
       }
 
-      setSaveProgress({ scenes: sceneCount, items: itemCount, stage: "DB 저장 검증" });
-      const verifiedOverview = await auditQuery(
-        "costume.save.verify",
-        "app/projects/[id]/costumes/page.tsx:handleSaveAll",
-        () => getProjectCostumeSceneOverview(projectId)
+      setSaveProgress({ scenes: sceneCount, items: itemCount, stage: "저장 결과 확인" });
+      const mapped = remapCostumeLocalState(
+        snapshotScenes,
+        snapshotDrafts,
+        bulkResult,
+        uploadedItems
       );
       const verificationErrors = verifyCostumeSave(
         saveInput,
         snapshotDrafts,
-        verifiedOverview.scenes,
+        mapped.scenes,
         bulkResult.sceneIdMap,
         bulkResult.itemIdMap
       );
       logCostumeSaveAudit({
         event: "save_verify",
-        scenes: verifiedOverview.scenes.length,
-        items: verifiedOverview.scenes.reduce((total, scene) => total + scene.items.length, 0),
+        scenes: mapped.scenes.length,
+        items: mapped.scenes.reduce((total, scene) => total + scene.items.length, 0),
         errors: verificationErrors.length
       });
       if (verificationErrors.length > 0) {
-        const mapped = remapCostumeLocalState(snapshotScenes, snapshotDrafts, bulkResult, uploadedItems);
         setScenes(mapped.scenes);
         setDrafts(mapped.drafts);
         setExpandedSceneIds((current) => new Set(
@@ -600,10 +600,8 @@ export default function ProjectCostumesPage() {
         throw new Error(`저장 검증 실패: ${verificationErrors.join(" / ")}`);
       }
 
-      setScenes(verifiedOverview.scenes);
-      setDrafts(Object.fromEntries(
-        verifiedOverview.scenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))
-      ));
+      setScenes(mapped.scenes);
+      setDrafts(mapped.drafts);
       setExpandedSceneIds((current) => new Set(
         [...current].map((id) => bulkResult?.sceneIdMap[id] ?? id)
       ));
@@ -759,12 +757,8 @@ export default function ProjectCostumesPage() {
                     ) : null}
                   </div>
 
-                  <div
-                    data-expanded={expanded ? "true" : "false"}
-                    aria-hidden={!expanded}
-                    inert={!expanded}
-                    className="ui-accordion"
-                  >
+                  {expanded ? (
+                    <div data-expanded="true" className="ui-accordion">
                     <div className="ui-accordion-inner min-h-0">
                     <div className="border-t border-field-border p-1.5 text-left sm:p-2">
                       {scene.items.length > 0 ? (
@@ -815,7 +809,8 @@ export default function ProjectCostumesPage() {
                       ) : null}
                     </div>
                     </div>
-                  </div>
+                    </div>
+                  ) : null}
                 </section>
               );
             })}

@@ -188,6 +188,7 @@ export default function ProjectDetailPage() {
   const statusMutationVersionByShotIdRef = useRef(new Map<string, number>());
   const statusMutationQueueByShotIdRef = useRef(new Map<string, Promise<Shot>>());
   const selectedShotsRefreshVersionRef = useRef(0);
+  const realtimeRefreshStateRef = useRef(new Map<string, { inFlight: boolean; queued: boolean }>());
   const initializedBucketEntryRef = useRef("");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
 
@@ -358,42 +359,65 @@ export default function ProjectDetailPage() {
 
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !selectedDailyPlanId) return;
-    const requestedEntryKey = progressEntryKey;
-    const refreshVersion = ++selectedShotsRefreshVersionRef.current;
+    const requestedProgressEntryKey = progressEntryKey;
+    const refreshState = realtimeRefreshStateRef.current.get(requestedProgressEntryKey) ?? {
+      inFlight: false,
+      queued: false
+    };
+    realtimeRefreshStateRef.current.set(requestedProgressEntryKey, refreshState);
+    if (refreshState.inFlight) {
+      refreshState.queued = true;
+      return;
+    }
+
+    refreshState.inFlight = true;
     try {
-      const refreshedShots = await auditQuery(
-        "progress.realtime.reloadCuts",
-        "app/projects/[id]/page.tsx:refreshSelectedShots",
-        () => listShots(projectId, selectedDailyPlanId)
+      do {
+        refreshState.queued = false;
+        const requestedEntryKey = progressEntryKey;
+        const refreshVersion = ++selectedShotsRefreshVersionRef.current;
+        try {
+          const refreshedShots = await auditQuery(
+            "progress.realtime.reloadCuts",
+            "app/projects/[id]/page.tsx:refreshSelectedShots",
+            () => listShots(projectId, selectedDailyPlanId)
+          );
+          if (
+            activeProgressEntryKeyRef.current !== requestedEntryKey
+            || selectedShotsRefreshVersionRef.current !== refreshVersion
+          ) continue;
+          const currentById = new Map(shotsRef.current.map((shot) => [shot.id, shot]));
+          persistedStatusByShotIdRef.current = new Map(refreshedShots.map((shot) => [
+            shot.id,
+            shot.status
+          ]));
+          const nextShots = refreshedShots.map((shot) => {
+            const enrichedShot = preserveShotMedia(shot, currentById.get(shot.id));
+            const pendingStatus = pendingStatusByShotIdRef.current.get(shot.id);
+            return pendingStatus ? { ...enrichedShot, status: pendingStatus.status } : enrichedShot;
+          });
+          shotsRef.current = nextShots;
+          setShots(nextShots);
+          rebuildArchiveMedia(nextShots);
+          setMediaLinksByShotId((current) => new Map(nextShots.map((shot) => [
+            shot.id,
+            current.get(shot.id) ?? []
+          ])));
+          commitSessionBuckets(reconcileSessionBuckets(nextShots, sessionBucketByShotIdRef.current, false));
+        } catch (error) {
+          if (
+            activeProgressEntryKeyRef.current !== requestedEntryKey
+            || selectedShotsRefreshVersionRef.current !== refreshVersion
+          ) continue;
+          setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
+        }
+      } while (
+        refreshState.queued
+        && activeProgressEntryKeyRef.current === progressEntryKey
       );
-      if (
-        activeProgressEntryKeyRef.current !== requestedEntryKey
-        || selectedShotsRefreshVersionRef.current !== refreshVersion
-      ) return;
-      const currentById = new Map(shotsRef.current.map((shot) => [shot.id, shot]));
-      persistedStatusByShotIdRef.current = new Map(refreshedShots.map((shot) => [
-        shot.id,
-        shot.status
-      ]));
-      const nextShots = refreshedShots.map((shot) => {
-        const enrichedShot = preserveShotMedia(shot, currentById.get(shot.id));
-        const pendingStatus = pendingStatusByShotIdRef.current.get(shot.id);
-        return pendingStatus ? { ...enrichedShot, status: pendingStatus.status } : enrichedShot;
-      });
-      shotsRef.current = nextShots;
-      setShots(nextShots);
-      rebuildArchiveMedia(nextShots);
-      setMediaLinksByShotId((current) => new Map(nextShots.map((shot) => [
-        shot.id,
-        current.get(shot.id) ?? []
-      ])));
-      commitSessionBuckets(reconcileSessionBuckets(nextShots, sessionBucketByShotIdRef.current, false));
-    } catch (error) {
-      if (
-        activeProgressEntryKeyRef.current !== requestedEntryKey
-        || selectedShotsRefreshVersionRef.current !== refreshVersion
-      ) return;
-      setErrorMessage(error instanceof Error ? error.message : "진행도 화면을 갱신하지 못했습니다.");
+    } finally {
+      refreshState.inFlight = false;
+      realtimeRefreshStateRef.current.delete(requestedProgressEntryKey);
     }
   }, [commitSessionBuckets, progressEntryKey, projectId, rebuildArchiveMedia, selectedDailyPlanId]);
 

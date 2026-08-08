@@ -24,6 +24,22 @@ export type ProjectCalendarEventList = {
   canEdit: boolean;
 };
 
+type ProjectCalendarReadCacheEntry = {
+  projectKey: string;
+  expiresAt: number;
+  value: ProjectCalendarEventList;
+};
+
+type ProjectCalendarReadRequestEntry = {
+  projectKey: string;
+  request: Promise<ProjectCalendarEventList>;
+};
+
+const PROJECT_CALENDAR_READ_CACHE_TTL_MS = 10_000;
+const projectCalendarReadCache = new Map<string, ProjectCalendarReadCacheEntry>();
+const projectCalendarReadRequests = new Map<string, ProjectCalendarReadRequestEntry>();
+const projectCalendarReadGeneration = new Map<string, number>();
+
 export class ProjectCalendarEventRequestError extends Error {
   readonly status: number;
   readonly code: string;
@@ -50,6 +66,41 @@ export async function listProjectCalendarEvents(
     ));
     return { events, canEdit: true };
   }
+
+  const projectKey = calendarReadProjectKey(projectId);
+  const readKey = calendarReadKey(projectKey, range);
+  const cached = projectCalendarReadCache.get(readKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached) projectCalendarReadCache.delete(readKey);
+
+  const inFlight = projectCalendarReadRequests.get(readKey);
+  if (inFlight) return inFlight.request;
+
+  const generation = projectCalendarReadGeneration.get(projectKey) ?? 0;
+  const request = fetchProjectCalendarEvents(projectId, range)
+    .then((value) => {
+      if ((projectCalendarReadGeneration.get(projectKey) ?? 0) === generation) {
+        projectCalendarReadCache.set(readKey, {
+          projectKey,
+          expiresAt: Date.now() + PROJECT_CALENDAR_READ_CACHE_TTL_MS,
+          value
+        });
+      }
+      return value;
+    })
+    .finally(() => {
+      if (projectCalendarReadRequests.get(readKey)?.request === request) {
+        projectCalendarReadRequests.delete(readKey);
+      }
+    });
+  projectCalendarReadRequests.set(readKey, { projectKey, request });
+  return request;
+}
+
+async function fetchProjectCalendarEvents(
+  projectId: string,
+  range?: { startDate: string; endDate: string }
+): Promise<ProjectCalendarEventList> {
   const endpoint = getCalendarEndpoint(projectId);
   const query = new URLSearchParams();
   if (range) {
@@ -86,6 +137,7 @@ export async function createProjectCalendarEvent(
       updatedAt: now
     };
     writeLocalEvents([created, ...readLocalEvents()], projectId);
+    invalidateProjectCalendarReadCache(projectId);
     return created;
   }
   const response = await fetchProjectCalendarApi(getCalendarEndpoint(projectId), {
@@ -93,7 +145,9 @@ export async function createProjectCalendarEvent(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ event })
   });
-  return readMutationEvent(response, "프로젝트 일정을 저장하지 못했습니다.");
+  const created = await readMutationEvent(response, "프로젝트 일정을 저장하지 못했습니다.");
+  invalidateProjectCalendarReadCache(projectId);
+  return created;
 }
 
 export async function updateProjectCalendarEvent(
@@ -109,6 +163,7 @@ export async function updateProjectCalendarEvent(
     if (!existing) throw new ProjectCalendarEventRequestError("일정을 찾을 수 없습니다.", 404, "CALENDAR_EVENT_NOT_FOUND");
     const updated: ProjectCalendarEvent = { ...existing, ...event, updatedAt: new Date().toISOString() };
     writeLocalEvents(current.map((candidate) => candidate.id === eventId ? updated : candidate), projectId);
+    invalidateProjectCalendarReadCache(projectId);
     return updated;
   }
   const response = await fetchProjectCalendarApi(getCalendarEndpoint(projectId), {
@@ -116,7 +171,9 @@ export async function updateProjectCalendarEvent(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: eventId, event })
   });
-  return readMutationEvent(response, "프로젝트 일정을 수정하지 못했습니다.");
+  const updated = await readMutationEvent(response, "프로젝트 일정을 수정하지 못했습니다.");
+  invalidateProjectCalendarReadCache(projectId);
+  return updated;
 }
 
 export async function deleteProjectCalendarEvent(projectId: string, eventId: string) {
@@ -126,6 +183,7 @@ export async function deleteProjectCalendarEvent(projectId: string, eventId: str
     const exists = current.some((candidate) => candidate.id === eventId && candidates.includes(candidate.projectId));
     if (!exists) throw new ProjectCalendarEventRequestError("일정을 찾을 수 없습니다.", 404, "CALENDAR_EVENT_NOT_FOUND");
     writeLocalEvents(current.filter((candidate) => candidate.id !== eventId), projectId);
+    invalidateProjectCalendarReadCache(projectId);
     return eventId;
   }
   const query = new URLSearchParams({ id: eventId });
@@ -134,7 +192,38 @@ export async function deleteProjectCalendarEvent(projectId: string, eventId: str
   });
   const payload = await readPayload(response);
   if (!response.ok) throw requestError(payload, response.status, "프로젝트 일정을 삭제하지 못했습니다.");
-  return payload.deletedId?.trim() || eventId;
+  const deletedId = payload.deletedId?.trim() || eventId;
+  invalidateProjectCalendarReadCache(projectId);
+  return deletedId;
+}
+
+function calendarReadProjectKey(projectId: string) {
+  return normalizeProjectId(projectId);
+}
+
+function calendarReadKey(
+  projectKey: string,
+  range?: { startDate: string; endDate: string }
+) {
+  return JSON.stringify([
+    projectKey,
+    range?.startDate ?? "",
+    range?.endDate ?? ""
+  ]);
+}
+
+function invalidateProjectCalendarReadCache(projectId: string) {
+  const projectKey = calendarReadProjectKey(projectId);
+  projectCalendarReadGeneration.set(
+    projectKey,
+    (projectCalendarReadGeneration.get(projectKey) ?? 0) + 1
+  );
+  for (const [key, entry] of projectCalendarReadCache) {
+    if (entry.projectKey === projectKey) projectCalendarReadCache.delete(key);
+  }
+  for (const [key, entry] of projectCalendarReadRequests) {
+    if (entry.projectKey === projectKey) projectCalendarReadRequests.delete(key);
+  }
 }
 
 async function readMutationEvent(response: Response, fallback: string) {

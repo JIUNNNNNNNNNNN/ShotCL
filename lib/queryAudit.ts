@@ -32,6 +32,7 @@ export type QueryAuditSummary = {
 const entries: QueryAuditEntry[] = [];
 const counts = new Map<string, number>();
 let nextId = 1;
+let nextMeasureId = 1;
 
 /** URL 또는 localStorage로 명시적으로 켠 개발 환경에서만 audit를 활성화합니다. */
 export function isQueryAuditEnabled() {
@@ -62,6 +63,11 @@ export async function auditQuery<T>(
 
   const startedAt = new Date();
   const started = performance.now();
+  const measureId = nextMeasureId;
+  nextMeasureId += 1;
+  const startMark = `shotcl:query:${measureId}:start`;
+  const endMark = `shotcl:query:${measureId}:end`;
+  performance.mark(startMark);
   const callCount = (counts.get(label) ?? 0) + 1;
   counts.set(label, callCount);
 
@@ -75,6 +81,7 @@ export async function auditQuery<T>(
       status: "success",
       callCount
     });
+    recordPerformanceMeasure(label, startMark, endMark);
     return result;
   } catch (error) {
     recordEntry({
@@ -86,6 +93,7 @@ export async function auditQuery<T>(
       callCount,
       error: error instanceof Error ? error.message : String(error)
     });
+    recordPerformanceMeasure(label, startMark, endMark);
     throw error;
   }
 }
@@ -164,4 +172,11 @@ function dispatchAuditEvent() {
 
 function roundMs(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function recordPerformanceMeasure(label: string, startMark: string, endMark: string) {
+  performance.mark(endMark);
+  performance.measure(`shotcl:query:${label}`, startMark, endMark);
+  performance.clearMarks(startMark);
+  performance.clearMarks(endMark);
 }
