@@ -254,6 +254,9 @@ export type ArchiveSceneCutMetadata = {
 export type ArchiveFilenameSuggestion = {
   sceneNumber: string;
   cutNumber: number;
+  matched: true;
+  pattern: "scene_cut" | "korean_scene_cut" | "s_c" | "s_parenthesized_cut" | "relative_path";
+  source: "basename" | "relative_path";
 };
 
 export type ArchiveAssetLinkCandidate = ArchiveSceneCutMetadata & {

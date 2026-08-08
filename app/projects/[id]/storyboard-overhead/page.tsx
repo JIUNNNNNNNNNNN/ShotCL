@@ -87,9 +87,11 @@ import {
   uploadProjectReferenceAsset,
   uploadStoryboardCropAssetsBulk,
   type ProjectReferenceAssetOrderUpdate,
+  type ProjectReferenceAssetUploadMetadata,
   type ProjectReferenceAssetSceneCutUpdateResult,
   type StoryboardCropBulkUploadItem
 } from "@/lib/data/projectReferenceAssets";
+import { parseSceneCutFromAssetName } from "@/lib/archiveAssetMetadata";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import {
   finderSelectionUpdate,
@@ -105,6 +107,7 @@ import {
   saveOverheadDiagramArchive
 } from "@/lib/data/shotMediaArchive";
 import { createEmptyShotOverheadDiagram } from "@/lib/shotOverhead";
+import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import type {
   OverheadDiagramArchiveItem,
   ProjectReferenceAsset,
@@ -1356,6 +1359,7 @@ export default function ProjectStoryboardOverheadPage() {
     setActiveType(assetType);
     try {
       let directUploadCount = 0;
+      let directAutoClassifiedCount = 0;
       if (directImageSources.length > 0 && importSources.length === 0) {
         const batchId = typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
@@ -1370,6 +1374,12 @@ export default function ProjectStoryboardOverheadPage() {
           try {
             setProgressMessage(`이미지 최적화 중 · ${file.name}`);
             const optimized = await optimizeArchiveImage(file);
+            const autoMetadata = overheadAutoSceneCutMetadata(
+              assetType,
+              file,
+              metadata?.relativePath,
+              sceneItems
+            );
             setProgressMessage(`${directProcessedCount + 1} / ${directImageSources.length} 업로드 중`);
             const uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
               thumbnailFile: optimized.thumbnailFile,
@@ -1380,10 +1390,12 @@ export default function ProjectStoryboardOverheadPage() {
               originalFilename: file.name,
               originalFolderName: metadata?.originalFolderName,
               relativePath: metadata?.relativePath,
+              ...autoMetadata,
               sortOrder: existingCount + directIndex
             });
             uploadedAssets.push(uploaded);
             directUploadCount += 1;
+            if (hasAutomaticSceneCut(autoMetadata)) directAutoClassifiedCount += 1;
           } catch (error) {
             failures.push({
               path: metadata.relativePath || file.name,
@@ -1402,7 +1414,8 @@ export default function ProjectStoryboardOverheadPage() {
             directUploadCount,
             excludedCount,
             failures.length,
-            context?.batchLabel
+            context?.batchLabel,
+            directAutoClassifiedCount
           ));
           if (directUploadCount === 0) {
             setErrorMessage("이미지를 업로드하지 못했습니다.");
@@ -1478,6 +1491,12 @@ export default function ProjectStoryboardOverheadPage() {
             try {
               setProgressMessage(`이미지 최적화 중 · ${file.name}`);
               const optimized = await optimizeArchiveImage(file);
+              const autoMetadata = overheadAutoSceneCutMetadata(
+                assetType,
+                file,
+                metadata.relativePath,
+                sceneItems
+              );
               const uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
                 thumbnailFile: optimized.thumbnailFile,
                 sourceType: "upload_image",
@@ -1487,10 +1506,12 @@ export default function ProjectStoryboardOverheadPage() {
                 originalFilename: file.name,
                 originalFolderName: metadata.originalFolderName,
                 relativePath: metadata.relativePath,
+                ...autoMetadata,
                 sortOrder: existingCount + directIndex
               });
               uploadedAssets.push(uploaded);
               directUploadCount += 1;
+              if (hasAutomaticSceneCut(autoMetadata)) directAutoClassifiedCount += 1;
             } catch (error) {
               failures.push({
                 path: metadata.relativePath || file.name,
@@ -1508,7 +1529,8 @@ export default function ProjectStoryboardOverheadPage() {
             directUploadCount,
             excludedCount,
             failures.length,
-            context?.batchLabel
+            context?.batchLabel,
+            directAutoClassifiedCount
           ));
           if (failures.length > 0) {
             setErrorMessage(
@@ -1846,10 +1868,11 @@ export default function ProjectStoryboardOverheadPage() {
                   title: displayName,
                   memo: value.memo,
                   episodeNumber: inherited.episodeNumber ?? undefined,
-                  sceneId: undefined,
-                  sceneNumber: "",
-                  sceneNo: "",
-                  cutNo: "",
+                  sceneId: result.sceneId || undefined,
+                  sceneNumber: result.sceneNo,
+                  sceneNo: result.sceneNo,
+                  cutNumber: nullableArchiveCutNumber(result.cutNo) ?? undefined,
+                  cutNo: result.cutNo,
                   sortOrder: currentImport.baseSortOrder + result.orderIndex
                 }
               };
@@ -1986,6 +2009,12 @@ export default function ProjectStoryboardOverheadPage() {
           const sourceMetadata = pendingImport.fileMetadata[fileIndex];
           setProgressMessage(`원본 PDF 보존 ${fileIndex + 1}/${pendingImport.sourceFiles.length}`);
           try {
+            const autoMetadata = overheadAutoSceneCutMetadata(
+              pendingImport.assetType,
+              sourceFile,
+              sourceMetadata?.relativePath,
+              sceneItems
+            );
             const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
               sourceType: "upload_pdf",
               groupId: `source:${batchId}`,
@@ -1996,10 +2025,7 @@ export default function ProjectStoryboardOverheadPage() {
               relativePath: sourceMetadata?.relativePath,
               title: value.title,
               memo: value.memo,
-              sceneId: undefined,
-              sceneNumber: "",
-              sceneNo: "",
-              cutNo: ""
+              ...autoMetadata
             });
             sourceAssetsByIndex.set(fileIndex, original.id);
             savedAssets.push(original);
@@ -2034,6 +2060,12 @@ export default function ProjectStoryboardOverheadPage() {
             const { file, metadata } = task.source;
             setProgressMessage(`이미지 최적화 중 · ${file.name}`);
             const optimized = await optimizeArchiveImage(file);
+            const autoMetadata = overheadAutoSceneCutMetadata(
+              pendingImport.assetType,
+              file,
+              metadata.relativePath,
+              sceneItems
+            );
             const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, optimized.displayFile, {
               thumbnailFile: optimized.thumbnailFile,
               sourceType: "upload_image",
@@ -2043,6 +2075,7 @@ export default function ProjectStoryboardOverheadPage() {
               originalFilename: file.name,
               originalFolderName: metadata.originalFolderName,
               relativePath: metadata.relativePath,
+              ...autoMetadata,
               sortOrder: pendingImport.baseSortOrder + taskIndex
             });
             completed += 1;
@@ -2059,6 +2092,13 @@ export default function ProjectStoryboardOverheadPage() {
           setProgressMessage(`썸네일 생성 중 ${taskIndex + 1}/${visibleTasks.length}`);
           const thumbnailFile = await createArchiveThumbnail(resultFile);
           const inherited = inheritedArchiveMetadata(pendingImport, page.sourceFileIndex);
+          const sourceFile = pendingImport.sourceFiles[page.sourceFileIndex];
+          const autoMetadata = overheadAutoSceneCutMetadata(
+            pendingImport.assetType,
+            sourceFile,
+            pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
+            sceneItems
+          );
           const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
             thumbnailFile,
             sourceType: crop ? "pdf_crop" : "pdf_page",
@@ -2072,14 +2112,11 @@ export default function ProjectStoryboardOverheadPage() {
             cropOrderIndex: taskIndex,
             cropIndex: taskIndex + 1,
             displayName: pageTitle(value.title || inherited.displayName, taskIndex, visibleTasks.length),
-            originalFilename: inherited.originalFilename || pendingImport.sourceFiles[page.sourceFileIndex]?.name,
+            originalFilename: inherited.originalFilename || sourceFile?.name,
             title: pageTitle(value.title || inherited.displayName, taskIndex, visibleTasks.length),
             memo: value.memo,
             episodeNumber: inherited.episodeNumber ?? undefined,
-            sceneId: undefined,
-            sceneNumber: "",
-            sceneNo: "",
-            cutNo: "",
+            ...autoMetadata,
             sortOrder: pendingImport.baseSortOrder + taskIndex
           });
           completed += 1;
@@ -2139,10 +2176,18 @@ export default function ProjectStoryboardOverheadPage() {
           failures: resultFailures
         };
         const totalFailures = allUploadFailures.length;
-        setStatusMessage(
-          `업로드 완료 · ${visibleSuccessCount}개 성공`
-          + (totalFailures > 0 ? ` · ${totalFailures}개 실패` : "")
-        );
+        const autoClassifiedCount = settled.reduce((count, outcome) => (
+          outcome.status === "fulfilled" && outcome.value.saved.crop.sceneId
+            ? count + 1
+            : count
+        ), 0);
+        setStatusMessage(archiveUploadSummary(
+          visibleSuccessCount,
+          0,
+          totalFailures,
+          undefined,
+          autoClassifiedCount
+        ));
         if (totalFailures > 0) {
           setErrorMessage(`${visibleSuccessCount}개는 저장됐지만 ${totalFailures}개를 저장하지 못했습니다.`);
         }
@@ -2159,6 +2204,12 @@ export default function ProjectStoryboardOverheadPage() {
           const sourceFile = page?.originalFile ?? pendingImport.sourceFiles[sourceIndex];
           if (!sourceFile) continue;
           setProgressMessage(`원본 이미지 보존 ${sourceIndex + 1}/${pendingImport.sourceFiles.length}`);
+          const autoMetadata = overheadAutoSceneCutMetadata(
+            pendingImport.assetType,
+            sourceFile,
+            pendingImport.fileMetadata[sourceIndex]?.relativePath,
+            sceneItems
+          );
           const source = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
             sourceType: "upload_image",
             groupId: `source:${batchId}`,
@@ -2169,10 +2220,7 @@ export default function ProjectStoryboardOverheadPage() {
             relativePath: pendingImport.fileMetadata[sourceIndex]?.relativePath,
             title: value.title,
             memo: value.memo,
-            sceneId: undefined,
-            sceneNumber: "",
-            sceneNo: "",
-            cutNo: ""
+            ...autoMetadata
           });
           sourceAssetsByIndex.set(sourceIndex, source.id);
           savedAssets.push(source);
@@ -2186,6 +2234,13 @@ export default function ProjectStoryboardOverheadPage() {
           const resultFile = await createCroppedArchiveFile(page, crop, page.name);
           const thumbnailFile = await createArchiveThumbnail(resultFile);
           const inherited = inheritedArchiveMetadata(pendingImport, page.sourceFileIndex);
+          const sourceFile = pendingImport.sourceFiles[page.sourceFileIndex];
+          const autoMetadata = overheadAutoSceneCutMetadata(
+            pendingImport.assetType,
+            sourceFile,
+            pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
+            sceneItems
+          );
           const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
             thumbnailFile,
             sourceType: "image_crop",
@@ -2199,14 +2254,11 @@ export default function ProjectStoryboardOverheadPage() {
             cropOrderIndex: index,
             cropIndex: index + 1,
             displayName: pageTitle(value.title || inherited.displayName, index, cropResults.length),
-            originalFilename: inherited.originalFilename || pendingImport.sourceFiles[page.sourceFileIndex]?.name,
+            originalFilename: inherited.originalFilename || sourceFile?.name,
             title: pageTitle(value.title || inherited.displayName, index, cropResults.length),
             memo: value.memo,
             episodeNumber: inherited.episodeNumber ?? undefined,
-            sceneId: undefined,
-            sceneNumber: "",
-            sceneNo: "",
-            cutNo: "",
+            ...autoMetadata,
             sortOrder: pendingImport.baseSortOrder + index
           });
           savedAssets.push(saved);
@@ -2219,6 +2271,13 @@ export default function ProjectStoryboardOverheadPage() {
           const page = result.page;
           const displayFile = new File([page.blob], page.name, { type: "image/jpeg" });
           const thumbnailFile = await createArchiveThumbnail(displayFile);
+          const sourceFile = pendingImport.sourceFiles[page.sourceFileIndex];
+          const autoMetadata = overheadAutoSceneCutMetadata(
+            pendingImport.assetType,
+            sourceFile,
+            pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
+            sceneItems
+          );
           setProgressMessage(`업로드 중 ${index + 1}/${value.results.length}`);
           const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, displayFile, {
             thumbnailFile,
@@ -2228,13 +2287,10 @@ export default function ProjectStoryboardOverheadPage() {
             originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             displayName: pageTitle(value.title || stripArchiveExtension(page.name), index, value.results.length),
-            originalFilename: pendingImport.sourceFiles[page.sourceFileIndex]?.name || page.name,
+            originalFilename: sourceFile?.name || page.name,
             title: pageTitle(value.title, index, value.results.length),
             memo: value.memo,
-            sceneId: undefined,
-            sceneNumber: "",
-            sceneNo: "",
-            cutNo: "",
+            ...autoMetadata,
             sortOrder: pendingImport.baseSortOrder + index
           });
           savedAssets.push(saved);
@@ -2245,6 +2301,14 @@ export default function ProjectStoryboardOverheadPage() {
       closeImport();
       setProgressMessage("");
       mergeUploadedAssets(savedAssets);
+      const visibleSavedAssets = savedAssets.filter((asset) => !asset.groupId?.startsWith("source:"));
+      setStatusMessage(archiveUploadSummary(
+        visibleSavedAssets.length,
+        0,
+        0,
+        undefined,
+        visibleAutoClassifiedAssetCount(visibleSavedAssets)
+      ));
       return {
         total: value.results.length,
         succeededResultIds: value.results.map((result) => result.id),
@@ -5065,6 +5129,53 @@ function isAcceptedArchiveFile(file: File) {
   return isPdfFile(file) || isImageFile(file);
 }
 
+type ArchiveAutoSceneCutMetadata = Pick<
+  ProjectReferenceAssetUploadMetadata,
+  "sceneId" | "sceneNumber" | "sceneNo" | "cutNumber" | "cutNo"
+>;
+
+function overheadAutoSceneCutMetadata(
+  assetType: ArchiveType,
+  file: File | undefined,
+  relativePath: string | undefined,
+  scenes: ProjectSceneItem[]
+): ArchiveAutoSceneCutMetadata {
+  if (assetType !== "overhead" || !file) return {};
+  const suggestion = parseSceneCutFromAssetName(file.name, relativePath);
+  if (!suggestion) return {};
+  const scene = scenes.find((entry) => (
+    normalizeSceneNumber(entry.sceneNo) === suggestion.sceneNumber
+  ));
+  const totalCuts = scene?.cutCount ?? 0;
+  if (!scene || !Number.isSafeInteger(totalCuts) || totalCuts <= 0 || suggestion.cutNumber > totalCuts) {
+    return {
+      sceneNumber: suggestion.sceneNumber,
+      sceneNo: suggestion.sceneNumber,
+      cutNumber: suggestion.cutNumber,
+      cutNo: String(suggestion.cutNumber)
+    };
+  }
+  return {
+    sceneId: scene.id,
+    sceneNumber: scene.sceneNo,
+    sceneNo: scene.sceneNo,
+    cutNumber: suggestion.cutNumber,
+    cutNo: String(suggestion.cutNumber)
+  };
+}
+
+function hasAutomaticSceneCut(value: ArchiveAutoSceneCutMetadata) {
+  return Boolean(value.sceneId && value.sceneNumber && value.cutNumber);
+}
+
+function visibleAutoClassifiedAssetCount(assets: ProjectReferenceAsset[]) {
+  return assets.filter((asset) => (
+    !asset.groupId?.startsWith("source:")
+    && Boolean(asset.crop.sceneId)
+    && nullableArchiveCutNumber(asset.crop.cutNumber ?? asset.cutNo) !== null
+  )).length;
+}
+
 async function hasPdfSignature(file: File) {
   if (file.size < 5) return false;
   const bytes = new Uint8Array(await file.slice(0, Math.min(1_024, file.size)).arrayBuffer());
@@ -5208,11 +5319,17 @@ function archiveUploadSummary(
   succeededCount: number,
   excludedCount: number,
   failedCount: number,
-  label?: string
+  label?: string,
+  autoClassifiedCount?: number
 ) {
+  const includesClassification = autoClassifiedCount !== undefined;
+  const classifiedCount = Math.min(succeededCount, Math.max(0, autoClassifiedCount ?? 0));
   return [
-    label ? `${label} 업로드 완료` : "업로드 완료",
-    `${succeededCount}개 성공`,
+    label ? `${label} · ${succeededCount}개 업로드` : `${succeededCount}개 업로드`,
+    ...(includesClassification ? [
+      `${classifiedCount}개 자동 분류`,
+      `${Math.max(0, succeededCount - classifiedCount)}개 미분류`
+    ] : []),
     ...(excludedCount > 0 ? [`${excludedCount}개 제외`] : []),
     ...(failedCount > 0 ? [`${failedCount}개 실패`] : [])
   ].join(" · ");

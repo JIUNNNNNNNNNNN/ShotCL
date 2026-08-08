@@ -25,9 +25,18 @@ export type ArchiveImportResult = {
   orderIndex: number;
   page: ArchiveImportPage;
   crop: RelativeCrop | null;
+  sceneId: string;
+  sceneNo: string;
+  cutNo: string;
   templateId?: string;
   manuallyPositioned?: boolean;
   customSize?: boolean;
+};
+
+type ArchiveImportCropMetadata = {
+  sceneId: string;
+  sceneNo: string;
+  cutNo: string;
 };
 
 export type ArchiveImportCommit = {
@@ -131,6 +140,7 @@ export function ArchiveImportDialog({
   const [applyCrop, setApplyCrop] = useState(assetType === "storyboard");
   const [cropTemplate, setCropTemplate] = useState<StoryboardCropTemplate | null>(null);
   const [candidates, setCandidates] = useState<StoryboardCropCandidate[]>([]);
+  const [candidateMetadataById, setCandidateMetadataById] = useState<Record<string, ArchiveImportCropMetadata>>({});
   const [pageOrigins, setPageOrigins] = useState<Record<string, StoryboardGridOrigin>>({});
   const [activePageId, setActivePageId] = useState(pages[0]?.id ?? "");
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
@@ -151,21 +161,37 @@ export function ArchiveImportDialog({
     [candidates]
   );
   const results: ArchiveImportResult[] = assetType === "storyboard"
-    ? orderedCandidates.map((candidate, orderIndex) => ({
-        id: candidate.id,
-        orderIndex,
-        page: candidate.page,
-        crop: candidate.crop,
-        templateId: candidate.templateId,
-        manuallyPositioned: candidate.manuallyPositioned,
-        customSize: candidate.customSize
-      }))
+    ? orderedCandidates.map((candidate, orderIndex) => {
+        const metadata = candidateMetadataById[candidate.id] ?? emptyCropMetadata();
+        return {
+          id: candidate.id,
+          orderIndex,
+          page: candidate.page,
+          crop: candidate.crop,
+          sceneId: metadata.sceneId,
+          sceneNo: metadata.sceneNo,
+          cutNo: metadata.cutNo,
+          templateId: candidate.templateId,
+          manuallyPositioned: candidate.manuallyPositioned,
+          customSize: candidate.customSize
+        };
+      })
     : selectedPages.map((page, orderIndex) => ({
         id: page.id,
         orderIndex,
         page,
-        crop: applyCrop ? referenceCrop : null
+        crop: applyCrop ? referenceCrop : null,
+        sceneId,
+        sceneNo,
+        cutNo
       }));
+  const cropMetadataErrorsById = assetType === "storyboard"
+    ? Object.fromEntries(results.flatMap((result) => {
+        const error = cropMetadataError(result, scenes);
+        return error ? [[result.id, error]] : [];
+      }))
+    : {};
+  const hasInvalidCropMetadata = Object.keys(cropMetadataErrorsById).length > 0;
   const isProgressBlocking = isBlockingArchiveImportProgress(progress);
   const isInteractionLocked = isSaving || isProgressBlocking;
 
@@ -346,7 +372,17 @@ export function ArchiveImportDialog({
 
   function removeCandidate(id: string) {
     setCandidates((current) => current.filter((candidate) => candidate.id !== id));
+    setCandidateMetadataById((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     if (editingCandidateId === id) setEditingCandidateId(null);
+  }
+
+  function updateCandidateMetadata(id: string, value: ArchiveImportCropMetadata) {
+    setCandidateMetadataById((current) => ({ ...current, [id]: value }));
   }
 
   return (
@@ -371,6 +407,9 @@ export function ArchiveImportDialog({
               referenceSelected={referenceSelected}
               cropTemplate={cropTemplate}
               candidates={candidates}
+              candidateMetadataById={candidateMetadataById}
+              cropMetadataErrorsById={cropMetadataErrorsById}
+              scenes={scenes}
               activePage={activePage}
               editingCandidate={editingCandidate}
               pageOrigin={activePage ? originForPage(activePage) : null}
@@ -388,6 +427,7 @@ export function ArchiveImportDialog({
               onAddAutomaticCandidates={addAutomaticCandidates}
               onEditCandidate={setEditingCandidateId}
               onCandidateChange={updateCandidate}
+              onCandidateMetadataChange={updateCandidateMetadata}
               onResetPageGrid={resetActivePageOrigin}
               onDeleteCandidate={removeCandidate}
               onUndo={() => {
@@ -395,6 +435,7 @@ export function ArchiveImportDialog({
                 if (last) removeCandidate(last.id);
               }}
               onCancel={requestClose}
+              hasInvalidCropMetadata={hasInvalidCropMetadata}
               onConfirmExtraction={() => void submitImport({
                 results,
                 cropTemplate,
@@ -407,7 +448,7 @@ export function ArchiveImportDialog({
             />
             <details className="mx-auto mt-3 max-w-5xl border border-field-border bg-field-soft">
               <summary className="cursor-pointer select-none px-3 py-2 text-xs font-bold text-field-subtle">
-                제목·씬·컷·메모
+                제목·메모
               </summary>
               <div className="border-t border-field-border p-3">
                 <ArchiveMetadataFields
@@ -696,6 +737,29 @@ function ArchiveMetadataFields({
   );
 }
 
+function emptyCropMetadata(): ArchiveImportCropMetadata {
+  return { sceneId: "", sceneNo: "", cutNo: "" };
+}
+
+function cropMetadataError(value: ArchiveImportCropMetadata, scenes: ProjectSceneItem[]) {
+  const cutText = value.cutNo.trim();
+  if (!cutText) return "";
+  if (!/^[1-9]\d*$/.test(cutText)) return "invalid_cut";
+  const cutNumber = Number(cutText);
+  if (!Number.isSafeInteger(cutNumber)) return "invalid_cut";
+  if (!value.sceneId.trim() && !value.sceneNo.trim()) return "missing_scene";
+  const scene = value.sceneId ? scenes.find((entry) => entry.id === value.sceneId) : null;
+  if (value.sceneId && !scene) return "missing_scene";
+  if (scene && (!scene.cutCount || cutNumber > scene.cutCount)) return "cut_out_of_range";
+  return "";
+}
+
+function cropMetadataErrorMessage(error: string) {
+  if (error === "missing_scene") return "컷을 입력하려면 씬을 먼저 선택해주세요.";
+  if (error === "cut_out_of_range") return "선택한 씬의 총 컷수 안에서 컷을 입력해주세요.";
+  return "컷은 1 이상의 숫자로 입력해주세요.";
+}
+
 function StoryboardCropWorkflow({
   pages,
   referencePage,
@@ -703,6 +767,9 @@ function StoryboardCropWorkflow({
   referenceSelected,
   cropTemplate,
   candidates,
+  candidateMetadataById,
+  cropMetadataErrorsById,
+  scenes,
   activePage,
   editingCandidate,
   pageOrigin,
@@ -717,10 +784,12 @@ function StoryboardCropWorkflow({
   onAddAutomaticCandidates,
   onEditCandidate,
   onCandidateChange,
+  onCandidateMetadataChange,
   onResetPageGrid,
   onDeleteCandidate,
   onUndo,
   onCancel,
+  hasInvalidCropMetadata,
   onConfirmExtraction
 }: {
   pages: ArchiveImportPage[];
@@ -729,6 +798,9 @@ function StoryboardCropWorkflow({
   referenceSelected: boolean;
   cropTemplate: StoryboardCropTemplate | null;
   candidates: StoryboardCropCandidate[];
+  candidateMetadataById: Record<string, ArchiveImportCropMetadata>;
+  cropMetadataErrorsById: Record<string, string>;
+  scenes: ProjectSceneItem[];
   activePage: ArchiveImportPage | null;
   editingCandidate: StoryboardCropCandidate | null;
   pageOrigin: StoryboardGridOrigin | null;
@@ -747,13 +819,17 @@ function StoryboardCropWorkflow({
     crop: RelativeCrop,
     options?: StoryboardCandidateChangeOptions
   ) => void;
+  onCandidateMetadataChange: (id: string, value: ArchiveImportCropMetadata) => void;
   onResetPageGrid: (page: ArchiveImportPage, candidate: StoryboardCropCandidate) => void;
   onDeleteCandidate: (id: string) => void;
   onUndo: () => void;
   onCancel: () => void;
+  hasInvalidCropMetadata: boolean;
   onConfirmExtraction: () => void;
 }) {
   const isEditorLocked = isSaving || Boolean(saveReport);
+  const metadataEditDisabled = isSaving || Boolean(saveReport && saveReport.failures.length === 0);
+  const metadataLockedCandidateIds = new Set(saveReport?.succeededResultIds ?? []);
   const activeCandidates = activePage
     ? candidates.filter((candidate) => candidate.page.id === activePage.id)
     : [];
@@ -805,8 +881,13 @@ function StoryboardCropWorkflow({
           pageOrigin={pageOrigin}
           candidates={activeCandidates}
           candidateNumbers={candidateNumbers}
+          candidateMetadataById={candidateMetadataById}
+          cropMetadataErrorsById={cropMetadataErrorsById}
+          scenes={scenes}
           selectedCandidateId={editingCandidate?.page.id === activePage.id ? editingCandidate.id : null}
           disabled={isEditorLocked}
+          metadataEditDisabled={metadataEditDisabled}
+          metadataLockedCandidateIds={metadataLockedCandidateIds}
           onReferenceCropChange={onReferenceCropChange}
           onReferenceSelectionComplete={onReferenceSelectionComplete}
           onConfirmTemplate={onConfirmTemplate}
@@ -814,6 +895,7 @@ function StoryboardCropWorkflow({
           onSelectRange={(selection) => onAddCandidates(activePage, selection)}
           onSelect={onEditCandidate}
           onCandidateChange={onCandidateChange}
+          onCandidateMetadataChange={onCandidateMetadataChange}
         />
       ) : referencePage ? (
         <p className="p-6 text-center text-sm text-field-muted">페이지를 표시할 수 없습니다.</p>
@@ -841,6 +923,16 @@ function StoryboardCropWorkflow({
             </details>
           ) : null}
         </section>
+      ) : null}
+
+      {hasInvalidCropMetadata ? (
+        <p className="border border-field-danger/60 bg-field-danger/10 px-3 py-2 text-xs text-field-danger" role="alert">
+          {(() => {
+            const [candidateId, error] = Object.entries(cropMetadataErrorsById)[0] ?? [];
+            const candidateNumber = candidateId ? candidateNumbers.get(candidateId) : null;
+            return `${candidateNumber ? `Crop ${candidateNumber}: ` : ""}${cropMetadataErrorMessage(error || "invalid_cut")}`;
+          })()}
+        </p>
       ) : null}
 
       <div className="sticky bottom-0 z-30 flex flex-wrap items-center justify-between gap-2 border border-field-divider bg-field-elevated p-2">
@@ -902,7 +994,7 @@ function StoryboardCropWorkflow({
           <button
             type="button"
             onClick={onConfirmExtraction}
-            disabled={!cropTemplate || candidates.length === 0 || isSaving}
+            disabled={!cropTemplate || candidates.length === 0 || isSaving || hasInvalidCropMetadata}
             className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-3 text-[11px] font-bold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25 disabled:border-field-disabled disabled:bg-field-disabled disabled:text-field-panel"
           >
             <Save className="h-3.5 w-3.5" aria-hidden />
@@ -941,15 +1033,21 @@ function StoryboardCropCanvas({
   pageOrigin,
   candidates,
   candidateNumbers,
+  candidateMetadataById,
+  cropMetadataErrorsById,
+  scenes,
   selectedCandidateId,
   disabled,
+  metadataEditDisabled,
+  metadataLockedCandidateIds,
   onReferenceCropChange,
   onReferenceSelectionComplete,
   onConfirmTemplate,
   onPlace,
   onSelectRange,
   onSelect,
-  onCandidateChange
+  onCandidateChange,
+  onCandidateMetadataChange
 }: {
   page: ArchiveImportPage;
   referenceCrop: RelativeCrop;
@@ -958,8 +1056,13 @@ function StoryboardCropCanvas({
   pageOrigin: StoryboardGridOrigin | null;
   candidates: StoryboardCropCandidate[];
   candidateNumbers: Map<string, number>;
+  candidateMetadataById: Record<string, ArchiveImportCropMetadata>;
+  cropMetadataErrorsById: Record<string, string>;
+  scenes: ProjectSceneItem[];
   selectedCandidateId: string | null;
   disabled: boolean;
+  metadataEditDisabled: boolean;
+  metadataLockedCandidateIds: Set<string>;
   onReferenceCropChange: (crop: RelativeCrop) => void;
   onReferenceSelectionComplete: () => void;
   onConfirmTemplate: () => void;
@@ -971,6 +1074,7 @@ function StoryboardCropCanvas({
     crop: RelativeCrop,
     options?: StoryboardCandidateChangeOptions
   ) => void;
+  onCandidateMetadataChange: (id: string, value: ArchiveImportCropMetadata) => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CanvasDrag | null>(null);
@@ -1304,12 +1408,16 @@ function StoryboardCropCanvas({
         const overlaps = candidates.some((other) => (
           other.id !== candidate.id && cropsOverlap(candidate.crop, other.crop)
         ));
+        const metadata = candidateMetadataById[candidate.id] ?? emptyCropMetadata();
+        const selectedSceneExists = scenes.some((scene) => scene.id === metadata.sceneId);
+        const candidateNumber = candidateNumbers.get(candidate.id) ?? index + 1;
+        const metadataError = cropMetadataErrorsById[candidate.id] ?? "";
+        const metadataDisabled = metadataEditDisabled || metadataLockedCandidateIds.has(candidate.id);
         return (
         <div
           key={candidate.id}
-          role="button"
+          role="group"
           tabIndex={0}
-          aria-pressed={selectedCandidateId === candidate.id}
           onPointerDown={(event) => startCandidateDrag(event, candidate, "move")}
           onClick={(event) => {
             event.stopPropagation();
@@ -1320,6 +1428,7 @@ function StoryboardCropCanvas({
             onSelect(candidate.id);
           }}
           onKeyDown={(event) => {
+            if (event.target !== event.currentTarget) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               onSelect(candidate.id);
@@ -1327,8 +1436,8 @@ function StoryboardCropCanvas({
           }}
           className={`absolute cursor-move border-2 bg-field-primary/10 ${
             selectedCandidateId === candidate.id
-              ? `z-10 ${overlaps ? "border-field-danger" : "border-field-primary"} ring-2 ring-white/90`
-              : overlaps ? "border-field-danger" : "border-field-primary"
+              ? `z-10 ${overlaps || metadataError ? "border-field-danger" : "border-field-primary"} ring-2 ring-white/90`
+              : overlaps || metadataError ? "border-field-danger" : "border-field-primary"
           }`}
           style={{
             left: `${candidate.crop.x * 100}%`,
@@ -1336,11 +1445,80 @@ function StoryboardCropCanvas({
             width: `${candidate.crop.width * 100}%`,
             height: `${candidate.crop.height * 100}%`
           }}
-          aria-label={`후보 ${index + 1} 수정`}
+          aria-label={`crop 후보 ${candidateNumber} 수정${metadataError ? `, ${cropMetadataErrorMessage(metadataError)}` : ""}`}
         >
-          <span className="pointer-events-none absolute left-0 top-0 grid h-5 min-w-5 place-items-center bg-field-primary px-1 text-[10px] font-black text-field-accent-foreground">
-            {candidateNumbers.get(candidate.id) ?? index + 1}
-          </span>
+          <div
+            className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-1 p-1"
+            onPointerDown={(event) => {
+              if ((event.target as HTMLElement).closest("input, select")) event.stopPropagation();
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <label className={`flex min-h-11 min-w-0 basis-[48%] items-center gap-1 border bg-field-floating/95 px-1.5 text-[10px] font-bold text-field-muted shadow-sm focus-within:ring-2 focus-within:ring-field-primary/25 ${metadataError ? "border-field-danger" : "border-field-border focus-within:border-field-primary"}`}>
+              <span className="shrink-0">씬</span>
+              {scenes.length > 0 || metadata.sceneId ? (
+                <select
+                  disabled={metadataDisabled}
+                  aria-invalid={metadataError === "missing_scene" || undefined}
+                  aria-label={`crop 후보 ${candidateNumber} 씬`}
+                  value={metadata.sceneId}
+                  onFocus={() => onSelect(candidate.id)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onChange={(event) => {
+                    const scene = scenes.find((entry) => entry.id === event.target.value);
+                    onCandidateMetadataChange(candidate.id, {
+                      sceneId: scene?.id || "",
+                      sceneNo: scene?.sceneNo || "",
+                      cutNo: scene ? metadata.cutNo : ""
+                    });
+                  }}
+                  className="h-9 min-w-0 flex-1 bg-transparent text-xs font-black text-field-text outline-none disabled:text-field-panel"
+                >
+                  <option value="">-</option>
+                  {metadata.sceneId && !selectedSceneExists ? (
+                    <option value={metadata.sceneId}>{metadata.sceneNo || "현재 씬"}</option>
+                  ) : null}
+                  {scenes.map((scene) => (
+                    <option key={scene.id} value={scene.id}>{scene.sceneNo}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  disabled
+                  aria-label={`crop 후보 ${candidateNumber} 씬, 프로젝트 씬 없음`}
+                  value=""
+                  placeholder="-"
+                  className="h-9 min-w-0 flex-1 bg-transparent text-xs font-black text-field-text outline-none disabled:text-field-panel"
+                  inputMode="numeric"
+                />
+              )}
+            </label>
+            <label className={`flex min-h-11 min-w-0 basis-[48%] items-center gap-1 border bg-field-floating/95 px-1.5 text-[10px] font-bold text-field-muted shadow-sm focus-within:ring-2 focus-within:ring-field-primary/25 ${metadataError ? "border-field-danger" : "border-field-border focus-within:border-field-primary"}`}>
+              <span className="shrink-0">컷</span>
+              <input
+                disabled={metadataDisabled || scenes.length === 0}
+                aria-invalid={Boolean(metadataError) || undefined}
+                aria-label={`crop 후보 ${candidateNumber} 컷`}
+                value={metadata.cutNo}
+                onFocus={() => onSelect(candidate.id)}
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  if (!/^\d*$/.test(event.target.value)) return;
+                  onCandidateMetadataChange(candidate.id, {
+                    ...metadata,
+                    cutNo: event.target.value
+                  });
+                }}
+                className="h-9 min-w-0 flex-1 bg-transparent text-right text-xs font-black text-field-text outline-none disabled:text-field-panel"
+                inputMode="numeric"
+              />
+            </label>
+            {metadataError ? (
+              <span className="sr-only" role="alert">
+                {`Crop ${candidateNumber}: ${cropMetadataErrorMessage(metadataError)}`}
+              </span>
+            ) : null}
+          </div>
           {selectedCandidateId === candidate.id
             ? (["nw", "ne", "sw", "se"] as CropResizeHandle[]).map((handle) => (
               <button
