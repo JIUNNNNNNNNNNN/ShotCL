@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   ChangeEvent,
   DragEvent,
+  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -84,6 +85,11 @@ import {
   type StoryboardCropBulkUploadItem
 } from "@/lib/data/projectReferenceAssets";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import {
+  finderSelectionUpdate,
+  retainVisibleSelection,
+  visibleSelectionOrder
+} from "@/lib/archiveSelection";
 import { getProject } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { auditQuery } from "@/lib/queryAudit";
@@ -320,6 +326,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [query, setQuery] = useState("");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<ArchiveSelectionKey>>(new Set());
+  const [selectionAnchorKey, setSelectionAnchorKey] = useState<ArchiveSelectionKey | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
   const [importProgress, setImportProgress] = useState<ArchiveImportProgressState | null>(null);
@@ -378,6 +385,7 @@ export default function ProjectStoryboardOverheadPage() {
   const assetPressCleanupRef = useRef<(() => void) | null>(null);
   const suppressArchiveClickRef = useRef<ArchiveSelectionKey | null>(null);
   const selectedKeysRef = useRef<Set<ArchiveSelectionKey>>(new Set());
+  const selectionPointerRef = useRef<{ key: ArchiveSelectionKey; pointerType: string } | null>(null);
   const pendingImportRef = useRef<PendingImport | null>(null);
   const savedImportResultIdsRef = useRef(new Set<string>());
   const importResultAssetIdsRef = useRef(new Map<string, string>());
@@ -557,6 +565,8 @@ export default function ProjectStoryboardOverheadPage() {
     setPendingConfirm(null);
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
+    setSelectionAnchorKey(null);
+    selectionPointerRef.current = null;
     setSelectionMode(false);
     setEditingAsset(null);
     setMetadataAnchor(null);
@@ -588,6 +598,8 @@ export default function ProjectStoryboardOverheadPage() {
   useEffect(() => {
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
+    setSelectionAnchorKey(null);
+    selectionPointerRef.current = null;
     setSelectionMode(false);
     cancelArchivePointerSession();
     cancelActiveReorderDrag();
@@ -799,36 +811,61 @@ export default function ProjectStoryboardOverheadPage() {
     );
   }, [archiveGroupsForCollapse, loadedArchiveProjectId, projectId]);
 
-  const scopeSelectionKeys = useMemo(
-    () => [...new Set([
-      ...archiveGroups.flatMap((group) => group.items.flatMap((item) => (
-        item.kind === "diagram" && item.diagram.legacy
-          ? []
-          : [archiveSelectionKey(item.kind, item.id)]
-      ))),
-      ...sourceAssets.map((asset) => archiveSelectionKey("asset", asset.id))
-    ])],
-    [archiveGroups, sourceAssets]
+  const visibleSelectionKeys = useMemo(
+    () => visibleSelectionOrder(
+      archiveGroups.map((group) => ({
+        key: group.key,
+        itemKeys: groupArchiveItemsByCut(group.items).flatMap((cutGroup) => (
+          cutGroup.items.flatMap((item) => (
+            item.kind === "diagram" && item.diagram.legacy
+              ? []
+              : [archiveSelectionKey(item.kind, item.id)]
+          ))
+        ))
+      })),
+      collapsedSceneKeys,
+      sourceAssets.map((asset) => archiveSelectionKey("asset", asset.id))
+    ),
+    [archiveGroups, collapsedSceneKeys, sourceAssets]
   );
+  const visibleSelectionKeySet = useMemo(
+    () => new Set(visibleSelectionKeys),
+    [visibleSelectionKeys]
+  );
+  const scopeSelectionKeys = visibleSelectionKeys;
+
+  useEffect(() => {
+    if (selectionAnchorKey && !visibleSelectionKeySet.has(selectionAnchorKey)) {
+      setSelectionAnchorKey(null);
+    }
+    const current = selectedKeysRef.current;
+    if ([...current].every((key) => visibleSelectionKeySet.has(key))) return;
+    const next = retainVisibleSelection(current, visibleSelectionKeySet);
+    selectedKeysRef.current = next;
+    setSelectedKeys(next);
+  }, [selectionAnchorKey, visibleSelectionKeySet]);
   const allScopeAssetsSelected = scopeSelectionKeys.length > 0
     && scopeSelectionKeys.every((key) => selectedKeys.has(key));
   const selectedReferenceAssetIds = useMemo(
     () => [...overheads, ...storyboards]
-      .filter((asset) => selectedKeys.has(archiveSelectionKey("asset", asset.id)))
+      .filter((asset) => {
+        const key = archiveSelectionKey("asset", asset.id);
+        return visibleSelectionKeySet.has(key) && selectedKeys.has(key);
+      })
       .map((asset) => asset.id),
-    [overheads, selectedKeys, storyboards]
+    [overheads, selectedKeys, storyboards, visibleSelectionKeySet]
   );
   const selectedDiagramItems = useMemo(
     () => diagramArchives.filter((item) => (
-      !item.legacy && selectedKeys.has(archiveSelectionKey("diagram", item.id))
+      !item.legacy
+      && visibleSelectionKeySet.has(archiveSelectionKey("diagram", item.id))
+      && selectedKeys.has(archiveSelectionKey("diagram", item.id))
     )),
-    [diagramArchives, selectedKeys]
+    [diagramArchives, selectedKeys, visibleSelectionKeySet]
   );
   const selectedCount = selectedReferenceAssetIds.length + selectedDiagramItems.length;
   const singleSelectedReferenceAsset = selectedCount === 1
-    ? [...overheads, ...storyboards].find((asset) => (
-      selectedKeys.has(archiveSelectionKey("asset", asset.id))
-    )) ?? null
+    ? [...overheads, ...storyboards].find((asset) => selectedReferenceAssetIds.includes(asset.id)) ?? null
     : null;
   const canCropSingleSelection = Boolean(
     canEdit
@@ -857,6 +894,10 @@ export default function ProjectStoryboardOverheadPage() {
       for (const id of ids) next.delete(archiveSelectionKey("asset", id));
       return next;
     });
+    setSelectionAnchorKey((current) => {
+      if (!current) return current;
+      return [...ids].some((id) => current === archiveSelectionKey("asset", id)) ? null : current;
+    });
     setPreview((current) => current?.assetId && ids.has(current.assetId) ? null : current);
     setEditingAsset((current) => current && ids.has(current.id) ? null : current);
     setRenamingAsset((current) => current && ids.has(current.id) ? null : current);
@@ -869,6 +910,10 @@ export default function ProjectStoryboardOverheadPage() {
       const next = new Set(current);
       for (const id of ids) next.delete(archiveSelectionKey("diagram", id));
       return next;
+    });
+    setSelectionAnchorKey((current) => {
+      if (!current) return current;
+      return [...ids].some((id) => current === archiveSelectionKey("diagram", id)) ? null : current;
     });
   }
 
@@ -2316,17 +2361,42 @@ export default function ProjectStoryboardOverheadPage() {
     setSelectedKeys(next);
   }
 
-  function toggleArchiveSelection(
+  function rememberArchiveSelectionPointer(
+    key: ArchiveSelectionKey,
+    event: ReactPointerEvent<HTMLButtonElement>
+  ) {
+    selectionPointerRef.current = { key, pointerType: event.pointerType };
+  }
+
+  function selectArchiveItem(
     kind: ArchiveSelectionKind,
     id: string,
-    additive = true
+    event: ReactMouseEvent<HTMLButtonElement>
   ) {
     const key = archiveSelectionKey(kind, id);
+    const recordedPointer = event.detail !== 0 && selectionPointerRef.current?.key === key
+      ? selectionPointerRef.current.pointerType
+      : "";
+    selectionPointerRef.current = null;
+    const nativePointerType = "pointerType" in event.nativeEvent
+      ? String(event.nativeEvent.pointerType || "")
+      : "";
+    const pointerType = nativePointerType || recordedPointer;
+    const touchSelection = pointerType === "touch" || pointerType === "pen";
+
+    const additive = event.metaKey || event.ctrlKey;
     updateSelectedKeys((current) => {
-      const next = additive ? new Set(current) : new Set<ArchiveSelectionKey>();
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
+      const result = finderSelectionUpdate({
+        currentSelection: current,
+        visibleKeys: visibleSelectionKeys,
+        anchorKey: selectionAnchorKey,
+        targetKey: key,
+        shiftKey: event.shiftKey,
+        additive: touchSelection || additive
+      });
+      if (!result) return current;
+      setSelectionAnchorKey(result.anchorKey);
+      return result.selection;
     });
   }
 
@@ -2341,6 +2411,7 @@ export default function ProjectStoryboardOverheadPage() {
       }
       return next;
     });
+    setSelectionAnchorKey(null);
     setSelectionMode(true);
   }
 
@@ -2374,6 +2445,8 @@ export default function ProjectStoryboardOverheadPage() {
   function clearSelection() {
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
+    setSelectionAnchorKey(null);
+    selectionPointerRef.current = null;
     setSelectionMode(false);
   }
 
@@ -2409,6 +2482,7 @@ export default function ProjectStoryboardOverheadPage() {
       clearSelection();
       return;
     }
+    setSelectionAnchorKey(null);
     setSelectionMode(true);
   }
 
@@ -2507,12 +2581,18 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   function scheduleArchiveClickSuppressionRelease(assetId: string) {
-    const suppressedKey = archiveSelectionKey("asset", assetId);
+    scheduleArchiveSelectionClickSuppressionRelease(archiveSelectionKey("asset", assetId));
+  }
+
+  function scheduleArchiveSelectionClickSuppressionRelease(
+    suppressedKey: ArchiveSelectionKey,
+    delayMs = 700
+  ) {
     window.setTimeout(() => {
       if (suppressArchiveClickRef.current === suppressedKey) {
         suppressArchiveClickRef.current = null;
       }
-    }, 700);
+    }, delayMs);
   }
 
   function cancelActiveReorderDrag() {
@@ -2558,6 +2638,9 @@ export default function ProjectStoryboardOverheadPage() {
       || !projectId
       || !event.isPrimary
       || event.button !== 0
+      || event.shiftKey
+      || event.metaKey
+      || event.ctrlKey
       || selectionMode
       || selectedKeysRef.current.size > 0
       || orderedAssetIds.length < 1
@@ -3248,6 +3331,10 @@ export default function ProjectStoryboardOverheadPage() {
   ) {
     event.preventDefault();
     event.stopPropagation();
+    const key = archiveSelectionKey("asset", asset.id);
+    selectionPointerRef.current = null;
+    suppressArchiveClickRef.current = key;
+    scheduleArchiveSelectionClickSuppressionRelease(key, 120);
     if (
       !canEdit
       || !projectId
@@ -3577,7 +3664,12 @@ export default function ProjectStoryboardOverheadPage() {
                         return (
                           <article
                             key={key}
-                            onContextMenu={(event) => event.preventDefault()}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              selectionPointerRef.current = null;
+                              suppressArchiveClickRef.current = key;
+                              scheduleArchiveSelectionClickSuppressionRelease(key, 120);
+                            }}
                             className={`ui-motion-surface relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition ${
                               selected
                                 ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
@@ -3586,12 +3678,20 @@ export default function ProjectStoryboardOverheadPage() {
                           >
                             <button
                               type="button"
+                              onPointerDown={(event) => rememberArchiveSelectionPointer(key, event)}
                               onClick={(event) => {
-                                if (selectionMode && !diagram.legacy) {
+                                if (suppressArchiveClickRef.current === key) {
+                                  suppressArchiveClickRef.current = null;
+                                  selectionPointerRef.current = null;
                                   event.preventDefault();
-                                  toggleArchiveSelection("diagram", diagram.id);
                                   return;
                                 }
+                                if (selectionMode && !diagram.legacy) {
+                                  event.preventDefault();
+                                  selectArchiveItem("diagram", diagram.id, event);
+                                  return;
+                                }
+                                selectionPointerRef.current = null;
                                 openDiagram(diagram, false);
                               }}
                               className="grid min-w-0 aspect-[4/3] touch-pan-y place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft"
@@ -3641,6 +3741,7 @@ export default function ProjectStoryboardOverheadPage() {
                           <button
                             type="button"
                             onPointerDown={(event) => {
+                              rememberArchiveSelectionPointer(key, event);
                               if (dragDeleteEnabled) beginAssetReorderPress(
                                 asset.id,
                                 group.sceneId,
@@ -3654,14 +3755,16 @@ export default function ProjectStoryboardOverheadPage() {
                             onClick={(event) => {
                               if (suppressArchiveClickRef.current === key) {
                                 suppressArchiveClickRef.current = null;
+                                selectionPointerRef.current = null;
                                 event.preventDefault();
                                 return;
                               }
                               if (selectionMode) {
                                 event.preventDefault();
-                                toggleArchiveSelection("asset", asset.id);
+                                selectArchiveItem("asset", asset.id, event);
                                 return;
                               }
+                              selectionPointerRef.current = null;
                               if (groupInReorderMode) {
                                 event.preventDefault();
                                 return;
@@ -3738,12 +3841,27 @@ export default function ProjectStoryboardOverheadPage() {
                   >
                     <button
                       type="button"
+                      onPointerDown={(event) => rememberArchiveSelectionPointer(key, event)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        selectionPointerRef.current = null;
+                        suppressArchiveClickRef.current = key;
+                        scheduleArchiveSelectionClickSuppressionRelease(key, 120);
+                      }}
                       onClick={(event) => {
-                        if (selectionMode) {
+                        if (suppressArchiveClickRef.current === key) {
+                          suppressArchiveClickRef.current = null;
+                          selectionPointerRef.current = null;
                           event.preventDefault();
-                          toggleArchiveSelection("asset", asset.id);
                           return;
                         }
+                        if (selectionMode) {
+                          event.preventDefault();
+                          selectArchiveItem("asset", asset.id, event);
+                          return;
+                        }
+                        selectionPointerRef.current = null;
                         if (detectArchiveCropSourceKind({
                           mimeType: asset.mimeType,
                           filename: asset.filename
