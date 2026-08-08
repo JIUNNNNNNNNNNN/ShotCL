@@ -9,6 +9,10 @@ import { useCurrentProjectPageActionMenu } from "@/components/ProjectPageActions
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
+import {
   isPersistentProjectShellViewport,
   usePersistentProjectShell
 } from "@/hooks/useProjectShellMode";
@@ -31,6 +35,16 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const actionDrawerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLElement | null>(null);
   const closeDrawer = useCallback(() => setOpenDrawer(null), []);
+  const navigationGuideAnchor = useContextualGuideAnchor<HTMLButtonElement>("shell.navigation-toggle");
+  const actionGuideAnchor = useContextualGuideAnchor<HTMLButtonElement>("shell.action-toggle");
+  const setNavigationToggleRef = useCallback((element: HTMLButtonElement | null) => {
+    navigationToggleRef.current = element;
+    navigationGuideAnchor(element);
+  }, [navigationGuideAnchor]);
+  const setActionToggleRef = useCallback((element: HTMLButtonElement | null) => {
+    actionToggleRef.current = element;
+    actionGuideAnchor(element);
+  }, [actionGuideAnchor]);
 
   useLayoutEffect(() => {
     setOpenDrawer(null);
@@ -54,6 +68,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const pageTitle = getProjectPageTitle(pathname, searchParams);
   const hasRightPanel = Boolean(menu?.actions.length);
   const modalDrawerOpen = !persistentShell && openDrawer !== null;
+  useContextualGuideBlocker("project-shell-drawer", modalDrawerOpen);
 
   return (
     <div
@@ -73,7 +88,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
           <HomeButton embedded />
         </div>
         <button
-          ref={navigationToggleRef}
+          ref={setNavigationToggleRef}
           type="button"
           className="project-shell__bar-button project-shell__navigation-toggle"
           aria-label={openDrawer === "navigation" ? "프로젝트 메뉴 닫기" : "프로젝트 메뉴 열기"}
@@ -89,7 +104,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
         </div>
         {hasRightPanel ? (
           <button
-            ref={actionToggleRef}
+            ref={setActionToggleRef}
             type="button"
             className="project-shell__bar-button project-shell__action-toggle"
             aria-label={openDrawer === "actions" ? "페이지 작업 닫기" : "페이지 작업 열기"}
@@ -154,7 +169,11 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
                 <X aria-hidden />
               </button>
             </div>
-            <ProjectNavigation drawer onNavigate={() => setOpenDrawer(null)} />
+            <ProjectNavigation
+              drawer
+              onNavigate={() => setOpenDrawer(null)}
+              onGuideReplay={closeDrawer}
+            />
           </aside>
       </div> : null}
     </div>

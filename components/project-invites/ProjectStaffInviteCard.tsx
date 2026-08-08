@@ -7,7 +7,12 @@ import {
   MoreHorizontal,
   UserRoundPlus
 } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { copyText } from "@/lib/client/copyText";
@@ -58,6 +63,14 @@ export function ProjectStaffInviteCard({
   const primaryActionContainerRef = useRef<HTMLDivElement | null>(null);
   const menuContainerRef = useRef<HTMLDivElement | null>(null);
   const confirmContainerRef = useRef<HTMLElement | null>(null);
+  const inviteActionAnchorRef = useContextualGuideAnchor("home.invite-action");
+  const { role, requestGuide } = useContextualGuide();
+  const setPrimaryActionContainerRef = useCallback((element: HTMLDivElement | null) => {
+    primaryActionContainerRef.current = element;
+    inviteActionAnchorRef(element);
+  }, [inviteActionAnchorRef]);
+
+  useContextualGuideBlocker("home.invite-controls", menuOpen || confirmAction !== null);
 
   currentProjectIdRef.current = projectId;
 
@@ -158,6 +171,12 @@ export function ProjectStaffInviteCard({
     }, FEEDBACK_DURATION_MS);
   }
 
+  function requestInviteGuideFromCopyAction() {
+    if (role === "admin" && primaryActionContainerRef.current) {
+      requestGuide("home.invite-staff", "feature");
+    }
+  }
+
   async function runAction(action: "ensure" | "rotate" | "revoke") {
     if (requestInFlightRef.current) return null;
     const requestedProjectId = projectId;
@@ -203,6 +222,7 @@ export function ProjectStaffInviteCard({
       }
       return;
     }
+    requestInviteGuideFromCopyAction();
     let activeState = inviteState;
     if (activeState.status === "inactive" || activeState.status === "error") {
       const created = await runAction("ensure");
@@ -234,6 +254,7 @@ export function ProjectStaffInviteCard({
 
   async function copyInviteUrl() {
     if (requestInFlightRef.current || inviteState.status !== "active") return;
+    requestInviteGuideFromCopyAction();
     const requestedProjectId = projectId;
     const operationId = ++operationSequenceRef.current;
     requestInFlightRef.current = true;
@@ -308,7 +329,7 @@ export function ProjectStaffInviteCard({
       </p>
 
       <div className="mt-3 grid min-w-0 gap-2" aria-busy={isBusy} aria-describedby="project-staff-invite-description">
-        <div ref={primaryActionContainerRef}>
+        <div ref={setPrimaryActionContainerRef}>
           <Button
             className="min-h-11 w-full min-w-0 px-2 text-xs sm:text-sm"
             disabled={isBusy || inviteState.status === "loading"}

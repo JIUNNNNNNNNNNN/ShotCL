@@ -19,6 +19,11 @@ import {
   type ReactNode
 } from "react";
 import {
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
+import {
   CALENDAR_EVENT_COLORS,
   addDateOnlyMonths,
   buildCalendarEventDateIndex,
@@ -133,6 +138,21 @@ export function ProjectMonthlyCalendar({
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const dateButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const didInitializeRef = useRef(false);
+  const didUseRangeGestureRef = useRef(false);
+  const pendingRangeGuideRef = useRef(false);
+  const calendarGuideAnchorRef = useContextualGuideAnchor("home.calendar-grid");
+  const { completeGuide, requestGuide } = useContextualGuide();
+
+  useContextualGuideBlocker("home.calendar-editor", editor !== null);
+
+  useEffect(() => {
+    if (editor || !pendingRangeGuideRef.current) return undefined;
+    pendingRangeGuideRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      requestGuide("home.calendar-range", "feature");
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [editor, requestGuide]);
 
   useEffect(() => {
     const today = getLocalTodayDateKey();
@@ -240,6 +260,11 @@ export function ProjectMonthlyCalendar({
   ) {
     setSelectedDate(selectedDateKey);
     if (!canEditEvents || !onCreateEvent) return;
+    completeGuide("home.calendar-create");
+    if (date !== endDate && !didUseRangeGestureRef.current) {
+      didUseRangeGestureRef.current = true;
+      pendingRangeGuideRef.current = true;
+    }
     returnFocusRef.current = focusTarget;
     setEditor({
       event: null,
@@ -421,6 +446,7 @@ export function ProjectMonthlyCalendar({
           </div>
 
           <div
+            ref={calendarGuideAnchorRef}
             className={styles.calendarGrid}
             role="grid"
             aria-label={`${visibleMonth.year}년 ${visibleMonth.month}월 프로젝트 일정`}

@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent, ReactNode } from "react";
+import type { MouseEvent, ReactNode, RefCallback } from "react";
 import Link from "next/link";
 import { ChevronDown, type LucideIcon } from "lucide-react";
 import type { ProjectNavigationItemId } from "@/lib/projectNavigation";
@@ -21,6 +21,7 @@ type ProjectNavigationCardGridProps = {
   onLinkClick: (event: MouseEvent<HTMLAnchorElement>, href: string) => void;
   onToggleRounds: (kind: "dailyPlans" | "progress") => void;
   renderRoundContent: (kind: "dailyPlans" | "progress") => ReactNode;
+  dailyPlansGuideRef?: RefCallback<HTMLDivElement>;
 };
 
 /** 데스크톱 고정 패널과 모바일 drawer가 공유하는 프로젝트 기능 카드 grid입니다. */
@@ -29,7 +30,8 @@ export function ProjectNavigationCardGrid({
   instanceId,
   onLinkClick,
   onToggleRounds,
-  renderRoundContent
+  renderRoundContent,
+  dailyPlansGuideRef
 }: ProjectNavigationCardGridProps) {
   return (
     <ul className="project-navigation__card-grid">
@@ -39,6 +41,7 @@ export function ProjectNavigationCardGrid({
         return (
           <li key={item.id} className="min-w-0">
             <div
+              ref={item.id === "dailyPlans" ? dailyPlansGuideRef : undefined}
               className="project-navigation__card"
               data-active={item.active ? "true" : "false"}
               data-has-rounds={roundKind ? "true" : "false"}

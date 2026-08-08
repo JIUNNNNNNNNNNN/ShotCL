@@ -3131,6 +3131,208 @@ button {
   }
 }
 
+@keyframes contextual-guide-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.contextual-guide-coach {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  width: min(288px, calc(100vw - 24px));
+  max-height: min(240px, calc(100dvh - 24px));
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--ui-accent-border);
+  border-radius: var(--ui-radius-panel);
+  background: color-mix(in srgb, var(--ui-surface-3) 96%, black);
+  padding: 14px;
+  color: var(--ui-text-primary);
+  box-shadow: var(--shadow-floating);
+  animation: contextual-guide-enter var(--motion-base) var(--ease-out-native) both;
+  overscroll-behavior: contain;
+  transition:
+    opacity 130ms var(--ease-in-native),
+    transform 130ms var(--ease-in-native);
+}
+
+.contextual-guide-coach[data-closing="true"] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.contextual-guide-coach__copy {
+  min-width: 0;
+  padding-right: 22px;
+}
+
+.contextual-guide-coach__copy h2 {
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.contextual-guide-coach__copy p {
+  margin-top: 4px;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.contextual-guide-coach__close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: var(--ui-radius-control);
+  color: var(--ui-text-muted);
+}
+
+.contextual-guide-coach__close:hover {
+  background: var(--ui-surface-4);
+  color: var(--ui-text-primary);
+}
+
+.contextual-guide-coach__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.contextual-guide-coach__ack {
+  display: inline-flex;
+  min-height: 40px;
+  align-self: end;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--ui-accent-border);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-accent-soft);
+  padding: 7px 10px;
+  color: var(--ui-accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.contextual-guide-coach__ack:hover {
+  background: var(--ui-accent-soft-strong);
+}
+
+.contextual-guide-coach__ack svg {
+  width: 14px;
+  height: 14px;
+}
+
+.contextual-guide-coach :where(button):focus-visible,
+.contextual-guide-help :where(button):focus-visible {
+  outline: 2px solid var(--ui-accent-focus);
+  outline-offset: 2px;
+}
+
+.contextual-guide-coach[data-presentation="bottom-coach"] {
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  width: auto;
+  max-height: min(30dvh, 220px);
+}
+
+.contextual-guide-coach[data-presentation="bottom-coach"] :where(
+  .contextual-guide-coach__close,
+  .contextual-guide-coach__ack
+) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.contextual-guide-help {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 8px;
+}
+
+.contextual-guide-help__trigger {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-2);
+  padding: 6px 10px;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.contextual-guide-help__trigger:hover,
+.contextual-guide-help__trigger[aria-expanded="true"] {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}
+
+.contextual-guide-help__trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.contextual-guide-help__menu {
+  position: absolute;
+  top: 44px;
+  right: 2px;
+  z-index: 82;
+  display: grid;
+  width: min(220px, calc(100vw - 32px));
+  gap: 3px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-surface-3);
+  padding: 5px;
+  box-shadow: var(--shadow-floating);
+  animation: contextual-guide-enter var(--motion-fast) var(--ease-out-native) both;
+}
+
+.contextual-guide-help__menu button {
+  min-height: 40px;
+  border-radius: var(--ui-radius-control);
+  padding: 8px 10px;
+  color: var(--ui-text-secondary);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.contextual-guide-help__menu button:hover {
+  background: var(--ui-surface-4);
+  color: var(--ui-text-primary);
+}
+
+@media (max-width: 719px), (max-height: 699px) {
+  .contextual-guide-help__trigger,
+  .contextual-guide-help__menu button {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .app-theme :where(
     .ui-motion-surface,
@@ -3153,6 +3355,8 @@ button {
     [data-memo-popover],
     [data-weather-region-popover],
     [data-shooting-order-popover],
+    .contextual-guide-coach,
+    .contextual-guide-help__menu,
     [data-scene-portrait-body],
     div[id^="archive-scene-"]
   ),

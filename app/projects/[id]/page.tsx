@@ -44,6 +44,12 @@ import { buildProgressRoundHref } from "@/lib/projectNavigation";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import {
+  useAutoContextualGuide,
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 import type { DailyPlan, DailyPlanMealTime, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
 type ProgressVisualBucket = "active" | "ok" | "omit";
@@ -191,6 +197,17 @@ export default function ProjectDetailPage() {
   const realtimeRefreshStateRef = useRef(new Map<string, { inFlight: boolean; queued: boolean }>());
   const initializedBucketEntryRef = useRef("");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
+  const progressCutListGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.cut-list");
+  const progressStatusGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.status-controls");
+  const { completeGuide, requestGuide } = useContextualGuide();
+  useAutoContextualGuide(
+    "progress.intro",
+    isProgressView && Boolean(dailyPlanId) && !isWorkspaceLoading && !isLoading
+  );
+  useContextualGuideBlocker(
+    "progress-overlay",
+    Boolean(editingShot || editingSchedule || isAddOpen || preview || mediaPicker)
+  );
 
   const commitSessionBuckets = useCallback((next: Map<string, ProgressVisualBucket>) => {
     sessionBucketByShotIdRef.current = next;
@@ -551,6 +568,8 @@ export default function ProjectDetailPage() {
   }, [selectedPlan, upsertDailyPlan]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
+    completeGuide("progress.intro");
+    requestGuide("progress.status", "feature");
     const requestedEntryKey = activeProgressEntryKeyRef.current;
     const currentShot = shotsRef.current.find((shot) => shot.id === targetShot.id) ?? targetShot;
     const mutationVersion = (statusMutationVersionByShotIdRef.current.get(targetShot.id) ?? 0) + 1;
@@ -607,7 +626,7 @@ export default function ProjectDetailPage() {
         statusMutationQueueByShotIdRef.current.delete(targetShot.id);
       }
     }
-  }, []);
+  }, [completeGuide, requestGuide]);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -970,7 +989,7 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      <div id="cut-board" className="scroll-mt-28 pb-24">
+      <div ref={progressCutListGuideRef} id="cut-board" className="scroll-mt-28 pb-24">
         <div className="mb-2 px-1">
           <h2 className="text-lg font-black text-field-text">오늘 컷</h2>
         </div>
@@ -980,7 +999,7 @@ export default function ProjectDetailPage() {
             <p className="mt-2 text-base leading-6 text-field-muted">필요하면 새 컷을 추가해 진행을 시작할 수 있습니다.</p>
           </Card>
         ) : (
-          <div className="grid gap-3">
+          <div ref={progressStatusGuideRef} className="grid gap-3">
             <section aria-labelledby="active-progress-shots-title" className="grid gap-2">
               <div className="flex min-h-10 items-center gap-2 rounded-[10px] border border-field-border bg-field-section px-3 py-2">
                 <h3 id="active-progress-shots-title" className="text-sm font-bold text-field-text">미촬영·촬영중</h3>

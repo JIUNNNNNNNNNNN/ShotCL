@@ -32,6 +32,10 @@ import {
   ProjectNavigationCardGrid,
   type ProjectNavigationCardItem
 } from "@/components/ProjectNavigationCardGrid";
+import {
+  ContextualGuideHelpButton,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
@@ -56,6 +60,7 @@ export { getProjectPageTitle } from "@/lib/projectNavigation";
 
 type ProjectNavigationProps = {
   onNavigate?: (href: string) => void;
+  onGuideReplay?: () => void;
   drawer?: boolean;
 };
 
@@ -87,7 +92,7 @@ const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
 
 /** 프로젝트의 공통 기능과 회차를 데스크톱 고정 패널·모바일 drawer에서 함께 사용합니다. */
-export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigationProps) {
+export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }: ProjectNavigationProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -113,6 +118,7 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
   });
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const duplicateLockRef = useRef("");
+  const dailyPlansGuideRef = useContextualGuideAnchor<HTMLDivElement>("shell.navigation.daily-plans");
   const visibleItems = useMemo(() => getVisibleProjectNavigationItems(role), [role]);
   const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
@@ -305,6 +311,8 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
           {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트 메뉴를 불러오지 못했습니다.")}</p> : null}
         </div>
 
+        <ContextualGuideHelpButton onBeforeReplay={onGuideReplay} />
+
         <div className="project-navigation__menu-scroll">
           <ProjectNavigationCardGrid
             items={cardItems}
@@ -315,6 +323,7 @@ export function ProjectNavigation({ onNavigate, drawer = false }: ProjectNavigat
               [kind]: !current[kind]
             }))}
             renderRoundContent={renderRoundContent}
+            dailyPlansGuideRef={dailyPlansGuideRef}
           />
 
           {mutationError && !pendingDelete ? (

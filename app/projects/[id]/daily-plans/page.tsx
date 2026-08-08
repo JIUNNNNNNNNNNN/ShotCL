@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { PageLoader } from "@/components/PixelDogLoader";
+import { useAutoContextualGuide } from "@/components/guides/ContextualGuideProvider";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -17,6 +18,11 @@ export default function DailyPlansPage() {
   const router = useRouter();
   const { project, dailyPlans, isLoading, error } = useProjectWorkspace();
   const redirectAttemptRef = useRef("");
+
+  useAutoContextualGuide(
+    "daily-plan.intro",
+    !isLoading && !error && Boolean(project) && dailyPlans.length > 1
+  );
 
   useEffect(() => {
     if (isLoading || error || !project || dailyPlans.length !== 1) {

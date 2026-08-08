@@ -101,6 +101,10 @@ import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { useDailyPlanDocumentOrientation } from "@/hooks/useDailyPlanDocumentOrientation";
+import {
+  useAutoContextualGuide,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 
 const ADDRESS_SEARCH_LOADING = "__address_search_loading__";
 
@@ -442,6 +446,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
   const [editingWeatherField, setEditingWeatherField] = useState<EditableWeatherField | null>(null);
   const [weatherStatus, setWeatherStatus] = useState("");
+  useAutoContextualGuide("daily-plan.intro", canManageTimetable);
+  useContextualGuideBlocker(
+    "daily-plan-overlay",
+    pendingTimetableDeleteKey !== null
+      || pendingActorDeleteId !== null
+      || openLocationMenuId !== null
+      || openLocationPickerId !== null
+      || gatheringPhotoPreview !== null
+  );
   const isSavingRef = useRef(false);
   const isPrintingRef = useRef(false);
   const editorInteractionRootRef = useRef<HTMLDivElement | null>(null);

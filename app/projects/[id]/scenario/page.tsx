@@ -17,6 +17,7 @@ import {
 import { useParams } from "next/navigation";
 import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useAutoContextualGuide } from "@/components/guides/ContextualGuideProvider";
 import {
   useProjectPageActionMenu,
   type ProjectPageActionMenuRegistration
@@ -86,6 +87,7 @@ export default function ProjectScenarioPage() {
     () => assets.find((asset) => asset.id === selectedId) ?? null,
     [assets, selectedId]
   );
+  useAutoContextualGuide("scenario.actions", !isLoading && Boolean(selectedAsset));
 
   const load = useCallback(async ({ withLoader = true }: { withLoader?: boolean } = {}) => {
     if (!projectId) return false;

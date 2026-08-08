@@ -12,6 +12,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, X } from "lucide-react";
+import {
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 import { normalizeExcludedEpisodeNumbers } from "@/lib/staffParticipation";
 import styles from "./StaffEpisodeParticipation.module.css";
 
@@ -68,7 +73,23 @@ export function StaffEpisodeParticipation({
   const [isRendered, setIsRendered] = useState(isOpen);
   const [isClosing, setIsClosing] = useState(false);
   const [position, setPosition] = useState<PopoverPosition>({ left: 0, top: 0, width: 0, ready: false });
+  const pendingSummaryGuideRef = useRef(false);
+  const canToggle = canEdit && !interactionBlocked;
   const panelId = `staff-participation-${useId().replace(/:/g, "")}`;
+  const participationGuideAnchorRef = useContextualGuideAnchor(
+    canToggle && totalEpisodes > 0 ? "staff.participation" : null
+  );
+  const { requestGuide } = useContextualGuide();
+  useContextualGuideBlocker(`${panelId}-guide-blocker`, isOpen || isRendered);
+
+  useEffect(() => {
+    if (isOpen || isRendered || !pendingSummaryGuideRef.current) return undefined;
+    pendingSummaryGuideRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      requestGuide("staff.participation-summary", "feature", rootRef.current);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isOpen, isRendered, requestGuide]);
 
   const episodeNumbers = useMemo(
     () => Array.from({ length: totalEpisodes }, (_, index) => index + 1),
@@ -85,7 +106,6 @@ export function StaffEpisodeParticipation({
   );
   const nonParticipatingEpisodes = normalizedExcluded;
   const participatingCount = participatingEpisodes.length;
-  const canToggle = canEdit && !interactionBlocked;
   const inlineMinimumWidth = 36 + episodeNumbers.length * 24;
   const useSummary = episodeNumbers.length > INLINE_EPISODE_LIMIT
     || containerWidth === 0
@@ -98,6 +118,20 @@ export function StaffEpisodeParticipation({
   const departmentStyle = {
     "--staff-department-color": departmentColor.border
   } as CSSProperties;
+
+  const setRootElement = useCallback((element: HTMLDivElement | null) => {
+    rootRef.current = element;
+    participationGuideAnchorRef(element);
+  }, [participationGuideAnchorRef]);
+
+  const showInteractionGuide = useCallback((summary: boolean) => {
+    if (!canToggle) return;
+    if (summary) {
+      pendingSummaryGuideRef.current = true;
+      return;
+    }
+    requestGuide("staff.participation", "feature", rootRef.current);
+  }, [canToggle, requestGuide]);
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current === null) return;
@@ -329,12 +363,14 @@ export function StaffEpisodeParticipation({
       closePanel(false);
       return;
     }
+    showInteractionGuide(true);
     openPanel({ pin: true, focusFirstEpisode: useBottomSheet });
   }
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
     event.preventDefault();
+    showInteractionGuide(true);
     openPanel({ pin: true, focusFirstEpisode: true });
   }
 
@@ -417,7 +453,7 @@ export function StaffEpisodeParticipation({
 
   return (
     <div
-      ref={rootRef}
+      ref={setRootElement}
       className={styles.root}
       data-staff-participation-control="true"
       style={departmentStyle}
@@ -478,7 +514,10 @@ export function StaffEpisodeParticipation({
                 aria-disabled={!canToggle || undefined}
                 aria-label={`${episodeNumber}회차 ${participating ? "참여" : "미참여"}`}
                 className={`${styles.segment} ${participating ? styles.activeEpisode : styles.inactiveEpisode}`}
-                onClick={() => toggleEpisode(episodeNumber)}
+                onClick={() => {
+                  showInteractionGuide(false);
+                  toggleEpisode(episodeNumber);
+                }}
               >
                 {episodeNumber}
               </button>

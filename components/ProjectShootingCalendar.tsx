@@ -6,6 +6,7 @@ import {
   type ProjectCalendarEventInput
 } from "@/components/project-calendar";
 import { SectionLoader } from "@/components/PixelDogLoader";
+import { useAutoContextualGuide } from "@/components/guides/ContextualGuideProvider";
 import { ProjectStaffInviteCard } from "@/components/project-invites/ProjectStaffInviteCard";
 import {
   createProjectCalendarEvent,
@@ -47,6 +48,11 @@ export function ProjectShootingCalendar({
   const [isMutating, setIsMutating] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const loadVersionRef = useRef(0);
+
+  useAutoContextualGuide(
+    "home.calendar-create",
+    !isLoadingEvents && !syncMessage && canManageEvents && serverCanEdit
+  );
 
   const calendarDailyPlans = useMemo(() => dailyPlans.map((plan) => ({
     id: plan.id,

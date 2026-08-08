@@ -24,6 +24,10 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import {
+  useAutoContextualGuide,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
+import {
   createBlankProjectStaffDepartment,
   createBlankProjectStaffMember,
   deleteProjectStaffMember,
@@ -94,6 +98,7 @@ export default function StaffListPage() {
   const departmentSubmitLockRef = useRef<{ name: string; at: number } | null>(null);
   const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
   const notesSummaryRef = useRef<HTMLDivElement | null>(null);
+  const staffGuideAnchorRef = useContextualGuideAnchor("staff.main");
   const canEdit = role !== "progress";
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
@@ -106,6 +111,7 @@ export default function StaffListPage() {
   const notesSummary = useMemo(() => buildStaffNotesSummary(members), [members]);
   membersRef.current = members;
   useUnsavedChangesGuard(isDirty);
+  useAutoContextualGuide("staff.intro", !isLoading && Boolean(project));
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -507,7 +513,7 @@ export default function StaffListPage() {
   }
 
   return (
-    <section className="staff-workspace mx-auto w-full max-w-6xl pb-20">
+    <section ref={staffGuideAnchorRef} className="staff-workspace mx-auto w-full max-w-6xl pb-20">
       <section className="border border-field-border bg-field-section px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">

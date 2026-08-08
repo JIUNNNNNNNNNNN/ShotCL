@@ -6,6 +6,10 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import {
+  useAutoContextualGuide,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
 import { Button } from "@/components/ui/Button";
 import {
   getProjectCostumeSceneOverview,
@@ -89,6 +93,11 @@ export default function ProjectCostumesPage() {
   const saveLockRef = useRef(false);
   const dirtyRef = useRef(false);
   const loadRequestRef = useRef(0);
+  const wardrobeGuideAnchorRef = useContextualGuideAnchor("wardrobe.main");
+  useAutoContextualGuide(
+    "wardrobe.intro",
+    !isLoading && !isWorkspaceLoading && Boolean(project)
+  );
 
   const load = useCallback(async () => {
     if (!projectId || isWorkspaceLoading || saveLockRef.current || dirtyRef.current) return;
@@ -635,7 +644,7 @@ export default function ProjectCostumesPage() {
 
   return (
     <>
-      <div className="mx-auto grid w-full max-w-6xl gap-2.5">
+      <div ref={wardrobeGuideAnchorRef} className="mx-auto grid w-full max-w-6xl gap-2.5">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <h1 className="ui-density-heading font-display break-words font-bold text-field-text">의상</h1>

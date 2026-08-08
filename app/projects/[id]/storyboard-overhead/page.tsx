@@ -42,6 +42,12 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
+  useAutoContextualGuide,
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
+import {
   useProjectPageActionMenu,
   type ProjectPageActionMenuRegistration
 } from "@/components/ProjectPageActions";
@@ -299,7 +305,9 @@ type ArchivePointerSession = {
   startY: number;
   latestX: number;
   latestY: number;
+  pointerType: string;
   longPressed: boolean;
+  selectionArmed: boolean;
   timeoutId: number;
   target: HTMLButtonElement;
   previousTouchAction: string;
@@ -364,6 +372,35 @@ export default function ProjectStoryboardOverheadPage() {
   const [reorderOverlay, setReorderOverlay] = useState<ArchiveReorderOverlay | null>(null);
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
+  const { completeGuide, registerAnchor, requestGuide } = useContextualGuide();
+  const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>("archive.upload");
+  const selectionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("archive.selection");
+  const folderUploadGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>(
+    supportsDirectoryPicker ? "archive.folder-upload" : null
+  );
+  const uploadActionsGuideAnchorRef = useCallback((element: HTMLDivElement | null) => {
+    uploadGuideAnchorRef(element);
+    folderUploadGuideAnchorRef(element);
+  }, [folderUploadGuideAnchorRef, uploadGuideAnchorRef]);
+  const guideOverlayOpen = Boolean(
+    pendingImport
+    || diagramDraft
+    || editingAsset
+    || renamingAsset
+    || preview
+    || pendingConfirm
+    || pendingDeleteAsset
+  );
+  useContextualGuideBlocker("archive-editor-overlay", guideOverlayOpen);
+  useAutoContextualGuide(
+    "archive.upload",
+    Boolean(
+      canEdit
+      && projectId
+      && !isLoading
+      && loadedArchiveProjectId === projectId
+    )
+  );
   const archiveActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
     key: "archive",
     scopeKey: `archive:${projectId ?? "unknown"}`,
@@ -386,6 +423,10 @@ export default function ProjectStoryboardOverheadPage() {
   const suppressArchiveClickRef = useRef<ArchiveSelectionKey | null>(null);
   const selectedKeysRef = useRef<Set<ArchiveSelectionKey>>(new Set());
   const selectionPointerRef = useRef<{ key: ArchiveSelectionKey; pointerType: string } | null>(null);
+  const selectionModePointerTypeRef = useRef("");
+  const selectionGestureGuideTargetRef = useRef<HTMLButtonElement | null>(null);
+  const selectionGestureGuideAnchorCleanupRef = useRef<(() => void) | null>(null);
+  const previousSelectionModeRef = useRef(false);
   const pendingImportRef = useRef<PendingImport | null>(null);
   const savedImportResultIdsRef = useRef(new Set<string>());
   const importResultAssetIdsRef = useRef(new Map<string, string>());
@@ -605,6 +646,35 @@ export default function ProjectStoryboardOverheadPage() {
     cancelActiveReorderDrag();
     exitReorderMode();
   }, [activeType, query]);
+
+  useEffect(() => {
+    const enteredSelectionMode = selectionMode && !previousSelectionModeRef.current;
+    previousSelectionModeRef.current = selectionMode;
+    if (!selectionMode) {
+      selectionModePointerTypeRef.current = "";
+      selectionGestureGuideTargetRef.current = null;
+      selectionGestureGuideAnchorCleanupRef.current?.();
+      selectionGestureGuideAnchorCleanupRef.current = null;
+      return;
+    }
+    if (!enteredSelectionMode) return;
+
+    const pointerType = selectionModePointerTypeRef.current;
+    selectionModePointerTypeRef.current = "";
+    const mobileInteraction = pointerType === "touch"
+      || pointerType === "pen"
+      || (!pointerType && window.matchMedia("(hover: none), (pointer: coarse)").matches);
+    const preferredGuide = mobileInteraction
+      ? "archive.selection.mobile"
+      : "archive.selection.desktop";
+    const fallbackGuide = mobileInteraction
+      ? "archive.selection.desktop"
+      : "archive.selection.mobile";
+    const preferredAnchor = selectionGestureGuideTargetRef.current;
+    if (!requestGuide(preferredGuide, "feature", preferredAnchor)) {
+      requestGuide(fallbackGuide, "feature");
+    }
+  }, [requestGuide, selectionMode]);
 
   useEffect(() => {
     if (!reorderModeGroupKey) return;
@@ -1150,6 +1220,7 @@ export default function ProjectStoryboardOverheadPage() {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     if (files.length === 0) return;
+    completeGuide("archive.folder-upload");
     await scanAndPrepareFolderBatch(assetType, async () => scanArchiveFileList(files));
   }
 
@@ -2385,6 +2456,7 @@ export default function ProjectStoryboardOverheadPage() {
     const touchSelection = pointerType === "touch" || pointerType === "pen";
 
     const additive = event.metaKey || event.ctrlKey;
+    let appliedSelection = false;
     updateSelectedKeys((current) => {
       const result = finderSelectionUpdate({
         currentSelection: current,
@@ -2395,9 +2467,18 @@ export default function ProjectStoryboardOverheadPage() {
         additive: touchSelection || additive
       });
       if (!result) return current;
+      appliedSelection = true;
       setSelectionAnchorKey(result.anchorKey);
       return result.selection;
     });
+    if (appliedSelection) {
+      const mobileInteraction = pointerType === "touch"
+        || pointerType === "pen"
+        || (!pointerType && window.matchMedia("(hover: none), (pointer: coarse)").matches);
+      completeGuide(
+        mobileInteraction ? "archive.selection.mobile" : "archive.selection.desktop"
+      );
+    }
   }
 
   function toggleCurrentAssetScope() {
@@ -2562,7 +2643,7 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  function cancelArchivePointerSession() {
+  function cancelArchivePointerSession(preserveSelectionGuideAnchor = false) {
     const current = longPressRef.current;
     if (current) {
       window.clearTimeout(current.timeoutId);
@@ -2578,6 +2659,11 @@ export default function ProjectStoryboardOverheadPage() {
     longPressRef.current = null;
     setPressedSelectionKey(null);
     assetPressCleanupRef.current?.();
+    if (!preserveSelectionGuideAnchor) {
+      selectionGestureGuideTargetRef.current = null;
+      selectionGestureGuideAnchorCleanupRef.current?.();
+      selectionGestureGuideAnchorCleanupRef.current = null;
+    }
   }
 
   function scheduleArchiveClickSuppressionRelease(assetId: string) {
@@ -2669,7 +2755,9 @@ export default function ProjectStoryboardOverheadPage() {
       startY: event.clientY,
       latestX: event.clientX,
       latestY: event.clientY,
+      pointerType: event.pointerType,
       longPressed: false,
+      selectionArmed: false,
       timeoutId: 0,
       target: event.currentTarget,
       previousTouchAction: event.currentTarget.style.touchAction
@@ -2689,6 +2777,18 @@ export default function ProjectStoryboardOverheadPage() {
       if (!current || current.pointerId !== press.pointerId) return;
       current.longPressed = true;
       suppressArchiveClickRef.current = current.key;
+      if (current.pointerType === "touch" || current.pointerType === "pen") {
+        current.selectionArmed = true;
+        selectionModePointerTypeRef.current = current.pointerType;
+        selectionGestureGuideAnchorCleanupRef.current?.();
+        selectionGestureGuideTargetRef.current = current.target;
+        selectionGestureGuideAnchorCleanupRef.current = registerAnchor(
+          "archive.selection",
+          current.target
+        );
+        if (navigator.vibrate) navigator.vibrate(18);
+        return;
+      }
       enterReorderMode(current.groupKey);
       if (navigator.vibrate) navigator.vibrate(18);
       startAssetOrderDrag(current);
@@ -2704,25 +2804,41 @@ export default function ProjectStoryboardOverheadPage() {
         pointerEvent.clientX - current.startX,
         pointerEvent.clientY - current.startY
       );
-      if (distance > LONG_PRESS_MOVE_TOLERANCE) cancelArchivePointerSession();
+      if (distance <= LONG_PRESS_MOVE_TOLERANCE) return;
+      if (current.selectionArmed) {
+        current.selectionArmed = false;
+        selectionGestureGuideTargetRef.current = null;
+        selectionGestureGuideAnchorCleanupRef.current?.();
+        selectionGestureGuideAnchorCleanupRef.current = null;
+        startAssetOrderDrag(current);
+        return;
+      }
+      if (!current.longPressed) cancelArchivePointerSession();
     };
     const finishPointerPress = (pointerEvent: PointerEvent) => {
       const current = longPressRef.current;
       if (!current || current.pointerId !== pointerEvent.pointerId) return;
-      cancelArchivePointerSession();
+      const enterMobileSelection = pointerEvent.type === "pointerup" && current.selectionArmed;
+      cancelArchivePointerSession(enterMobileSelection);
+      if (enterMobileSelection) {
+        scheduleArchiveSelectionClickSuppressionRelease(current.key);
+        setSelectionAnchorKey(null);
+        setSelectionMode(true);
+      }
     };
+    const cancelPointerPress = () => cancelArchivePointerSession();
     const cleanup = () => {
       document.removeEventListener("pointermove", handlePointerMove);
       document.removeEventListener("pointerup", finishPointerPress);
       document.removeEventListener("pointercancel", finishPointerPress);
-      window.removeEventListener("blur", cancelArchivePointerSession);
+      window.removeEventListener("blur", cancelPointerPress);
       assetPressCleanupRef.current = null;
     };
     assetPressCleanupRef.current = cleanup;
     document.addEventListener("pointermove", handlePointerMove);
     document.addEventListener("pointerup", finishPointerPress);
     document.addEventListener("pointercancel", finishPointerPress);
-    window.addEventListener("blur", cancelArchivePointerSession);
+    window.addEventListener("blur", cancelPointerPress);
   }
 
   function startAssetOrderDrag(press: ArchivePointerSession) {
@@ -3439,7 +3555,7 @@ export default function ProjectStoryboardOverheadPage() {
               <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="제목, 메모, 씬, 컷 검색" />
             </label>
             {canEdit ? (
-              <div className="flex flex-wrap justify-end gap-2">
+              <div ref={uploadActionsGuideAnchorRef} className="flex flex-wrap justify-end gap-2">
                 {activeType !== "storyboard" ? (
                   <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                     <MapIcon className="h-4 w-4" aria-hidden />
@@ -3514,8 +3630,12 @@ export default function ProjectStoryboardOverheadPage() {
             {canEdit ? (
               <div className="flex items-center gap-2">
                 <button
+                  ref={selectionGuideAnchorRef}
                   type="button"
                   disabled={scopeSelectionKeys.length === 0 || isSaving}
+                  onPointerDown={(event) => {
+                    selectionModePointerTypeRef.current = event.pointerType;
+                  }}
                   onClick={toggleSelectionMode}
                   className={`min-h-9 border px-3 text-xs font-bold transition-colors disabled:opacity-40 ${selectionMode ? "border-field-primary/80 bg-field-primary/10 text-field-primary" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
                   aria-pressed={selectionMode}
@@ -3784,8 +3904,8 @@ export default function ProjectStoryboardOverheadPage() {
                             aria-label={`${archiveDisplayName(asset)}, ${orderNumber}번째 자료${
                               dragDeleteEnabled
                                 ? assetReorderEnabled
-                                  ? ", 길게 눌러 순서 이동 또는 삭제"
-                                  : ", 길게 눌러 삭제"
+                                  ? ", 모바일에서는 길게 눌러 여러 장 선택, 누른 채 움직여 순서 이동 또는 삭제"
+                                  : ", 모바일에서는 길게 눌러 여러 장 선택, 누른 채 움직여 삭제"
                                 : ""
                             }`}
                           >

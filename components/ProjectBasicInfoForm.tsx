@@ -14,6 +14,12 @@ import {
 } from "@/lib/projectBasicInfo";
 import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import {
+  useAutoContextualGuide,
+  useContextualGuide,
+  useContextualGuideAnchor,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 
 type ProjectBasicInfoFormProps = {
   projectName: string;
@@ -37,6 +43,20 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [openEpisodeStaffId, setOpenEpisodeStaffId] = useState<string | null>(null);
+  const basicInfoGuideAnchor = useContextualGuideAnchor<HTMLFormElement>("basic-info.form");
+  const { completeGuide } = useContextualGuide();
+  const basicInfoGuideUseful = useMemo(() => {
+    const hasStaff = initialValue.mainStaff.some((member) => (
+      member.role.trim() || member.name.trim() || member.phone.trim()
+    ));
+    const hasActor = initialValue.actors.some((actor) => actor.role.trim() || actor.name.trim());
+    return initialValue.totalEpisodes < 1
+      || !initialValue.shootingStartDate
+      || !initialValue.shootingEndDate
+      || (!hasStaff && !hasActor);
+  }, [initialValue]);
+  useAutoContextualGuide("basic-info.intro", basicInfoGuideUseful);
+  useContextualGuideBlocker("basic-info-episode-selector", openEpisodeStaffId !== null);
   const savedFingerprintRef = useRef(JSON.stringify({ value, totalEpisodesDraft }));
   const selectableTotalEpisodes = parseSelectableTotalEpisodes(totalEpisodesDraft);
   const episodeLimitViolations = useMemo(
@@ -172,6 +192,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
     setIsSaving(true);
     try {
       await onSave(validation.value);
+      completeGuide("basic-info.intro");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "프로젝트 기본정보를 저장하지 못했습니다.");
       setIsSaving(false);
@@ -179,7 +200,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   }
 
   return (
-    <form noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
+    <form ref={basicInfoGuideAnchor} noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
       <div className="flex flex-wrap items-center justify-center gap-2 px-1 text-center">
         <div className="min-w-0 text-center">
           <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>

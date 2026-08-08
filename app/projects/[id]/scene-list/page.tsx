@@ -10,6 +10,10 @@ import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
 import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
 import {
+  useAutoContextualGuide,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
+import {
   confirmUnsavedChangesNavigation,
   useUnsavedChangesGuard
 } from "@/hooks/useUnsavedChangesGuard";
@@ -96,6 +100,8 @@ export default function ProjectSceneListPage() {
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [cutInputErrors, setCutInputErrors] = useState<Record<string, string>>({});
+  const desktopGuideAnchorRef = useContextualGuideAnchor("scene-list.desktop");
+  const mobileGuideAnchorRef = useContextualGuideAnchor("scene-list.mobile");
   const itemsRef = useRef(items);
   const cellMergesRef = useRef(cellMerges);
   const cellMergesMaterializedRef = useRef(cellMergesMaterialized);
@@ -108,6 +114,15 @@ export default function ProjectSceneListPage() {
     materialized: false,
     updatedAt: null
   });
+  const sceneListGuideReady = !isLoading && loadedProjectId === projectId && Boolean(project);
+  useAutoContextualGuide(
+    "scene-list.desktop-intro",
+    sceneListGuideReady && viewportMode === "editor" && canEdit
+  );
+  useAutoContextualGuide(
+    "scene-list.mobile-intro",
+    sceneListGuideReady && viewportMode === "portrait"
+  );
   const mergeMutationVersionsRef = useRef(new Map<string, number>());
   const mergeSaveQueueRef = useRef<MergeSaveJob[]>([]);
   const mergeSaveRunningRef = useRef(false);
@@ -723,15 +738,17 @@ export default function ProjectSceneListPage() {
               <SectionLoader className="min-h-40" />
             </div>
           ) : viewportMode === "portrait" ? (
-            <SceneListPortraitReadOnly
-              items={items}
-              actorRoles={actorRoles}
-              cellMerges={cellMerges}
-              expandedSceneIds={expandedPortraitSceneIds}
-              onToggle={togglePortraitScene}
-            />
+            <div ref={mobileGuideAnchorRef} className="min-w-0">
+              <SceneListPortraitReadOnly
+                items={items}
+                actorRoles={actorRoles}
+                cellMerges={cellMerges}
+                expandedSceneIds={expandedPortraitSceneIds}
+                onToggle={togglePortraitScene}
+              />
+            </div>
           ) : (
-            <div data-scene-list-mode="editor">
+            <div ref={desktopGuideAnchorRef} data-scene-list-mode="editor">
               <SceneListNativeTable
                 items={items}
                 actorRoles={actorRoles}

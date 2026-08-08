@@ -9,6 +9,10 @@ import type {
   ResolvedProjectPageActionMenu
 } from "@/components/ProjectPageActions";
 import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
+import {
+  useContextualGuide,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
 
 type RightProjectSidebarProps = {
   mode: "panel" | "drawer";
@@ -176,6 +180,13 @@ function PageActionItem({
   onAction?: () => void;
 }) {
   const Icon = action.icon;
+  const { persistentShell, requestGuide } = useContextualGuide();
+  const guideAnchorKey = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf"
+    ? "daily-plan.pdf-actions"
+    : action.id.startsWith("scenario")
+      ? "scenario.actions"
+      : null;
+  const guideAnchorRef = useContextualGuideAnchor<HTMLAnchorElement | HTMLButtonElement>(guideAnchorKey);
   const sharedClassName = `project-action-menu__item flex w-full items-center justify-center rounded-md border text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.tone === "danger"
       ? "border-field-danger/55 bg-transparent text-field-danger hover:border-field-danger hover:bg-field-danger/10 focus-visible:ring-field-danger"
@@ -197,6 +208,7 @@ function PageActionItem({
   if (action.href && !action.disabled) {
     return (
       <Link
+        ref={guideAnchorRef}
         href={action.href}
         data-project-action-id={action.id}
         onClick={(event) => {
@@ -216,12 +228,22 @@ function PageActionItem({
 
   return (
     <button
+      ref={guideAnchorRef}
       type="button"
       data-project-action-id={action.id}
       onClick={() => {
         if (action.disabled) return;
         action.onSelect?.();
-        if (action.closeDrawerOnSelect !== false) onAction?.();
+        const isPdfAction = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf";
+        const closesDrawer = action.closeDrawerOnSelect !== false;
+        if (closesDrawer) onAction?.();
+        if (isPdfAction) {
+          if (!persistentShell && closesDrawer && onAction) {
+            window.setTimeout(() => requestGuide("daily-plan.pdf", "feature"), 220);
+          } else {
+            requestGuide("daily-plan.pdf", "feature");
+          }
+        }
       }}
       disabled={action.disabled}
       aria-busy={action.pending || undefined}

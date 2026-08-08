@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
 import { ProjectWorkspaceProvider } from "@/components/ProjectWorkspaceContext";
 import { ProjectWorkspaceShell } from "@/components/ProjectWorkspaceShell";
+import { ContextualGuideProvider } from "@/components/guides/ContextualGuideProvider";
 import { clearProjectReadCache } from "@/lib/data/projects";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
@@ -78,11 +79,13 @@ export function ProjectAccessGate({
 
   return (
     <ProjectAccessContext.Provider value={{ role, isShared: role !== null }}>
-      <ProjectPageActionsProvider>
-        <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
-          <ProjectWorkspaceShell>{children}</ProjectWorkspaceShell>
-        </ProjectWorkspaceProvider>
-      </ProjectPageActionsProvider>
+      <ContextualGuideProvider userNamespace={accessPreferenceScope} role={role}>
+        <ProjectPageActionsProvider>
+          <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
+            <ProjectWorkspaceShell>{children}</ProjectWorkspaceShell>
+          </ProjectWorkspaceProvider>
+        </ProjectPageActionsProvider>
+      </ContextualGuideProvider>
     </ProjectAccessContext.Provider>
   );
 }
