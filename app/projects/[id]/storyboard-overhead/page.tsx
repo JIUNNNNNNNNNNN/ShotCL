@@ -20,6 +20,7 @@ import {
   Crop,
   FileImage,
   FileText,
+  FolderUp,
   ImagePlus,
   Info,
   Map as MapIcon,
@@ -61,6 +62,11 @@ import {
   type ArchiveImportPage,
   type StoryboardCropTemplate
 } from "@/lib/client/archiveMedia";
+import {
+  scanArchiveDrop,
+  scanArchiveFileList,
+  type ArchiveFolderScanResult
+} from "@/lib/client/archiveFolderDrop";
 import { KeyedMutationQueue } from "@/lib/client/keyedMutationQueue";
 import {
   deleteProjectReferenceAssets,
@@ -107,6 +113,11 @@ const ArchiveImportDialog = dynamic(
 
 type ArchiveType = Extract<ProjectReferenceAssetType, "overhead" | "storyboard">;
 type ArchiveViewType = "all" | ArchiveType;
+type DeferredArchiveImageSource = {
+  file: File;
+  metadata: { originalFolderName: string; relativePath: string };
+  sourceOrderIndex: number;
+};
 type PendingImport = {
   assetType: ArchiveType;
   sourceKind: "pdf" | "images" | "mixed";
@@ -116,6 +127,8 @@ type PendingImport = {
   importBatchId: string;
   baseSortOrder: number;
   fileMetadata: Array<{ originalFolderName: string; relativePath: string }>;
+  sourceOrderIndexes?: number[];
+  deferredImageSources?: DeferredArchiveImageSource[];
   existingSourceAssetIds?: string[];
   inheritedAssets?: Array<ProjectReferenceAsset | null>;
 };
@@ -151,6 +164,11 @@ type MetadataDraft = {
 type MetadataAnchor = {
   clientX: number;
   clientY: number;
+};
+
+type ArchiveUploadFailure = {
+  path: string;
+  message: string;
 };
 
 type ArchiveGroupItem =
@@ -327,6 +345,8 @@ export default function ProjectStoryboardOverheadPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
+  const [supportsDirectoryPicker, setSupportsDirectoryPicker] = useState(false);
+  const [uploadFailures, setUploadFailures] = useState<ArchiveUploadFailure[]>([]);
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
   const [pressedSelectionKey, setPressedSelectionKey] = useState<ArchiveSelectionKey | null>(null);
   const [pendingMetadataAssetIds, setPendingMetadataAssetIds] = useState<Set<string>>(new Set());
@@ -353,6 +373,7 @@ export default function ProjectStoryboardOverheadPage() {
   }), [activeType, projectId]);
   useProjectPageActionMenu(archiveActionMenu);
   const preparingRef = useRef(false);
+  const folderScanRef = useRef(false);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
   const assetPressCleanupRef = useRef<(() => void) | null>(null);
   const suppressArchiveClickRef = useRef<ArchiveSelectionKey | null>(null);
@@ -557,6 +578,11 @@ export default function ProjectStoryboardOverheadPage() {
     update();
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    const input = document.createElement("input");
+    setSupportsDirectoryPicker("webkitdirectory" in input);
   }, []);
 
   useEffect(() => {
@@ -1068,7 +1094,82 @@ export default function ProjectStoryboardOverheadPage() {
       assetType,
       files,
       undefined,
-      assetType === "overhead" && files.every(isImageFile)
+      assetType === "overhead"
+    );
+  }
+
+  async function prepareFolderUpload(
+    assetType: ArchiveType,
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+    await scanAndPrepareFolderBatch(assetType, async () => scanArchiveFileList(files));
+  }
+
+  async function scanAndPrepareFolderBatch(
+    assetType: ArchiveType,
+    scan: () => Promise<ArchiveFolderScanResult>,
+    batchLabel = "폴더"
+  ) {
+    const batchAssetType = assetType;
+    if (
+      !projectId
+      || !canEdit
+      || folderScanRef.current
+      || preparingRef.current
+      || isSaving
+    ) return;
+
+    folderScanRef.current = true;
+    setIsPreparing(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    setUploadFailures([]);
+    setProgressMessage(`${batchLabel} 확인 중…`);
+    let result: ArchiveFolderScanResult | null = null;
+    try {
+      result = await scan();
+      setProgressMessage(`${result.files.length}개 파일 발견`);
+      await yieldArchiveProcessingTask();
+    } catch (error) {
+      setErrorMessage(errorMessageOf(error, "폴더를 확인하지 못했습니다."));
+      setProgressMessage("");
+    } finally {
+      folderScanRef.current = false;
+      setIsPreparing(false);
+    }
+
+    if (!result) return;
+    const scanFailures = result.skipped
+      .filter((issue) => issue.reason.includes("실패"))
+      .map((issue) => ({ path: issue.path, message: issue.reason }));
+    const excludedCount = Math.max(0, result.excludedCount - scanFailures.length);
+    if (result.files.length === 0) {
+      setProgressMessage("");
+      setUploadFailures(scanFailures);
+      setErrorMessage("폴더에서 업로드 가능한 PDF 또는 이미지를 찾지 못했습니다.");
+      if (result.excludedCount > 0) {
+        setStatusMessage(`${result.discoveredCount}개 확인 · ${result.excludedCount}개 제외`);
+      }
+      return;
+    }
+
+    await prepareFiles(
+      batchAssetType,
+      result.files.map((entry) => entry.file),
+      undefined,
+      batchAssetType === "overhead",
+      {
+        fileMetadata: result.files.map((entry) => ({
+          originalFolderName: entry.originalFolderName,
+          relativePath: entry.relativePath
+        })),
+        initialExcludedCount: excludedCount,
+        initialFailures: scanFailures,
+        batchLabel
+      }
     );
   }
 
@@ -1081,9 +1182,18 @@ export default function ProjectStoryboardOverheadPage() {
       fileMetadata?: Array<{ originalFolderName: string; relativePath: string }>;
       existingSourceAssetIds?: string[];
       inheritedAssets?: Array<ProjectReferenceAsset | null>;
+      initialExcludedCount?: number;
+      initialFailures?: ArchiveUploadFailure[];
+      batchLabel?: string;
     }
   ) {
-    if (!projectId || rawFiles.length === 0 || preparingRef.current || isSaving) return;
+    if (
+      !projectId
+      || rawFiles.length === 0
+      || folderScanRef.current
+      || preparingRef.current
+      || isSaving
+    ) return;
     const seenSources = new Set<string>();
     const candidates = rawFiles.flatMap((file, index) => {
       const metadata = context?.fileMetadata?.[index] ?? {
@@ -1100,50 +1210,51 @@ export default function ProjectStoryboardOverheadPage() {
         inheritedAsset: context?.inheritedAssets?.[index] ?? null
       }];
     });
-    const acceptedSources = candidates.filter(({ file }) => {
-      if (!isAcceptedArchiveFile(file) || file.size <= 0) return false;
-      if (expectedKind === "pdf") return isPdfFile(file);
-      if (expectedKind === "images") return isImageFile(file);
-      return true;
-    });
-    const files = acceptedSources.map(({ file }) => file);
-    let excludedCount = candidates.length - acceptedSources.length;
-    if (files.length === 0) {
+    const acceptedSources = candidates
+      .filter(({ file }) => {
+        if (!isAcceptedArchiveFile(file) || file.size <= 0) return false;
+        if (expectedKind === "pdf") return isPdfFile(file);
+        if (expectedKind === "images") return isImageFile(file);
+        return true;
+      })
+      .map((source, sourceOrderIndex) => ({ ...source, sourceOrderIndex }));
+    let excludedCount = (context?.initialExcludedCount ?? 0)
+      + candidates.length
+      - acceptedSources.length;
+    const failures = [...(context?.initialFailures ?? [])];
+    if (acceptedSources.length === 0) {
       setErrorMessage("PDF, JPG, JPEG, PNG, WebP 중 읽을 수 있는 파일을 선택해주세요.");
+      setUploadFailures(failures);
       return;
     }
-    const pdfFiles = files.filter(isPdfFile);
-    const imageFiles = files.filter(isImageFile);
-    if (pdfFiles.length > 0 && imageFiles.length > 0 && assetType !== "storyboard") {
-      setErrorMessage("PDF와 이미지는 각각의 가져오기 흐름으로 나누어 놓아주세요.");
-      return;
-    }
-    const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 && imageFiles.length > 0
-      ? "mixed"
-      : pdfFiles.length > 0
-        ? "pdf"
-        : "images";
+    const directImageSources = directImageUpload
+      ? acceptedSources.filter(({ file }) => isImageFile(file))
+      : [];
+    const importSources = directImageUpload
+      ? acceptedSources.filter(({ file }) => !isImageFile(file))
+      : acceptedSources;
     preparingRef.current = true;
     setIsPreparing(true);
     setErrorMessage("");
+    setUploadFailures([]);
     setActiveType(assetType);
     try {
-      if (sourceKind === "images" && directImageUpload) {
+      let directUploadCount = 0;
+      if (directImageSources.length > 0 && importSources.length === 0) {
         const batchId = typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `${Date.now()}`;
         const existingCount = (assetType === "overhead" ? overheads : storyboards)
           .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
           .length;
-        let completed = 0;
-        let failed = 0;
         const uploadedAssets: ProjectReferenceAsset[] = [];
-        await mapWithConcurrency(files, 3, async (file, index) => {
+        let directProcessedCount = 0;
+        await mapWithConcurrency(directImageSources, 3, async (source, directIndex) => {
+          const { file, metadata } = source;
           try {
             setProgressMessage(`이미지 최적화 중 · ${file.name}`);
             const optimized = await optimizeArchiveImage(file);
-            setProgressMessage(`썸네일 생성 완료 · 업로드 중 ${completed + 1}/${files.length}`);
-            const metadata = acceptedSources[index]?.metadata;
+            setProgressMessage(`${directProcessedCount + 1} / ${directImageSources.length} 업로드 중`);
             const uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
               thumbnailFile: optimized.thumbnailFile,
               sourceType: "upload_image",
@@ -1153,30 +1264,51 @@ export default function ProjectStoryboardOverheadPage() {
               originalFilename: file.name,
               originalFolderName: metadata?.originalFolderName,
               relativePath: metadata?.relativePath,
-              sortOrder: existingCount + index
+              sortOrder: existingCount + directIndex
             });
             uploadedAssets.push(uploaded);
-            completed += 1;
-            setProgressMessage(`저장 중 ${completed}/${files.length}`);
-          } catch {
-            failed += 1;
+            directUploadCount += 1;
+          } catch (error) {
+            failures.push({
+              path: metadata.relativePath || file.name,
+              message: errorMessageOf(error, "이미지를 업로드하지 못했습니다.")
+            });
+          } finally {
+            directProcessedCount += 1;
+            setProgressMessage(`저장 중 ${directProcessedCount}/${directImageSources.length}`);
           }
         });
-        excludedCount += failed;
         mergeUploadedAssets(uploadedAssets);
-        setProgressMessage("");
-        if (completed === 0) {
-          setErrorMessage(`이미지를 업로드하지 못했습니다. ${excludedCount}개 파일을 제외했습니다.`);
-        } else if (excludedCount > 0) {
-          setStatusMessage(`${completed}개 업로드됨 · ${excludedCount}개 제외`);
+        if (importSources.length === 0) {
+          setProgressMessage("");
+          setUploadFailures(sortArchiveUploadFailures(failures));
+          setStatusMessage(archiveUploadSummary(
+            directUploadCount,
+            excludedCount,
+            failures.length,
+            context?.batchLabel
+          ));
+          if (directUploadCount === 0) {
+            setErrorMessage("이미지를 업로드하지 못했습니다.");
+          }
+          return;
         }
-        return;
       }
+
+      const files = importSources.map(({ file }) => file);
+      const pdfFiles = files.filter(isPdfFile);
+      const imageFiles = files.filter(isImageFile);
+      const sourceKind: PendingImport["sourceKind"] = pdfFiles.length > 0 && imageFiles.length > 0
+        ? "mixed"
+        : pdfFiles.length > 0
+          ? "pdf"
+          : "images";
       const pages: ArchiveImportPage[] = [];
       const readableFiles: File[] = [];
       const readableMetadata: Array<{ originalFolderName: string; relativePath: string }> = [];
       const readableSourceIds: string[] = [];
       const readableInheritedAssets: Array<ProjectReferenceAsset | null> = [];
+      const readableSourceOrderIndexes: number[] = [];
       for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
         const file = files[fileIndex];
         try {
@@ -1198,22 +1330,92 @@ export default function ProjectStoryboardOverheadPage() {
           }
           if (rendered.length === 0) throw new Error("Empty source");
           readableFiles.push(file);
-          readableMetadata.push(acceptedSources[fileIndex]?.metadata ?? {
+          readableMetadata.push(importSources[fileIndex]?.metadata ?? {
             originalFolderName: "",
             relativePath: file.name
           });
-          readableSourceIds.push(acceptedSources[fileIndex]?.sourceAssetId ?? "");
-          readableInheritedAssets.push(acceptedSources[fileIndex]?.inheritedAsset ?? null);
+          readableSourceIds.push(importSources[fileIndex]?.sourceAssetId ?? "");
+          readableInheritedAssets.push(importSources[fileIndex]?.inheritedAsset ?? null);
+          readableSourceOrderIndexes.push(
+            importSources[fileIndex]?.sourceOrderIndex ?? sourceFileIndex
+          );
           pages.push(...rendered);
-        } catch {
-          excludedCount += 1;
+        } catch (error) {
+          failures.push({
+            path: importSources[fileIndex]?.metadata.relativePath || file.name,
+            message: errorMessageOf(error, "자료를 읽지 못했습니다.")
+          });
         }
       }
       if (pages.length === 0 || readableFiles.length === 0) {
-        setErrorMessage("읽을 수 있는 자료가 없습니다.");
+        if (directImageSources.length > 0) {
+          const batchId = typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}`;
+          const existingCount = (assetType === "overhead" ? overheads : storyboards)
+            .filter((asset) => asset.mimeType.startsWith("image/") && !asset.groupId?.startsWith("source:"))
+            .length;
+          const uploadedAssets: ProjectReferenceAsset[] = [];
+          let processed = 0;
+          await mapWithConcurrency(directImageSources, 3, async (source, directIndex) => {
+            const { file, metadata } = source;
+            try {
+              setProgressMessage(`이미지 최적화 중 · ${file.name}`);
+              const optimized = await optimizeArchiveImage(file);
+              const uploaded = await uploadProjectReferenceAsset(projectId, assetType, optimized.displayFile, {
+                thumbnailFile: optimized.thumbnailFile,
+                sourceType: "upload_image",
+                groupId: batchId,
+                folderId: null,
+                displayName: stripArchiveExtension(file.name),
+                originalFilename: file.name,
+                originalFolderName: metadata.originalFolderName,
+                relativePath: metadata.relativePath,
+                sortOrder: existingCount + directIndex
+              });
+              uploadedAssets.push(uploaded);
+              directUploadCount += 1;
+            } catch (error) {
+              failures.push({
+                path: metadata.relativePath || file.name,
+                message: errorMessageOf(error, "이미지를 업로드하지 못했습니다.")
+              });
+            } finally {
+              processed += 1;
+              setProgressMessage(`저장 중 ${processed}/${directImageSources.length}`);
+            }
+          });
+          mergeUploadedAssets(uploadedAssets);
+          setProgressMessage("");
+          setUploadFailures(sortArchiveUploadFailures(failures));
+          setStatusMessage(archiveUploadSummary(
+            directUploadCount,
+            excludedCount,
+            failures.length,
+            context?.batchLabel
+          ));
+          if (failures.length > 0) {
+            setErrorMessage(
+              `${directUploadCount}개 이미지는 저장했지만 ${failures.length}개 자료를 처리하지 못했습니다.`
+            );
+          }
+          return;
+        }
+        setErrorMessage(
+          directUploadCount > 0
+            ? `${directUploadCount}개 이미지는 저장했지만 읽을 수 있는 나머지 자료가 없습니다.`
+            : "읽을 수 있는 자료가 없습니다."
+        );
         setProgressMessage("");
+        setUploadFailures(sortArchiveUploadFailures(failures));
         return;
       }
+      const targetImageCount = (assetType === "overhead" ? overheads : storyboards)
+        .filter((asset) => (
+          asset.mimeType.startsWith("image/")
+          && !asset.groupId?.startsWith("source:")
+        ))
+        .length;
       beginImport({
         assetType,
         sourceKind,
@@ -1223,13 +1425,25 @@ export default function ProjectStoryboardOverheadPage() {
           : `${readableFiles[0].name} 외 ${readableFiles.length - 1}개`,
         pages,
         importBatchId: createArchiveSessionId(),
-        baseSortOrder: imageAssets.length,
+        baseSortOrder: targetImageCount,
         fileMetadata: readableMetadata,
+        sourceOrderIndexes: readableSourceOrderIndexes,
+        deferredImageSources: directImageSources.map(({ file, metadata, sourceOrderIndex }) => ({
+          file,
+          metadata,
+          sourceOrderIndex
+        })),
         existingSourceAssetIds: readableSourceIds.some(Boolean) ? readableSourceIds : undefined,
         inheritedAssets: readableInheritedAssets.some(Boolean) ? readableInheritedAssets : undefined
       });
       setProgressMessage("");
-      if (excludedCount > 0) setStatusMessage(`${readableFiles.length}개 준비됨 · ${excludedCount}개 제외`);
+      setUploadFailures(sortArchiveUploadFailures(failures));
+      setStatusMessage([
+        context?.batchLabel ? `${context.batchLabel} 확인 완료` : "자료 준비 완료",
+        `${readableFiles.length + directImageSources.length}개 준비`,
+        ...(excludedCount > 0 ? [`${excludedCount}개 제외`] : []),
+        ...(failures.length > 0 ? [`${failures.length}개 실패`] : [])
+      ].join(" · "));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "자료를 준비하지 못했습니다.");
       setProgressMessage("");
@@ -1250,12 +1464,12 @@ export default function ProjectStoryboardOverheadPage() {
     event.preventDefault();
     setDragDepth((current) => ({ ...current, [assetType]: 0 }));
     if (!supportsDesktopDrop || !canEdit) return;
-    const files = Array.from(event.dataTransfer.files).filter(isAcceptedArchiveFile);
-    if (files.length === 0) {
-      setErrorMessage("PDF, JPG, JPEG, PNG, WebP 파일을 놓아주세요.");
-      return;
-    }
-    await prepareFiles(assetType, files, undefined, assetType === "overhead");
+    const dataTransfer = event.dataTransfer;
+    await scanAndPrepareFolderBatch(
+      assetType,
+      () => scanArchiveDrop(dataTransfer),
+      "드롭한 자료"
+    );
   }
 
   function beginImport(nextImport: PendingImport) {
@@ -1645,6 +1859,7 @@ export default function ProjectStoryboardOverheadPage() {
     try {
       if (pendingImport.sourceKind === "pdf") {
         const sourceAssetsByIndex = new Map<number, string>();
+        const sourceUploadFailures: ArchiveUploadFailure[] = [];
         for (let fileIndex = 0; fileIndex < pendingImport.sourceFiles.length; fileIndex += 1) {
           const sourceFile = pendingImport.sourceFiles[fileIndex];
           const existingSourceId = pendingImport.existingSourceAssetIds?.[fileIndex];
@@ -1654,32 +1869,78 @@ export default function ProjectStoryboardOverheadPage() {
           }
           const sourceMetadata = pendingImport.fileMetadata[fileIndex];
           setProgressMessage(`원본 PDF 보존 ${fileIndex + 1}/${pendingImport.sourceFiles.length}`);
-          const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
-            sourceType: "upload_pdf",
-            groupId: `source:${batchId}`,
-            folderId: null,
-            displayName: value.title || stripArchiveExtension(sourceFile.name),
-            originalFilename: sourceFile.name,
-            originalFolderName: sourceMetadata?.originalFolderName,
-            relativePath: sourceMetadata?.relativePath,
-            title: value.title,
-            memo: value.memo,
-            sceneId: undefined,
-            sceneNumber: "",
-            sceneNo: "",
-            cutNo: ""
-          });
-          sourceAssetsByIndex.set(fileIndex, original.id);
-          savedAssets.push(original);
+          try {
+            const original = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, sourceFile, {
+              sourceType: "upload_pdf",
+              groupId: `source:${batchId}`,
+              folderId: null,
+              displayName: value.title || stripArchiveExtension(sourceFile.name),
+              originalFilename: sourceFile.name,
+              originalFolderName: sourceMetadata?.originalFolderName,
+              relativePath: sourceMetadata?.relativePath,
+              title: value.title,
+              memo: value.memo,
+              sceneId: undefined,
+              sceneNumber: "",
+              sceneNo: "",
+              cutNo: ""
+            });
+            sourceAssetsByIndex.set(fileIndex, original.id);
+            savedAssets.push(original);
+          } catch (error) {
+            sourceUploadFailures.push({
+              path: sourceMetadata?.relativePath || sourceFile.name,
+              message: errorMessageOf(error, "원본 PDF를 보존하지 못했습니다.")
+            });
+          }
         }
+        const visibleTasks = [
+          ...value.results.map((result) => ({
+            kind: "pdf-result" as const,
+            sourceOrderIndex: pendingImport.sourceOrderIndexes?.[result.page.sourceFileIndex]
+              ?? result.page.sourceFileIndex,
+            withinSourceOrder: result.page.index,
+            result
+          })),
+          ...(pendingImport.deferredImageSources ?? []).map((source) => ({
+            kind: "image" as const,
+            sourceOrderIndex: source.sourceOrderIndex,
+            withinSourceOrder: 0,
+            source
+          }))
+        ].sort((left, right) => (
+          left.sourceOrderIndex - right.sourceOrderIndex
+          || left.withinSourceOrder - right.withinSourceOrder
+        ));
         let completed = 0;
-        await mapWithConcurrency(value.results, 3, async (result, index) => {
+        const settled = await mapSettledWithConcurrency(visibleTasks, 3, async (task, taskIndex) => {
+          if (task.kind === "image") {
+            const { file, metadata } = task.source;
+            setProgressMessage(`이미지 최적화 중 · ${file.name}`);
+            const optimized = await optimizeArchiveImage(file);
+            const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, optimized.displayFile, {
+              thumbnailFile: optimized.thumbnailFile,
+              sourceType: "upload_image",
+              groupId: batchId,
+              folderId: null,
+              displayName: stripArchiveExtension(file.name),
+              originalFilename: file.name,
+              originalFolderName: metadata.originalFolderName,
+              relativePath: metadata.relativePath,
+              sortOrder: pendingImport.baseSortOrder + taskIndex
+            });
+            completed += 1;
+            setProgressMessage(`저장 중 ${completed}/${visibleTasks.length}`);
+            return { kind: task.kind, saved, source: task.source };
+          }
+
+          const { result } = task;
           const { page, crop } = result;
-          setProgressMessage(`crop 이미지 생성 중 ${index + 1}/${value.results.length}`);
+          setProgressMessage(`crop 이미지 생성 중 ${taskIndex + 1}/${visibleTasks.length}`);
           const resultFile = crop
             ? await createCroppedArchiveFile(page, crop, page.name)
             : new File([page.blob], page.name, { type: "image/jpeg" });
-          setProgressMessage(`썸네일 생성 중 ${index + 1}/${value.results.length}`);
+          setProgressMessage(`썸네일 생성 중 ${taskIndex + 1}/${visibleTasks.length}`);
           const thumbnailFile = await createArchiveThumbnail(resultFile);
           const inherited = inheritedArchiveMetadata(pendingImport, page.sourceFileIndex);
           const saved = await uploadProjectReferenceAsset(projectId, pendingImport.assetType, resultFile, {
@@ -1692,23 +1953,84 @@ export default function ProjectStoryboardOverheadPage() {
             originalFolderName: pendingImport.fileMetadata[page.sourceFileIndex]?.originalFolderName,
             relativePath: pendingImport.fileMetadata[page.sourceFileIndex]?.relativePath,
             ...cropMetadata(crop, page, value.cropTemplate),
-            cropOrderIndex: index,
-            cropIndex: index + 1,
-            displayName: pageTitle(value.title || inherited.displayName, index, value.results.length),
+            cropOrderIndex: taskIndex,
+            cropIndex: taskIndex + 1,
+            displayName: pageTitle(value.title || inherited.displayName, taskIndex, visibleTasks.length),
             originalFilename: inherited.originalFilename || pendingImport.sourceFiles[page.sourceFileIndex]?.name,
-            title: pageTitle(value.title || inherited.displayName, index, value.results.length),
+            title: pageTitle(value.title || inherited.displayName, taskIndex, visibleTasks.length),
             memo: value.memo,
             episodeNumber: inherited.episodeNumber ?? undefined,
             sceneId: undefined,
             sceneNumber: "",
             sceneNo: "",
             cutNo: "",
-            sortOrder: imageAssets.length + index
+            sortOrder: pendingImport.baseSortOrder + taskIndex
           });
-          savedAssets.push(saved);
           completed += 1;
-          setProgressMessage(`저장 중 ${completed}/${value.results.length}`);
+          setProgressMessage(`저장 중 ${completed}/${visibleTasks.length}`);
+          return { kind: task.kind, saved, result };
         });
+
+        const succeededResultIds: string[] = [];
+        const resultFailures: ArchiveImportSaveFailure[] = [];
+        const imageUploadFailures: ArchiveUploadFailure[] = [];
+        let visibleSuccessCount = 0;
+        settled.forEach((outcome, taskIndex) => {
+          const task = visibleTasks[taskIndex];
+          if (outcome.status === "fulfilled") {
+            savedAssets.push(outcome.value.saved);
+            visibleSuccessCount += 1;
+            if (outcome.value.kind === "pdf-result") {
+              succeededResultIds.push(outcome.value.result.id);
+            }
+            return;
+          }
+          if (task.kind === "image") {
+            imageUploadFailures.push({
+              path: task.source.metadata.relativePath || task.source.file.name,
+              message: errorMessageOf(outcome.reason, "이미지를 업로드하지 못했습니다.")
+            });
+            return;
+          }
+          resultFailures.push({
+            resultId: task.result.id,
+            cropIndex: task.result.orderIndex + 1,
+            label: task.result.page.name,
+            message: errorMessageOf(outcome.reason, "PDF 페이지를 저장하지 못했습니다.")
+          });
+        });
+
+        mergeUploadedAssets(savedAssets);
+        closeImport(true);
+        setProgressMessage("");
+        const allUploadFailures = [
+          ...sourceUploadFailures,
+          ...imageUploadFailures,
+          ...resultFailures.map((failure) => ({
+            path: failure.label,
+            message: failure.message
+          }))
+        ];
+        if (allUploadFailures.length > 0) {
+          setUploadFailures((current) => sortArchiveUploadFailures([
+            ...current,
+            ...allUploadFailures
+          ]));
+        }
+        const report: ArchiveImportSaveReport = {
+          total: value.results.length,
+          succeededResultIds,
+          failures: resultFailures
+        };
+        const totalFailures = allUploadFailures.length;
+        setStatusMessage(
+          `업로드 완료 · ${visibleSuccessCount}개 성공`
+          + (totalFailures > 0 ? ` · ${totalFailures}개 실패` : "")
+        );
+        if (totalFailures > 0) {
+          setErrorMessage(`${visibleSuccessCount}개는 저장됐지만 ${totalFailures}개를 저장하지 못했습니다.`);
+        }
+        return report;
       } else if (value.results.some((result) => result.crop)) {
         const sourceAssetsByIndex = new Map<number, string>();
         for (let sourceIndex = 0; sourceIndex < pendingImport.sourceFiles.length; sourceIndex += 1) {
@@ -1769,7 +2091,7 @@ export default function ProjectStoryboardOverheadPage() {
             sceneNumber: "",
             sceneNo: "",
             cutNo: "",
-            sortOrder: imageAssets.length + index
+            sortOrder: pendingImport.baseSortOrder + index
           });
           savedAssets.push(saved);
           completed += 1;
@@ -1797,7 +2119,7 @@ export default function ProjectStoryboardOverheadPage() {
             sceneNumber: "",
             sceneNo: "",
             cutNo: "",
-            sortOrder: imageAssets.length + index
+            sortOrder: pendingImport.baseSortOrder + index
           });
           savedAssets.push(saved);
           completed += 1;
@@ -2957,15 +3279,33 @@ export default function ProjectStoryboardOverheadPage() {
 
         {errorMessage ? <p role="alert" className=" border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}
         {statusMessage ? (
-          <p role="status" className="border border-field-border bg-field-panel px-3 py-2 text-xs text-field-muted">
+          <p role="status" aria-live="polite" className="border border-field-border bg-field-panel px-3 py-2 text-xs text-field-muted">
             {statusMessage}
           </p>
         ) : null}
         {isPreparing || progressMessage ? (
-          <div className="grid justify-items-center gap-2 py-2">
+          <div className="grid justify-items-center gap-2 py-2" role="status" aria-live="polite" aria-atomic="true">
             <SectionLoader className="!min-h-16" />
             <p className="text-xs text-field-muted">{progressMessage}</p>
           </div>
+        ) : null}
+        {uploadFailures.length > 0 ? (
+          <details className="border border-field-danger/50 bg-field-danger/10 px-3 py-2 text-xs text-field-text">
+            <summary className="cursor-pointer font-bold text-field-danger">
+              {uploadFailures.length}개 파일 실패
+            </summary>
+            <ul className="mt-2 grid max-h-32 gap-1 overflow-y-auto" aria-label="업로드 실패 파일">
+              {uploadFailures.slice(0, 30).map((failure, index) => (
+                <li key={`${failure.path}-${index}`} className="break-all leading-5">
+                  <span className="font-semibold">{failure.path}</span>
+                  <span className="text-field-muted"> · {failure.message}</span>
+                </li>
+              ))}
+              {uploadFailures.length > 30 ? (
+                <li className="text-field-muted">외 {uploadFailures.length - 30}개</li>
+              ) : null}
+            </ul>
+          </details>
         ) : null}
         {canEdit && supportsDesktopDrop ? (
           <div className="hidden grid-cols-2 gap-3 md:grid" aria-label="데스크탑 자료 드롭 영역">
@@ -2996,7 +3336,7 @@ export default function ProjectStoryboardOverheadPage() {
                 >
                   <div className="pointer-events-none grid justify-items-center gap-1.5">
                     {type === "overhead" ? <MapIcon className="h-6 w-6" aria-hidden /> : <Clapperboard className="h-6 w-6" aria-hidden />}
-                    <p className="text-sm font-bold">{label} 파일 놓기</p>
+                    <p className="text-sm font-bold">{label} 파일·폴더 놓기</p>
                     <p className="text-[11px] text-field-muted">PDF · JPG · JPEG · PNG · WebP</p>
                   </div>
                 </div>
@@ -3031,15 +3371,51 @@ export default function ProjectStoryboardOverheadPage() {
                       PDF
                       <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(selectedArchiveType, event)} />
                     </label>
+                    {supportsDirectoryPicker ? (
+                      <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40">
+                        <FolderUp className="h-4 w-4" aria-hidden />
+                        폴더 업로드
+                        <input
+                          ref={(node) => {
+                            if (node && "webkitdirectory" in node) node.webkitdirectory = true;
+                          }}
+                          type="file"
+                          accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"
+                          multiple
+                          className="sr-only"
+                          aria-label={`${selectedArchiveType === "overhead" ? "부감도" : "콘티"} 폴더 업로드`}
+                          disabled={isPreparing || isSaving}
+                          onChange={(event) => prepareFolderUpload(selectedArchiveType, event)}
+                        />
+                      </label>
+                    ) : null}
                   </>
                 ) : (
-                  (["overhead", "storyboard"] as const).map((type) => (
-                    <label key={type} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
+                  (["overhead", "storyboard"] as const).flatMap((type) => [
+                    <label key={`${type}-files`} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                       <Upload className="h-4 w-4" aria-hidden />
                       {type === "overhead" ? "부감도 업로드" : "콘티 업로드"}
                       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareMixedUpload(type, event)} />
-                    </label>
-                  ))
+                    </label>,
+                    supportsDirectoryPicker ? (
+                      <label key={`${type}-folder`} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40">
+                        <FolderUp className="h-4 w-4" aria-hidden />
+                        {type === "overhead" ? "부감도 폴더 업로드" : "콘티 폴더 업로드"}
+                        <input
+                          ref={(node) => {
+                            if (node && "webkitdirectory" in node) node.webkitdirectory = true;
+                          }}
+                          type="file"
+                          accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp"
+                          multiple
+                          className="sr-only"
+                          aria-label={type === "overhead" ? "부감도 폴더 업로드" : "콘티 폴더 업로드"}
+                          disabled={isPreparing || isSaving}
+                          onChange={(event) => prepareFolderUpload(type, event)}
+                        />
+                      </label>
+                    ) : null
+                  ])
                 )}
               </div>
             ) : null}
@@ -4443,7 +4819,7 @@ function isPdfFile(file: File) {
 }
 
 function isImageFile(file: File) {
-  return /^(?:image\/jpeg|image\/png|image\/webp)$/i.test(file.type)
+  return /^(?:image\/jpeg|image\/jpg|image\/png|image\/webp)$/i.test(file.type)
     || /\.(?:jpe?g|png|webp)$/i.test(file.name);
 }
 
@@ -4582,6 +4958,26 @@ function logStoryboardImportTimings(
       apiRequests: timings.cropCount
     }
   });
+}
+
+function sortArchiveUploadFailures(failures: ArchiveUploadFailure[]) {
+  return [...failures].sort((left, right) => (
+    ARCHIVE_NATURAL_COLLATOR.compare(left.path, right.path)
+  ));
+}
+
+function archiveUploadSummary(
+  succeededCount: number,
+  excludedCount: number,
+  failedCount: number,
+  label?: string
+) {
+  return [
+    label ? `${label} 업로드 완료` : "업로드 완료",
+    `${succeededCount}개 성공`,
+    ...(excludedCount > 0 ? [`${excludedCount}개 제외`] : []),
+    ...(failedCount > 0 ? [`${failedCount}개 실패`] : [])
+  ].join(" · ");
 }
 
 function errorMessageOf(error: unknown, fallback: string) {

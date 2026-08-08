@@ -39,17 +39,45 @@ type LegacyFileSystemDirectoryEntry = LegacyFileSystemEntry & {
 };
 
 type DataTransferItemWithEntry = {
+  kind?: string;
   webkitGetAsEntry?: () => LegacyFileSystemEntry | null;
+  getAsEntry?: () => LegacyFileSystemEntry | null;
+  getAsFile?: () => File | null;
 };
 
 const SUPPORTED_EXTENSION = /\.(?:pdf|jpe?g|png|webp)$/i;
-const IGNORED_NAMES = new Set([".DS_Store", "Thumbs.db"]);
+const SUPPORTED_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp"
+]);
+const EXTENSION_FALLBACK_MIME_TYPES = new Set([
+  "",
+  "application/octet-stream",
+  "binary/octet-stream"
+]);
+const IGNORED_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini"]);
+const IGNORED_DIRECTORIES = new Set([
+  "__macosx",
+  ".spotlight-v100",
+  ".trashes",
+  ".fseventsd"
+]);
+const ARCHIVE_PATH_COLLATOR = new Intl.Collator("ko-KR", {
+  numeric: true,
+  sensitivity: "base"
+});
 
 export async function scanArchiveDrop(dataTransfer: DataTransfer): Promise<ArchiveFolderScanResult> {
-  const entries = Array.from(dataTransfer.items ?? [])
-    .map((item): LegacyFileSystemEntry | null => (
-      (item as unknown as DataTransferItemWithEntry).webkitGetAsEntry?.() ?? null
-    ))
+  const items = Array.from(dataTransfer.items ?? []).map((item) => {
+    const candidate = item as unknown as DataTransferItemWithEntry;
+    const entry = candidate.getAsEntry?.() ?? candidate.webkitGetAsEntry?.() ?? null;
+    return { candidate, entry };
+  });
+  const entries = items
+    .map(({ entry }) => entry)
     .filter((entry): entry is LegacyFileSystemEntry => entry !== null);
 
   if (entries.length === 0) {
@@ -64,7 +92,19 @@ export async function scanArchiveDrop(dataTransfer: DataTransfer): Promise<Archi
       await traverseEntry(entry, "", entry.name, result);
     }
   }
-  return dedupeScanResult(result);
+  const fallbackFiles = items.flatMap(({ candidate, entry }) => {
+    if (entry || candidate.kind === "string") return [];
+    const file = candidate.getAsFile?.() ?? null;
+    return file ? [file] : [];
+  });
+  if (fallbackFiles.length > 0) {
+    const fallback = scanArchiveFileList(fallbackFiles);
+    result.files.push(...fallback.files);
+    result.discoveredCount += fallback.discoveredCount;
+    result.excludedCount += fallback.excludedCount;
+    result.skipped.push(...fallback.skipped);
+  }
+  return finalizeScanResult(result);
 }
 
 export function scanArchiveFileList(files: File[]): ArchiveFolderScanResult {
@@ -77,7 +117,7 @@ export function scanArchiveFileList(files: File[]): ArchiveFolderScanResult {
     result.discoveredCount += 1;
     addFile(result, file, originalFolderName, relativePath, folderPath);
   }
-  return dedupeScanResult(result);
+  return finalizeScanResult(result);
 }
 
 async function traverseEntry(
@@ -86,7 +126,7 @@ async function traverseEntry(
   relativePath: string,
   result: ArchiveFolderScanResult
 ) {
-  if (isHiddenPath(relativePath)) {
+  if (isIgnoredSystemPath(relativePath)) {
     if (entry.isFile) result.discoveredCount += 1;
     addSkipped(result, relativePath, "숨김 또는 시스템 파일");
     return;
@@ -151,11 +191,11 @@ function addFile(
     addSkipped(result, relativePath, "0바이트 파일");
     return;
   }
-  if (isHiddenPath(relativePath) || IGNORED_NAMES.has(file.name)) {
+  if (isIgnoredSystemPath(relativePath) || isIgnoredName(file.name)) {
     addSkipped(result, relativePath, "숨김 또는 시스템 파일");
     return;
   }
-  if (!SUPPORTED_EXTENSION.test(file.name)) {
+  if (!isSupportedArchiveFolderFile(file)) {
     addSkipped(result, relativePath, "지원하지 않는 형식");
     return;
   }
@@ -167,10 +207,25 @@ function addFile(
   });
 }
 
-function isHiddenPath(value: string) {
+export function isSupportedArchiveFolderFile(file: File) {
+  const mimeType = file.type.trim().toLowerCase();
+  if (SUPPORTED_MIME_TYPES.has(mimeType)) return true;
+  if (!EXTENSION_FALLBACK_MIME_TYPES.has(mimeType)) return false;
+  return SUPPORTED_EXTENSION.test(file.name);
+}
+
+function isIgnoredSystemPath(value: string) {
   return normalizePath(value)
     .split("/")
-    .some((part) => part.startsWith(".") || IGNORED_NAMES.has(part));
+    .some((part) => (
+      isIgnoredName(part)
+      || IGNORED_DIRECTORIES.has(part.toLowerCase())
+      || part.startsWith("._")
+    ));
+}
+
+function isIgnoredName(value: string) {
+  return IGNORED_NAMES.has(value.toLowerCase());
 }
 
 function normalizePath(value: string) {
@@ -191,7 +246,7 @@ function addSkipped(result: ArchiveFolderScanResult, path: string, reason: strin
   result.skipped.push({ path: normalizePath(path) || "(이름 없음)", reason });
 }
 
-function dedupeScanResult(result: ArchiveFolderScanResult): ArchiveFolderScanResult {
+function finalizeScanResult(result: ArchiveFolderScanResult): ArchiveFolderScanResult {
   const seen = new Set<string>();
   const files = result.files.filter((entry) => {
     const key = `${entry.relativePath}:${entry.file.size}:${entry.file.lastModified}`;
@@ -201,6 +256,17 @@ function dedupeScanResult(result: ArchiveFolderScanResult): ArchiveFolderScanRes
     }
     seen.add(key);
     return true;
+  });
+  files.sort((left, right) => {
+    const pathOrder = ARCHIVE_PATH_COLLATOR.compare(
+      left.relativePath.normalize("NFC"),
+      right.relativePath.normalize("NFC")
+    );
+    if (pathOrder !== 0) return pathOrder;
+    const nameOrder = ARCHIVE_PATH_COLLATOR.compare(left.file.name, right.file.name);
+    if (nameOrder !== 0) return nameOrder;
+    if (left.file.size !== right.file.size) return left.file.size - right.file.size;
+    return left.file.lastModified - right.file.lastModified;
   });
   return {
     ...result,
