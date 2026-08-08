@@ -282,15 +282,15 @@ const compactInputClass =
 
 const centeredSelectClass = `${compactInputClass} daily-plan-dropdown-no-indicator appearance-none [text-align-last:center]`;
 const timetableInputClass = `${compactInputClass} max-w-full text-center`;
-const timetableCellClass = "min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
-const timetableWideCellClass = `${timetableCellClass} max-lg:col-span-2`;
+const timetableCellClass = "daily-plan-timetable-cell min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
+const timetableWideCellClass = `${timetableCellClass} daily-plan-timetable-cell--wide max-lg:col-span-2`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
-const timetableFieldLabelBaseClass = "mb-1 min-h-6 select-none items-center justify-center break-words text-center text-[11px] font-black leading-4 text-field-subtle [overflow-wrap:anywhere] max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
+const timetableFieldLabelBaseClass = "daily-plan-timetable-mobile-label mb-1 min-h-6 select-none items-center justify-center break-words text-center text-[11px] font-black leading-4 text-field-subtle [overflow-wrap:anywhere] max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
 const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden max-lg:flex`;
-const mobileTimetableLabelClass = "mb-1 hidden break-words text-[11px] font-black text-field-subtle [overflow-wrap:anywhere] max-lg:block max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
+const mobileTimetableLabelClass = "daily-plan-timetable-mobile-label mb-1 hidden break-words text-[11px] font-black text-field-subtle [overflow-wrap:anywhere] max-lg:block max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[44px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[44px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[44px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 const staffDepartmentGridClass =
-  "grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
+  "daily-plan-staff-department-grid grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
 
 const maxRuntimeMinutes = 1440;
 const CSS_PIXELS_PER_INCH = 96;
@@ -1983,20 +1983,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           <h2 className="text-lg font-black text-field-text">TIME TABLE 입력</h2>
 
           <div className="mt-1.5 w-full md:mt-5">
-            <table className="w-full table-fixed border-collapse text-xs max-lg:block">
+            <table className="daily-plan-timetable-table w-full table-fixed border-collapse text-xs max-lg:block">
               <colgroup className="max-lg:hidden">
                 {[8, 9, 11, 6, 8, 8, 14, 15, 11, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
               </colgroup>
-              <thead className="max-lg:hidden">
+              <thead className="daily-plan-timetable-head max-lg:hidden">
                 <tr className="bg-field-panel text-field-subtle">
                   {["시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
-                    <th key={header} className="border border-field-border px-2 py-2 text-center font-black">
+                    <th key={header} className="daily-plan-timetable-head-cell border border-field-border px-2 py-2 text-center font-black">
                       {header}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="max-lg:grid max-lg:gap-3 max-md:gap-1">
+              <tbody className="daily-plan-timetable-body max-lg:grid max-lg:gap-3 max-md:gap-1">
                 {timetableRows.map((row) => {
                   const rowKey = getEditorTimetableRowKey(row);
                   const isSelected = timetableInteraction.selectedRowKey === rowKey;

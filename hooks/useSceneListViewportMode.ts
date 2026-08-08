@@ -6,14 +6,14 @@ export type SceneListViewportMode = "portrait" | "editor";
 
 export const SCENE_LIST_EDITOR_MIN_WIDTH_PX = 1100;
 /**
- * The editor needs the center workspace, not merely a wide outer viewport.
- * 1100–1439px and low-height wide screens use App Shell drawers, while a
- * persistent three-panel shell needs 1800px before the natural table is safe.
+ * The editor needs about 1100px of center workspace, not merely a wide outer
+ * viewport. Persistent shells reserve a compact left rail, so they require a
+ * wider outer viewport; low-height desktop windows use the full-width drawer
+ * shell and can switch at the editor's natural minimum.
  */
 export const SCENE_LIST_EDITOR_MEDIA_QUERY = [
-  `(min-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX}px) and (max-width: 1439px)`,
-  "(min-width: 1440px) and (max-height: 699px)",
-  "(min-width: 1800px) and (min-height: 700px)"
+  `(min-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX}px) and (max-height: 699px)`,
+  "(min-width: 1400px) and (min-height: 700px)"
 ].join(", ");
 
 const subscribeToPortraitMode = (onStoreChange: () => void) => {

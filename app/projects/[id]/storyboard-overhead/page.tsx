@@ -3568,7 +3568,7 @@ export default function ProjectStoryboardOverheadPage() {
                             </button>
                           ) : null}
                         </div>
-                        <div className="grid min-w-0 select-none grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                        <div className="archive-asset-grid grid min-w-0 select-none gap-2">
                     {cutGroup.items.map((item) => {
                       const key = archiveSelectionKey(item.kind, item.id);
                       const selected = selectedKeys.has(key);
@@ -3723,7 +3723,7 @@ export default function ProjectStoryboardOverheadPage() {
               <h2 className="font-display text-base font-bold text-field-text">보존된 원본</h2>
               <p className="text-xs text-field-muted">PDF와 crop 전 이미지입니다. 추출 결과를 삭제해도 원본은 별도 자료로 남습니다.</p>
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="archive-source-grid grid min-w-0 gap-2">
               {sourceAssets.map((asset) => {
                 const key = archiveSelectionKey("asset", asset.id);
                 const selected = selectedKeys.has(key);

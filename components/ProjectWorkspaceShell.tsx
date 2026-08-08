@@ -8,10 +8,13 @@ import { ProjectNavigation, getProjectPageTitle } from "@/components/ProjectNavi
 import { useCurrentProjectPageActionMenu } from "@/components/ProjectPageActions";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import {
+  isPersistentProjectShellViewport,
+  usePersistentProjectShell
+} from "@/hooks/useProjectShellMode";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
 
 type OpenDrawer = "navigation" | "actions" | null;
-const PERSISTENT_PROJECT_SHELL_QUERY = "(min-width: 1440px) and (min-height: 700px)";
 
 /** 프로젝트 내부만 좌측 navigation·중앙 page·우측 action으로 배치합니다. */
 export function ProjectWorkspaceShell({ children }: { children: React.ReactNode }) {
@@ -20,6 +23,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const routeKey = `${pathname}?${searchParams.toString()}`;
   const menu = useCurrentProjectPageActionMenu();
   const { projectName } = useProjectWorkspace();
+  const persistentShell = usePersistentProjectShell();
   const [openDrawer, setOpenDrawer] = useState<OpenDrawer>(null);
   const navigationToggleRef = useRef<HTMLButtonElement | null>(null);
   const actionToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -33,6 +37,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   }, [menu?.key, menu?.scopeKey, routeKey]);
 
   useAccessibleProjectDrawer({
+    enabled: !persistentShell,
     openDrawer,
     onClose: closeDrawer,
     navigationDrawerRef,
@@ -42,34 +47,28 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
     actionToggleRef
   });
 
-  useEffect(() => {
-    const persistentShellQuery = window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY);
-    const closeMobileDrawerWhenShellBecomesPersistent = () => {
-      setOpenDrawer((current) => {
-        if (current && persistentShellQuery.matches) return null;
-        return current;
-      });
-    };
-    closeMobileDrawerWhenShellBecomesPersistent();
-    persistentShellQuery.addEventListener("change", closeMobileDrawerWhenShellBecomesPersistent);
-    return () => persistentShellQuery.removeEventListener("change", closeMobileDrawerWhenShellBecomesPersistent);
-  }, []);
+  useLayoutEffect(() => {
+    if (persistentShell) setOpenDrawer(null);
+  }, [persistentShell]);
 
   const pageTitle = getProjectPageTitle(pathname, searchParams);
-  const hasActions = Boolean(menu);
-  const modalDrawerOpen = openDrawer !== null;
+  const hasRightPanel = Boolean(menu?.actions.length);
+  const modalDrawerOpen = !persistentShell && openDrawer !== null;
 
   return (
     <div
-      className={`project-shell ${hasActions ? "project-shell--has-actions" : ""}`}
+      className={`project-shell ${hasRightPanel ? "project-shell--has-actions" : ""}`}
       data-project-shell
-      data-project-shell-actions={hasActions ? "true" : "false"}
+      data-project-shell-actions={hasRightPanel ? "true" : "false"}
+      data-project-shell-mode={persistentShell ? "persistent" : "drawer"}
     >
-      <aside className="project-shell__navigation no-print" aria-label="프로젝트 전체 메뉴" inert={modalDrawerOpen}>
-        <ProjectNavigation />
-      </aside>
+      {persistentShell ? (
+        <aside className="project-shell__navigation no-print" aria-label="프로젝트 전체 메뉴">
+          <ProjectNavigation />
+        </aside>
+      ) : null}
 
-      <header className="project-shell__app-bar no-print" inert={modalDrawerOpen}>
+      {!persistentShell ? <header className="project-shell__app-bar no-print" inert={modalDrawerOpen}>
         <div className="project-shell__mobile-home">
           <HomeButton embedded />
         </div>
@@ -88,7 +87,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
           <p className="break-words text-[11px] font-semibold text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
           <h1 className="break-words text-sm font-black text-field-text [overflow-wrap:anywhere]">{pageTitle}</h1>
         </div>
-        {hasActions ? (
+        {hasRightPanel ? (
           <button
             ref={actionToggleRef}
             type="button"
@@ -101,22 +100,25 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             {openDrawer === "actions" ? <X aria-hidden /> : <PanelRight aria-hidden />}
           </button>
         ) : <span className="project-shell__bar-spacer" aria-hidden />}
-      </header>
+      </header> : null}
 
       <main ref={contentRef} className="project-shell__content" id="project-main-content" inert={modalDrawerOpen}>
         {isDemoStorageMode() ? <ProjectTestModeWarning /> : null}
         <div className="project-shell__page">{children}</div>
       </main>
 
-      <RightProjectSidebar
-        projectName={projectName}
-        menu={menu}
-        drawerOpen={openDrawer === "actions"}
-        onDrawerClose={closeDrawer}
-        drawerRef={actionDrawerRef}
-      />
+      {hasRightPanel ? (
+        <RightProjectSidebar
+          mode={persistentShell ? "panel" : "drawer"}
+          projectName={projectName}
+          menu={menu}
+          drawerOpen={!persistentShell && openDrawer === "actions"}
+          onDrawerClose={closeDrawer}
+          drawerRef={actionDrawerRef}
+        />
+      ) : null}
 
-      <div
+      {!persistentShell ? <div
         className="project-shell__drawer-layer no-print"
         data-open={openDrawer === "navigation" ? "true" : "false"}
         aria-hidden={openDrawer !== "navigation"}
@@ -154,7 +156,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             </div>
             <ProjectNavigation drawer onNavigate={() => setOpenDrawer(null)} />
           </aside>
-      </div>
+      </div> : null}
     </div>
   );
 }
@@ -177,6 +179,7 @@ function ProjectTestModeWarning() {
 }
 
 function useAccessibleProjectDrawer({
+  enabled,
   openDrawer,
   onClose,
   navigationDrawerRef,
@@ -185,6 +188,7 @@ function useAccessibleProjectDrawer({
   navigationToggleRef,
   actionToggleRef
 }: {
+  enabled: boolean;
   openDrawer: OpenDrawer;
   onClose: () => void;
   navigationDrawerRef: React.RefObject<HTMLElement | null>;
@@ -194,7 +198,7 @@ function useAccessibleProjectDrawer({
   actionToggleRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   useEffect(() => {
-    if (!openDrawer) return undefined;
+    if (!enabled || !openDrawer) return undefined;
     const drawer = openDrawer === "navigation" ? navigationDrawerRef.current : actionDrawerRef.current;
     const returnTarget = openDrawer === "navigation" ? navigationToggleRef.current : actionToggleRef.current;
     if (!drawer) return undefined;
@@ -249,7 +253,7 @@ function useAccessibleProjectDrawer({
       document.body.style.overflow = previousOverflow;
       if (content) content.style.overflowY = previousContentOverflow;
       window.requestAnimationFrame(() => {
-        if (window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY).matches) {
+        if (isPersistentProjectShellViewport()) {
           const persistentTarget = openDrawer === "navigation"
             ? document.querySelector<HTMLElement>(
               '.project-shell__navigation [aria-current="page"], .project-shell__navigation a[href], .project-shell__navigation button'
@@ -267,6 +271,7 @@ function useAccessibleProjectDrawer({
     actionDrawerRef,
     actionToggleRef,
     contentRef,
+    enabled,
     navigationDrawerRef,
     navigationToggleRef,
     onClose,

@@ -11,6 +11,7 @@ import type {
 import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
 
 type RightProjectSidebarProps = {
+  mode: "panel" | "drawer";
   projectName: string | null;
   menu: ResolvedProjectPageActionMenu | null;
   drawerOpen: boolean;
@@ -18,8 +19,9 @@ type RightProjectSidebarProps = {
   drawerRef: RefObject<HTMLElement | null>;
 };
 
-/** 현재 기능 페이지가 등록한 동일한 작업을 wide panel과 responsive drawer에 표시합니다. */
+/** 현재 shell mode에 맞는 panel 또는 drawer 한 가지만 렌더링합니다. */
 export function RightProjectSidebar({
+  mode,
   projectName,
   menu,
   drawerOpen,
@@ -28,8 +30,8 @@ export function RightProjectSidebar({
 }: RightProjectSidebarProps) {
   if (!menu) return null;
 
-  return (
-    <>
+  if (mode === "panel") {
+    return (
       <aside
         role="complementary"
         aria-label={menu.ariaLabel}
@@ -38,8 +40,11 @@ export function RightProjectSidebar({
         <ActionMenuHeader projectName={projectName} menu={menu} />
         <ActionMenuItems menu={menu} />
       </aside>
+    );
+  }
 
-      <div
+  return (
+    <div
         className="project-shell__action-drawer-overlay no-print"
         data-open={drawerOpen ? "true" : "false"}
         aria-hidden={!drawerOpen}
@@ -67,8 +72,7 @@ export function RightProjectSidebar({
           />
           <ActionMenuItems menu={menu} onAction={onDrawerClose} />
         </aside>
-      </div>
-    </>
+    </div>
   );
 }
 

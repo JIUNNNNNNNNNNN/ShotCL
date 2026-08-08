@@ -221,8 +221,8 @@
   --ui-calendar-toolbar-height: 48px;
   --ui-calendar-weekday-height: 26px;
   --ui-calendar-day-min-height: 76px;
-  --ui-shell-navigation-width: clamp(280px, 20vw, 320px);
-  --ui-shell-action-width: clamp(208px, 15vw, 252px);
+  --ui-shell-navigation-width: clamp(240px, 18vw, 300px);
+  --ui-shell-action-width: clamp(208px, 15vw, 264px);
   --ui-dialog-safe-margin: 16px;
   --surface-00: var(--bg-base);
   --surface-01: var(--bg-surface-1);
@@ -2255,9 +2255,12 @@ button {
   margin: 0;
 }
 
-/* Project App Shell breakpoint: persistent three-panel mode needs both width
-   and usable height; otherwise the central workspace keeps drawer controls. */
+/* Shell mode is independent from density. React applies the same canonical
+   720x700 viewport query through data-project-shell-mode; CSS only lays out
+   the single mounted panel or drawer system for that mode. */
 .project-shell {
+  --project-shell-navigation-width: var(--ui-shell-navigation-width);
+  --project-shell-action-width: var(--ui-shell-action-width);
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2368,6 +2371,11 @@ button {
   max-width: 100%;
 }
 
+.project-shell__page {
+  container-name: project-workspace;
+  container-type: inline-size;
+}
+
 .project-shell__page > * {
   animation: ui-page-enter var(--motion-base) var(--ease-out-native);
 }
@@ -2391,6 +2399,8 @@ button {
   gap: var(--ui-card-gap);
   padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .project-action-menu__item {
@@ -2835,66 +2845,289 @@ button {
   }
 }
 
-@media (min-width: 600px) and (max-width: 1439px) {
+@media (min-width: 600px) and (max-width: 719px),
+  (min-width: 720px) and (max-height: 699px) {
   .project-shell__navigation-drawer {
     width: clamp(300px, 40vw, 360px);
     width: clamp(300px, 40dvw, 360px);
     max-width: 360px;
   }
-
 }
 
-@media (min-width: 1440px) and (min-height: 700px) {
+.project-shell[data-project-shell-mode="persistent"] {
+  grid-template-columns: var(--project-shell-navigation-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.project-shell[data-project-shell-mode="persistent"].project-shell--has-actions {
+  grid-template-columns:
+    var(--project-shell-navigation-width)
+    minmax(0, 1fr)
+    var(--project-shell-action-width);
+}
+
+.project-shell[data-project-shell-mode="persistent"] .project-shell__navigation {
+  display: flex;
+  grid-column: 1;
+  grid-row: 1;
+  flex-direction: column;
+}
+
+.project-shell[data-project-shell-mode="persistent"] .project-shell__app-bar {
+  display: none;
+}
+
+.project-shell[data-project-shell-mode="persistent"] .project-shell__content {
+  grid-column: 2;
+  grid-row: 1;
+  padding:
+    var(--ui-page-padding-block)
+    var(--ui-page-padding-inline)
+    max(var(--ui-page-padding-block), env(safe-area-inset-bottom));
+}
+
+.project-shell[data-project-shell-mode="persistent"] .project-shell__action-panel {
+  display: flex;
+  grid-column: 3;
+  grid-row: 1;
+  flex-direction: column;
+}
+
+.project-shell[data-project-shell-mode="persistent"] .project-shell__drawer-layer,
+.project-shell[data-project-shell-mode="persistent"] .project-shell__action-drawer-overlay {
+  display: none;
+}
+
+@media (min-width: 1200px) and (min-height: 700px) {
+  .project-shell {
+    --project-shell-navigation-width: clamp(240px, 18vw, 300px);
+    --project-shell-action-width: clamp(208px, 15vw, 264px);
+  }
+
   .pixel-dog-loader-page {
     min-height: calc(100dvh - 3.25rem);
   }
+}
 
+/* Tablet landscape and compact desktop retain both panels with narrower rails. */
+@media (min-width: 900px) and (max-width: 1199px) and (min-height: 700px) {
   .project-shell {
-    grid-template-columns: var(--ui-shell-navigation-width) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-  }
-
-  .project-shell--has-actions {
-    grid-template-columns: var(--ui-shell-navigation-width) minmax(0, 1fr) var(--ui-shell-action-width);
-  }
-
-  .project-shell__navigation {
-    display: flex;
-    grid-column: 1;
-    grid-row: 1;
-    flex-direction: column;
-  }
-
-  .project-shell__app-bar {
-    display: none;
-  }
-
-  .project-shell__content {
-    grid-column: 2;
-    grid-row: 1;
-    padding:
-      var(--ui-page-padding-block)
-      var(--ui-page-padding-inline)
-      max(var(--ui-page-padding-block), env(safe-area-inset-bottom));
-  }
-
-  .project-shell__action-panel {
-    display: flex;
-    grid-column: 3;
-    grid-row: 1;
-    flex-direction: column;
-  }
-
-  .project-shell__drawer-layer,
-  .project-shell__action-drawer-overlay {
-    display: none;
+    --project-shell-navigation-width: clamp(210px, 22vw, 240px);
+    --project-shell-action-width: clamp(180px, 19vw, 210px);
   }
 }
 
-@media (min-width: 1440px) and (min-height: 700px) and (pointer: fine) {
-  .project-navigation__round-link {
-    min-height: 40px;
+/* Tablet portrait keeps the shell persistent and spends width on content by
+   compacting both rails rather than hiding them. */
+@media (min-width: 720px) and (max-width: 899px) and (min-height: 700px) {
+  .project-shell {
+    --project-shell-navigation-width: clamp(170px, 23vw, 200px);
+    --project-shell-action-width: clamp(150px, 20vw, 180px);
+  }
+}
+
+@media (min-width: 720px) and (max-width: 1199px) and (min-height: 700px) {
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation {
+    padding: 8px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__home {
+    min-height: 44px;
+    margin-bottom: 6px;
+    gap: 7px;
+    padding: 6px 8px;
+    font-size: 0.8125rem;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__project-summary {
+    margin-bottom: 6px;
+    padding: 0 4px 7px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-grid {
+    gap: 6px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card {
+    min-height: 50px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-link {
+    min-height: 48px;
+    gap: 7px;
+    padding: 6px 8px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card[data-has-rounds="true"] .project-navigation__card-link {
+    padding-right: 36px;
+    padding-left: 36px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-label {
+    font-size: 0.8125rem;
+    word-break: keep-all;
+    white-space: normal;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-chevron {
+    right: 11px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__round-link {
+    min-height: 44px;
+    padding: 6px 7px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__header,
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__items {
+    padding: 8px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__items {
+    gap: 7px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__item {
+    min-height: 44px;
+    gap: 7px;
+    padding: 7px 8px;
+    font-size: 0.8125rem;
+    white-space: normal;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__icon {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (min-width: 720px) and (max-width: 899px) and (min-height: 700px) {
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card {
+    min-height: 48px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-link {
+    min-height: 46px;
+    padding: 5px 6px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-label,
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__item {
+    font-size: 0.75rem;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__round-link > span {
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__header .font-display {
+    font-size: 0.875rem;
+    line-height: 1.35;
+  }
+}
+
+@media (pointer: fine) {
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__round-link {
     padding-block: 5px;
+  }
+}
+
+/* Page content responds to the usable center column instead of the outer
+   viewport. This keeps tablet rails persistent without forcing desktop grids
+   into the narrower workspace between them. */
+.archive-asset-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.archive-source-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container project-workspace (min-width: 480px) {
+  .archive-asset-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .archive-source-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container project-workspace (min-width: 720px) {
+  .archive-asset-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container project-workspace (min-width: 900px) {
+  .archive-source-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container project-workspace (min-width: 1000px) {
+  .archive-asset-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@container project-workspace (max-width: 899px) {
+  .daily-plan-timetable-table {
+    display: block;
+  }
+
+  .daily-plan-timetable-table > colgroup,
+  .daily-plan-timetable-head {
+    display: none;
+  }
+
+  .daily-plan-timetable-body {
+    display: grid;
+    gap: 12px;
+  }
+
+  .daily-plan-timetable-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--ui-border-default);
+    border-radius: var(--ui-radius-card);
+    background: var(--ui-surface-2);
+  }
+
+  .daily-plan-timetable-cell {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .daily-plan-timetable-cell--wide {
+    grid-column: span 2 / span 2;
+  }
+
+  .daily-plan-timetable-mobile-label {
+    display: flex;
+  }
+
+  .daily-plan-timetable-row :where(button, input, select) {
+    min-height: 44px;
+  }
+
+  .daily-plan-staff-department-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .daily-plan-staff-department-grid > :nth-child(5) {
+    grid-column: span 2 / span 2;
   }
 }
 
