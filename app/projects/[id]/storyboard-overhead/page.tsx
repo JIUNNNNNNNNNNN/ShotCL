@@ -3699,7 +3699,7 @@ export default function ProjectStoryboardOverheadPage() {
           <p className="text-xs text-field-muted">업로드한 자료는 진행도에 자동 적용되지 않습니다. 진행도 컷 카드에서 명시적으로 선택해야 표시됩니다.</p>
         </Card>
 
-        <Card className="grid gap-3">
+        <Card className="archive-grid-container grid gap-3">
           <div>
             <h2 className="font-display text-lg font-bold text-field-text">{activeType === "all" ? "전체" : activeType === "overhead" ? "부감도" : "콘티"} 자료</h2>
             <p className="text-xs text-field-muted">이미지 원본 비율을 유지하며 모서리를 자르지 않습니다.</p>
@@ -3775,7 +3775,7 @@ export default function ProjectStoryboardOverheadPage() {
                             </button>
                           ) : null}
                         </div>
-                        <div className="archive-asset-grid grid min-w-0 select-none gap-2">
+                        <div className="archive-asset-grid grid select-none">
                     {cutGroup.items.map((item) => {
                       const key = archiveSelectionKey(item.kind, item.id);
                       const selected = selectedKeys.has(key);
@@ -3790,7 +3790,7 @@ export default function ProjectStoryboardOverheadPage() {
                               suppressArchiveClickRef.current = key;
                               scheduleArchiveSelectionClickSuppressionRelease(key, 120);
                             }}
-                            className={`ui-motion-surface relative grid min-w-0 select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition ${
+                            className={`ui-motion-surface relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1 rounded-[var(--radius-card)] border bg-field-panel p-1.5 text-center transition ${
                               selected
                                 ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
                                 : "border-field-border"
@@ -3842,7 +3842,7 @@ export default function ProjectStoryboardOverheadPage() {
                           key={key}
                           data-archive-reorder-item={asset.id}
                           data-archive-reorder-group={orderGroupKey}
-                          className={`ui-motion-surface relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1.5 rounded-[var(--radius-card)] border bg-field-panel p-2 text-center transition-[transform,border-color,background-color,opacity] ${
+                          className={`ui-motion-surface relative grid min-w-0 max-w-full select-none grid-rows-[minmax(0,1fr)_auto] gap-1 rounded-[var(--radius-card)] border bg-field-panel p-1.5 text-center transition-[transform,border-color,background-color,opacity] ${
                             selected
                               ? "border-field-primary bg-field-primary/10 ring-2 ring-field-primary/45"
                               : "border-field-border"
@@ -3855,7 +3855,7 @@ export default function ProjectStoryboardOverheadPage() {
                           {pendingMetadataAssetIds.has(asset.id) ? (
                             <span className="pointer-events-none absolute left-1 top-1 z-20 h-2 w-2 bg-field-primary" title="정보 저장 중" aria-label="정보 저장 중" />
                           ) : null}
-                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-7 min-w-7 place-items-center border border-field-divider bg-field-elevated px-1 text-[11px] font-bold text-field-subtle">
+                          <span aria-hidden="true" className="pointer-events-none absolute right-1 top-1 z-20 grid h-6 min-w-6 place-items-center border border-field-divider bg-field-elevated px-1 text-[10px] font-bold text-field-subtle">
                             {orderNumber}
                           </span>
                           <button
