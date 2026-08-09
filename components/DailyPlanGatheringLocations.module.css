@@ -20,6 +20,22 @@
   overflow: hidden;
 }
 
+.emptyMedia {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.emptyMediaContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--field-muted);
+}
+
 .information {
   min-width: 0;
   align-self: center;
@@ -32,88 +48,24 @@
   scrollbar-width: thin;
 }
 
-.actions {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--field-line);
-}
-
-.actionButton {
-  min-width: 0;
-  min-height: 44px;
-  padding-inline: 4px;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  line-height: 1.2;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: keep-all;
-}
-
 @container (min-width: 480px) and (max-width: 559px) {
   .layout {
     grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-    gap: 10px 12px;
-  }
-
-  .actions {
-    grid-column: 1 / -1;
+    gap: 12px;
   }
 }
 
 @container (min-width: 560px) {
   .layout {
-    grid-template-columns:
-      minmax(220px, 260px)
-      minmax(150px, 1fr)
-      minmax(148px, 168px);
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
     gap: 10px;
-  }
-
-  .layoutWithoutActions {
-    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  }
-
-  .actions {
-    height: 100%;
-    max-height: 156px;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: repeat(3, minmax(44px, 1fr));
-    align-content: center;
-    gap: 6px;
-    padding-top: 0;
-    padding-left: 10px;
-    border-top: 0;
-    border-left: 1px solid var(--field-line);
-  }
-
-  .actionButton {
-    flex-direction: row;
-    gap: 6px;
-    padding-inline: 10px;
-    font-size: 12px;
   }
 }
 
 @container (min-width: 760px) {
   .layout {
-    grid-template-columns:
-      minmax(260px, 300px)
-      minmax(190px, 1fr)
-      minmax(150px, 190px);
+    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
     gap: 12px;
-  }
-
-  .layoutWithoutActions {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  }
-
-  .actions {
-    padding-left: 12px;
   }
 }
 
@@ -123,25 +75,11 @@
       grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
       gap: var(--ui-card-gap);
     }
-
-    .actions {
-      grid-column: 1 / -1;
-      height: auto;
-      max-height: none;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      grid-template-rows: minmax(44px, auto);
-      gap: var(--ui-card-gap);
-      padding-top: var(--ui-card-gap);
-      padding-left: 0;
-      border-top: 1px solid var(--field-line);
-      border-left: 0;
-    }
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .media,
-  .actionButton {
+  .media {
     transition-duration: 0.01ms !important;
   }
 }

@@ -13,8 +13,11 @@ import {
   Clapperboard,
   Download,
   FileText,
+  ImagePlus,
+  Images,
   List,
   Map,
+  MapPin,
   Pencil,
   Plus,
   Printer,
@@ -27,7 +30,7 @@ import {
 
 export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail" | "scenario";
 
-export type ProjectPageActionGroup = "view" | "document" | "manage";
+export type ProjectPageActionGroup = "view" | "document" | "manage" | "gatheringPlace";
 export type ProjectPageActionTone = "default" | "danger";
 
 export type ProjectPageActionId =
@@ -37,6 +40,9 @@ export type ProjectPageActionId =
   | "archiveDiagram"
   | "archiveStoryboard"
   | "progressAddCut"
+  | "progressGatheringPhotoAdd"
+  | "progressGatheringPhotoManage"
+  | "progressGatheringAddressEdit"
   | "scenarioScenesView"
   | "scenarioFullView"
   | "scenarioEdit"
@@ -99,6 +105,9 @@ const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   archiveDiagram: { label: "부감도", icon: Map },
   archiveStoryboard: { label: "콘티", icon: Clapperboard },
   progressAddCut: { label: "새 컷 추가", icon: Plus, emphasis: "primary" },
+  progressGatheringPhotoAdd: { label: "사진 추가", icon: ImagePlus, group: "gatheringPlace" },
+  progressGatheringPhotoManage: { label: "사진 관리", icon: Images, group: "gatheringPlace" },
+  progressGatheringAddressEdit: { label: "주소 수정", icon: MapPin, group: "gatheringPlace" },
   scenarioScenesView: { label: "씬별 보기", icon: List, group: "view" },
   scenarioFullView: { label: "전체 보기", icon: FileText, group: "view" },
   scenarioEdit: { label: "편집", icon: Pencil, group: "document" },
@@ -122,7 +131,12 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
   progressDetail: {
     title: "진행도 작업",
     ariaLabel: "진행도 작업 메뉴",
-    actionIds: ["progressAddCut"]
+    actionIds: [
+      "progressAddCut",
+      "progressGatheringPhotoAdd",
+      "progressGatheringPhotoManage",
+      "progressGatheringAddressEdit"
+    ]
   },
   scenario: {
     title: "시나리오 작업",

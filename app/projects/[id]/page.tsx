@@ -12,9 +12,11 @@ import {
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
-import type { GatheringPhotoPreview } from "@/components/DailyPlanGatheringLocations";
+import type {
+  GatheringLocationActions,
+  GatheringPhotoPreview
+} from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
-import type { ProgressSceneDurationSaveInput } from "@/components/ProgressSceneDurationEditor";
 import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
@@ -30,7 +32,6 @@ import {
   type ProgressArchiveMediaAsset
 } from "@/lib/data/shotMediaArchive";
 import {
-  updateDailyPlanSceneDuration,
   updateDailyPlanScheduleItem,
   type DailyPlanListItem
 } from "@/lib/data/dailyPlans";
@@ -41,7 +42,6 @@ import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
 import { calculateDailyProgress } from "@/lib/progress/dailyProgress";
 import { buildProgressRoundHref } from "@/lib/projectNavigation";
-import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
@@ -57,10 +57,6 @@ const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
 
 const DailyPlanGatheringLocations = dynamic(
   () => import("@/components/DailyPlanGatheringLocations").then((module) => module.DailyPlanGatheringLocations),
-  { ssr: false }
-);
-const ProgressSceneDurationEditor = dynamic(
-  () => import("@/components/ProgressSceneDurationEditor").then((module) => module.ProgressSceneDurationEditor),
   { ssr: false }
 );
 const ShotCard = dynamic(
@@ -178,6 +174,7 @@ export default function ProjectDetailPage() {
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
   const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [gatheringLocationActions, setGatheringLocationActions] = useState<GatheringLocationActions | null>(null);
   const [preview, setPreview] = useState<{
     url: string;
     title: string;
@@ -226,7 +223,6 @@ export default function ProjectDetailPage() {
     if (!isProgressView) return;
     void Promise.all([
       import("@/components/DailyPlanGatheringLocations"),
-      import("@/components/ProgressSceneDurationEditor"),
       import("@/components/ShotCard"),
       import("@/components/ShotReorderList")
     ]);
@@ -524,10 +520,6 @@ export default function ProjectDetailPage() {
     () => remapScheduleRowsForVisibleShots(shots, activeShots, scheduleRowsByIndex),
     [activeShots, scheduleRowsByIndex, shots]
   );
-  const sceneDurationRowByShotId = useMemo(
-    () => buildProgressSceneDurationRowsByFirstShot(selectedPlan, shots),
-    [selectedPlan, shots]
-  );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
   const progressActionMenu = useMemo<ProjectPageActionMenuRegistration | null>(() => {
     if (
@@ -547,10 +539,36 @@ export default function ProjectDetailPage() {
           onSelect: () => setIsAddOpen(true),
           hidden: progressOnly,
           disabled: isSaving
+        },
+        progressGatheringPhotoAdd: {
+          onSelect: gatheringLocationActions?.addPhotos,
+          hidden: progressOnly || !gatheringLocationActions?.visible,
+          disabled: gatheringLocationActions?.addPhotosDisabled ?? true,
+          pending: gatheringLocationActions?.addPhotosPending ?? false
+        },
+        progressGatheringPhotoManage: {
+          onSelect: gatheringLocationActions?.managePhotos,
+          hidden: progressOnly || !gatheringLocationActions?.visible,
+          disabled: gatheringLocationActions?.managePhotosDisabled ?? true
+        },
+        progressGatheringAddressEdit: {
+          onSelect: gatheringLocationActions?.editAddress,
+          hidden: progressOnly || !gatheringLocationActions?.visible,
+          disabled: gatheringLocationActions?.editAddressDisabled ?? true,
+          pending: gatheringLocationActions?.editAddressPending ?? false
         }
       }
     };
-  }, [dailyPlanId, isProgressView, isSaving, progressOnly, project, projectId, selectedPlan]);
+  }, [
+    dailyPlanId,
+    gatheringLocationActions,
+    isProgressView,
+    isSaving,
+    progressOnly,
+    project,
+    projectId,
+    selectedPlan
+  ]);
   useProjectPageActionMenu(progressActionMenu);
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
@@ -752,39 +770,6 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const handleSaveSceneDuration = useCallback(async ({
-    rowId,
-    runtimeMinutes
-  }: ProgressSceneDurationSaveInput) => {
-    if (!projectId || !dailyPlanId || role !== "admin") {
-      throw new Error("씬 예정 소요시간을 수정할 권한이 없습니다.");
-    }
-    const currentPlan = dailyPlans.find((plan) => plan.id === dailyPlanId);
-    if (!currentPlan) throw new Error("일촬표를 찾을 수 없습니다.");
-
-    const result = await updateDailyPlanSceneDuration({
-      projectId,
-      dailyPlanId,
-      rowId,
-      runtimeMinutes,
-      expectedUpdatedAt: currentPlan.updatedAt
-    });
-    upsertDailyPlan({ ...currentPlan, memo: result.memo, updatedAt: result.updatedAt });
-  }, [dailyPlanId, dailyPlans, projectId, role, upsertDailyPlan]);
-
-  const renderSceneDurationBeforeIndex = useCallback((visibleShots: Shot[], index: number) => {
-    const shot = visibleShots[index];
-    const row = shot ? sceneDurationRowByShotId.get(shot.id) : null;
-    return row ? (
-      <ProgressSceneDurationEditor
-        rows={[row]}
-        canEdit={role === "admin"}
-        onSave={handleSaveSceneDuration}
-        showTitle={false}
-      />
-    ) : null;
-  }, [handleSaveSceneDuration, role, sceneDurationRowByShotId]);
-
   async function handleDeleteShot(shot: Shot) {
     const shouldDelete = window.confirm(`"${shot.title}" 컷을 삭제할까요?`);
     if (!shouldDelete) return;
@@ -975,6 +960,7 @@ export default function ProjectDetailPage() {
         canEdit={role === "admin"}
         onPlanMetadataChange={handleDailyPlanMetadataChange}
         onPreview={handleGatheringPhotoPreview}
+        onActionsChange={setGatheringLocationActions}
       />
 
       {errorMessage ? (
@@ -1011,19 +997,14 @@ export default function ProjectDetailPage() {
                 disabled={role !== "admin" || isReordering}
                 onReorder={handleReorderShots}
                 renderShot={renderShot}
-                renderRowsBeforeIndex={(index) => (
-                  <>
-                    {activeScheduleRowsByIndex.get(index)?.map((item) => (
-                      <ProgressScheduleCard
-                        key={item.id}
-                        item={item}
-                        onOpen={setEditingSchedule}
-                        onImagePreview={handleImagePreview}
-                      />
-                    ))}
-                    {renderSceneDurationBeforeIndex(activeShots, index)}
-                  </>
-                )}
+                renderRowsBeforeIndex={(index) => activeScheduleRowsByIndex.get(index)?.map((item) => (
+                  <ProgressScheduleCard
+                    key={item.id}
+                    item={item}
+                    onOpen={setEditingSchedule}
+                    onImagePreview={handleImagePreview}
+                  />
+                ))}
               />
             </section>
 
@@ -1040,7 +1021,6 @@ export default function ProjectDetailPage() {
                   disabled={role !== "admin" || isReordering}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
-                  renderRowsBeforeIndex={(index) => renderSceneDurationBeforeIndex(okShots, index)}
                 />
               ) : <p className="px-1 py-2 text-xs text-field-muted">OK 컷이 없습니다.</p>}
             </ProgressStatusSection>
@@ -1058,7 +1038,6 @@ export default function ProjectDetailPage() {
                   disabled={role !== "admin" || isReordering}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
-                  renderRowsBeforeIndex={(index) => renderSceneDurationBeforeIndex(omitShots, index)}
                 />
               ) : <p className="px-1 py-2 text-xs text-field-muted">OMIT 컷이 없습니다.</p>}
             </ProgressStatusSection>
@@ -1182,40 +1161,6 @@ function remapScheduleRowsForVisibleShots(
     const shot = allShots[allIndex];
     if (shot && visibleIds.has(shot.id)) visibleIndex += 1;
   }
-  return result;
-}
-
-function buildProgressSceneDurationRowsByFirstShot(plan: DailyPlan | null, shots: Shot[]) {
-  const result = new Map<string, {
-    rowId: string;
-    sceneLabel: string;
-    runtimeMinutes: number | null;
-  }>();
-  if (!plan) return result;
-
-  const firstShotByScene = new Map<string, string>();
-  shots.forEach((shot) => {
-    const sceneNumber = normalizeSceneNumber(shot.sceneNumber);
-    if (sceneNumber && !firstShotByScene.has(sceneNumber)) {
-      firstShotByScene.set(sceneNumber, shot.id);
-    }
-  });
-
-  const assignedScenes = new Set<string>();
-  decodeDailyPlanMemo(plan.memo).timetableScenes.forEach((scene) => {
-    const sceneNumber = normalizeSceneNumber(
-      scene.rowSnapshot.sceneNumber || scene.sourceSnapshot?.sceneNumber
-    );
-    const rowId = scene.rowId.trim();
-    const shotId = firstShotByScene.get(sceneNumber);
-    if (!sceneNumber || !rowId || !shotId || assignedScenes.has(sceneNumber)) return;
-    assignedScenes.add(sceneNumber);
-    result.set(shotId, {
-      rowId,
-      sceneLabel: `S#${sceneNumber}`,
-      runtimeMinutes: scene.rowSnapshot.runtimeMinutes
-    });
-  });
   return result;
 }
 

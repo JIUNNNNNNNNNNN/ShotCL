@@ -120,9 +120,17 @@ function ActionMenuItems({
 }) {
   const usesGroups = menu.actions.some((action) => action.group);
   if (usesGroups) {
+    const primaryActions = menu.actions.filter((action) => !action.group);
     const groups = groupActions(menu.actions);
     return (
       <nav className="project-action-menu__items flex min-h-0 flex-1 flex-col overflow-y-auto" aria-label={menu.ariaLabel}>
+        {primaryActions.length > 0 ? (
+          <div className={groups.length > 0 ? "grid gap-[var(--ui-card-gap)] border-b border-field-divider pb-[var(--ui-section-gap)]" : "grid gap-[var(--ui-card-gap)]"}>
+            {primaryActions.map((action) => (
+              <PageActionItem key={action.id} action={action} onAction={onAction} />
+            ))}
+          </div>
+        ) : null}
         {groups.map((group) => (
           <section
             key={group.key}
@@ -155,7 +163,8 @@ function ActionMenuItems({
 const ACTION_GROUP_LABELS: Record<ProjectPageActionGroup, string> = {
   view: "보기",
   document: "문서",
-  manage: "관리"
+  manage: "관리",
+  gatheringPlace: "집합장소 관리"
 };
 
 function groupActions(actions: ResolvedProjectPageAction[]) {

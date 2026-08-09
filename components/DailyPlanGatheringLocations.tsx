@@ -6,10 +6,8 @@ import {
   ChevronUp,
   Clock3,
   ImageIcon,
-  ImagePlus,
   Images,
   MapPin,
-  PencilLine,
   Save,
   Trash2,
   X
@@ -39,6 +37,18 @@ export type GatheringPhotoPreview = {
   title: string;
 };
 
+export type GatheringLocationActions = {
+  visible: boolean;
+  addPhotos: () => void;
+  managePhotos: () => void;
+  editAddress: () => void;
+  addPhotosDisabled: boolean;
+  addPhotosPending: boolean;
+  managePhotosDisabled: boolean;
+  editAddressDisabled: boolean;
+  editAddressPending: boolean;
+};
+
 type DailyPlanGatheringLocationsProps = {
   projectId: string;
   plan: DailyPlan;
@@ -47,6 +57,7 @@ type DailyPlanGatheringLocationsProps = {
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
   ) => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
+  onActionsChange?: (actions: GatheringLocationActions | null) => void;
 };
 
 type ExistingDraftPhoto = {
@@ -90,7 +101,8 @@ export function DailyPlanGatheringLocations({
   plan,
   canEdit,
   onPlanMetadataChange,
-  onPreview
+  onPreview,
+  onActionsChange
 }: DailyPlanGatheringLocationsProps) {
   const place = useMemo(
     () => selectProgressGatheringPlace(plan),
@@ -120,6 +132,46 @@ export function DailyPlanGatheringLocations({
     canEdit && place?.persistedId && place.photos.length > 0 && hasPersistentProject
   );
   const isUploadBusy = pendingPhotos.some((photo) => photo.status !== "failed");
+  const actionControls = useMemo<GatheringLocationActions>(() => ({
+    visible: Boolean(canEdit && place),
+    addPhotos: () => photoInputRef.current?.click(),
+    managePhotos: () => {
+      if (uploadLockRef.current || isSavingAddress || isEditingAddress) return;
+      setMessage("");
+      rememberDialogTrigger();
+      setIsEditingPhotos(true);
+    },
+    editAddress: () => {
+      if (!place || uploadLockRef.current || isSavingAddress || isEditingPhotos) return;
+      setMessage("");
+      setAddressError("");
+      setAddressDraft(place.address);
+      rememberDialogTrigger();
+      setIsEditingAddress(true);
+    },
+    addPhotosDisabled: !canAddPhotos || isUploadBusy || isSavingAddress || isEditingAddress || isEditingPhotos,
+    addPhotosPending: isUploadBusy,
+    managePhotosDisabled: !canManagePhotos || isUploadBusy || isSavingAddress || isEditingAddress,
+    editAddressDisabled: !canEdit || !place || isUploadBusy || isSavingAddress || isEditingPhotos,
+    editAddressPending: isSavingAddress
+  }), [
+    canAddPhotos,
+    canEdit,
+    canManagePhotos,
+    isEditingAddress,
+    isEditingPhotos,
+    isSavingAddress,
+    isUploadBusy,
+    place
+  ]);
+
+  useEffect(() => {
+    onActionsChange?.(actionControls);
+  }, [actionControls, onActionsChange]);
+
+  useEffect(() => () => {
+    onActionsChange?.(null);
+  }, [onActionsChange]);
 
   useEffect(() => {
     activePlanIdRef.current = plan.id;
@@ -159,7 +211,11 @@ export function DailyPlanGatheringLocations({
   function restoreDialogTrigger() {
     const target = dialogReturnFocusRef.current;
     dialogReturnFocusRef.current = null;
-    window.requestAnimationFrame(() => target?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => {
+      const fallback = document.querySelector<HTMLButtonElement>(".project-shell__action-toggle");
+      const focusTarget = target?.isConnected && !target.closest("[inert]") ? target : fallback;
+      focusTarget?.focus({ preventScroll: true });
+    });
   }
 
   function closeAddressEditor() {
@@ -527,36 +583,15 @@ export function DailyPlanGatheringLocations({
         <GatheringPlaceRow
           callTime={callTime}
           place={place}
-          canShowActions={Boolean(canEdit && place)}
-          canEditAddress={Boolean(canEdit && place)}
-          canAddPhotos={canAddPhotos}
-          canManagePhotos={canManagePhotos}
           pendingPhotos={pendingPhotos}
           uploadProgress={uploadProgress}
           uploadError={uploadError}
-          isEditingAddress={isEditingAddress}
-          isEditingPhotos={isEditingPhotos}
-          isSavingAddress={isSavingAddress}
-          onStartAddressEdit={() => {
-            setMessage("");
-            setAddressError("");
-            setAddressDraft(place?.address ?? "");
-            rememberDialogTrigger();
-            setIsEditingAddress(true);
-          }}
-          onAddPhotos={() => photoInputRef.current?.click()}
           onRetryPhoto={(photo) => void retryPendingPhoto(photo)}
           onDismissPhoto={(photo) => releasePendingPhotos(
             [photo.id],
             plan.id,
             uploadGenerationRef.current
           )}
-          onManage={() => {
-            if (uploadLockRef.current || isSavingAddress || isEditingAddress) return;
-            setMessage("");
-            rememberDialogTrigger();
-            setIsEditingPhotos(true);
-          }}
           onPreview={onPreview}
         />
       )}
@@ -621,52 +656,31 @@ export function DailyPlanGatheringLocations({
 function GatheringPlaceRow({
   callTime,
   place,
-  canShowActions,
-  canEditAddress,
-  canAddPhotos,
-  canManagePhotos,
   pendingPhotos,
   uploadProgress,
   uploadError,
-  isEditingAddress,
-  isEditingPhotos,
-  isSavingAddress,
-  onStartAddressEdit,
-  onAddPhotos,
   onRetryPhoto,
   onDismissPhoto,
-  onManage,
   onPreview
 }: {
   callTime: string;
   place: ProgressGatheringPlace | null;
-  canShowActions: boolean;
-  canEditAddress: boolean;
-  canAddPhotos: boolean;
-  canManagePhotos: boolean;
   pendingPhotos: InlinePendingPhoto[];
   uploadProgress: string;
   uploadError: string;
-  isEditingAddress: boolean;
-  isEditingPhotos: boolean;
-  isSavingAddress: boolean;
-  onStartAddressEdit: () => void;
-  onAddPhotos: () => void;
   onRetryPhoto: (photo: InlinePendingPhoto) => void;
   onDismissPhoto: (photo: InlinePendingPhoto) => void;
-  onManage: () => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
 }) {
   const photoPreviews = (place?.photos ?? []).map((photo) => ({
     url: photo.url,
     title: `${place?.locationName || "집합장소"} · ${photo.originalFilename || "위치 사진"}`
   }));
-  const isUploadBusy = pendingPhotos.some((photo) => photo.status !== "failed");
   const failedPhoto = pendingPhotos.find((photo) => photo.status === "failed") ?? null;
   const photoCount = (place?.photos.length ?? 0) + pendingPhotos.length;
   return (
     <article className="min-w-0 p-3">
-      <div className={cn(styles.layout, !canShowActions && styles.layoutWithoutActions)}>
+      <div className={styles.layout}>
         <GatheringPlaceMedia
           locationName={place?.locationName || "집합장소"}
           photos={place?.photos ?? []}
@@ -722,20 +736,6 @@ function GatheringPlaceRow({
           ) : null}
         </div>
 
-        {canShowActions ? (
-          <GatheringPlaceActions
-            canAddPhotos={canAddPhotos}
-            canManagePhotos={canManagePhotos}
-            canEditAddress={canEditAddress}
-            isUploadBusy={isUploadBusy}
-            isSavingAddress={isSavingAddress}
-            isEditingPhotos={isEditingPhotos}
-            isEditingAddress={isEditingAddress}
-            onAddPhotos={onAddPhotos}
-            onManage={onManage}
-            onStartAddressEdit={onStartAddressEdit}
-          />
-        ) : null}
       </div>
     </article>
   );
@@ -805,86 +805,12 @@ function GatheringPlaceMedia({
   }
 
   return (
-    <div className={cn(mediaClassName, "flex items-center justify-center")} role="img" aria-label={`${locationName} 위치 사진 없음`}>
-      <div className="grid justify-items-center gap-2 text-field-muted">
+    <div className={cn(mediaClassName, styles.emptyMedia)} role="img" aria-label={`${locationName} 위치 사진 없음`}>
+      <div className={styles.emptyMediaContent}>
         <ImageIcon className="h-8 w-8" aria-hidden />
         <span className="text-xs font-semibold">집합장소 사진 없음</span>
       </div>
     </div>
-  );
-}
-
-function GatheringPlaceActions({
-  canAddPhotos,
-  canManagePhotos,
-  canEditAddress,
-  isUploadBusy,
-  isSavingAddress,
-  isEditingPhotos,
-  isEditingAddress,
-  onAddPhotos,
-  onManage,
-  onStartAddressEdit
-}: {
-  canAddPhotos: boolean;
-  canManagePhotos: boolean;
-  canEditAddress: boolean;
-  isUploadBusy: boolean;
-  isSavingAddress: boolean;
-  isEditingPhotos: boolean;
-  isEditingAddress: boolean;
-  onAddPhotos: () => void;
-  onManage: () => void;
-  onStartAddressEdit: () => void;
-}) {
-  const actionClassName = "w-full border-field-border bg-field-input text-field-subtle hover:border-field-primary hover:bg-field-primary-soft hover:text-field-primary focus-visible:ring-2 focus-visible:ring-field-primary-focus";
-  return (
-    <nav className={styles.actions} aria-label="집합장소 관리 메뉴">
-      <Button
-        variant="secondary"
-        className={cn(styles.actionButton, actionClassName)}
-        onClick={onAddPhotos}
-        disabled={!canAddPhotos || isUploadBusy || isSavingAddress || isEditingAddress || isEditingPhotos}
-        aria-label="집합장소 사진 추가"
-      >
-        <ImagePlus className="h-4 w-4 shrink-0" aria-hidden />
-        <span>사진 추가</span>
-      </Button>
-      <Button
-        variant="secondary"
-        className={cn(
-          styles.actionButton,
-          actionClassName,
-          isEditingPhotos && "border-field-primary bg-field-primary-soft text-field-primary"
-        )}
-        onClick={onManage}
-        disabled={!canManagePhotos || isUploadBusy || isSavingAddress || isEditingAddress}
-        aria-label="집합장소 사진 관리"
-        aria-haspopup="dialog"
-        aria-expanded={isEditingPhotos}
-        aria-controls="gathering-photo-editor-dialog"
-      >
-        <Images className="h-4 w-4 shrink-0" aria-hidden />
-        <span>사진 관리</span>
-      </Button>
-      <Button
-        variant="secondary"
-        className={cn(
-          styles.actionButton,
-          actionClassName,
-          isEditingAddress && "border-field-primary bg-field-primary-soft text-field-primary"
-        )}
-        onClick={onStartAddressEdit}
-        disabled={!canEditAddress || isUploadBusy || isSavingAddress || isEditingPhotos}
-        aria-label="집합장소 주소 수정"
-        aria-haspopup="dialog"
-        aria-expanded={isEditingAddress}
-        aria-controls="gathering-address-editor-dialog"
-      >
-        <PencilLine className="h-4 w-4 shrink-0" aria-hidden />
-        <span>주소 수정</span>
-      </Button>
-    </nav>
   );
 }
 
