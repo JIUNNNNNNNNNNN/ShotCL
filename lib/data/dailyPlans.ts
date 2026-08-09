@@ -7,6 +7,7 @@ import {
   normalizeDailyPlanShotStatus
 } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import {
@@ -39,6 +40,7 @@ import type {
 export type SaveDailyPlanInput = {
   projectId: string;
   dailyPlanId?: string | null;
+  expectedUpdatedAt?: string | null;
   plan: DailyPlanDraft;
   shots: DailyPlanShotDraft[];
   allowDuplicate?: boolean;
@@ -87,6 +89,11 @@ export type DailyPlanSceneDurationMutationResult = {
   runtimeMinutes: number | null;
 };
 
+export type DailyPlanScheduleItemMutationResult = {
+  mealTimes: DailyPlanMealTime[];
+  updatedAt: string;
+};
+
 export type SaveDailyPlanResult = DailyPlanWithShots & {
   saveStatus: "saved" | "duplicate";
   message: string;
@@ -106,11 +113,12 @@ export class DailyPlanDuplicateError extends Error {
 
 type SaveDailyPlanApiPayload = {
   ok?: boolean;
-  status?: "saved" | "saved_shots_failed" | "duplicate";
+  status?: "saved" | "saved_shots_failed" | "duplicate" | "conflict" | "failed";
   message?: string;
   dailyPlan?: Record<string, unknown>;
   plan?: Record<string, unknown>;
   shots?: Record<string, unknown>[];
+  latestUpdatedAt?: string | null;
   progressSync?: {
     status?: "synced" | "failed";
     shotCount?: number;
@@ -399,23 +407,41 @@ export async function updateDailyPlanScheduleItem(
   projectId: string,
   dailyPlanId: string,
   itemId: string,
-  patch: Pick<DailyPlanMealTime, "progressMemo" | "imageUrl">
-): Promise<DailyPlanMealTime[]> {
+  patch: Partial<Pick<DailyPlanMealTime, "progressMemo" | "imageUrl">>,
+  expectedUpdatedAt: string
+): Promise<DailyPlanScheduleItemMutationResult> {
   try {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scheduleItem: { id: itemId, ...patch } })
+        body: JSON.stringify({ scheduleItem: { id: itemId, ...patch, expectedUpdatedAt } })
       }
     );
     const payload = (await response.json().catch(() => ({}))) as {
       mealTimes?: unknown;
+      updatedAt?: unknown;
+      latestUpdatedAt?: unknown;
       error?: string;
     };
-    if (response.ok && payload.mealTimes) {
-      return normalizeDailyPlanMealTimes(payload.mealTimes);
+    if (response.ok && payload.mealTimes && typeof payload.updatedAt === "string") {
+      return {
+        mealTimes: normalizeDailyPlanMealTimes(payload.mealTimes),
+        updatedAt: payload.updatedAt
+      };
+    }
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<DailyPlanScheduleItemMutationResult>(
+        "daily-plan",
+        payload.error || "기타일정이 다른 화면에서 변경되었습니다.",
+        typeof payload.latestUpdatedAt === "string"
+          ? {
+              mealTimes: normalizeDailyPlanMealTimes(payload.mealTimes),
+              updatedAt: payload.latestUpdatedAt
+            }
+          : null
+      );
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
       throw new Error(payload.error || "기타일정 정보를 저장하지 못했습니다.");
@@ -432,8 +458,10 @@ export async function updateDailyPlanScheduleItem(
     item.id === itemId
       ? {
           ...item,
-          progressMemo: String(patch.progressMemo ?? "").slice(0, 2000),
-          imageUrl: patch.imageUrl || null
+          ...("progressMemo" in patch
+            ? { progressMemo: String(patch.progressMemo ?? "").slice(0, 2000) }
+            : {}),
+          ...("imageUrl" in patch ? { imageUrl: patch.imageUrl || null } : {})
         }
       : item
   ));
@@ -444,7 +472,8 @@ export async function updateDailyPlanScheduleItem(
         : item
     ))
   }, projectId);
-  return mealTimes;
+  const updatedAt = new Date().toISOString();
+  return { mealTimes, updatedAt };
 }
 
 /** 진행도 화면에서 canonical 집합장소 주소를 명시적으로 저장합니다. */
@@ -475,6 +504,7 @@ export async function updateDailyPlanGatheringAddress(
     shootingLocations?: unknown;
     updatedAt?: unknown;
     gatheringPointId?: unknown;
+    latestUpdatedAt?: unknown;
     error?: string;
   };
   if (
@@ -484,6 +514,15 @@ export async function updateDailyPlanGatheringAddress(
     || typeof payload.updatedAt !== "string"
     || typeof payload.gatheringPointId !== "string"
   ) {
+    if (response.status === 409) {
+      throw new AutosaveConflictError(
+        "daily-plan",
+        payload.error || "집합장소 주소가 다른 화면에서 변경되었습니다.",
+        typeof payload.latestUpdatedAt === "string"
+          ? { updatedAt: payload.latestUpdatedAt }
+          : null
+      );
+    }
     throw new Error(payload.error || "집합장소 주소를 저장하지 못했습니다.");
   }
   return {
@@ -518,6 +557,7 @@ export async function updateDailyPlanSceneDuration(
   const payload = (await response.json().catch(() => ({}))) as {
     memo?: unknown;
     updatedAt?: unknown;
+    latestUpdatedAt?: unknown;
     rowId?: unknown;
     runtimeMinutes?: unknown;
     error?: string;
@@ -534,6 +574,15 @@ export async function updateDailyPlanSceneDuration(
     || typeof payload.rowId !== "string"
     || runtimeMinutes === undefined
   ) {
+    if (response.status === 409) {
+      throw new AutosaveConflictError(
+        "daily-plan",
+        payload.error || "씬 예정 소요시간이 다른 화면에서 변경되었습니다.",
+        typeof payload.latestUpdatedAt === "string"
+          ? { updatedAt: payload.latestUpdatedAt }
+          : null
+      );
+    }
     throw new Error(payload.error || "씬 예정 소요시간을 저장하지 못했습니다.");
   }
   return {
@@ -791,7 +840,13 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
     const response = await fetch(`/api/projects/${encodeURIComponent(input.projectId)}/daily-plans`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dailyPlanId: input.dailyPlanId, plan: input.plan, shots: normalizedShots, allowDuplicate: input.allowDuplicate })
+      body: JSON.stringify({
+        dailyPlanId: input.dailyPlanId,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        plan: input.plan,
+        shots: normalizedShots,
+        allowDuplicate: input.allowDuplicate
+      })
     });
     const payload = (await response.json().catch(() => ({}))) as SaveDailyPlanApiPayload;
     const planRow = payload.dailyPlan ?? payload.plan;
@@ -808,6 +863,13 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
         progressSyncErrorCode: payload.shotsSync?.errorCode
       };
     }
+    if (response.status === 409 && payload.status === "conflict") {
+      throw new AutosaveConflictError(
+        "daily-plan",
+        payload.error || "일촬표가 다른 화면에서 변경되었습니다. 현재 입력은 유지됩니다.",
+        payload.latestUpdatedAt ? { updatedAt: payload.latestUpdatedAt } : null
+      );
+    }
     if (response.status === 409 || payload.status === "duplicate") {
       throw new DailyPlanDuplicateError(payload.message);
     }
@@ -822,6 +884,8 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
 
   if (supabase) {
     if (input.dailyPlanId) {
+      const expectedUpdatedAt = String(input.expectedUpdatedAt ?? "").trim();
+      if (!expectedUpdatedAt) throw new Error("최신 일촬표 저장 시각이 필요합니다.");
       const { data: oldShots, error: oldShotsError } = await supabase
         .from("daily_plan_shots")
         .select("*")
@@ -832,6 +896,29 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
       const newRows = normalizedShots.map((shot, index) => dailyPlanShotDraftToRow(input.projectId, input.dailyPlanId!, shot, index + 1));
       let insertedRows: Record<string, unknown>[] = [];
       try {
+        const { data: planRow, error: planError } = await supabase
+          .from("daily_plans")
+          .update(dailyPlanDraftToRow(input.projectId, input.plan))
+          .eq("id", input.dailyPlanId)
+          .eq("project_id", input.projectId)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("*")
+          .maybeSingle();
+        if (planError) throw planError;
+        if (!planRow) {
+          const { data: latest, error: latestError } = await supabase
+            .from("daily_plans")
+            .select("updated_at")
+            .eq("id", input.dailyPlanId)
+            .eq("project_id", input.projectId)
+            .maybeSingle();
+          if (latestError) throw latestError;
+          throw new AutosaveConflictError(
+            "daily-plan",
+            "일촬표가 다른 화면에서 변경되었습니다. 현재 입력은 유지됩니다.",
+            latest?.updated_at ? { updatedAt: String(latest.updated_at) } : null
+          );
+        }
         if (newRows.length) {
           const { data, error } = await supabase.from("daily_plan_shots").insert(newRows).select("*").order("order_index", { ascending: true });
           if (error) throw error;
@@ -841,14 +928,6 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
           const { error } = await supabase.from("daily_plan_shots").delete().in("id", oldShots.map((row) => row.id));
           if (error) throw error;
         }
-        const { data: planRow, error: planError } = await supabase
-          .from("daily_plans")
-          .update(dailyPlanDraftToRow(input.projectId, input.plan))
-          .eq("id", input.dailyPlanId)
-          .eq("project_id", input.projectId)
-          .select("*")
-          .single();
-        if (planError) throw planError;
         return {
           plan: dailyPlanFromRow(planRow),
           shots: insertedRows.map(dailyPlanShotFromRow),
@@ -903,6 +982,17 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
   const now = new Date().toISOString();
   const planId = input.dailyPlanId ?? createLocalId("daily_plan");
   const existingPlan = buckets.dailyPlans.find((plan) => plan.id === planId);
+  if (input.dailyPlanId) {
+    const expectedUpdatedAt = String(input.expectedUpdatedAt ?? "").trim();
+    if (!existingPlan) throw new Error("수정할 일촬표를 찾을 수 없습니다.");
+    if (!expectedUpdatedAt || existingPlan.updatedAt !== expectedUpdatedAt) {
+      throw new AutosaveConflictError(
+        "daily-plan",
+        "일촬표가 다른 화면에서 변경되었습니다. 현재 입력은 유지됩니다.",
+        { updatedAt: existingPlan.updatedAt }
+      );
+    }
+  }
   const plan: DailyPlan = {
     id: planId,
     projectId: input.projectId,

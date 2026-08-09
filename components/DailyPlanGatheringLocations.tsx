@@ -12,13 +12,17 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { Button } from "@/components/ui/Button";
 import { MotionPresence } from "@/components/ui/MotionPresence";
+import { useAutosave } from "@/hooks/useAutosave";
+import { getAutosaveDraft } from "@/lib/client/autosaveDraftCache";
 import {
   GatheringPhotoMutationError,
   saveDailyPlanGatheringPhotoDraft
 } from "@/lib/data/dailyPlanGatheringPhotos";
 import { updateDailyPlanGatheringAddress } from "@/lib/data/dailyPlans";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import {
   createGatheringPhotoId,
   normalizeGatheringLocationName,
@@ -30,6 +34,7 @@ import { decodeDailyPlanMemo, type DailyPlanGatheringPhoto } from "@/lib/dailyPl
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import type { AutosaveStatus as AutosaveStatusValue } from "@/lib/client/latestAutosaveQueue";
 import styles from "./DailyPlanGatheringLocations.module.css";
 
 export type GatheringPhotoPreview = {
@@ -111,7 +116,7 @@ export function DailyPlanGatheringLocations({
   const [isEditingPhotos, setIsEditingPhotos] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressDraft, setAddressDraft] = useState("");
-  const [isSavingAddress, setIsSavingAddress] = useState(false);
+  const [isComposingAddress, setIsComposingAddress] = useState(false);
   const [addressError, setAddressError] = useState("");
   const [message, setMessage] = useState("");
   const [pendingPhotos, setPendingPhotos] = useState<InlinePendingPhoto[]>([]);
@@ -124,6 +129,7 @@ export function DailyPlanGatheringLocations({
   const activePlanIdRef = useRef(plan.id);
   const inlineObjectUrlsRef = useRef<Set<string>>(new Set());
   const dialogReturnFocusRef = useRef<HTMLElement | null>(null);
+  const addressExpectedUpdatedAtRef = useRef(plan.updatedAt);
   const callTime = plan.callTime.trim();
   const hasContent = Boolean(callTime || place?.locationName || place?.address || place?.photos.length);
   const hasPersistentProject = isValidDatabaseProjectId(projectId);
@@ -132,27 +138,75 @@ export function DailyPlanGatheringLocations({
     canEdit && place?.persistedId && place.photos.length > 0 && hasPersistentProject
   );
   const isUploadBusy = pendingPhotos.some((photo) => photo.status !== "failed");
+  const addressAutosave = useAutosave<string>({
+    value: addressDraft,
+    enabled: Boolean(canEdit && isEditingAddress && place && !isComposingAddress),
+    delayMs: 850,
+    scopeKey: `${plan.id}:${place?.id ?? "missing"}:address`,
+    initialSavedFingerprint: JSON.stringify(place?.address ?? ""),
+    restoreDraft: (address) => setAddressDraft(address),
+    save: async (address) => {
+      if (!place) return;
+      const result = await updateDailyPlanGatheringAddress({
+        projectId,
+        dailyPlanId: plan.id,
+        gatheringPointId: place.persistedId,
+        locationId: place.locationId,
+        locationName: place.locationName,
+        departmentIds: place.departmentIds,
+        address,
+        expectedUpdatedAt: addressExpectedUpdatedAtRef.current
+      });
+      addressExpectedUpdatedAtRef.current = result.updatedAt;
+      onPlanMetadataChange({
+        memo: result.memo,
+        shootingLocations: result.shootingLocations,
+        updatedAt: result.updatedAt
+      });
+    },
+    onSaved: () => {
+      setAddressError("");
+    },
+    onError: (error) => {
+      if (error instanceof AutosaveConflictError && error.kind === "daily-plan") {
+        const latest = error.latest as { updatedAt?: string } | null;
+        if (latest?.updatedAt) addressExpectedUpdatedAtRef.current = latest.updatedAt;
+      }
+      setAddressError(error instanceof Error ? error.message : "주소를 자동 저장하지 못했습니다.");
+    }
+  });
+  const isSavingAddress = addressAutosave.isPending;
   const actionControls = useMemo<GatheringLocationActions>(() => ({
     visible: Boolean(canEdit && place),
     addPhotos: () => photoInputRef.current?.click(),
     managePhotos: () => {
-      if (uploadLockRef.current || isSavingAddress || isEditingAddress) return;
+      if (uploadLockRef.current || isEditingAddress) return;
       setMessage("");
       rememberDialogTrigger();
       setIsEditingPhotos(true);
     },
     editAddress: () => {
-      if (!place || uploadLockRef.current || isSavingAddress || isEditingPhotos) return;
+      if (!place || uploadLockRef.current || isEditingPhotos) return;
       setMessage("");
       setAddressError("");
-      setAddressDraft(place.address);
+      const scopeKey = `${plan.id}:${place.id}:address`;
+      const cached = getAutosaveDraft<string>(scopeKey);
+      // A failed non-blocking save remains the latest local draft when the
+      // sheet is reopened. A clean open establishes the server baseline and
+      // must not emit a mutation by itself.
+      if (cached) setAddressDraft(cached.value);
+      else {
+        addressAutosave.markSaved(place.address);
+        setAddressDraft(place.address);
+      }
+      addressExpectedUpdatedAtRef.current = plan.updatedAt;
       rememberDialogTrigger();
       setIsEditingAddress(true);
     },
-    addPhotosDisabled: !canAddPhotos || isUploadBusy || isSavingAddress || isEditingAddress || isEditingPhotos,
+    addPhotosDisabled: !canAddPhotos || isUploadBusy || isEditingAddress || isEditingPhotos,
     addPhotosPending: isUploadBusy,
-    managePhotosDisabled: !canManagePhotos || isUploadBusy || isSavingAddress || isEditingAddress,
-    editAddressDisabled: !canEdit || !place || isUploadBusy || isSavingAddress || isEditingPhotos,
+    managePhotosDisabled: !canManagePhotos || isUploadBusy || isEditingAddress,
+    editAddressDisabled: !canEdit || !place || isUploadBusy || isEditingPhotos,
     editAddressPending: isSavingAddress
   }), [
     canAddPhotos,
@@ -162,7 +216,9 @@ export function DailyPlanGatheringLocations({
     isEditingPhotos,
     isSavingAddress,
     isUploadBusy,
-    place
+    place,
+    plan.updatedAt,
+    addressAutosave.markSaved
   ]);
 
   useEffect(() => {
@@ -447,7 +503,9 @@ export function DailyPlanGatheringLocations({
   }
 
   async function handlePhotoFiles(files: File[]) {
-    if (!place || files.length === 0 || uploadLockRef.current || isSavingAddress || isEditingAddress) return;
+    // Address autosave is an independent background mutation. Do not make a
+    // slow address request block the existing immediate photo upload action.
+    if (!place || files.length === 0 || uploadLockRef.current || isEditingAddress) return;
     setMessage("");
     setUploadError("");
     if (!isValidDatabaseProjectId(projectId)) {
@@ -511,7 +569,7 @@ export function DailyPlanGatheringLocations({
   }
 
   async function retryPendingPhoto(photo: InlinePendingPhoto) {
-    if (!place || uploadLockRef.current || isSavingAddress || isEditingAddress) return;
+    if (!place || uploadLockRef.current || isEditingAddress) return;
     const generation = uploadGenerationRef.current + 1;
     uploadGenerationRef.current = generation;
     uploadLockRef.current = true;
@@ -534,36 +592,6 @@ export function DailyPlanGatheringLocations({
     }
   }
 
-  async function saveAddress() {
-    if (!place || isSavingAddress || uploadLockRef.current) return;
-    setIsSavingAddress(true);
-    setAddressError("");
-    setMessage("");
-    try {
-      const result = await updateDailyPlanGatheringAddress({
-        projectId,
-        dailyPlanId: plan.id,
-        gatheringPointId: place.persistedId,
-        locationId: place.locationId,
-        locationName: place.locationName,
-        departmentIds: place.departmentIds,
-        address: addressDraft,
-        expectedUpdatedAt: plan.updatedAt
-      });
-      onPlanMetadataChange({
-        memo: result.memo,
-        shootingLocations: result.shootingLocations,
-        updatedAt: result.updatedAt
-      });
-      closeAddressEditor();
-      setMessage("주소를 저장했습니다.");
-    } catch (error) {
-      setAddressError(error instanceof Error ? error.message : "주소를 저장하지 못했습니다.");
-    } finally {
-      setIsSavingAddress(false);
-    }
-  }
-
   return (
     <section
       className={cn(
@@ -574,7 +602,10 @@ export function DailyPlanGatheringLocations({
     >
       <div className="flex min-h-9 items-center justify-between gap-3 border-b border-field-border px-3 py-2">
         <h2 id="gathering-locations-title" className="text-sm font-bold text-field-text">집합장소</h2>
-        {message ? <p className="min-w-0 break-words text-right text-[11px] font-normal text-field-muted [overflow-wrap:anywhere]" role="status">{message}</p> : null}
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          {message ? <p className="min-w-0 break-words text-right text-[11px] font-normal text-field-muted [overflow-wrap:anywhere]" role="status">{message}</p> : null}
+          <AutosaveStatus status={addressAutosave.status} onRetry={addressAutosave.retry} />
+        </div>
       </div>
 
       {!hasContent ? (
@@ -617,18 +648,19 @@ export function DailyPlanGatheringLocations({
           <GatheringAddressEditor
             locationName={place.locationName}
             addressDraft={addressDraft}
-            isSaving={isSavingAddress}
+            autosaveStatus={addressAutosave.status}
             errorMessage={addressError}
             onAddressDraftChange={(value) => {
               setAddressDraft(value);
               setAddressError("");
             }}
             onCancel={() => {
-              setAddressError("");
-              setAddressDraft(place.address);
+              void addressAutosave.flush();
               closeAddressEditor();
             }}
-            onSave={() => void saveAddress()}
+            onRetry={addressAutosave.retry}
+            onFlush={() => void addressAutosave.flush()}
+            onCompositionChange={setIsComposingAddress}
           />
         ) : null}
       </MotionPresence>
@@ -887,19 +919,23 @@ export function GatheringPhotoStrip({
 function GatheringAddressEditor({
   locationName,
   addressDraft,
-  isSaving,
+  autosaveStatus,
   errorMessage,
   onAddressDraftChange,
   onCancel,
-  onSave
+  onRetry,
+  onFlush,
+  onCompositionChange
 }: {
   locationName: string;
   addressDraft: string;
-  isSaving: boolean;
+  autosaveStatus: AutosaveStatusValue;
   errorMessage: string;
   onAddressDraftChange: (value: string) => void;
   onCancel: () => void;
-  onSave: () => void;
+  onRetry: () => void;
+  onFlush: () => void;
+  onCompositionChange: (composing: boolean) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const addressInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -907,7 +943,7 @@ function GatheringAddressEditor({
     dialogRef,
     initialFocusRef: addressInputRef,
     onClose: onCancel,
-    isBusy: isSaving
+    isBusy: false
   });
 
   return (
@@ -919,18 +955,21 @@ function GatheringAddressEditor({
       aria-modal="true"
       aria-labelledby="gathering-address-editor-title"
       aria-describedby={errorMessage ? "gathering-address-editor-error" : undefined}
-      aria-busy={isSaving}
       tabIndex={-1}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !isSaving) onCancel();
+        if (event.target === event.currentTarget) onCancel();
       }}
     >
       <form
         className="ui-motion-dialog max-h-[min(82dvh,30rem)] w-full max-w-md overflow-y-auto rounded-t-[var(--radius-dialog)] border border-field-divider bg-field-dialog p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-dialog sm:rounded-[var(--radius-dialog)] sm:pb-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!isSaving) onSave();
+          onFlush();
+          onCancel();
         }}
+        onBlurCapture={onFlush}
+        onCompositionStart={() => onCompositionChange(true)}
+        onCompositionEnd={() => onCompositionChange(false)}
       >
         <div className="flex items-start justify-between gap-3 border-b border-field-border pb-3">
           <div className="min-w-0">
@@ -943,7 +982,6 @@ function GatheringAddressEditor({
             variant="secondary"
             className="!min-h-9 !w-9 shrink-0 p-1"
             onClick={onCancel}
-            disabled={isSaving}
             aria-label="주소 수정 닫기"
           >
             <X className="h-4 w-4" aria-hidden />
@@ -959,7 +997,6 @@ function GatheringAddressEditor({
           value={addressDraft}
           maxLength={1000}
           rows={3}
-          disabled={isSaving}
           onChange={(event) => onAddressDraftChange(event.currentTarget.value)}
           className="mt-1.5 min-h-24 w-full resize-y rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 py-2.5 text-sm font-normal leading-5 text-field-text outline-none transition-colors placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary-focus disabled:bg-field-disabled"
           placeholder="집합장소 주소"
@@ -972,13 +1009,10 @@ function GatheringAddressEditor({
           </p>
         ) : null}
 
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-field-border pt-3">
-          <Button variant="secondary" className="min-h-11" onClick={onCancel} disabled={isSaving}>
-            취소
-          </Button>
-          <Button className="min-h-11" type="submit" disabled={isSaving}>
-            <Save className="h-4 w-4" aria-hidden />
-            {isSaving ? "저장 중" : "저장"}
+        <div className="mt-4 flex min-h-11 items-center justify-between gap-3 border-t border-field-border pt-3">
+          <AutosaveStatus status={autosaveStatus} onRetry={onRetry} />
+          <Button className="min-h-11 min-w-24" type="submit">
+            닫기
           </Button>
         </div>
       </form>

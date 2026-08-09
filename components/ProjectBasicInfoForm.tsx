@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, Save, Trash2, X } from "lucide-react";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { Button } from "@/components/ui/Button";
+import { useAutosave } from "@/hooks/useAutosave";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
   createBlankProjectMainStaffMember,
@@ -13,7 +15,6 @@ import {
   validateProjectBasicInfo
 } from "@/lib/projectBasicInfo";
 import type { ProjectActor, ProjectBasicInfo, ProjectMainStaffMember } from "@/lib/types";
-import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import {
   useAutoContextualGuide,
   useContextualGuide,
@@ -22,26 +23,29 @@ import {
 } from "@/components/guides/ContextualGuideProvider";
 
 type ProjectBasicInfoFormProps = {
+  projectId: string;
   projectName: string;
   initialValue: ProjectBasicInfo;
-  onSave: (value: ProjectBasicInfo) => Promise<void>;
+  onAutoSave: (value: ProjectBasicInfo) => Promise<void>;
+  onComplete: () => void;
+};
+
+type ProjectBasicInfoDraft = {
+  value: ProjectBasicInfo;
+  totalEpisodesDraft: string;
 };
 
 const fieldClass =
   "min-h-11 w-full min-w-0 border border-field-border bg-field-input px-3 py-2 text-center text-sm text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
-export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: ProjectBasicInfoFormProps) {
-  const [value, setValue] = useState<ProjectBasicInfo>(() => ({
-    ...initialValue,
-    mainStaff: initialValue.mainStaff.length > 0
-      ? initialValue.mainStaff.map((member) => ({ ...member, phone: formatKoreanPhoneNumber(member.phone) }))
-      : [createFormMainStaffMember()],
-    actors: initialValue.actors.length > 0 ? initialValue.actors.map((actor) => ({ ...actor })) : [{ role: "", name: "" }]
-  }));
+export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onAutoSave, onComplete }: ProjectBasicInfoFormProps) {
+  const [value, setValue] = useState<ProjectBasicInfo>(() => normalizeProjectBasicInfoForForm(initialValue));
   const [totalEpisodesDraft, setTotalEpisodesDraft] = useState(String(initialValue.totalEpisodes));
   const [isSaving, setIsSaving] = useState(false);
+  const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
   const [openEpisodeStaffId, setOpenEpisodeStaffId] = useState<string | null>(null);
   const basicInfoGuideAnchor = useContextualGuideAnchor<HTMLFormElement>("basic-info.form");
   const { completeGuide } = useContextualGuide();
@@ -57,7 +61,6 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
   }, [initialValue]);
   useAutoContextualGuide("basic-info.intro", basicInfoGuideUseful);
   useContextualGuideBlocker("basic-info-episode-selector", openEpisodeStaffId !== null);
-  const savedFingerprintRef = useRef(JSON.stringify({ value, totalEpisodesDraft }));
   const selectableTotalEpisodes = parseSelectableTotalEpisodes(totalEpisodesDraft);
   const episodeLimitViolations = useMemo(
     () => selectableTotalEpisodes
@@ -65,9 +68,88 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
       : [],
     [selectableTotalEpisodes, value.mainStaff]
   );
-  useUnsavedChangesGuard(
-    JSON.stringify({ value, totalEpisodesDraft }) !== savedFingerprintRef.current
-  );
+  const autosaveDraft = useMemo<ProjectBasicInfoDraft>(() => ({ value, totalEpisodesDraft }), [totalEpisodesDraft, value]);
+  const draftStorageKey = `shotcl:autosave:project-basic-info:${projectId}`;
+  const initialDraftFingerprint = useMemo(() => projectBasicInfoDraftFingerprint({
+    value: normalizeProjectBasicInfoForForm(initialValue),
+    totalEpisodesDraft: String(initialValue.totalEpisodes)
+  }), [initialValue]);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(draftStorageKey);
+      if (raw) {
+        const restored = JSON.parse(raw) as ProjectBasicInfoDraft;
+        const validation = validateProjectBasicInfo({
+          ...restored.value,
+          totalEpisodes: Number(restored.totalEpisodesDraft)
+        });
+        if (validation.ok && projectBasicInfoDraftFingerprint(restored) !== initialDraftFingerprint) {
+          setValue({
+            ...restored.value,
+            mainStaff: restored.value.mainStaff.map((member) => ({
+              ...member,
+              phone: formatKoreanPhoneNumber(member.phone)
+            }))
+          });
+          setTotalEpisodesDraft(restored.totalEpisodesDraft);
+        } else {
+          window.sessionStorage.removeItem(draftStorageKey);
+        }
+      }
+    } catch {
+      window.sessionStorage.removeItem(draftStorageKey);
+    } finally {
+      setIsDraftHydrated(true);
+    }
+  }, [draftStorageKey, initialDraftFingerprint]);
+
+  useEffect(() => {
+    if (!isDraftHydrated) return;
+    try {
+      if (projectBasicInfoDraftFingerprint(autosaveDraft) === initialDraftFingerprint) {
+        window.sessionStorage.removeItem(draftStorageKey);
+      } else {
+        window.sessionStorage.setItem(draftStorageKey, JSON.stringify(autosaveDraft));
+      }
+    } catch {
+      // Storage availability must never block editing or background save.
+    }
+  }, [autosaveDraft, draftStorageKey, initialDraftFingerprint, isDraftHydrated]);
+
+  const autosave = useAutosave<ProjectBasicInfoDraft>({
+    value: autosaveDraft,
+    enabled: !isComposing && !isSaving,
+    delayMs: 700,
+    scopeKey: `project-basic-info:${projectId}`,
+    validate: (draft) => validateProjectBasicInfo({
+      ...draft.value,
+      totalEpisodes: Number(draft.totalEpisodesDraft)
+    }).ok,
+    save: async (draft) => {
+      const validation = validateProjectBasicInfo({
+        ...draft.value,
+        totalEpisodes: Number(draft.totalEpisodesDraft)
+      });
+      if (!validation.ok) throw new Error(validation.error);
+      await onAutoSave(validation.value);
+    },
+    onSaved: (_result, savedDraft, meta) => {
+      if (meta.isLatest) {
+        setErrorMessage("");
+        try {
+          if (projectBasicInfoDraftFingerprint(savedDraft) === projectBasicInfoDraftFingerprint(autosaveDraft)) {
+            window.sessionStorage.removeItem(draftStorageKey);
+          }
+        } catch {
+          // Ignore unavailable storage; persistence already succeeded.
+        }
+      }
+    },
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : "프로젝트 기본정보를 자동 저장하지 못했습니다.");
+    }
+  });
 
   const updateStaff = useCallback((index: number, field: keyof Pick<ProjectMainStaffMember, "role" | "name" | "phone" | "includeInDailyPlan">, nextValue: string | boolean) => {
     setErrorMessage("");
@@ -176,7 +258,7 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
     }));
   }, []);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage("");
 
@@ -190,17 +272,30 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
     }
 
     setIsSaving(true);
+    // Persist a recoverable tab-local draft before immediate navigation. The
+    // exact current snapshot enters the background queue without awaiting it.
     try {
-      await onSave(validation.value);
-      completeGuide("basic-info.intro");
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "프로젝트 기본정보를 저장하지 못했습니다.");
-      setIsSaving(false);
+      window.sessionStorage.setItem(draftStorageKey, JSON.stringify(autosaveDraft));
+    } catch {
+      // Storage availability must not block completion/navigation.
     }
+    void autosave.saveNow(autosaveDraft);
+    completeGuide("basic-info.intro");
+    onComplete();
   }
 
   return (
-    <form ref={basicInfoGuideAnchor} noValidate onSubmit={handleSubmit} className="mx-auto grid w-full max-w-4xl gap-4">
+    <form
+      ref={basicInfoGuideAnchor}
+      noValidate
+      onSubmit={handleSubmit}
+      onBlurCapture={() => {
+        if (!isComposing) void autosave.flush();
+      }}
+      onCompositionStart={() => setIsComposing(true)}
+      onCompositionEnd={() => setIsComposing(false)}
+      className="mx-auto grid w-full max-w-4xl gap-4"
+    >
       <div className="flex flex-wrap items-center justify-center gap-2 px-1 text-center">
         <div className="min-w-0 text-center">
           <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>
@@ -334,14 +429,31 @@ export function ProjectBasicInfoForm({ projectName, initialValue, onSave }: Proj
         </p>
       ) : null}
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <AutosaveStatus status={autosave.status} onRetry={autosave.retry} />
         <Button type="submit" disabled={isSaving} className="w-full sm:w-auto sm:min-w-44">
           <Save className="h-4 w-4" aria-hidden />
-          {isSaving ? "저장 중" : "저장"}
+          {isSaving ? "확인 중" : "완료"}
         </Button>
       </div>
     </form>
   );
+}
+
+function projectBasicInfoDraftFingerprint(draft: ProjectBasicInfoDraft) {
+  return JSON.stringify(draft);
+}
+
+function normalizeProjectBasicInfoForForm(value: ProjectBasicInfo): ProjectBasicInfo {
+  return {
+    ...value,
+    mainStaff: value.mainStaff.length > 0
+      ? value.mainStaff.map((member) => ({ ...member, phone: formatKoreanPhoneNumber(member.phone) }))
+      : [createFormMainStaffMember()],
+    actors: value.actors.length > 0
+      ? value.actors.map((actor) => ({ ...actor }))
+      : [{ role: "", name: "" }]
+  };
 }
 
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

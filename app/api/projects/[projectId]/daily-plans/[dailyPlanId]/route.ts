@@ -15,7 +15,12 @@ import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { DailyPlanLocation } from "@/lib/types";
 
 type DailyPlanPatchBody = {
-  scheduleItem?: { id?: unknown; progressMemo?: unknown; imageUrl?: unknown };
+  scheduleItem?: {
+    id?: unknown;
+    progressMemo?: unknown;
+    imageUrl?: unknown;
+    expectedUpdatedAt?: unknown;
+  };
   gatheringAddress?: {
     gatheringPointId?: unknown;
     locationId?: unknown;
@@ -75,24 +80,53 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
       failureMessage = "기타일정 정보를 저장하지 못했습니다.";
       const itemId = String(body.scheduleItem.id ?? "").trim();
       if (!itemId) return NextResponse.json({ error: "수정할 기타일정 정보가 없습니다." }, { status: 400 });
+      const expectedUpdatedAt = String(body.scheduleItem.expectedUpdatedAt ?? "").trim();
+      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+        return NextResponse.json({ error: "기타일정 버전 정보가 올바르지 않습니다." }, { status: 400 });
+      }
       const { data: plan, error: selectError } = await supabase
         .from("daily_plans")
-        .select("meal_times")
+        .select("meal_times,updated_at")
         .eq("project_id", projectId)
         .eq("id", dailyPlanId)
         .maybeSingle();
       if (selectError) throw selectError;
       if (!plan) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
 
+      if (String(plan.updated_at ?? "") !== expectedUpdatedAt) {
+        return NextResponse.json({
+          error: "기타일정이 다른 화면에서 변경되었습니다. 최신 값에 다시 적용합니다.",
+          mealTimes: normalizeDailyPlanMealTimes(plan.meal_times),
+          latestUpdatedAt: String(plan.updated_at ?? "") || null
+        }, { status: 409 });
+      }
+
       const mealTimes = normalizeDailyPlanMealTimes(plan.meal_times);
       if (!mealTimes.some((item) => item.id === itemId)) {
         return NextResponse.json({ error: "기타일정을 찾을 수 없습니다." }, { status: 404 });
       }
-      const progressMemo = String(body.scheduleItem.progressMemo ?? "").slice(0, 2000);
-      const rawImageUrl = String(body.scheduleItem.imageUrl ?? "").trim();
-      const imageUrl = rawImageUrl ? rawImageUrl.slice(0, 4000) : null;
+      const hasProgressMemo = Object.prototype.hasOwnProperty.call(body.scheduleItem, "progressMemo");
+      const hasImageUrl = Object.prototype.hasOwnProperty.call(body.scheduleItem, "imageUrl");
+      if (!hasProgressMemo && !hasImageUrl) {
+        return NextResponse.json({ error: "수정할 기타일정 정보가 없습니다." }, { status: 400 });
+      }
       const nextMealTimes = mealTimes.map((item) => (
-        item.id === itemId ? { ...item, progressMemo, imageUrl } : item
+        item.id === itemId
+          ? {
+              ...item,
+              ...(hasProgressMemo
+                ? { progressMemo: String(body.scheduleItem!.progressMemo ?? "").slice(0, 2000) }
+                : {}),
+              ...(hasImageUrl
+                ? {
+                    imageUrl: (() => {
+                      const raw = String(body.scheduleItem!.imageUrl ?? "").trim();
+                      return raw ? raw.slice(0, 4000) : null;
+                    })()
+                  }
+                : {})
+            }
+          : item
       ));
 
       const { data: savedPlan, error: updateError } = await supabase
@@ -100,18 +134,44 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
         .update({ meal_times: nextMealTimes })
         .eq("project_id", projectId)
         .eq("id", dailyPlanId)
-        .select("meal_times")
-        .single();
+        .eq("updated_at", expectedUpdatedAt)
+        .select("meal_times,updated_at")
+        .maybeSingle();
       if (updateError) throw updateError;
-      return NextResponse.json({ mealTimes: normalizeDailyPlanMealTimes(savedPlan.meal_times) });
+      if (!savedPlan) {
+        const { data: latest, error: latestError } = await supabase
+          .from("daily_plans")
+          .select("meal_times,updated_at")
+          .eq("project_id", projectId)
+          .eq("id", dailyPlanId)
+          .maybeSingle();
+        if (latestError) throw latestError;
+        return NextResponse.json({
+          error: "기타일정이 다른 화면에서 변경되었습니다. 최신 값에 다시 적용합니다.",
+          mealTimes: normalizeDailyPlanMealTimes(latest?.meal_times),
+          latestUpdatedAt: String(latest?.updated_at ?? "") || null
+        }, { status: 409 });
+      }
+      return NextResponse.json({
+        mealTimes: normalizeDailyPlanMealTimes(savedPlan.meal_times),
+        updatedAt: String(savedPlan.updated_at ?? "")
+      });
     }
 
-    const { data: planRow, error: selectError } = await supabase
-      .from("daily_plans")
-      .select("*")
-      .eq("project_id", projectId)
-      .eq("id", dailyPlanId)
-      .maybeSingle();
+    const planResult = body.gatheringAddress
+      ? await supabase
+        .from("daily_plans")
+        .select("shooting_locations,memo,updated_at")
+        .eq("project_id", projectId)
+        .eq("id", dailyPlanId)
+        .maybeSingle()
+      : await supabase
+        .from("daily_plans")
+        .select("memo,updated_at")
+        .eq("project_id", projectId)
+        .eq("id", dailyPlanId)
+        .maybeSingle();
+    const { data: planRow, error: selectError } = planResult;
     if (selectError) throw selectError;
     if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
 
@@ -302,10 +362,17 @@ async function saveDailyPlanPatchWithCas(input: {
     .maybeSingle();
   if (error) throw error;
   if (!data) {
-    throw createRouteError(
+    const { data: latest, error: latestError } = await input.supabase
+      .from("daily_plans")
+      .select("updated_at")
+      .eq("project_id", input.projectId)
+      .eq("id", input.dailyPlanId)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    throw Object.assign(createRouteError(
       "일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인한 뒤 다시 저장해주세요.",
       409
-    );
+    ), { latestUpdatedAt: String(latest?.updated_at ?? "") || null });
   }
   return data as unknown as Record<string, unknown>;
 }
@@ -435,14 +502,19 @@ function dailyPlanPatchError(error: unknown, fallbackMessage: string) {
     return NextResponse.json({ error: fallbackMessage }, { status: 503 });
   }
   const value = error && typeof error === "object"
-    ? error as { message?: unknown; status?: unknown; safe?: unknown }
+    ? error as { message?: unknown; status?: unknown; safe?: unknown; latestUpdatedAt?: unknown }
     : null;
   const isSafe = value?.safe === true;
   const status = isSafe && typeof value?.status === "number" ? value.status : 500;
   const message = typeof value?.message === "string" ? value.message : "";
   if (status >= 500) console.error("[daily-plan:patch]", error);
   return NextResponse.json(
-    { error: isSafe ? message : fallbackMessage },
+    {
+      error: isSafe ? message : fallbackMessage,
+      ...(status === 409 && typeof value?.latestUpdatedAt === "string"
+        ? { latestUpdatedAt: value.latestUpdatedAt }
+        : {})
+    },
     { status }
   );
 }

@@ -30,13 +30,19 @@ type StaffDepartmentInput = {
 };
 
 type StaffReorderInput = {
+  action?: unknown;
   department?: unknown;
   memberIds?: unknown;
+  member?: unknown;
+  expectedUpdatedAt?: unknown;
 };
 
 type StaffDeleteInput = {
   memberId?: unknown;
 };
+
+const STAFF_MEMBER_COLUMNS = "id,project_id,department,name,phone,location,notes,sort_order,created_at,updated_at" as const;
+const STAFF_DEPARTMENT_COLUMNS = "id,project_id,name,sort_order,created_at,updated_at" as const;
 
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
@@ -267,6 +273,12 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
     const body = (await request.json()) as StaffReorderInput | null;
+    if (body?.action === "update-member") {
+      return await updateStaffMemberDraft(supabase, projectId, body);
+    }
+    if (body?.action === "update-department") {
+      return await updateStaffDepartmentDraft(supabase, projectId, body);
+    }
     if (!body || typeof body.department !== "string" || !Array.isArray(body.memberIds) || body.memberIds.length === 0 || body.memberIds.length > 500) {
       return NextResponse.json({ error: "스탭 순서 데이터가 올바르지 않습니다." }, { status: 400 });
     }
@@ -405,6 +417,109 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
   }
 }
 
+async function updateStaffMemberDraft(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: StaffReorderInput
+) {
+  if (!body.member || typeof body.member !== "object" || Array.isArray(body.member)) {
+    return NextResponse.json({ error: "자동 저장할 스탭 입력값이 올바르지 않습니다." }, { status: 400 });
+  }
+  const input = body.member as StaffMemberInput;
+  const id = String(input.id ?? "").trim();
+  const expectedUpdatedAt = normalizeExpectedUpdatedAt(body.expectedUpdatedAt, "스탭 행");
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "스탭 행 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  if (!expectedUpdatedAt.ok) {
+    return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+  }
+  const normalizedPatch = normalizeStaffMemberPatch(input);
+  if (!normalizedPatch.ok) {
+    return NextResponse.json({ error: normalizedPatch.error }, { status: 400 });
+  }
+  const { data: saved, error: saveError } = await supabase
+    .from("project_staff_members")
+    .update(normalizedPatch.fields)
+    .eq("project_id", projectId)
+    .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt.value)
+    .select(STAFF_MEMBER_COLUMNS)
+    .maybeSingle();
+  if (saveError) throw saveError;
+  if (!saved) {
+    const { data: latest, error: latestError } = await supabase
+      .from("project_staff_members")
+      .select(STAFF_MEMBER_COLUMNS)
+      .eq("project_id", projectId)
+      .eq("id", id)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    if (!latest) {
+      return NextResponse.json({ error: "자동 저장할 스탭을 찾을 수 없습니다." }, { status: 404 });
+    }
+    return NextResponse.json(
+      { error: "스탭 정보가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.", member: staffMemberResponseRow(latest) },
+      { status: 409 }
+    );
+  }
+  return NextResponse.json({ ok: true, member: staffMemberResponseRow(saved) });
+}
+
+async function updateStaffDepartmentDraft(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: StaffReorderInput
+) {
+  if (!body.department || typeof body.department !== "object" || Array.isArray(body.department)) {
+    return NextResponse.json({ error: "자동 저장할 부서 입력값이 올바르지 않습니다." }, { status: 400 });
+  }
+  const input = body.department as StaffDepartmentInput;
+  const id = String(input.id ?? "").trim();
+  const name = normalizeText(input.name, 100).trim();
+  const expectedUpdatedAt = normalizeExpectedUpdatedAt(body.expectedUpdatedAt, "부서");
+  if (!isUuid(id)) {
+    return NextResponse.json({ error: "부서 ID가 올바르지 않습니다." }, { status: 400 });
+  }
+  if (!name) {
+    return NextResponse.json({ error: "부서 이름을 입력해주세요." }, { status: 400 });
+  }
+  if (!expectedUpdatedAt.ok) {
+    return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+  }
+  const { data: saved, error: saveError } = await supabase
+    .from("project_staff_departments")
+    .update({ name })
+    .eq("project_id", projectId)
+    .eq("id", id)
+    .eq("updated_at", expectedUpdatedAt.value)
+    .select(STAFF_DEPARTMENT_COLUMNS)
+    .maybeSingle();
+  if (saveError?.code === "23505") {
+    // 중복 이름은 낙관적 잠금 충돌이 아니라 입력값 제약 위반입니다.
+    // 409를 쓰면 클라이언트가 최신 버전을 다시 적용하는 CAS 충돌로 오인합니다.
+    return NextResponse.json({ error: "같은 이름의 부서는 한 번만 등록할 수 있습니다." }, { status: 422 });
+  }
+  if (saveError) throw saveError;
+  if (!saved) {
+    const { data: latest, error: latestError } = await supabase
+      .from("project_staff_departments")
+      .select(STAFF_DEPARTMENT_COLUMNS)
+      .eq("project_id", projectId)
+      .eq("id", id)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    if (!latest) {
+      return NextResponse.json({ error: "자동 저장할 부서를 찾을 수 없습니다." }, { status: 404 });
+    }
+    return NextResponse.json(
+      { error: "부서 정보가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.", department: latest },
+      { status: 409 }
+    );
+  }
+  return NextResponse.json({ ok: true, department: saved });
+}
+
 /** 프로젝트와 stable staff ID를 함께 제한해 여러 번 호출해도 안전하게 같은 결과를 냅니다. */
 export async function DELETE(request: NextRequest, context: { params: Promise<{ projectId: string }> }) {
   try {
@@ -500,6 +615,29 @@ function normalizeMemberInput(
   };
 }
 
+function normalizeStaffMemberPatch(input: StaffMemberInput):
+  | { ok: true; fields: Record<string, unknown> }
+  | { ok: false; error: string } {
+  const fields: Record<string, unknown> = {};
+  const has = (key: keyof StaffMemberInput) => Object.prototype.hasOwnProperty.call(input, key);
+  if (has("department")) fields.department = normalizeStaffDepartment(input.department);
+  if (has("name")) fields.name = normalizeText(input.name, 100);
+  if (has("phone")) fields.phone = formatKoreanPhoneNumber(normalizeText(input.phone, 30));
+  if (has("location")) fields.location = normalizeText(input.location, 120);
+  if (has("notes")) {
+    const decoded = decodeProjectStaffNotes(input.notes);
+    fields.notes = encodeProjectStaffNotes(
+      decoded.role,
+      decoded.notes,
+      decoded.excludedEpisodeNumbers
+    );
+  }
+  if (Object.keys(fields).length === 0) {
+    return { ok: false, error: "자동 저장할 스탭 변경사항이 없습니다." };
+  }
+  return { ok: true, fields };
+}
+
 function staffMemberResponseRow(row: Record<string, unknown>) {
   const decodedNotes = decodeProjectStaffNotes(row.notes);
   return {
@@ -583,6 +721,19 @@ function normalizeDepartmentInput(
 
 function normalizeText(value: unknown, maxLength: number) {
   return String(value ?? "").slice(0, maxLength);
+}
+
+function normalizeExpectedUpdatedAt(value: unknown, label: string):
+  | { ok: true; value: string }
+  | { ok: false; error: string } {
+  if (typeof value !== "string") {
+    return { ok: false, error: `${label} 버전 정보가 올바르지 않습니다.` };
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 80 || Number.isNaN(Date.parse(normalized))) {
+    return { ok: false, error: `${label} 버전 정보가 올바르지 않습니다.` };
+  }
+  return { ok: true, value: normalized };
 }
 
 function isUuid(value: string) {

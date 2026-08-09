@@ -9,6 +9,7 @@ import type {
   ProjectScenarioScene,
 } from "@/lib/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 
 type ApiError = { error?: string; detail?: string };
 
@@ -403,6 +404,7 @@ export async function updateProjectReferenceAsset(
     scenarioScenes?: ProjectScenarioScene[];
     scenarioParseError?: string | null;
     reanalyzeScenario?: boolean;
+    expectedUpdatedAt?: string;
   }
 ): Promise<ProjectReferenceAsset> {
   const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
@@ -411,10 +413,56 @@ export async function updateProjectReferenceAsset(
     body: JSON.stringify({ id, ...patch })
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & { asset?: ProjectReferenceAsset };
+  if (response.status === 409) {
+    throw new AutosaveConflictError<ProjectReferenceAsset>(
+      "scenario-asset",
+      [payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오가 다른 곳에서 변경되었습니다.",
+      payload.asset ?? null
+    );
+  }
   if (!response.ok || !payload.asset) {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 설정을 저장하지 못했습니다.");
   }
   return payload.asset;
+}
+
+export type ProjectScenarioScenesUpdate = Pick<
+  ProjectReferenceAsset,
+  "id" | "scenarioScenes" | "scenarioParseError" | "updatedAt"
+>;
+
+export async function updateProjectScenarioScenes(
+  projectId: string,
+  id: string,
+  input: {
+    scenarioScenes: ProjectScenarioScene[];
+    scenarioParseError?: string | null;
+    expectedUpdatedAt: string;
+  }
+): Promise<ProjectScenarioScenesUpdate> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "update_scenario_scenes",
+      id,
+      ...input
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    asset?: ProjectScenarioScenesUpdate | ProjectReferenceAsset;
+  };
+  if (response.status === 409) {
+    throw new AutosaveConflictError<ProjectReferenceAsset>(
+      "scenario-asset",
+      [payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오가 다른 곳에서 변경되었습니다.",
+      payload.asset as ProjectReferenceAsset | null ?? null
+    );
+  }
+  if (!response.ok || !payload.asset) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오 씬을 저장하지 못했습니다.");
+  }
+  return payload.asset as ProjectScenarioScenesUpdate;
 }
 
 export type ProjectReferenceAssetOrderUpdate = {

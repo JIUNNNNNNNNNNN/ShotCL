@@ -13,6 +13,7 @@ import {
   saveDailyPlanWithShots,
   type SaveDailyPlanResult
 } from "@/lib/data/dailyPlans";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { getShotIdentityKey, syncShotsFromDrafts } from "@/lib/data/shots";
 import {
   createBlankCallSheetPerson,
@@ -83,6 +84,7 @@ import {
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanDocument } from "@/components/DailyPlanDocument";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
 import { DailyPlanLocationReorderList } from "@/components/DailyPlanLocationReorderList";
 import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
@@ -101,6 +103,7 @@ import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { useDailyPlanDocumentOrientation } from "@/hooks/useDailyPlanDocumentOrientation";
+import { useAutosave } from "@/hooks/useAutosave";
 import {
   useAutoContextualGuide,
   useContextualGuideBlocker
@@ -258,6 +261,16 @@ type TimetableMutationSnapshot = {
   mealTimes: DailyPlanMealTime[];
   printMeta: DailyPlanPrintMeta;
   automaticStartRowIds: Set<string>;
+};
+
+type DailyPlanAutosaveSnapshot = {
+  plan: DailyPlanDraft;
+  printMeta: DailyPlanPrintMeta;
+  locations: DailyPlanLocation[];
+  mealTimes: DailyPlanMealTime[];
+  scenes: SceneBlockInput[];
+  automaticStartRowIds: string[];
+  fingerprint: string;
 };
 
 type OpenMeteoResponse = {
@@ -430,8 +443,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [activePrintAction, setActivePrintAction] = useState<DailyPlanPrintAction | null>(null);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
   const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
-  const [isTimetableMutationPending, setIsTimetableMutationPending] = useState(false);
-  const [isActorMutationPending, setIsActorMutationPending] = useState(false);
   const [activeDragSource, setActiveDragSource] = useState<"timetable" | "actor" | null>(null);
   const [gatheringPhotoPreview, setGatheringPhotoPreview] = useState<{
     images: Array<{ url: string; title: string }>;
@@ -456,6 +467,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       || gatheringPhotoPreview !== null
   );
   const isSavingRef = useRef(false);
+  const dailyPlanUpdatedAtRef = useRef<string | null>(initialPlan?.updatedAt ?? null);
+  const dailyPlanAutosaveSaveNowRef = useRef<(
+    snapshot: DailyPlanAutosaveSnapshot
+  ) => Promise<boolean>>(() => Promise.resolve(true));
   const isPrintingRef = useRef(false);
   const editorInteractionRootRef = useRef<HTMLDivElement | null>(null);
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
@@ -485,8 +500,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     rowKeys: timetableRowKeys,
     disabled: !canManageTimetable
       || isSaving
-      || isTimetableMutationPending
-      || isActorMutationPending
       || pendingTimetableDeleteKey !== null
       || pendingActorDeleteId !== null
       || activeDragSource === "actor",
@@ -508,8 +521,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     rowKeys: actorRowKeys,
     disabled: !canManageTimetable
       || isSaving
-      || isTimetableMutationPending
-      || isActorMutationPending
       || pendingTimetableDeleteKey !== null
       || pendingActorDeleteId !== null
       || activeDragSource === "timetable",
@@ -556,19 +567,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => createDailyPlanEditorFingerprint(plan, printMeta, locations, mealTimes, scenes),
     [locations, mealTimes, plan, printMeta, scenes]
   );
-  useUnsavedChangesGuard(currentEditorFingerprint !== savedEditorFingerprint);
+  // Persisted plans are protected by the background queue and flush on
+  // navigation. Only a not-yet-created plan needs the explicit dirty guard.
+  useUnsavedChangesGuard(
+    !dailyPlanId && currentEditorFingerprint !== savedEditorFingerprint
+  );
   useEffect(() => {
     const root = editorInteractionRootRef.current;
     if (!root) return;
-    const shouldLock = isSaving || isTimetableMutationPending || isActorMutationPending;
-    root.inert = shouldLock;
-    if (shouldLock && document.activeElement instanceof HTMLElement && root.contains(document.activeElement)) {
-      document.activeElement.blur();
-    }
+    // Explicit manual save만 잠깁니다. Background autosave/reorder persistence는
+    // focus, drag, navigation을 막지 않습니다.
+    root.inert = isSaving;
     return () => {
       root.inert = false;
     };
-  }, [isActorMutationPending, isSaving, isTimetableMutationPending]);
+  }, [isSaving]);
   const previewData = useMemo(() => {
     const printablePlan = buildPlanForSave(
       deferredPreviewSource.plan,
@@ -1107,83 +1120,80 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setPrintMeta(snapshot.printMeta);
   }
 
-  async function persistTimetableMutation(
-    nextSnapshot: TimetableMutationSnapshot,
-    rollbackSnapshot: TimetableMutationSnapshot,
-    successMessage: string
-  ) {
+  function createAutosaveSnapshotForTimetableMutation(
+    nextSnapshot: TimetableMutationSnapshot
+  ): DailyPlanAutosaveSnapshot {
+    return {
+      plan,
+      printMeta: nextSnapshot.printMeta,
+      locations,
+      mealTimes: nextSnapshot.mealTimes,
+      scenes: nextSnapshot.scenes,
+      automaticStartRowIds: [...nextSnapshot.automaticStartRowIds],
+      fingerprint: createDailyPlanEditorFingerprint(
+        plan,
+        nextSnapshot.printMeta,
+        locations,
+        nextSnapshot.mealTimes,
+        nextSnapshot.scenes
+      )
+    };
+  }
+
+  function persistTimetableMutation(nextSnapshot: TimetableMutationSnapshot) {
     applyTimetableMutationSnapshot(nextSnapshot);
-    setIsTimetableMutationPending(true);
-    setErrorMessage("");
-    try {
-      const result = await saveCurrentPlan(false, nextSnapshot);
-      if (!result) {
-        applyTimetableMutationSnapshot(rollbackSnapshot);
-        return;
-      }
-      setMessage(result.didSyncShots ? successMessage : formatProgressSyncFailure(result.saved));
-    } finally {
-      setIsTimetableMutationPending(false);
+    if (dailyPlanId) {
+      // Drop/delete 결과를 먼저 화면에 적용하고 같은 latest-wins queue로
+      // persistence만 뒤에서 진행합니다. 실패해도 사용자의 local draft는 유지됩니다.
+      void dailyPlanAutosaveSaveNowRef.current(
+        createAutosaveSnapshotForTimetableMutation(nextSnapshot)
+      );
     }
   }
 
-  async function persistTimetableReorder(orderedRowKeys: string[]) {
-    if (!canManageTimetable || isSavingRef.current || isTimetableMutationPending) return;
+  function persistTimetableReorder(orderedRowKeys: string[]) {
+    if (!canManageTimetable || isSaving) return;
     const nextRows = orderEditorTimetableRowsByStableKeys(timetableRows, orderedRowKeys);
     if (nextRows === timetableRows) return;
-    const rollbackSnapshot = captureTimetableMutationSnapshot();
     const nextSnapshot = createTimetableMutationSnapshot(
       nextRows,
       printMeta,
       automaticStartRowIdsRef.current
     );
-    await persistTimetableMutation(nextSnapshot, rollbackSnapshot, "타임테이블 순서를 저장했습니다.");
+    persistTimetableMutation(nextSnapshot);
   }
 
-  async function confirmTimetableDelete() {
+  function confirmTimetableDelete() {
     const rowKey = pendingTimetableDeleteKey;
-    if (!rowKey || !canManageTimetable || isSavingRef.current || isTimetableMutationPending) return;
+    if (!rowKey || !canManageTimetable || isSaving) return;
     const nextRows = timetableRows.filter((row) => getEditorTimetableRowKey(row) !== rowKey);
     if (nextRows.length === timetableRows.length) {
       setPendingTimetableDeleteKey(null);
       return;
     }
-    const rollbackSnapshot = captureTimetableMutationSnapshot();
     const nextSnapshot = createTimetableMutationSnapshot(
       nextRows,
       printMeta,
       automaticStartRowIdsRef.current
     );
     setPendingTimetableDeleteKey(null);
-    await persistTimetableMutation(nextSnapshot, rollbackSnapshot, "타임테이블 행을 삭제했습니다.");
+    timetableInteraction.clearSelection();
+    persistTimetableMutation(nextSnapshot);
   }
 
-  async function persistActorMutation(
-    nextSnapshot: TimetableMutationSnapshot,
-    rollbackSnapshot: TimetableMutationSnapshot,
-    successMessage: string
-  ) {
+  function persistActorMutation(nextSnapshot: TimetableMutationSnapshot) {
     applyTimetableMutationSnapshot(nextSnapshot);
-    setIsActorMutationPending(true);
-    setErrorMessage("");
-    try {
-      const result = await saveCurrentPlan(false, nextSnapshot);
-      if (!result) {
-        applyTimetableMutationSnapshot(rollbackSnapshot);
-        return;
-      }
-      setMessage(result.didSyncShots ? successMessage : formatProgressSyncFailure(result.saved));
-    } finally {
-      setIsActorMutationPending(false);
+    if (dailyPlanId) {
+      void dailyPlanAutosaveSaveNowRef.current(
+        createAutosaveSnapshotForTimetableMutation(nextSnapshot)
+      );
     }
   }
 
-  async function persistActorReorder(orderedRowKeys: string[]) {
+  function persistActorReorder(orderedRowKeys: string[]) {
     if (
       !canManageTimetable
-      || isSavingRef.current
-      || isTimetableMutationPending
-      || isActorMutationPending
+      || isSaving
     ) return;
     const orderedActors = orderActorsByStableRowKeys(printMeta.starring, orderedRowKeys);
     if (orderedActors === printMeta.starring) return;
@@ -1195,17 +1205,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         starring: orderedActors
       }
     };
-    await persistActorMutation(nextSnapshot, rollbackSnapshot, "배우 순서를 저장했습니다.");
+    persistActorMutation(nextSnapshot);
   }
 
-  async function confirmActorDelete() {
+  function confirmActorDelete() {
     const actorId = pendingActorDeleteId;
     if (
       !actorId
       || !canManageTimetable
-      || isSavingRef.current
-      || isTimetableMutationPending
-      || isActorMutationPending
+      || isSaving
     ) return;
     const actor = printMeta.starring.find((person) => person.id === actorId);
     if (!actor) {
@@ -1229,7 +1237,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     };
     setPendingActorDeleteId(null);
     actorInteraction.clearSelection();
-    await persistActorMutation(nextSnapshot, rollbackSnapshot, "배우 카드를 삭제했습니다.");
+    persistActorMutation(nextSnapshot);
   }
 
   function updateSceneLocation(sceneIndex: number, locationId: string) {
@@ -1370,18 +1378,27 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
   }
 
-  async function saveCurrentPlan(showMessage = true, snapshot?: TimetableMutationSnapshot) {
+  async function saveCurrentPlan(
+    showMessage = true,
+    snapshot?: TimetableMutationSnapshot,
+    background = false,
+    autosaveSnapshot?: DailyPlanAutosaveSnapshot
+  ) {
     if (isSavingRef.current) return null;
-    const sourceScenes = snapshot?.scenes ?? scenes;
-    const sourceMealTimes = snapshot?.mealTimes ?? mealTimes;
-    const sourcePrintMeta = snapshot?.printMeta ?? printMeta;
-    const sourceAutomaticRowIds = snapshot?.automaticStartRowIds ?? automaticStartRowIdsRef.current;
+    const sourcePlan = autosaveSnapshot?.plan ?? plan;
+    const sourceLocations = autosaveSnapshot?.locations ?? locations;
+    const sourceScenes = autosaveSnapshot?.scenes ?? snapshot?.scenes ?? scenes;
+    const sourceMealTimes = autosaveSnapshot?.mealTimes ?? snapshot?.mealTimes ?? mealTimes;
+    const sourcePrintMeta = autosaveSnapshot?.printMeta ?? snapshot?.printMeta ?? printMeta;
+    const sourceAutomaticRowIds = autosaveSnapshot
+      ? new Set(autosaveSnapshot.automaticStartRowIds)
+      : snapshot?.automaticStartRowIds ?? automaticStartRowIdsRef.current;
     const sourceTimetableRows = buildEditorTimetableRows(
       sourceScenes,
       sourceMealTimes,
       sourcePrintMeta.timetableRowOrder
     );
-    const constraintMessage = getProjectConstraintMessage(plan, sourcePrintMeta, activeProjectBasicInfo);
+    const constraintMessage = getProjectConstraintMessage(sourcePlan, sourcePrintMeta, activeProjectBasicInfo);
     if (constraintMessage) {
       setMessage("");
       setErrorMessage(constraintMessage);
@@ -1394,10 +1411,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       return null;
     }
 
+    const submittedFingerprint = autosaveSnapshot?.fingerprint ?? createDailyPlanEditorFingerprint(
+      sourcePlan,
+      sourcePrintMeta,
+      sourceLocations,
+      sourceMealTimes,
+      sourceScenes
+    );
+
     isSavingRef.current = true;
-    setIsSaving(true);
-    setErrorMessage("");
-    setMessage("");
+    if (!background) {
+      setIsSaving(true);
+      setErrorMessage("");
+      setMessage("");
+    }
 
     try {
       const persistedTimetableRows = getPersistedEditorTimetableRows(sourceTimetableRows);
@@ -1411,22 +1438,19 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         timetableScenes: serializeTimetableScenes(sourceScenes, sceneListItems)
       });
       const planForSave = buildPlanForSave(
-        plan,
-        locations,
+        sourcePlan,
+        sourceLocations,
         sourceMealTimes,
         printMetaForSave,
         sourceScenes,
         sceneListItems
       );
-      const automaticRowPositions = captureAutomaticTimetableRowPositions(
-        persistedTimetableRows,
-        sourceAutomaticRowIds
-      );
       const saved = await saveDailyPlanWithShots({
         projectId: project.id,
         dailyPlanId,
+        expectedUpdatedAt: dailyPlanId ? dailyPlanUpdatedAtRef.current : null,
         plan: planForSave,
-        shots: scenesToShotDrafts(sourceScenes, locations)
+        shots: scenesToShotDrafts(sourceScenes, sourceLocations)
       });
       if (saved.saveStatus === "duplicate") {
         setMessage(saved.message);
@@ -1434,71 +1458,98 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       }
 
       const didSyncShots = await completeShotBoardSync(saved);
-      const savedDraft = planToDraft(saved.plan);
-      const savedMeta = decodeDailyPlanMemo(savedDraft.memo);
-      const nextLocations = buildInitialLocations(savedDraft);
-      const nextMeals = buildInitialMeals(savedDraft, false);
-      const savedShotDrafts = saved.shots.map(dailyPlanShotToDraft);
-      const hasStoredSceneRows = savedMeta.timetableScenes.length > 0 || savedShotDrafts.length > 0;
-      const nextScenes = hasStoredSceneRows
-        ? restoreTimetableScenes(
-          savedMeta.timetableScenes,
-          savedShotDrafts,
-          nextLocations,
-          sceneListItems
-        )
-        : [];
-      const nextPersistedTimetableRows = getPersistedEditorTimetableRows(
-        buildEditorTimetableRows(nextScenes, nextMeals, savedMeta.timetableRowOrder)
-      );
-      const nextTimetableRowKeys = new Set(nextPersistedTimetableRows.map(getEditorTimetableRowKey));
-      const savedAutomaticRowIds = new Set(
-        savedMeta.automaticTimetableRowIds.filter((rowKey) => nextTimetableRowKeys.has(rowKey))
-      );
-      automaticStartRowIdsRef.current = savedAutomaticRowIds.size > 0
-        ? savedAutomaticRowIds
-        : restoreAutomaticTimetableRowIds(nextPersistedTimetableRows, automaticRowPositions);
+      const persistedTimetableRowKeys = new Set(persistedTimetableRows.map(getEditorTimetableRowKey));
+      if (!background) {
+        automaticStartRowIdsRef.current = new Set(
+          persistedAutomaticRowIds.filter((rowKey) => persistedTimetableRowKeys.has(rowKey))
+        );
+      }
+      dailyPlanUpdatedAtRef.current = saved.plan.updatedAt;
       upsertDailyPlan(saved.plan, {
         shotCount: saved.shots.length,
         ...(typeof saved.progressShotCount === "number" ? { progressTotal: saved.progressShotCount } : {}),
         sceneNumbers: [...new Set(saved.shots.map((shot) => shot.sceneNumber.trim()).filter(Boolean))]
       });
       setDailyPlanId(saved.plan.id);
-      setPlan({ ...savedDraft, memo: savedMeta.memoText });
-      setPrintMeta(savedMeta);
-      setLocations(nextLocations);
-      setLocationInputModes(buildLocationInputModes(nextLocations));
-      setMealTimes(nextMeals);
-      setScenes(nextScenes);
-      setSavedEditorFingerprint(createDailyPlanEditorFingerprint(
-        { ...savedDraft, memo: savedMeta.memoText },
-        savedMeta,
-        nextLocations,
-        nextMeals,
-        nextScenes
-      ));
+      // 저장 응답으로 편집 중인 입력을 다시 채우지 않습니다. 네트워크 왕복 중
+      // 사용자가 계속 입력한 내용은 로컬 상태에 남고, 제출한 스냅샷만 저장 완료로 표시합니다.
+      setSavedEditorFingerprint(submittedFingerprint);
 
       if (!dailyPlanId) {
         router.replace(`/projects/${project.id}/daily-plans/${saved.plan.id}`);
       }
 
-      if (showMessage) {
+      if (showMessage && !background) {
         setMessage(didSyncShots ? saved.message : formatProgressSyncFailure(saved));
       }
 
       return { saved, didSyncShots };
     } catch (error) {
-      if (error instanceof DailyPlanDuplicateError) {
+      if (error instanceof AutosaveConflictError && error.kind === "daily-plan") {
+        const latest = error.latest as { updatedAt?: string } | null;
+        if (latest?.updatedAt) dailyPlanUpdatedAtRef.current = latest.updatedAt;
+      }
+      if (background) throw error;
+      if (error instanceof DailyPlanDuplicateError && !background) {
         setMessage(error.message);
-      } else {
-        setErrorMessage("일촬표를 저장하지 못했습니다.");
+      } else if (!background) {
+        setErrorMessage(error instanceof Error ? error.message : "일촬표를 저장하지 못했습니다.");
       }
       return null;
     } finally {
       isSavingRef.current = false;
-      setIsSaving(false);
+      if (!background) setIsSaving(false);
     }
   }
+
+  const dailyPlanAutosaveSnapshot = useMemo<DailyPlanAutosaveSnapshot>(() => ({
+    plan,
+    printMeta,
+    locations,
+    mealTimes,
+    scenes,
+    automaticStartRowIds: [...automaticStartRowIdsRef.current],
+    fingerprint: currentEditorFingerprint
+  }), [currentEditorFingerprint, locations, mealTimes, plan, printMeta, scenes]);
+  const dailyPlanAutosave = useAutosave({
+    value: dailyPlanAutosaveSnapshot,
+    enabled: Boolean(
+      canManageTimetable
+      && dailyPlanId
+      && !isSaving
+      && !isPrinting
+      && pendingTimetableDeleteKey === null
+      && pendingActorDeleteId === null
+      && activeDragSource === null
+    ),
+    delayMs: 1_100,
+    scopeKey: `daily-plan:${project.id}:${dailyPlanId ?? "new"}`,
+    initialSavedFingerprint: savedEditorFingerprint,
+    fingerprint: (snapshot) => snapshot.fingerprint,
+    restoreDraft: (snapshot) => {
+      setPlan(snapshot.plan);
+      setPrintMeta(snapshot.printMeta);
+      setLocations(snapshot.locations);
+      setMealTimes(snapshot.mealTimes);
+      setScenes(snapshot.scenes);
+      automaticStartRowIdsRef.current = new Set(snapshot.automaticStartRowIds);
+    },
+    save: async (snapshot) => {
+      const result = await saveCurrentPlan(false, undefined, true, snapshot);
+      if (!result) throw new Error("일촬표를 자동 저장하지 못했습니다.");
+      return result;
+    },
+    onSaved: () => setErrorMessage(""),
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : "일촬표를 자동 저장하지 못했습니다.");
+    }
+  });
+  dailyPlanAutosaveSaveNowRef.current = dailyPlanAutosave.saveNow;
+  useEffect(() => {
+    if (currentEditorFingerprint === savedEditorFingerprint) {
+      dailyPlanAutosave.markSaved(dailyPlanAutosaveSnapshot);
+    }
+  }, [currentEditorFingerprint, dailyPlanAutosave, dailyPlanAutosaveSnapshot, savedEditorFingerprint]);
 
   sidebarSaveRequestRef.current = () => {
     void saveCurrentPlan();
@@ -1664,11 +1715,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       },
       dailyPlanSave: {
         onSelect: () => sidebarSaveRequestRef.current(),
-        disabled: !canManageTimetable || isSaving,
-        pending: isSaving
+        disabled: !canManageTimetable || isSaving || dailyPlanAutosave.isPending,
+        pending: isSaving || dailyPlanAutosave.isPending
       },
     }
-  }), [activePrintAction, canManageTimetable, canPrint, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
+  }), [activePrintAction, canManageTimetable, canPrint, dailyPlanAutosave.isPending, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
   useProjectPageActionMenu(dailyPlanActionMenu);
 
   const isActorCardDragging = actorInteraction.isDragging;
@@ -1684,11 +1735,19 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     <div className="print-daily-plan">
       <div
         ref={editorInteractionRootRef}
-        aria-busy={isSaving || isTimetableMutationPending || isActorMutationPending}
+        aria-busy={isSaving}
+        onBlur={() => {
+          if (dailyPlanId) void dailyPlanAutosave.flush();
+        }}
         className={`daily-plan-editor no-print text-center text-[13px] md:text-sm ${
-          isSaving || isTimetableMutationPending || isActorMutationPending ? "pointer-events-none select-none" : ""
+          isSaving ? "pointer-events-none select-none" : ""
         }`}
       >
+        {canManageTimetable && dailyPlanId ? (
+          <div className="mb-2 flex justify-end">
+            <AutosaveStatus status={dailyPlanAutosave.status} onRetry={dailyPlanAutosave.retry} />
+          </div>
+        ) : null}
         {message ? <div role="status" className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-semibold text-field-text">{message}</div> : null}
         {errorMessage ? <div role="alert" className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-semibold text-field-danger">{errorMessage}</div> : null}
 
@@ -2385,7 +2444,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
-                disabled={isTimetableMutationPending}
                 onClick={() => {
                   setPendingTimetableDeleteKey(null);
                   timetableInteraction.clearSelection();
@@ -2395,8 +2453,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </Button>
               <Button
                 variant="danger"
-                disabled={isTimetableMutationPending}
-                onClick={() => void confirmTimetableDelete()}
+                onClick={confirmTimetableDelete}
               >
                 삭제
               </Button>
@@ -2422,7 +2479,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
                 variant="secondary"
-                disabled={isActorMutationPending}
                 onClick={() => {
                   setPendingActorDeleteId(null);
                   actorInteraction.clearSelection();
@@ -2432,8 +2488,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
               </Button>
               <Button
                 variant="danger"
-                disabled={isActorMutationPending}
-                onClick={() => void confirmActorDelete()}
+                onClick={confirmActorDelete}
               >
                 삭제
               </Button>
@@ -5345,36 +5400,6 @@ function getPersistedTimetableRowOrder(
 ) {
   if (configuredOrder.length === 0) return [];
   return getPersistedEditorTimetableRows(rows).map((row) => row.type);
-}
-
-function captureAutomaticTimetableRowPositions(
-  rows: EditorTimetableRow[],
-  automaticRowIds: Set<string>
-) {
-  const positions = new Set<string>();
-  const typeIndexes: Record<EditorTimetableRow["type"], number> = { scene: 0, event: 0 };
-  rows.forEach((row) => {
-    const typeIndex = typeIndexes[row.type]++;
-    if (automaticRowIds.has(getEditorTimetableRowKey(row))) {
-      positions.add(`${row.type}:${typeIndex}`);
-    }
-  });
-  return positions;
-}
-
-function restoreAutomaticTimetableRowIds(
-  rows: EditorTimetableRow[],
-  positions: Set<string>
-) {
-  const automaticRowIds = new Set<string>();
-  const typeIndexes: Record<EditorTimetableRow["type"], number> = { scene: 0, event: 0 };
-  rows.forEach((row) => {
-    const typeIndex = typeIndexes[row.type]++;
-    if (positions.has(`${row.type}:${typeIndex}`)) {
-      automaticRowIds.add(getEditorTimetableRowKey(row));
-    }
-  });
-  return automaticRowIds;
 }
 
 function getNextCutNumber(currentValue: string | undefined, fallback: number) {

@@ -3,7 +3,8 @@ import {
   dailyPlanDraftToRow,
   dailyPlanFromRow,
   dailyPlanShotDraftToRow,
-  dailyPlanShotFromRow
+  dailyPlanShotFromRow,
+  normalizeDailyPlanMealTimes
 } from "@/lib/data/mappers";
 import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import { mergeLatestGatheringPhotoMetadata } from "@/lib/dailyPlan/gatheringPoints";
@@ -13,10 +14,11 @@ import { ProgressShotsSyncError, syncProgressShotsForDailyPlan } from "@/lib/dai
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
-import type { DailyPlanDraft, DailyPlanShotDraft } from "@/lib/types";
+import type { DailyPlanDraft, DailyPlanMealTime, DailyPlanShotDraft } from "@/lib/types";
 
 type DailyPlanSaveBody = {
   dailyPlanId?: string | null;
+  expectedUpdatedAt?: string | null;
   plan: DailyPlanDraft;
   shots: DailyPlanShotDraft[];
   allowDuplicate?: boolean;
@@ -124,6 +126,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       }
       body = {
         dailyPlanId: requestBody.dailyPlanId,
+        expectedUpdatedAt: requestBody.expectedUpdatedAt,
         plan: requestBody.plan,
         shots: requestBody.shots,
         allowDuplicate: requestBody.allowDuplicate
@@ -148,6 +151,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
     let planRow: Record<string, unknown>;
     let shotRows: Record<string, unknown>[] = [];
     if (body.dailyPlanId) {
+      const expectedUpdatedAt = String(body.expectedUpdatedAt ?? "").trim();
+      if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+        return NextResponse.json(
+          { ok: false, status: "failed", error: "최신 일촬표 저장 시각이 필요합니다." },
+          { status: 400 }
+        );
+      }
       const { data: existingPlan, error: existingPlanError } = await supabase
         .from("daily_plans")
         .select("*")
@@ -158,8 +168,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       if (!existingPlan) {
         return NextResponse.json({ ok: false, status: "failed", error: "수정할 일촬표를 찾을 수 없습니다." }, { status: 404 });
       }
+      if (String(existingPlan.updated_at ?? "") !== expectedUpdatedAt) {
+        return dailyPlanSaveConflict(existingPlan.updated_at);
+      }
       body.plan = {
         ...body.plan,
+        mealTimes: mergeLatestProgressScheduleFields(body.plan.mealTimes, existingPlan.meal_times),
         memo: encodeDailyPlanMemo(mergeLatestGatheringPhotoMetadata(
           decodeDailyPlanMemo(body.plan.memo),
           decodeDailyPlanMemo(String(existingPlan.memo ?? "")),
@@ -176,7 +190,33 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
 
       const newRows = body.shots.map((shot, index) => dailyPlanShotDraftToRow(projectId, body.dailyPlanId!, shot, index + 1));
       const insertedIds: string[] = [];
+      let claimedPlanRow: Record<string, unknown> | null = null;
       try {
+        // Claim the document version before touching child rows. Two editors
+        // can otherwise both replace shots and the later CAS loser may restore
+        // stale rows over the winner's result.
+        const { data: savedPlan, error: planError } = await supabase
+          .from("daily_plans")
+          .update(dailyPlanDraftToRow(projectId, body.plan))
+          .eq("id", body.dailyPlanId)
+          .eq("project_id", projectId)
+          .eq("updated_at", expectedUpdatedAt)
+          .select("*")
+          .maybeSingle();
+        if (planError) throw planError;
+        if (!savedPlan) {
+          const { data: latest, error: latestError } = await supabase
+            .from("daily_plans")
+            .select("updated_at")
+            .eq("id", body.dailyPlanId)
+            .eq("project_id", projectId)
+            .maybeSingle();
+          if (latestError) throw latestError;
+          throw new DailyPlanSaveConflictError(latest?.updated_at);
+        }
+        planRow = savedPlan;
+        claimedPlanRow = savedPlan;
+
         if (newRows.length) {
           const { data, error } = await supabase.from("daily_plan_shots").insert(newRows).select("*").order("order_index");
           if (error) throw error;
@@ -187,20 +227,25 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
           const { error } = await supabase.from("daily_plan_shots").delete().in("id", oldShots.map((row) => row.id));
           if (error) throw error;
         }
-        const { data, error } = await supabase
-          .from("daily_plans")
-          .update(dailyPlanDraftToRow(projectId, body.plan))
-          .eq("id", body.dailyPlanId)
-          .eq("project_id", projectId)
-          .select("*")
-          .single();
-        if (error) throw error;
-        planRow = data;
       } catch (error) {
         if (insertedIds.length) await supabase.from("daily_plan_shots").delete().in("id", insertedIds);
         if (oldShots.length) {
           const { data: remainingOldShots } = await supabase.from("daily_plan_shots").select("id").in("id", oldShots.map((row) => row.id));
-          if ((remainingOldShots?.length ?? 0) < oldShots.length) await supabase.from("daily_plan_shots").insert(oldShots);
+          const remainingIds = new Set((remainingOldShots ?? []).map((row) => String(row.id)));
+          const missingOldShots = oldShots.filter((row) => !remainingIds.has(String(row.id)));
+          if (missingOldShots.length) await supabase.from("daily_plan_shots").insert(missingOldShots);
+        }
+        if (claimedPlanRow?.updated_at) {
+          // Revert the document only when no later progress/editor mutation
+          // advanced it after our claim. A failed rollback never overwrites a
+          // newer mutation.
+          const { error: rollbackError } = await supabase
+            .from("daily_plans")
+            .update(dailyPlanDraftToRow(projectId, dailyPlanFromRow(existingPlan)))
+            .eq("id", body.dailyPlanId)
+            .eq("project_id", projectId)
+            .eq("updated_at", claimedPlanRow.updated_at);
+          if (rollbackError) console.error("[daily-plan:rollback]", rollbackError);
         }
         throw error;
       }
@@ -274,11 +319,55 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       );
     }
   } catch (error) {
+    if (error instanceof DailyPlanSaveConflictError) {
+      return dailyPlanSaveConflict(error.latestUpdatedAt);
+    }
     if (isPostgresUniqueViolation(error)) {
       return NextResponse.json({ ok: false, status: "duplicate", message: DUPLICATE_MESSAGE }, { status: 409 });
     }
     return NextResponse.json({ ok: false, status: "failed", error: "일촬표를 저장하지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }
+}
+
+class DailyPlanSaveConflictError extends Error {
+  readonly latestUpdatedAt: string | null;
+
+  constructor(updatedAt: unknown) {
+    super("일촬표가 다른 화면에서 변경되었습니다.");
+    this.name = "DailyPlanSaveConflictError";
+    this.latestUpdatedAt = String(updatedAt ?? "") || null;
+  }
+}
+
+function dailyPlanSaveConflict(updatedAt: unknown) {
+  return NextResponse.json(
+    {
+      ok: false,
+      status: "conflict",
+      error: "일촬표가 다른 화면에서 변경되었습니다. 현재 입력은 유지되며, 최신 내용을 확인한 뒤 다시 저장해주세요.",
+      latestUpdatedAt: String(updatedAt ?? "") || null
+    },
+    { status: 409 }
+  );
+}
+
+/** 진행도에서만 편집하는 필드는 whole-document 재시도에도 최신값을 보존합니다. */
+function mergeLatestProgressScheduleFields(
+  incomingValue: unknown,
+  latestValue: unknown
+): DailyPlanMealTime[] {
+  const incoming = normalizeDailyPlanMealTimes(incomingValue);
+  const latestById = new Map(normalizeDailyPlanMealTimes(latestValue).map((item) => [item.id, item]));
+  return incoming.map((item) => {
+    const latest = latestById.get(item.id);
+    return latest
+      ? {
+          ...item,
+          progressMemo: latest.progressMemo ?? "",
+          imageUrl: latest.imageUrl ?? null
+        }
+      : item;
+  });
 }
 
 async function findDuplicateDailyPlan(supabase: ReturnType<typeof requireProjectAccessDb>, projectId: string, plan: DailyPlanDraft) {

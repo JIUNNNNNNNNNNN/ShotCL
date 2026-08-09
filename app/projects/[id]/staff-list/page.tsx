@@ -15,6 +15,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { InlineLoader, PageLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
@@ -30,11 +31,16 @@ import {
 import {
   createBlankProjectStaffDepartment,
   createBlankProjectStaffMember,
+  createProjectStaffMemberDraftPatch,
   deleteProjectStaffMember,
   listProjectStaffMembers,
   reorderProjectStaffMembers,
-  saveProjectStaffMembers
+  saveProjectStaffDepartmentDraft,
+  saveProjectStaffMemberDraft,
+  saveProjectStaffMembers,
+  type ProjectStaffMemberDraftPatch
 } from "@/lib/data/staffMembers";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { getProject } from "@/lib/data/projects";
 import {
@@ -45,6 +51,7 @@ import {
 } from "@/lib/dailyPlan/staffList";
 import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { useKeyedAutosave } from "@/hooks/useKeyedAutosave";
 
 const inputClassName =
   "workspace-control h-auto min-h-[var(--ui-compact-control-height)] w-full min-w-0 border px-2 py-1.5 text-center text-xs outline-none transition placeholder:text-center";
@@ -60,6 +67,14 @@ type PendingStaffDelete = {
   sectionKey: string;
   sectionLabel: string;
 };
+
+type StaffAutosaveEntity =
+  | { key: string; kind: "member"; member: ProjectStaffMember }
+  | { key: string; kind: "department"; department: ProjectStaffDepartment };
+
+type StaffAutosaveResult =
+  | { kind: "member"; member: ProjectStaffMember }
+  | { kind: "department"; department: ProjectStaffDepartment };
 
 function useProjectId() {
   const params = useParams<{ id: string | string[] }>();
@@ -79,6 +94,7 @@ export default function StaffListPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [composingAutosaveKey, setComposingAutosaveKey] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
@@ -92,6 +108,16 @@ export default function StaffListPage() {
   const editVersionRef = useRef(0);
   const membersRef = useRef<ProjectStaffMember[]>([]);
   const persistedMemberIdsRef = useRef(new Set<string>());
+  const persistedDepartmentIdsRef = useRef(new Set<string>());
+  const autosaveMemberVersionsRef = useRef(new Map<string, string>());
+  const autosaveDepartmentVersionsRef = useRef(new Map<string, string>());
+  const autosaveMemberSnapshotsRef = useRef(new Map<string, ProjectStaffMember>());
+  const autosaveDepartmentSnapshotsRef = useRef(new Map<string, ProjectStaffDepartment>());
+  const autosaveMemberIntentFieldsRef = useRef(new Map<string, Set<keyof ProjectStaffMemberDraftPatch>>());
+  const autosaveDepartmentIntentRef = useRef(new Set<string>());
+  const departmentsRef = useRef<ProjectStaffDepartment[]>([]);
+  const staffMemberMutationTailsRef = useRef(new Map<string, Promise<void>>());
+  const activeProjectIdRef = useRef(projectId);
   const sectionMutationLocksRef = useRef(new Set<string>());
   const sectionMutationVersionsRef = useRef(new Map<string, number>());
   const pendingDepartmentSubmitRef = useRef(false);
@@ -99,6 +125,7 @@ export default function StaffListPage() {
   const memberRoleInputRefs = useRef(new Map<string, HTMLInputElement>());
   const notesSummaryRef = useRef<HTMLDivElement | null>(null);
   const staffGuideAnchorRef = useContextualGuideAnchor("staff.main");
+  activeProjectIdRef.current = projectId;
   const canEdit = role !== "progress";
   const staffGroups = useMemo(
     () => groupStaffMembersForDisplay(members, departments),
@@ -110,8 +137,207 @@ export default function StaffListPage() {
   );
   const notesSummary = useMemo(() => buildStaffNotesSummary(members), [members]);
   membersRef.current = members;
+  departmentsRef.current = departments;
   useUnsavedChangesGuard(isDirty);
   useAutoContextualGuide("staff.intro", !isLoading && Boolean(project));
+
+  const staffAutosaveEntities = useMemo<StaffAutosaveEntity[]>(() => [
+    ...members
+      .filter((member) => persistedMemberIdsRef.current.has(member.id))
+      .map((member) => ({
+        key: staffMemberAutosaveKey(member.id),
+        kind: "member" as const,
+        member
+      })),
+    ...departments
+      .filter((department) => persistedDepartmentIdsRef.current.has(department.id))
+      .map((department) => ({
+        key: staffDepartmentAutosaveKey(department.id),
+        kind: "department" as const,
+        department
+      }))
+  ], [departments, members]);
+  const validateStaffAutosaveEntity = useCallback((entity: StaffAutosaveEntity) => (
+    entity.key !== composingAutosaveKey
+  ), [composingAutosaveKey]);
+  const staffAutosave = useKeyedAutosave<StaffAutosaveEntity, StaffAutosaveResult>({
+    values: staffAutosaveEntities,
+    getKey: (entity) => entity.key,
+    enabled: canEdit && !isLoading && !isSaving,
+    scopeKey: projectId || "staff-list",
+    delayMs: 750,
+    fingerprint: staffAutosaveEntityFingerprint,
+    validate: validateStaffAutosaveEntity,
+    restoreDrafts: (drafts) => {
+      for (const restored of drafts) {
+        const entity = restored.value;
+        const savedEntity = restored.savedValue;
+        if (entity.kind === "member") {
+          const currentMember = membersRef.current.find((member) => member.id === entity.member.id);
+          if (!currentMember) continue;
+          const savedMember = savedEntity?.kind === "member" ? savedEntity.member : currentMember;
+          const restoredFieldNames = Object.keys(createProjectStaffMemberDraftPatch(
+            savedMember,
+            entity.member,
+            totalEpisodes
+          )) as Array<keyof ProjectStaffMemberDraftPatch>;
+          const intentFields = new Set<keyof ProjectStaffMemberDraftPatch>(restoredFieldNames);
+          if (intentFields.size === 0) continue;
+          autosaveMemberIntentFieldsRef.current.set(entity.member.id, intentFields);
+          const mergedMember = mergeStaffMemberConflict(currentMember, entity.member, intentFields);
+          const nextMembers = membersRef.current.map((member) => (
+            member.id === entity.member.id ? mergedMember : member
+          ));
+          membersRef.current = nextMembers;
+          setMembers(nextMembers);
+          continue;
+        }
+        const currentDepartment = departmentsRef.current.find((department) => (
+          department.id === entity.department.id
+        ));
+        const savedDepartment = savedEntity?.kind === "department"
+          ? savedEntity.department
+          : currentDepartment;
+        if (!currentDepartment || savedDepartment?.name === entity.department.name) continue;
+        autosaveDepartmentIntentRef.current.add(entity.department.id);
+        const nextDepartments = departmentsRef.current.map((department) => (
+          department.id === entity.department.id
+            ? { ...department, name: entity.department.name }
+            : department
+        ));
+        departmentsRef.current = nextDepartments;
+        setDepartments(nextDepartments);
+      }
+    },
+    save: async (entity) => {
+      if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
+      if (entity.kind === "member") {
+        await staffMemberMutationTailsRef.current.get(entity.member.id);
+        const expectedUpdatedAt = autosaveMemberVersionsRef.current.get(entity.member.id);
+        if (!expectedUpdatedAt) throw new Error("자동 저장할 스탭의 저장 버전을 확인할 수 없습니다.");
+        const baseline = autosaveMemberSnapshotsRef.current.get(entity.member.id);
+        if (!baseline) throw new Error("자동 저장할 스탭의 기준값을 확인할 수 없습니다.");
+        const currentMember = autosaveMemberIntentFieldsRef.current.has(entity.member.id)
+          ? membersRef.current.find((member) => member.id === entity.member.id) ?? entity.member
+          : entity.member;
+        const patch = createProjectStaffMemberDraftPatch(baseline, currentMember, totalEpisodes);
+        if (Object.keys(patch).length === 0) {
+          autosaveMemberIntentFieldsRef.current.delete(entity.member.id);
+          return { kind: "member", member: { ...currentMember, updatedAt: expectedUpdatedAt } };
+        }
+        autosaveMemberIntentFieldsRef.current.set(
+          entity.member.id,
+          new Set(Object.keys(patch) as Array<keyof ProjectStaffMemberDraftPatch>)
+        );
+        const saved = await saveProjectStaffMemberDraft(
+          projectId,
+          entity.member.id,
+          patch,
+          expectedUpdatedAt
+        );
+        autosaveMemberVersionsRef.current.set(entity.member.id, saved.updatedAt);
+        autosaveMemberSnapshotsRef.current.set(entity.member.id, saved);
+        autosaveMemberIntentFieldsRef.current.delete(entity.member.id);
+        return { kind: "member", member: saved };
+      }
+      const expectedUpdatedAt = autosaveDepartmentVersionsRef.current.get(entity.department.id);
+      if (!expectedUpdatedAt) throw new Error("자동 저장할 부서의 저장 버전을 확인할 수 없습니다.");
+      const baseline = autosaveDepartmentSnapshotsRef.current.get(entity.department.id);
+      if (!baseline) throw new Error("자동 저장할 부서의 기준값을 확인할 수 없습니다.");
+      const currentDepartment = autosaveDepartmentIntentRef.current.has(entity.department.id)
+        ? departmentsRef.current.find((department) => department.id === entity.department.id)
+          ?? entity.department
+        : entity.department;
+      if (baseline.name === currentDepartment.name) {
+        autosaveDepartmentIntentRef.current.delete(entity.department.id);
+        return { kind: "department", department: { ...currentDepartment, updatedAt: expectedUpdatedAt } };
+      }
+      autosaveDepartmentIntentRef.current.add(entity.department.id);
+      const saved = await saveProjectStaffDepartmentDraft(
+        projectId,
+        entity.department.id,
+        currentDepartment.name,
+        expectedUpdatedAt
+      );
+      autosaveDepartmentVersionsRef.current.set(entity.department.id, saved.updatedAt);
+      autosaveDepartmentSnapshotsRef.current.set(entity.department.id, saved);
+      autosaveDepartmentIntentRef.current.delete(entity.department.id);
+      return { kind: "department", department: saved };
+    },
+    onSaved: (result, entity) => {
+      if (activeProjectIdRef.current !== projectId) return;
+      if (result.kind === "member" && entity.kind === "member") {
+        const nextMembers = membersRef.current.map((member) => {
+          return member.id === entity.member.id
+            && staffMemberEditableFingerprint(member) === staffMemberEditableFingerprint(entity.member)
+            ? { ...member, updatedAt: result.member.updatedAt }
+            : member;
+        });
+        membersRef.current = nextMembers;
+        setMembers(nextMembers);
+        return;
+      }
+      if (result.kind === "department" && entity.kind === "department") {
+        setDepartments((current) => current.map((department) => {
+          return department.id === entity.department.id
+            && staffDepartmentEditableFingerprint(department) === staffDepartmentEditableFingerprint(entity.department)
+            ? { ...department, updatedAt: result.department.updatedAt }
+            : department;
+        }));
+      }
+    },
+    onError: (error, failedEntity) => {
+      if (error instanceof AutosaveConflictError) {
+        if (error.kind === "staff-member") {
+          const latestMember = error.latest as ProjectStaffMember | null;
+          if (latestMember?.id && latestMember.updatedAt) {
+            autosaveMemberVersionsRef.current.set(latestMember.id, latestMember.updatedAt);
+            autosaveMemberSnapshotsRef.current.set(latestMember.id, latestMember);
+            if (failedEntity.kind === "member" && failedEntity.member.id === latestMember.id) {
+              const currentMember = membersRef.current.find((member) => member.id === latestMember.id)
+                ?? failedEntity.member;
+              const intentFields = autosaveMemberIntentFieldsRef.current.get(latestMember.id)
+                ?? new Set<keyof ProjectStaffMemberDraftPatch>();
+              for (const key of Object.keys(createProjectStaffMemberDraftPatch(
+                failedEntity.member,
+                currentMember,
+                totalEpisodes
+              )) as Array<keyof ProjectStaffMemberDraftPatch>) {
+                intentFields.add(key);
+              }
+              autosaveMemberIntentFieldsRef.current.set(latestMember.id, intentFields);
+              const mergedMember = mergeStaffMemberConflict(latestMember, currentMember, intentFields);
+              const nextMembers = membersRef.current.map((member) => (
+                member.id === latestMember.id ? mergedMember : member
+              ));
+              membersRef.current = nextMembers;
+              setMembers(nextMembers);
+            }
+          }
+        } else if (error.kind === "staff-department") {
+          const latestDepartment = error.latest as ProjectStaffDepartment | null;
+          if (latestDepartment?.id && latestDepartment.updatedAt) {
+            autosaveDepartmentVersionsRef.current.set(latestDepartment.id, latestDepartment.updatedAt);
+            autosaveDepartmentSnapshotsRef.current.set(latestDepartment.id, latestDepartment);
+            if (failedEntity.kind === "department" && failedEntity.department.id === latestDepartment.id) {
+              autosaveDepartmentIntentRef.current.add(latestDepartment.id);
+              const currentDepartment = departmentsRef.current.find((department) => (
+                department.id === latestDepartment.id
+              )) ?? failedEntity.department;
+              const mergedDepartment = { ...latestDepartment, name: currentDepartment.name };
+              const nextDepartments = departmentsRef.current.map((department) => (
+                department.id === latestDepartment.id ? mergedDepartment : department
+              ));
+              departmentsRef.current = nextDepartments;
+              setDepartments(nextDepartments);
+            }
+          }
+        }
+      }
+      if (activeProjectIdRef.current !== projectId) return;
+      setErrorMessage(error instanceof Error ? error.message : "스탭 변경사항을 자동 저장하지 못했습니다.");
+    }
+  });
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -125,15 +351,33 @@ export default function StaffListPage() {
       setMembers(staffData.members);
       persistedMemberIdsRef.current = new Set(staffData.members.map((member) => member.id));
       setDepartments(staffData.departments);
+      departmentsRef.current = staffData.departments;
       setTotalEpisodes(staffData.totalEpisodes);
       setIsDirty(false);
       setErrorMessage("");
+      persistedDepartmentIdsRef.current = new Set(staffData.departments.map((department) => department.id));
+      autosaveMemberVersionsRef.current = new Map(staffData.members.map((member) => [member.id, member.updatedAt]));
+      autosaveMemberSnapshotsRef.current = new Map(staffData.members.map((member) => [member.id, member]));
+      autosaveDepartmentVersionsRef.current = new Map(staffData.departments.map((department) => [
+        department.id,
+        department.updatedAt
+      ]));
+      autosaveDepartmentSnapshotsRef.current = new Map(staffData.departments.map((department) => [
+        department.id,
+        department
+      ]));
+      autosaveMemberIntentFieldsRef.current.clear();
+      autosaveDepartmentIntentRef.current.clear();
+      staffAutosave.markSaved(staffAutosaveEntitiesFrom(
+        staffData.members,
+        staffData.departments
+      ));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "스탭 리스트를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, role]);
+  }, [projectId, role, staffAutosave.markSaved]);
 
   useEffect(() => {
     load();
@@ -205,6 +449,10 @@ export default function StaffListPage() {
     setIsSaving(true);
     setErrorMessage("");
     try {
+      if (!await staffAutosave.flush()) {
+        setErrorMessage("자동 저장에 실패한 입력값을 먼저 확인해주세요.");
+        return;
+      }
       const result = await saveProjectStaffMembers(
         projectId,
         sourceMembers,
@@ -212,10 +460,25 @@ export default function StaffListPage() {
         totalEpisodes
       );
       persistedMemberIdsRef.current = new Set(result.members.map((member) => member.id));
+      persistedDepartmentIdsRef.current = new Set(result.departments.map((department) => department.id));
+      autosaveMemberVersionsRef.current = new Map(result.members.map((member) => [member.id, member.updatedAt]));
+      autosaveMemberSnapshotsRef.current = new Map(result.members.map((member) => [member.id, member]));
+      autosaveDepartmentVersionsRef.current = new Map(result.departments.map((department) => [
+        department.id,
+        department.updatedAt
+      ]));
+      autosaveDepartmentSnapshotsRef.current = new Map(result.departments.map((department) => [
+        department.id,
+        department
+      ]));
+      autosaveMemberIntentFieldsRef.current.clear();
+      autosaveDepartmentIntentRef.current.clear();
+      staffAutosave.markSaved(staffAutosaveEntitiesFrom(result.members, result.departments));
       if (editVersionRef.current === version) {
         membersRef.current = result.members;
         setMembers(result.members);
         setDepartments(result.departments);
+        departmentsRef.current = result.departments;
         setTotalEpisodes(result.totalEpisodes);
         setIsDirty(false);
       }
@@ -225,7 +488,7 @@ export default function StaffListPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, projectId, totalEpisodes]);
+  }, [canEdit, projectId, staffAutosave, totalEpisodes]);
 
   const commitMembers = useCallback((updater: (current: ProjectStaffMember[]) => ProjectStaffMember[]) => {
     editVersionRef.current += 1;
@@ -247,20 +510,21 @@ export default function StaffListPage() {
     ));
     membersRef.current = nextMembers;
     setMembers(nextMembers);
-    setIsDirty(true);
+    if (!persistedMemberIdsRef.current.has(id)) setIsDirty(true);
     setMessage("");
     setErrorMessage("");
   }, []);
 
   function commitDepartments(
-    updater: (current: ProjectStaffDepartment[]) => ProjectStaffDepartment[]
+    updater: (current: ProjectStaffDepartment[]) => ProjectStaffDepartment[],
+    structural = true
   ) {
     editVersionRef.current += 1;
     setDepartments((current) => updater(current).map((department, index) => ({
       ...department,
       sortOrder: index + 1
     })));
-    setIsDirty(true);
+    if (structural) setIsDirty(true);
     setMessage("");
     setErrorMessage("");
   }
@@ -297,13 +561,29 @@ export default function StaffListPage() {
     }
     const currentDepartment = departments.find((department) => department.id === id);
     if (!currentDepartment || currentDepartment.name === name) return true;
+    const nextDepartment = { ...currentDepartment, name };
     commitDepartments((current) => current.map((department) => (
-      department.id === id ? { ...department, name } : department
-    )));
+      department.id === id ? nextDepartment : department
+    )), !persistedDepartmentIdsRef.current.has(id));
+    if (persistedDepartmentIdsRef.current.has(id)) {
+      void staffAutosave.flushValues([{
+        key: staffDepartmentAutosaveKey(id),
+        kind: "department",
+        department: nextDepartment
+      }]);
+    }
     return true;
   }
 
-  function deleteDepartment(id: string) {
+  async function deleteDepartment(id: string) {
+    if (
+      persistedDepartmentIdsRef.current.has(id)
+      && !await staffAutosave.flushKeys([staffDepartmentAutosaveKey(id)])
+    ) {
+      setErrorMessage("삭제할 부서의 자동 저장에 실패했습니다. 다시 시도해주세요.");
+      return;
+    }
+    if (activeProjectIdRef.current !== projectId) return;
     commitDepartments((current) => current.filter((department) => department.id !== id));
   }
 
@@ -402,13 +682,28 @@ export default function StaffListPage() {
     }
 
     try {
-      const orders = await reorderProjectStaffMembers(
+      if (!await staffAutosave.flushKeys(orderedMemberIds.map(staffMemberAutosaveKey))) {
+        throw new Error("스탭 입력값 자동 저장에 실패해 순서를 변경하지 못했습니다.");
+      }
+      const reorderPromise = reorderProjectStaffMembers(
         projectId,
         sourceMember.department,
         orderedMemberIds
       );
+      const settledReorder = reorderPromise.then(() => undefined, () => undefined);
+      orderedMemberIds.forEach((memberId) => {
+        trackEntityMutationTail(staffMemberMutationTailsRef.current, memberId, settledReorder);
+      });
+      const orders = await reorderPromise;
       if (sectionMutationVersionsRef.current.get(sectionKey) !== mutationVersion) return;
       const orderById = new Map(orders.map((order) => [order.id, order]));
+      orders.forEach((order) => {
+        autosaveMemberVersionsRef.current.set(order.id, order.updatedAt);
+        const baseline = autosaveMemberSnapshotsRef.current.get(order.id);
+        if (baseline) {
+          autosaveMemberSnapshotsRef.current.set(order.id, { ...baseline, ...order });
+        }
+      });
       const confirmedMembers = membersRef.current.map((member) => {
         const order = orderById.get(member.id);
         return order ? { ...member, ...order } : member;
@@ -433,7 +728,7 @@ export default function StaffListPage() {
     } finally {
       finishSectionMutation(sectionKey, mutationVersion);
     }
-  }, [canEdit, finishSectionMutation, projectId, setSectionPending]);
+  }, [canEdit, finishSectionMutation, projectId, setSectionPending, staffAutosave.flushKeys]);
 
   const requestMemberDelete = useCallback((member: ProjectStaffMember) => {
     if (!canEdit) return;
@@ -467,6 +762,9 @@ export default function StaffListPage() {
     const originalSectionMemberIds = sortStaffMembers(membersRef.current.filter((member) => (
       getStaffSectionKey(member.department) === pending.sectionKey
     ))).map((member) => member.id);
+    const beforeDelete = staffAutosave.flushKeys([
+      staffMemberAutosaveKey(currentMember.id)
+    ]);
     const optimisticMembers = membersRef.current.filter((member) => member.id !== currentMember.id);
     editVersionRef.current += 1;
     membersRef.current = optimisticMembers;
@@ -474,9 +772,23 @@ export default function StaffListPage() {
 
     const isPersisted = persistedMemberIdsRef.current.has(currentMember.id);
     try {
-      if (isPersisted) await deleteProjectStaffMember(projectId, currentMember.id);
+      if (!await beforeDelete) {
+        throw new Error("삭제할 스탭의 자동 저장에 실패했습니다. 다시 시도해주세요.");
+      }
+      if (isPersisted) {
+        const deletePromise = deleteProjectStaffMember(projectId, currentMember.id);
+        trackEntityMutationTail(
+          staffMemberMutationTailsRef.current,
+          currentMember.id,
+          deletePromise.then(() => undefined, () => undefined)
+        );
+        await deletePromise;
+      }
       if (sectionMutationVersionsRef.current.get(pending.sectionKey) !== mutationVersion) return;
       persistedMemberIdsRef.current.delete(currentMember.id);
+      autosaveMemberVersionsRef.current.delete(currentMember.id);
+      autosaveMemberSnapshotsRef.current.delete(currentMember.id);
+      autosaveMemberIntentFieldsRef.current.delete(currentMember.id);
       if (!isPersisted) setIsDirty(true);
       setPendingMemberDelete(null);
       setMessage(`${currentMember.name.trim() || "스탭"}을 삭제했습니다.`);
@@ -497,7 +809,14 @@ export default function StaffListPage() {
       setIsDeletingMember(false);
       finishSectionMutation(pending.sectionKey, mutationVersion);
     }
-  }, [canEdit, finishSectionMutation, pendingMemberDelete, projectId, setSectionPending]);
+  }, [
+    canEdit,
+    finishSectionMutation,
+    pendingMemberDelete,
+    projectId,
+    setSectionPending,
+    staffAutosave.flushKeys
+  ]);
 
   if (isLoading) return <PageLoader />;
 
@@ -513,7 +832,22 @@ export default function StaffListPage() {
   }
 
   return (
-    <section ref={staffGuideAnchorRef} className="staff-workspace mx-auto w-full max-w-6xl pb-20">
+    <section
+      ref={staffGuideAnchorRef}
+      className="staff-workspace mx-auto w-full max-w-6xl pb-20"
+      onCompositionStartCapture={(event) => {
+        setComposingAutosaveKey(getStaffAutosaveKeyFromTarget(event.target));
+      }}
+      onCompositionEndCapture={(event) => {
+        const key = getStaffAutosaveKeyFromTarget(event.target);
+        setComposingAutosaveKey((current) => current === key ? null : current);
+        if (key) window.setTimeout(() => void staffAutosave.flushKeys([key]), 0);
+      }}
+      onBlurCapture={(event) => {
+        const key = getStaffAutosaveKeyFromTarget(event.target);
+        if (key && key !== composingAutosaveKey) void staffAutosave.flushKeys([key]);
+      }}
+    >
       <section className="border border-field-border bg-field-section px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -523,6 +857,13 @@ export default function StaffListPage() {
             <div className="min-w-0">
               <h1 className="ui-density-heading font-display font-black text-field-text">스탭 리스트</h1>
               <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{project.name} · 프로젝트 공통</p>
+              <AutosaveStatus
+                status={staffAutosave.status}
+                onRetry={() => {
+                  setErrorMessage("");
+                  staffAutosave.retry();
+                }}
+              />
             </div>
           </div>
           <div className="flex items-center gap-1.5">
@@ -642,7 +983,7 @@ export default function StaffListPage() {
                 department={department}
                 colorIndex={index}
                 onCommit={(name) => updateDepartment(department.id, name)}
-                onDelete={() => deleteDepartment(department.id)}
+                onDelete={() => void deleteDepartment(department.id)}
               />
             ))}
             <div className="workspace-control flex h-8 items-center border border-dashed pl-2">
@@ -1243,7 +1584,10 @@ function DepartmentChip({
   }
 
   return (
-    <div className="workspace-control flex h-8 items-center border pl-2">
+    <div
+      data-staff-department-id={department.id}
+      className="workspace-control flex h-8 items-center border pl-2"
+    >
       <input
         type="text"
         value={draftName}
@@ -1289,6 +1633,75 @@ function getStaffSectionKey(department: unknown) {
   return normalizeStaffDepartment(department).toLocaleLowerCase("ko-KR") || "__unassigned__";
 }
 
+function staffMemberAutosaveKey(memberId: string) {
+  return `member:${memberId}`;
+}
+
+function staffDepartmentAutosaveKey(departmentId: string) {
+  return `department:${departmentId}`;
+}
+
+function getStaffAutosaveKeyFromTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  const memberId = target.closest<HTMLElement>("[data-staff-member-id]")
+    ?.dataset.staffMemberId;
+  if (memberId) return staffMemberAutosaveKey(memberId);
+  const departmentId = target.closest<HTMLElement>("[data-staff-department-id]")
+    ?.dataset.staffDepartmentId;
+  return departmentId ? staffDepartmentAutosaveKey(departmentId) : null;
+}
+
+function staffAutosaveEntitiesFrom(
+  members: ProjectStaffMember[],
+  departments: ProjectStaffDepartment[]
+): StaffAutosaveEntity[] {
+  return [
+    ...members.map((member) => ({
+      key: staffMemberAutosaveKey(member.id),
+      kind: "member" as const,
+      member
+    })),
+    ...departments.map((department) => ({
+      key: staffDepartmentAutosaveKey(department.id),
+      kind: "department" as const,
+      department
+    }))
+  ];
+}
+
+function staffAutosaveEntityFingerprint(entity: StaffAutosaveEntity) {
+  return entity.kind === "member"
+    ? staffMemberEditableFingerprint(entity.member)
+    : staffDepartmentEditableFingerprint(entity.department);
+}
+
+function staffMemberEditableFingerprint(member: ProjectStaffMember) {
+  return JSON.stringify({
+    department: member.department,
+    role: member.role,
+    name: member.name,
+    phone: member.phone,
+    location: member.location,
+    notes: member.notes,
+    excludedEpisodeNumbers: member.excludedEpisodeNumbers
+  });
+}
+
+function staffDepartmentEditableFingerprint(department: ProjectStaffDepartment) {
+  return JSON.stringify(department.name.trim());
+}
+
+function trackEntityMutationTail(
+  tails: Map<string, Promise<void>>,
+  key: string,
+  mutation: Promise<void>
+) {
+  tails.set(key, mutation);
+  void mutation.then(() => {
+    if (tails.get(key) === mutation) tails.delete(key);
+  });
+}
+
 function hasSameIds(currentIds: string[], requestedIds: string[]) {
   if (currentIds.length !== requestedIds.length) return false;
   const currentIdSet = new Set(currentIds);
@@ -1329,6 +1742,24 @@ function applyStaffSectionOrder(
     }
   });
   return nextMembers;
+}
+
+function mergeStaffMemberConflict(
+  latest: ProjectStaffMember,
+  local: ProjectStaffMember,
+  intentFields: ReadonlySet<keyof ProjectStaffMemberDraftPatch>
+) {
+  const merged = { ...latest };
+  if (intentFields.has("department")) merged.department = local.department;
+  if (intentFields.has("name")) merged.name = local.name;
+  if (intentFields.has("phone")) merged.phone = local.phone;
+  if (intentFields.has("location")) merged.location = local.location;
+  if (intentFields.has("notes")) {
+    merged.role = local.role;
+    merged.notes = local.notes;
+    merged.excludedEpisodeNumbers = local.excludedEpisodeNumbers;
+  }
+  return merged;
 }
 
 function normalizeDepartmentName(value: string) {

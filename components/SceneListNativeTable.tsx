@@ -774,7 +774,11 @@ const SceneNativeRow = memo(function SceneNativeRow({
   };
 
   return (
-    <tr {...trProps} className={`${trProps.className ?? ""} bg-white hover:bg-[#f7f7f7]`}>
+    <tr
+      {...trProps}
+      data-scene-item-id={item.id}
+      className={`${trProps.className ?? ""} bg-white hover:bg-[#f7f7f7]`}
+    >
       <td
         className={`relative h-9 border-b border-r border-[#d6d6d6] bg-white p-0 text-center align-middle ${
           canEdit ? "cursor-grab active:cursor-grabbing" : ""

@@ -1,4 +1,5 @@
 import { readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { normalizeStaffDepartment, sortStaffMembers } from "@/lib/dailyPlan/staffList";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
@@ -6,12 +7,14 @@ import {
   normalizeExcludedEpisodeNumbers,
   normalizeStaffTotalEpisodes
 } from "@/lib/staffParticipation";
-import { decodeProjectStaffNotes } from "@/lib/staffRoleMetadata";
+import { decodeProjectStaffNotes, encodeProjectStaffNotes } from "@/lib/staffRoleMetadata";
 import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 type StaffListPayload = {
   members?: Record<string, unknown>[];
+  member?: Record<string, unknown>;
   departments?: Record<string, unknown>[];
+  department?: Record<string, unknown>;
   orders?: Record<string, unknown>[];
   memberId?: unknown;
   deleted?: unknown;
@@ -32,6 +35,14 @@ export type ProjectStaffOrderUpdate = Pick<ProjectStaffMember, "id" | "sortOrder
 export type ProjectStaffDeleteResult = {
   memberId: string;
   deleted: boolean;
+};
+
+export type ProjectStaffMemberDraftPatch = Partial<Pick<
+  ProjectStaffMember,
+  "department" | "name" | "phone" | "location"
+>> & {
+  /** role/notes/participation share the physical notes column and are encoded together. */
+  notes?: string;
 };
 
 export function createBlankProjectStaffMember(
@@ -142,6 +153,183 @@ export async function saveProjectStaffMembers(
   }
 
   return saveLocalStaffMembers(projectId, normalizedMembers, normalizedDepartments);
+}
+
+/** 이미 저장된 한 스탭 행의 입력 필드만 갱신합니다. 생성·삭제·순서는 건드리지 않습니다. */
+export async function saveProjectStaffMemberDraft(
+  projectId: string,
+  memberId: string,
+  patch: ProjectStaffMemberDraftPatch,
+  expectedUpdatedAt: string
+): Promise<ProjectStaffMember> {
+  const normalizedPatch = normalizeStaffMemberDraftPatch(patch);
+  if (Object.keys(normalizedPatch).length === 0) {
+    throw new Error("자동 저장할 스탭 변경사항이 없습니다.");
+  }
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/staff-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-member",
+          member: { id: memberId, ...normalizedPatch },
+          expectedUpdatedAt
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+    if (response.ok && payload.member) return staffMemberFromRow(payload.member);
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<ProjectStaffMember>(
+        "staff-member",
+        payload.error || "스탭 정보가 다른 곳에서 변경되었습니다.",
+        payload.member ? staffMemberFromRow(payload.member) : null
+      );
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "스탭 정보를 자동 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const buckets = readLocalBuckets();
+  const existingIndex = buckets.projectStaffMembers.findIndex((candidate) => (
+    candidate.projectId === projectId && candidate.id === memberId
+  ));
+  if (existingIndex < 0) throw new Error("자동 저장할 스탭을 찾을 수 없습니다.");
+  const decodedNotes = normalizedPatch.notes === undefined
+    ? null
+    : decodeProjectStaffNotes(normalizedPatch.notes);
+  const savedMember = {
+    ...buckets.projectStaffMembers[existingIndex],
+    ...(normalizedPatch.department !== undefined ? { department: normalizedPatch.department } : {}),
+    ...(normalizedPatch.name !== undefined ? { name: normalizedPatch.name } : {}),
+    ...(normalizedPatch.phone !== undefined ? { phone: normalizedPatch.phone } : {}),
+    ...(normalizedPatch.location !== undefined ? { location: normalizedPatch.location } : {}),
+    ...(decodedNotes ? decodedNotes : {}),
+    updatedAt: new Date().toISOString()
+  };
+  writeLocalBuckets({
+    projectStaffMembers: buckets.projectStaffMembers.map((candidate) => (
+      candidate.projectId === projectId && candidate.id === memberId ? savedMember : candidate
+    ))
+  }, projectId);
+  return savedMember;
+}
+
+/** 저장된 행과 현재 행을 비교해 실제 DB column에 해당하는 변경만 만듭니다. */
+export function createProjectStaffMemberDraftPatch(
+  saved: ProjectStaffMember,
+  current: ProjectStaffMember,
+  totalEpisodes: number
+): ProjectStaffMemberDraftPatch {
+  const normalized = normalizeMember(current, current.projectId, Math.max(0, current.sortOrder - 1), totalEpisodes);
+  const patch: ProjectStaffMemberDraftPatch = {};
+  if (normalizeStaffDepartment(saved.department) !== normalized.department) patch.department = normalized.department;
+  if (saved.name !== normalized.name) patch.name = normalized.name;
+  if (formatKoreanPhoneNumber(saved.phone) !== normalized.phone) patch.phone = normalized.phone;
+  if (saved.location !== normalized.location) patch.location = normalized.location;
+  if (
+    String(saved.role ?? "").trim().slice(0, 100) !== normalized.role
+    || saved.notes !== normalized.notes
+    || JSON.stringify(normalizeExcludedEpisodeNumbers(saved.excludedEpisodeNumbers, totalEpisodes))
+      !== JSON.stringify(normalized.excludedEpisodeNumbers)
+  ) {
+    patch.notes = encodeProjectStaffNotes(
+      normalized.role,
+      normalized.notes,
+      normalized.excludedEpisodeNumbers
+    );
+  }
+  return patch;
+}
+
+/** 이미 저장된 부서 이름만 갱신합니다. 부서 생성·삭제·순서는 건드리지 않습니다. */
+export async function saveProjectStaffDepartmentDraft(
+  projectId: string,
+  departmentId: string,
+  nameValue: string,
+  expectedUpdatedAt: string
+): Promise<ProjectStaffDepartment> {
+  const name = normalizeDepartmentName(nameValue);
+  if (!name) throw new Error("부서 이름을 입력해주세요.");
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/staff-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-department",
+          department: { id: departmentId, name },
+          expectedUpdatedAt
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+    if (response.ok && payload.department) return staffDepartmentFromRow(payload.department);
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<ProjectStaffDepartment>(
+        "staff-department",
+        payload.error || "부서 정보가 다른 곳에서 변경되었습니다.",
+        payload.department ? staffDepartmentFromRow(payload.department) : null
+      );
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "부서 정보를 자동 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const buckets = readLocalBuckets();
+  const existingIndex = buckets.projectStaffDepartments.findIndex((candidate) => (
+    candidate.projectId === projectId && candidate.id === departmentId
+  ));
+  if (existingIndex < 0) throw new Error("자동 저장할 부서를 찾을 수 없습니다.");
+  const savedDepartment = {
+    ...buckets.projectStaffDepartments[existingIndex],
+    name,
+    updatedAt: new Date().toISOString()
+  };
+  writeLocalBuckets({
+    projectStaffDepartments: buckets.projectStaffDepartments.map((candidate) => (
+      candidate.projectId === projectId && candidate.id === departmentId
+        ? savedDepartment
+        : candidate
+    ))
+  }, projectId);
+  return savedDepartment;
+}
+
+function normalizeStaffMemberDraftPatch(
+  patch: ProjectStaffMemberDraftPatch
+): ProjectStaffMemberDraftPatch {
+  const normalized: ProjectStaffMemberDraftPatch = {};
+  if (Object.prototype.hasOwnProperty.call(patch, "department")) {
+    normalized.department = normalizeStaffDepartment(patch.department);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "name")) {
+    normalized.name = String(patch.name ?? "").slice(0, 100);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "phone")) {
+    normalized.phone = formatKoreanPhoneNumber(String(patch.phone ?? "").slice(0, 30));
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "location")) {
+    normalized.location = String(patch.location ?? "").slice(0, 120);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "notes")) {
+    const decoded = decodeProjectStaffNotes(patch.notes);
+    normalized.notes = encodeProjectStaffNotes(
+      decoded.role,
+      decoded.notes,
+      decoded.excludedEpisodeNumbers
+    );
+  }
+  return normalized;
 }
 
 /** 같은 부서의 stable ID 전체를 한 요청으로 재배치하고 canonical sortOrder만 반환합니다. */

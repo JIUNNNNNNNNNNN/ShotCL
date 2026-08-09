@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import {
   useAutoContextualGuide,
@@ -35,11 +36,14 @@ import {
   deleteProjectReferenceAsset,
   listProjectReferenceAssets,
   updateProjectReferenceAsset,
+  updateProjectScenarioScenes,
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { useAutosave } from "@/hooks/useAutosave";
 import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import type { ProjectReferenceAsset, ProjectScenarioScene } from "@/lib/types";
 
@@ -75,6 +79,8 @@ export default function ProjectScenarioPage() {
   const [expandedSceneIds, setExpandedSceneIds] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [hasStructuralChanges, setHasStructuralChanges] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<ScenarioUploadProgressState | null>(null);
@@ -87,6 +93,7 @@ export default function ProjectScenarioPage() {
   const [confirmationError, setConfirmationError] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const scenarioUpdatedAtRef = useRef("");
   const actionHandlersRef = useRef({
     viewScenes: () => {},
     viewPdf: () => {},
@@ -95,12 +102,52 @@ export default function ProjectScenarioPage() {
     refresh: () => {},
     delete: () => {}
   });
-  useUnsavedChangesGuard(hasChanges);
+  // Persisted text is flushed by the autosave queue and must not block route
+  // changes. Only create/delete/reorder drafts still require an explicit save.
+  useUnsavedChangesGuard(hasStructuralChanges);
 
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === selectedId) ?? null,
     [assets, selectedId]
   );
+  const scenarioAutosave = useAutosave<ProjectScenarioScene[], ProjectReferenceAsset>({
+    value: draftScenes,
+    enabled: canEdit
+      && isEditing
+      && Boolean(selectedAsset)
+      && !hasStructuralChanges
+      && !isSaving
+      && !isComposing,
+    scopeKey: `scenario:${projectId ?? "unknown"}:${selectedAsset?.id ?? "empty"}`,
+    delayMs: 750,
+    initialSavedFingerprint: JSON.stringify(selectedAsset?.scenarioScenes ?? []),
+    restoreDraft: (scenes) => {
+      setDraftScenes(scenes.map((scene) => ({ ...scene })));
+      setHasChanges(true);
+    },
+    save: async (scenes) => {
+      if (!projectId || !selectedAsset) throw new Error("시나리오 PDF를 찾을 수 없습니다.");
+      const saved = await updateProjectScenarioScenes(projectId, selectedAsset.id, {
+        scenarioScenes: scenes,
+        expectedUpdatedAt: scenarioUpdatedAtRef.current || selectedAsset.updatedAt
+      });
+      scenarioUpdatedAtRef.current = saved.updatedAt;
+      return { ...selectedAsset, ...saved };
+    },
+    onSaved: (saved, _scenes, meta) => {
+      replaceAsset(saved);
+      if (meta.isLatest && !hasStructuralChanges) {
+        setHasChanges(false);
+      }
+    },
+    onError: (error) => {
+      if (error instanceof AutosaveConflictError && error.kind === "scenario-asset") {
+        const latestAsset = error.latest as ProjectReferenceAsset | null;
+        if (latestAsset?.updatedAt) scenarioUpdatedAtRef.current = latestAsset.updatedAt;
+      }
+      setErrorMessage(error instanceof Error ? error.message : "씬 정보를 자동 저장하지 못했습니다.");
+    }
+  });
   const isUploadFeedbackVisible = uploadProgress !== null;
   useAutoContextualGuide("scenario.intro", !isLoading && !isUploadFeedbackVisible);
   useContextualGuideBlocker("scenario-upload-processing", isUploadFeedbackVisible);
@@ -158,7 +205,12 @@ export default function ProjectScenarioPage() {
     const scenes = selectedAsset?.scenarioScenes ?? [];
     const nextSelectedAssetId = selectedAsset?.id ?? "";
     const selectedAssetChanged = selectedAssetIdRef.current !== nextSelectedAssetId;
-    if (!selectedAssetChanged && hasChanges) return;
+    if (!selectedAssetChanged && (isEditing || hasChanges)) {
+      // An autosave updates the asset timestamp. Rebase only the CAS token;
+      // never rehydrate/close the focused editor from that local echo.
+      scenarioUpdatedAtRef.current = selectedAsset?.updatedAt ?? scenarioUpdatedAtRef.current;
+      return;
+    }
     setDraftScenes(scenes.map((scene) => ({ ...scene })));
     setExpandedSceneIds((current) => {
       if (selectedAssetChanged) return new Set();
@@ -166,10 +218,13 @@ export default function ProjectScenarioPage() {
       return new Set(Array.from(current).filter((id) => validIds.has(id)));
     });
     selectedAssetIdRef.current = nextSelectedAssetId;
-    setIsEditing(false);
+    scenarioUpdatedAtRef.current = selectedAsset?.updatedAt ?? "";
+    if (selectedAssetChanged) setIsEditing(false);
     setHasChanges(false);
+    setHasStructuralChanges(false);
     setQuery("");
-  }, [hasChanges, selectedAsset?.id, selectedAsset?.updatedAt]);
+    scenarioAutosave.markSaved(scenes);
+  }, [hasChanges, isEditing, scenarioAutosave.markSaved, selectedAsset?.id, selectedAsset?.updatedAt]);
 
   const filteredScenes = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
@@ -328,12 +383,21 @@ export default function ProjectScenarioPage() {
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const saved = await updateProjectReferenceAsset(projectId, selectedAsset.id, {
-        scenarioScenes: draftScenes
+      if (!await scenarioAutosave.flush()) {
+        setErrorMessage("자동 저장에 실패한 입력값을 먼저 확인해주세요.");
+        return;
+      }
+      const savedPatch = await updateProjectScenarioScenes(projectId, selectedAsset.id, {
+        scenarioScenes: draftScenes,
+        expectedUpdatedAt: scenarioUpdatedAtRef.current || selectedAsset.updatedAt
       });
+      const saved = { ...selectedAsset, ...savedPatch };
+      scenarioUpdatedAtRef.current = saved.updatedAt;
       replaceAsset(saved);
       setIsEditing(false);
       setHasChanges(false);
+      setHasStructuralChanges(false);
+      scenarioAutosave.markSaved(saved.scenarioScenes ?? []);
       setStatusMessage("씬 구성이 저장되었습니다.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "씬 구성을 저장하지 못했습니다.");
@@ -414,6 +478,7 @@ export default function ProjectScenarioPage() {
     setDraftScenes((current) => [...current, scene]);
     setIsEditing(true);
     setHasChanges(true);
+    setHasStructuralChanges(true);
   }
 
   function requestRemoveScene(id: string) {
@@ -431,6 +496,7 @@ export default function ProjectScenarioPage() {
       return next;
     });
     setHasChanges(true);
+    setHasStructuralChanges(true);
   }
 
   function moveScene(index: number, direction: -1 | 1) {
@@ -442,6 +508,7 @@ export default function ProjectScenarioPage() {
       return next;
     });
     setHasChanges(true);
+    setHasStructuralChanges(true);
   }
 
   function cancelEditing() {
@@ -451,7 +518,9 @@ export default function ProjectScenarioPage() {
     setExpandedSceneIds((current) => new Set(Array.from(current).filter((id) => validIds.has(id))));
     setIsEditing(false);
     setHasChanges(false);
+    setHasStructuralChanges(false);
     setErrorMessage("");
+    scenarioAutosave.markSaved(scenes);
   }
 
   function toggleScene(sceneId: string) {
@@ -526,7 +595,7 @@ export default function ProjectScenarioPage() {
       },
       scenarioRefresh: {
         onSelect: () => actionHandlersRef.current.refresh(),
-        disabled: hasChanges || isRefreshing || isSaving || isDeleting || isUploading,
+        disabled: hasStructuralChanges || isRefreshing || isSaving || isDeleting || isUploading,
         pending: isRefreshing,
         closeDrawerOnSelect: false
       },
@@ -546,7 +615,7 @@ export default function ProjectScenarioPage() {
     isSaving,
     isSharing,
     isUploading,
-    hasChanges,
+    hasStructuralChanges,
     projectId,
     selectedAsset,
     viewMode
@@ -556,7 +625,14 @@ export default function ProjectScenarioPage() {
   if (isLoading) return <PageLoader />;
 
   return (
-    <div className="grid w-full min-w-0 gap-2">
+    <div
+      className="grid w-full min-w-0 gap-2"
+      onCompositionStartCapture={() => setIsComposing(true)}
+      onCompositionEndCapture={() => setIsComposing(false)}
+      onBlurCapture={() => {
+        if (!isComposing) void scenarioAutosave.flush();
+      }}
+    >
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-b border-field-border pb-2">
         <div className="mr-1 min-w-0 flex-[0_1_14rem]">
           <h1 className="ui-density-heading font-display font-bold leading-normal text-field-text">
@@ -565,6 +641,7 @@ export default function ProjectScenarioPage() {
           <p className="break-words text-[11px] leading-normal text-field-muted [overflow-wrap:anywhere]">
             {projectName}
           </p>
+          <AutosaveStatus status={scenarioAutosave.status} onRetry={scenarioAutosave.retry} />
         </div>
 
         {assets.length > 0 ? (
@@ -572,9 +649,10 @@ export default function ProjectScenarioPage() {
             <span className="sr-only">시나리오 PDF 선택</span>
             <select
               value={selectedId}
-              disabled={hasChanges || isSaving || isUploading || isRefreshing || isDeleting}
-              title={hasChanges ? "변경사항을 저장하거나 취소한 뒤 다른 PDF를 선택하세요." : undefined}
+              disabled={hasStructuralChanges || isSaving || isUploading || isRefreshing || isDeleting}
+              title={hasStructuralChanges ? "씬 추가·삭제·순서 변경을 저장하거나 취소한 뒤 다른 PDF를 선택하세요." : undefined}
               onChange={(event) => {
+                void scenarioAutosave.flush();
                 setSelectedId(event.target.value);
                 setErrorMessage("");
                 setStatusMessage("");
@@ -598,8 +676,11 @@ export default function ProjectScenarioPage() {
             <>
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasChanges}
+                onClick={() => {
+                  void scenarioAutosave.flush();
+                  fileInputRef.current?.click();
+                }}
+                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasStructuralChanges}
                 aria-label={isUploading ? "시나리오 처리 중" : "PDF 업로드"}
                 aria-busy={isUploading}
                 title="PDF 업로드"
@@ -613,7 +694,7 @@ export default function ProjectScenarioPage() {
                 type="file"
                 accept="application/pdf,.pdf"
                 multiple
-                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasChanges}
+                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasStructuralChanges}
                 className="sr-only"
                 onChange={handleUpload}
               />
@@ -672,9 +753,9 @@ export default function ProjectScenarioPage() {
           {statusMessage}
         </p>
       ) : null}
-      {hasChanges ? (
+      {hasStructuralChanges ? (
         <p className="text-right text-[11px] font-bold text-field-primary">
-          저장하지 않은 변경사항이 있습니다.
+          씬 구성 변경사항은 저장 버튼으로 확정해 주세요.
         </p>
       ) : null}
 

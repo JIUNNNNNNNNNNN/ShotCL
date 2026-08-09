@@ -13,7 +13,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { MapPin, Trash2, X } from "lucide-react";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { Button } from "@/components/ui/Button";
+import { useAutosave } from "@/hooks/useAutosave";
+import { getAutosaveDraft } from "@/lib/client/autosaveDraftCache";
 import {
   CALENDAR_EVENT_COLORS,
   normalizeDateOnly,
@@ -86,12 +89,18 @@ export function ProjectCalendarEventEditor({
     location: event?.location ?? "",
     colorKey: event?.colorKey ?? ""
   }), [event, initialEndDate, initialStartDate]);
-  const [values, setValues] = useState(initialValues);
+  const autosaveScopeKey = event?.id ?? "new-project-calendar-event";
+  const [values, setValues] = useState(() => (
+    event
+      ? getAutosaveDraft<ProjectCalendarEventEditorValues>(autosaveScopeKey)?.value ?? initialValues
+      : initialValues
+  ));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [dismissHint, setDismissHint] = useState("");
   const [isClosing, setIsClosing] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const [position, setPosition] = useState<EditorPosition>({
     left: VIEWPORT_PADDING,
     top: VIEWPORT_PADDING,
@@ -104,11 +113,38 @@ export function ProjectCalendarEventEditor({
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const isPending = mutationPending || isSubmitting;
-  const isDirty = JSON.stringify(values) !== JSON.stringify(initialValues);
+  // 기존 일정은 자동저장되므로 닫기 차단이 필요하지 않습니다. 새 일정만 명시적으로 생성합니다.
+  const isDirty = !event && JSON.stringify(values) !== JSON.stringify(initialValues);
   const isSheet = presentation === "sheet";
+
+  const autosave = useAutosave<ProjectCalendarEventEditorValues>({
+    value: values,
+    enabled: Boolean(event && !readOnly && onUpdate && !isComposing),
+    delayMs: 600,
+    scopeKey: autosaveScopeKey,
+    initialSavedFingerprint: JSON.stringify(initialValues),
+    restoreDraft: (draft) => setValues(draft),
+    validate: (draft) => validateCalendarEventInput(draft).ok,
+    save: async (draft) => {
+      if (!event || !onUpdate) return;
+      const result = validateCalendarEventInput(draft);
+      if (!result.ok) throw new Error("일정 입력값을 확인해주세요.");
+      await onUpdate(event.id, result.value as ProjectCalendarEventInput);
+    },
+    onSaved: (_result, _draft, meta) => {
+      if (meta.isLatest) setErrors((current) => ({ ...current, form: "" }));
+    },
+    onError: (error) => {
+      setErrors((current) => ({
+        ...current,
+        form: error instanceof Error ? error.message : "일정을 자동 저장하지 못했습니다."
+      }));
+    }
+  });
 
   const closeWithMotion = useCallback((restoreFocus = true) => {
     if (isClosing) return;
+    if (event && !readOnly) void autosave.flush();
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       onClose(restoreFocus);
       return;
@@ -118,7 +154,7 @@ export function ProjectCalendarEventEditor({
     }
     setIsClosing(true);
     closeTimerRef.current = window.setTimeout(() => onClose(restoreFocus), CLOSE_DURATION_MS);
-  }, [isClosing, onClose]);
+  }, [autosave, event, isClosing, onClose, readOnly]);
 
   const updatePosition = useCallback(() => {
     if (isSheet) return;
@@ -282,11 +318,16 @@ export function ProjectCalendarEventEditor({
       return;
     }
 
+    if (event) {
+      void autosave.flush();
+      closeWithMotion();
+      return;
+    }
+
     setIsSubmitting(true);
     setErrors({});
     try {
-      if (event) await onUpdate?.(event.id, result.value as ProjectCalendarEventInput);
-      else await onCreate?.(result.value as ProjectCalendarEventInput);
+      await onCreate?.(result.value as ProjectCalendarEventInput);
       closeWithMotion();
     } catch (error) {
       setErrors({ form: error instanceof Error ? error.message : "일정을 저장하지 못했습니다." });
@@ -373,7 +414,15 @@ export function ProjectCalendarEventEditor({
             </div>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} noValidate>
+          <form
+            onSubmit={handleSubmit}
+            noValidate
+            onBlurCapture={() => {
+              if (event && !isComposing) void autosave.flush();
+            }}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+          >
             <header className={styles.editorHeader}>
               <div>
                 <h2 id="project-calendar-event-editor-title" className={styles.editorTitle}>
@@ -507,10 +556,13 @@ export function ProjectCalendarEventEditor({
                 </Button>
               ) : <span />}
               <div className={styles.editorActions}>
+                {event && !readOnly ? (
+                  <AutosaveStatus status={autosave.status} onRetry={autosave.retry} />
+                ) : null}
                 <Button type="button" variant="ghost" onClick={() => closeWithMotion()} disabled={isPending}>
-                  {readOnly ? "닫기" : "취소"}
+                  {event || readOnly ? "닫기" : "취소"}
                 </Button>
-                {!readOnly ? (
+                {!readOnly && !event ? (
                   <Button type="submit" disabled={isPending || (!event && !onCreate) || (Boolean(event) && !onUpdate)}>
                     {isPending ? "저장 중" : "저장"}
                   </Button>

@@ -38,6 +38,7 @@ import type {
   ArchiveImportSaveReport
 } from "@/components/ArchiveImportDialog";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -74,7 +75,15 @@ import {
   scanArchiveFileList,
   type ArchiveFolderScanResult
 } from "@/lib/client/archiveFolderDrop";
+import {
+  canRestoreAutosaveDraft,
+  createAutosaveDraftWriterId,
+  discardAutosaveDraft,
+  getAutosaveDraft,
+  rememberAutosaveDraft
+} from "@/lib/client/autosaveDraftCache";
 import { KeyedMutationQueue } from "@/lib/client/keyedMutationQueue";
+import type { AutosaveStatus as AutosaveStatusValue } from "@/lib/client/latestAutosaveQueue";
 import {
   deleteProjectReferenceAssets,
   inspectProjectReferenceAssets,
@@ -174,6 +183,20 @@ type MetadataDraft = {
   sceneId: string;
   sceneNo: string;
   cutNo: string;
+};
+
+type ArchiveMetadataDraftState = {
+  draft: MetadataDraft;
+  savedFingerprint: string;
+  failedFingerprint: string;
+  error: string;
+};
+
+type ArchiveRenameDraftState = {
+  value: string;
+  savedFingerprint: string;
+  failedFingerprint: string;
+  error: string;
 };
 
 type MetadataAnchor = {
@@ -354,9 +377,15 @@ export default function ProjectStoryboardOverheadPage() {
     cutNo: ""
   });
   const [metadataError, setMetadataError] = useState("");
+  const [savedMetadataFingerprint, setSavedMetadataFingerprint] = useState("");
+  const [failedMetadataFingerprint, setFailedMetadataFingerprint] = useState("");
+  const [metadataDraftStates, setMetadataDraftStates] = useState<Map<string, ArchiveMetadataDraftState>>(new Map());
   const [renamingAsset, setRenamingAsset] = useState<ProjectReferenceAsset | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [renameError, setRenameError] = useState("");
+  const [savedRenameFingerprint, setSavedRenameFingerprint] = useState("");
+  const [failedRenameFingerprint, setFailedRenameFingerprint] = useState("");
+  const [renameDraftStates, setRenameDraftStates] = useState<Map<string, ArchiveRenameDraftState>>(new Map());
   const [preview, setPreview] = useState<{ url: string; title: string; assetId?: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadedArchiveProjectId, setLoadedArchiveProjectId] = useState("");
@@ -372,6 +401,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [dragDepth, setDragDepth] = useState<Record<ArchiveType, number>>({ overhead: 0, storyboard: 0 });
   const [pressedSelectionKey, setPressedSelectionKey] = useState<ArchiveSelectionKey | null>(null);
   const [pendingMetadataAssetIds, setPendingMetadataAssetIds] = useState<Set<string>>(new Set());
+  const [pendingRenameAssetIds, setPendingRenameAssetIds] = useState<Set<string>>(new Set());
   const [pendingReorderGroupKeys, setPendingReorderGroupKeys] = useState<Set<string>>(new Set());
   const [collapsedSceneKeys, setCollapsedSceneKeys] = useState<Set<string>>(new Set());
   const [reorderModeGroupKey, setReorderModeGroupKey] = useState<string | null>(null);
@@ -438,9 +468,15 @@ export default function ProjectStoryboardOverheadPage() {
   const importProgressTimerRef = useRef<number | null>(null);
   const importAbortControllerRef = useRef<AbortController | null>(null);
   const archiveAssetsRef = useRef<ProjectReferenceAsset[]>([]);
+  const metadataDraftStatesRef = useRef(new Map<string, ArchiveMetadataDraftState>());
+  const renameDraftStatesRef = useRef(new Map<string, ArchiveRenameDraftState>());
   const pendingMetadataAssetIdsRef = useRef(new Set<string>());
+  const pendingRenameAssetIdsRef = useRef(new Set<string>());
   const pendingReorderGroupKeysRef = useRef(new Set<string>());
   const pendingMetadataVersionByAssetIdRef = useRef(new Map<string, number>());
+  const pendingMetadataFingerprintByAssetIdRef = useRef(new Map<string, string>());
+  const pendingRenameVersionByAssetIdRef = useRef(new Map<string, number>());
+  const pendingRenameFingerprintByAssetIdRef = useRef(new Map<string, string>());
   const pendingReorderVersionByGroupKeyRef = useRef(new Map<string, number>());
   const assetOperationVersionRef = useRef(new Map<string, number>());
   const renameOperationVersionRef = useRef(new Map<string, number>());
@@ -448,6 +484,7 @@ export default function ProjectStoryboardOverheadPage() {
   const deletedAssetIdsRef = useRef(new Set<string>());
   const committedPlacementByAssetIdRef = useRef(new Map<string, ArchiveAssetPlacement>());
   const archiveMutationQueueRef = useRef(new KeyedMutationQueue());
+  const [archiveDraftWriterId] = useState(createAutosaveDraftWriterId);
   const archiveProjectEpochRef = useRef(0);
   const activeProjectIdRef = useRef(projectId);
   activeProjectIdRef.current = projectId;
@@ -455,6 +492,10 @@ export default function ProjectStoryboardOverheadPage() {
   const hasInitializedCollapseRef = useRef(false);
   const knownArchiveSceneKeysRef = useRef(new Set<string>());
   const metadataSceneRevealKeysRef = useRef(new Set<string>());
+  const editingMetadataAssetRef = useRef<ProjectReferenceAsset | null>(null);
+  const metadataFingerprintRef = useRef("");
+  const renamingAssetRef = useRef<ProjectReferenceAsset | null>(null);
+  const renameFingerprintRef = useRef("");
   const reorderModeGroupKeyRef = useRef<string | null>(null);
   const reorderSessionRef = useRef<ArchiveReorderSession | null>(null);
   const reorderPointerCleanupRef = useRef<(() => void) | null>(null);
@@ -463,7 +504,37 @@ export default function ProjectStoryboardOverheadPage() {
   const deleteDropZoneRef = useRef<HTMLDivElement | null>(null);
   const pendingDeleteAssetRef = useRef<PendingDeleteAsset | null>(null);
   const deleteInspectionInFlightRef = useRef(false);
+
+  const metadataFingerprint = editingAsset
+    ? createArchiveMetadataFingerprint(editingAsset.id, metadataDraft)
+    : "";
+  editingMetadataAssetRef.current = editingAsset;
+  metadataFingerprintRef.current = metadataFingerprint;
+  const renameFingerprint = renamingAsset
+    ? createArchiveRenameFingerprint(renamingAsset.id, renameDraft)
+    : "";
+  renamingAssetRef.current = renamingAsset;
+  renameFingerprintRef.current = renameFingerprint;
   const deleteActionInFlightRef = useRef(false);
+
+  const archiveEditorAutosaveStatus = useMemo<AutosaveStatusValue>(() => {
+    const metadataEntries = [...metadataDraftStates.entries()];
+    const renameEntries = [...renameDraftStates.entries()];
+    const hasError = metadataEntries.some(([assetId, state]) => (
+      createArchiveMetadataFingerprint(assetId, state.draft) === state.failedFingerprint
+    )) || renameEntries.some(([assetId, state]) => (
+      createArchiveRenameFingerprint(assetId, state.value) === state.failedFingerprint
+    ));
+    if (hasError) return "error";
+    if (pendingMetadataAssetIds.size > 0 || pendingRenameAssetIds.size > 0) return "saving";
+    const hasDirty = metadataEntries.some(([assetId, state]) => (
+      createArchiveMetadataFingerprint(assetId, state.draft) !== state.savedFingerprint
+    )) || renameEntries.some(([assetId, state]) => (
+      createArchiveRenameFingerprint(assetId, state.value) !== state.savedFingerprint
+    ));
+    if (hasDirty) return "dirty";
+    return metadataEntries.length > 0 || renameEntries.length > 0 ? "saved" : "idle";
+  }, [metadataDraftStates, pendingMetadataAssetIds, pendingRenameAssetIds, renameDraftStates]);
 
   useUnsavedChangesGuard(isActiveArchiveImportProgress(importProgress));
 
@@ -595,16 +666,25 @@ export default function ProjectStoryboardOverheadPage() {
 
   useEffect(() => {
     archiveProjectEpochRef.current += 1;
+    metadataDraftStatesRef.current.clear();
+    renameDraftStatesRef.current.clear();
     pendingMetadataAssetIdsRef.current.clear();
+    pendingRenameAssetIdsRef.current.clear();
     pendingReorderGroupKeysRef.current.clear();
     pendingMetadataVersionByAssetIdRef.current.clear();
+    pendingMetadataFingerprintByAssetIdRef.current.clear();
+    pendingRenameVersionByAssetIdRef.current.clear();
+    pendingRenameFingerprintByAssetIdRef.current.clear();
     pendingReorderVersionByGroupKeyRef.current.clear();
     assetOperationVersionRef.current.clear();
     renameOperationVersionRef.current.clear();
     groupOperationVersionRef.current.clear();
     deletedAssetIdsRef.current.clear();
     committedPlacementByAssetIdRef.current.clear();
+    setMetadataDraftStates(new Map());
+    setRenameDraftStates(new Map());
     setPendingMetadataAssetIds(new Set());
+    setPendingRenameAssetIds(new Set());
     setPendingReorderGroupKeys(new Set());
     deleteActionInFlightRef.current = false;
     deleteInspectionInFlightRef.current = false;
@@ -618,7 +698,11 @@ export default function ProjectStoryboardOverheadPage() {
     setSelectionMode(false);
     setEditingAsset(null);
     setMetadataAnchor(null);
+    setSavedMetadataFingerprint("");
+    setFailedMetadataFingerprint("");
     setRenamingAsset(null);
+    setSavedRenameFingerprint("");
+    setFailedRenameFingerprint("");
     hasInitializedCollapseRef.current = false;
     knownArchiveSceneKeysRef.current = new Set();
     metadataSceneRevealKeysRef.current = new Set();
@@ -969,6 +1053,20 @@ export default function ProjectStoryboardOverheadPage() {
   function removeAssetsFromLocalState(assetIds: Iterable<string>) {
     const ids = new Set(assetIds);
     for (const id of ids) committedPlacementByAssetIdRef.current.delete(id);
+    const nextMetadataDrafts = new Map(metadataDraftStatesRef.current);
+    const nextRenameDrafts = new Map(renameDraftStatesRef.current);
+    for (const id of ids) {
+      nextMetadataDrafts.delete(id);
+      nextRenameDrafts.delete(id);
+      if (projectId) {
+        discardAutosaveDraft(archiveMetadataDraftScopeKey(projectId, id), archiveDraftWriterId);
+        discardAutosaveDraft(archiveRenameDraftScopeKey(projectId, id), archiveDraftWriterId);
+      }
+    }
+    metadataDraftStatesRef.current = nextMetadataDrafts;
+    renameDraftStatesRef.current = nextRenameDrafts;
+    setMetadataDraftStates(nextMetadataDrafts);
+    setRenameDraftStates(nextRenameDrafts);
     setCombinedArchiveAssets(archiveAssetsRef.current.filter((asset) => !ids.has(asset.id)));
     updateSelectedKeys((current) => {
       const next = new Set(current);
@@ -1128,8 +1226,57 @@ export default function ProjectStoryboardOverheadPage() {
     return true;
   }
 
-  function markMetadataPending(assetId: string, version: number) {
+  function updateMetadataDraftState(
+    assetId: string,
+    update: (current: ArchiveMetadataDraftState | undefined) => ArchiveMetadataDraftState | null
+  ) {
+    const next = new Map(metadataDraftStatesRef.current);
+    const value = update(next.get(assetId));
+    if (value) {
+      next.set(assetId, value);
+      if (projectId) {
+        const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId);
+        rememberAutosaveDraft(
+          archiveMetadataDraftScopeKey(projectId, assetId),
+          value.draft,
+          createArchiveMetadataFingerprint(assetId, value.draft),
+          value.savedFingerprint,
+          currentAsset ? archiveMetadataDraftFromAsset(currentAsset) : null,
+          archiveDraftWriterId
+        );
+      }
+    } else next.delete(assetId);
+    metadataDraftStatesRef.current = next;
+    setMetadataDraftStates(next);
+  }
+
+  function updateRenameDraftState(
+    assetId: string,
+    update: (current: ArchiveRenameDraftState | undefined) => ArchiveRenameDraftState | null
+  ) {
+    const next = new Map(renameDraftStatesRef.current);
+    const value = update(next.get(assetId));
+    if (value) {
+      next.set(assetId, value);
+      if (projectId) {
+        const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId);
+        rememberAutosaveDraft(
+          archiveRenameDraftScopeKey(projectId, assetId),
+          value.value,
+          createArchiveRenameFingerprint(assetId, value.value),
+          value.savedFingerprint,
+          currentAsset ? archiveDisplayName(currentAsset) : null,
+          archiveDraftWriterId
+        );
+      }
+    } else next.delete(assetId);
+    renameDraftStatesRef.current = next;
+    setRenameDraftStates(next);
+  }
+
+  function markMetadataPending(assetId: string, version: number, fingerprint: string) {
     pendingMetadataVersionByAssetIdRef.current.set(assetId, version);
+    pendingMetadataFingerprintByAssetIdRef.current.set(assetId, fingerprint);
     pendingMetadataAssetIdsRef.current.add(assetId);
     setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
   }
@@ -1137,8 +1284,24 @@ export default function ProjectStoryboardOverheadPage() {
   function clearMetadataPending(assetId: string, version: number) {
     if (pendingMetadataVersionByAssetIdRef.current.get(assetId) !== version) return;
     pendingMetadataVersionByAssetIdRef.current.delete(assetId);
+    pendingMetadataFingerprintByAssetIdRef.current.delete(assetId);
     pendingMetadataAssetIdsRef.current.delete(assetId);
     setPendingMetadataAssetIds(new Set(pendingMetadataAssetIdsRef.current));
+  }
+
+  function markRenamePending(assetId: string, version: number, fingerprint: string) {
+    pendingRenameVersionByAssetIdRef.current.set(assetId, version);
+    pendingRenameFingerprintByAssetIdRef.current.set(assetId, fingerprint);
+    pendingRenameAssetIdsRef.current.add(assetId);
+    setPendingRenameAssetIds(new Set(pendingRenameAssetIdsRef.current));
+  }
+
+  function clearRenamePending(assetId: string, version: number) {
+    if (pendingRenameVersionByAssetIdRef.current.get(assetId) !== version) return;
+    pendingRenameVersionByAssetIdRef.current.delete(assetId);
+    pendingRenameFingerprintByAssetIdRef.current.delete(assetId);
+    pendingRenameAssetIdsRef.current.delete(assetId);
+    setPendingRenameAssetIds(new Set(pendingRenameAssetIdsRef.current));
   }
 
   function markReorderPending(groupKey: string, version: number) {
@@ -2625,9 +2788,31 @@ export default function ProjectStoryboardOverheadPage() {
 
   function renameSingleSelectedAsset() {
     if (!singleSelectedReferenceAsset) return;
+    const assetId = singleSelectedReferenceAsset.id;
+    const persistedName = archiveDisplayName(singleSelectedReferenceAsset);
+    const persistedFingerprint = createArchiveRenameFingerprint(assetId, persistedName);
+    const localState = renameDraftStatesRef.current.get(assetId);
+    const cached = projectId
+      ? getAutosaveDraft<string>(archiveRenameDraftScopeKey(projectId, assetId))
+      : null;
+    const restorableDraft = cached && canRestoreAutosaveDraft(cached, persistedFingerprint)
+      ? cached.value
+      : null;
+    if (projectId && cached && restorableDraft === null) {
+      discardAutosaveDraft(archiveRenameDraftScopeKey(projectId, assetId), archiveDraftWriterId);
+    }
+    const nextState = localState ?? {
+      value: restorableDraft ?? persistedName,
+      savedFingerprint: persistedFingerprint,
+      failedFingerprint: "",
+      error: ""
+    };
+    if (!localState) updateRenameDraftState(assetId, () => nextState);
     setRenamingAsset(singleSelectedReferenceAsset);
-    setRenameDraft(archiveDisplayName(singleSelectedReferenceAsset));
-    setRenameError("");
+    setRenameDraft(nextState.value);
+    setSavedRenameFingerprint(nextState.savedFingerprint);
+    setFailedRenameFingerprint(nextState.failedFingerprint);
+    setRenameError(nextState.error);
   }
 
   function toggleSelectionMode() {
@@ -3392,10 +3577,27 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  function closeMetadata() {
+  function dismissMetadataEditor() {
     setEditingAsset(null);
     setMetadataAnchor(null);
     setMetadataError("");
+    setSavedMetadataFingerprint("");
+    setFailedMetadataFingerprint("");
+  }
+
+  function closeMetadata() {
+    if (!editingAsset) return;
+    const assetId = editingAsset.id;
+    const draft = metadataDraft;
+    const submittedFingerprint = createArchiveMetadataFingerprint(assetId, draft);
+    const localState = metadataDraftStatesRef.current.get(assetId);
+    dismissMetadataEditor();
+    if (
+      submittedFingerprint === localState?.savedFingerprint
+      || submittedFingerprint === localState?.failedFingerprint
+      || pendingMetadataFingerprintByAssetIdRef.current.get(assetId) === submittedFingerprint
+    ) return;
+    saveMetadataDraft(assetId, draft);
   }
 
   function openMetadata(asset: ProjectReferenceAsset, anchor?: { clientX: number; clientY: number }) {
@@ -3404,58 +3606,102 @@ export default function ProjectStoryboardOverheadPage() {
       setErrorMessage("삭제 중인 자료는 수정할 수 없습니다.");
       return;
     }
-    const currentSceneId = asset.crop.sceneId || "";
+    const persistedDraft = archiveMetadataDraftFromAsset(asset);
+    const persistedFingerprint = createArchiveMetadataFingerprint(asset.id, persistedDraft);
+    const localState = metadataDraftStatesRef.current.get(asset.id);
+    const cached = projectId
+      ? getAutosaveDraft<MetadataDraft>(archiveMetadataDraftScopeKey(projectId, asset.id))
+      : null;
+    const restorableDraft = cached && canRestoreAutosaveDraft(cached, persistedFingerprint)
+      ? cached.value
+      : null;
+    if (projectId && cached && restorableDraft === null) {
+      discardAutosaveDraft(archiveMetadataDraftScopeKey(projectId, asset.id), archiveDraftWriterId);
+    }
+    const nextState = localState ?? {
+      draft: restorableDraft ?? persistedDraft,
+      savedFingerprint: persistedFingerprint,
+      failedFingerprint: "",
+      error: ""
+    };
+    if (!localState) updateMetadataDraftState(asset.id, () => nextState);
     setEditingAsset(asset);
     setMetadataAnchor(anchor ? { clientX: anchor.clientX, clientY: anchor.clientY } : null);
-    setMetadataError("");
-    setMetadataDraft({
-      sceneId: currentSceneId,
-      sceneNo: asset.crop.sceneNumber || asset.sceneNo || "",
-      cutNo: asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || ""
-    });
+    setMetadataDraft(nextState.draft);
+    setMetadataError(nextState.error);
+    setSavedMetadataFingerprint(nextState.savedFingerprint);
+    setFailedMetadataFingerprint(nextState.failedFingerprint);
   }
 
-  function saveMetadata() {
-    if (!projectId || !editingAsset || !canEdit) return;
-    if (deletedAssetIdsRef.current.has(editingAsset.id)) {
-      setMetadataError("삭제 중인 자료는 수정할 수 없습니다.");
+  function saveMetadataDraft(assetId: string, draft: MetadataDraft) {
+    if (!projectId || !canEdit) return;
+    const submittedFingerprint = createArchiveMetadataFingerprint(assetId, draft);
+    if (pendingMetadataFingerprintByAssetIdRef.current.get(assetId) === submittedFingerprint) return;
+    const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId);
+    const persistedDraft = currentAsset ? archiveMetadataDraftFromAsset(currentAsset) : draft;
+    const baselineFingerprint = createArchiveMetadataFingerprint(assetId, persistedDraft);
+    updateMetadataDraftState(assetId, (current) => ({
+      draft,
+      savedFingerprint: current?.savedFingerprint ?? baselineFingerprint,
+      failedFingerprint: "",
+      error: ""
+    }));
+
+    const recordFailure = (message: string) => {
+      const localMessage = `${message} 로컬 변경사항을 유지했습니다.`;
+      updateMetadataDraftState(assetId, (current) => {
+        if (!current || createArchiveMetadataFingerprint(assetId, current.draft) !== submittedFingerprint) {
+          return current ?? null;
+        }
+        return { ...current, failedFingerprint: submittedFingerprint, error: localMessage };
+      });
+      if (
+        editingMetadataAssetRef.current?.id === assetId
+        && metadataFingerprintRef.current === submittedFingerprint
+      ) {
+        setFailedMetadataFingerprint(submittedFingerprint);
+        setMetadataError(localMessage);
+      }
+      setErrorMessage(`${localMessage} 다시 시도해주세요.`);
+    };
+
+    if (deletedAssetIdsRef.current.has(assetId)) {
+      recordFailure("삭제 중인 자료는 수정할 수 없습니다.");
       return;
     }
-    const cutNumber = metadataDraft.cutNo.trim() ? Number(metadataDraft.cutNo) : null;
+    const cutNumber = draft.cutNo.trim() ? Number(draft.cutNo) : null;
     if (cutNumber !== null && (!Number.isInteger(cutNumber) || cutNumber < 1)) {
-      setMetadataError("컷은 1 이상의 정수로 입력해주세요.");
+      recordFailure("컷은 1 이상의 정수로 입력해주세요.");
       return;
     }
-    if (cutNumber !== null && !metadataDraft.sceneId) {
-      setMetadataError("컷을 설정하려면 씬을 먼저 선택해주세요.");
+    if (cutNumber !== null && !draft.sceneId) {
+      recordFailure("컷을 설정하려면 씬을 먼저 선택해주세요.");
       return;
     }
-    const selectedScene = sceneItems.find((scene) => scene.id === metadataDraft.sceneId);
-    if (metadataDraft.sceneId && !selectedScene) {
-      setMetadataError("연결된 씬이 삭제되었습니다. 다른 씬을 선택하거나 연결을 해제해주세요.");
+    const selectedScene = sceneItems.find((scene) => scene.id === draft.sceneId);
+    if (draft.sceneId && !selectedScene) {
+      recordFailure("연결된 씬이 삭제되었습니다. 다른 씬을 선택하거나 연결을 해제해주세요.");
       return;
     }
     if (cutNumber !== null && selectedScene && (!selectedScene.cutCount || cutNumber > selectedScene.cutCount)) {
       if (!selectedScene.cutCount) {
-        setMetadataError("씬리스트에 총 컷수를 먼저 입력해주세요.");
+        recordFailure("씬리스트에 총 컷수를 먼저 입력해주세요.");
         return;
       }
-      setMetadataError(`선택한 씬의 총 컷수 ${selectedScene.cutCount}를 초과했습니다.`);
+      recordFailure(`선택한 씬의 총 컷수 ${selectedScene.cutCount}를 초과했습니다.`);
       return;
     }
-    const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === editingAsset.id);
     if (!currentAsset) {
-      setMetadataError("수정할 이미지 자료를 찾을 수 없습니다.");
+      recordFailure("수정할 이미지 자료를 찾을 수 없습니다.");
       return;
     }
     const previousGroupKey = archiveAssetOrderGroupKey(currentAsset);
-    const previousSceneKey = archiveSceneKeyFromOrderGroupKey(previousGroupKey);
-    const previousSceneWasCollapsed = collapsedSceneKeysRef.current.has(previousSceneKey);
     const nextGroupKey = archiveOrderGroupKey(selectedScene?.id || null, cutNumber);
     const targetSceneKey = archiveSceneCollapseKey(selectedScene?.id || null);
-    const targetWasCollapsed = collapsedSceneKeysRef.current.has(targetSceneKey);
-    setMetadataError("");
-    const assetId = editingAsset.id;
+    if (editingMetadataAssetRef.current?.id === assetId) {
+      setFailedMetadataFingerprint("");
+      setMetadataError("");
+    }
     const optimistic = moveArchiveAssetToOrderGroup(
       archiveAssetsRef.current,
       assetId,
@@ -3466,17 +3712,16 @@ export default function ProjectStoryboardOverheadPage() {
       }
     );
     if (!optimistic) {
-      setMetadataError("수정할 이미지 자료를 찾을 수 없습니다.");
+      recordFailure("수정할 이미지 자료를 찾을 수 없습니다.");
       return;
     }
     const assetVersion = nextAssetOperationVersion(assetId);
     const groupVersions = nextGroupOperationVersions([previousGroupKey, nextGroupKey]);
     const operationProjectId = projectId;
-    markMetadataPending(assetId, assetVersion);
+    markMetadataPending(assetId, assetVersion, submittedFingerprint);
     metadataSceneRevealKeysRef.current.add(targetSceneKey);
     expandScene(targetSceneKey);
     setCombinedArchiveAssets(optimistic.assets);
-    closeMetadata();
     void archiveMutationQueueRef.current.enqueue(
       [
         archiveAssetMutationKey(operationProjectId, assetId),
@@ -3520,6 +3765,21 @@ export default function ProjectStoryboardOverheadPage() {
           commitSceneCutUpdate(result);
           if (assetOperationVersionRef.current.get(assetId) !== assetVersion) return;
           applySceneCutUpdate(result, groupOperationVersionsAreCurrent(groupVersions));
+          updateMetadataDraftState(assetId, (current) => {
+            if (!current || createArchiveMetadataFingerprint(assetId, current.draft) !== submittedFingerprint) {
+              return current ?? null;
+            }
+            return { ...current, savedFingerprint: submittedFingerprint, failedFingerprint: "", error: "" };
+          });
+          if (
+            editingMetadataAssetRef.current?.id === assetId
+            && metadataFingerprintRef.current === submittedFingerprint
+          ) {
+            setSavedMetadataFingerprint(submittedFingerprint);
+            setFailedMetadataFingerprint("");
+            setMetadataError("");
+          }
+          setErrorMessage("");
         } catch (error) {
           if (activeProjectIdRef.current !== operationProjectId) return;
           if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
@@ -3530,37 +3790,10 @@ export default function ProjectStoryboardOverheadPage() {
           const operationIsCurrent = assetOperationVersionRef.current.get(assetId) === assetVersion;
           const groupsAreCurrent = groupOperationVersionsAreCurrent(groupVersions);
           if (!operationIsCurrent || !groupsAreCurrent) return;
-
-          if (error instanceof ProjectReferenceAssetSceneCutError && error.asset) {
-            if (
-              !previousSceneWasCollapsed
-              && archiveSceneCollapseKey(error.asset.sceneId) === previousSceneKey
-            ) {
-              metadataSceneRevealKeysRef.current.add(previousSceneKey);
-            }
-            applySceneCutUpdate({ asset: error.asset, orders: error.orders });
-            if (targetWasCollapsed && error.asset.sceneId !== (selectedScene?.id || null)) {
-              updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
-            }
-            setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
-          } else if (error instanceof ProjectReferenceAssetSceneCutError && error.orders.length > 0) {
-            removeAssetsFromLocalState([assetId]);
-            applyOrderUpdates(error.orders);
-            setErrorMessage(`${error.message} 서버의 현재 상태로 맞췄습니다.`);
-          } else {
-            if (!previousSceneWasCollapsed) {
-              metadataSceneRevealKeysRef.current.add(previousSceneKey);
-            }
-            setCombinedArchiveAssets(restoreCommittedArchivePlacements(
-              archiveAssetsRef.current,
-              new Set([previousGroupKey, nextGroupKey]),
-              assetId
-            ));
-            if (targetWasCollapsed) {
-              updateCollapsedScenes((current) => new Set(current).add(targetSceneKey));
-            }
-            setErrorMessage(`${error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다."} 변경을 되돌렸습니다.`);
-          }
+          const message = error instanceof Error ? error.message : "자료 정보를 저장하지 못했습니다.";
+          // Keep the optimistic placement and draft as the local source of truth.
+          // The committed server snapshot is retained only for retry preconditions.
+          recordFailure(message);
         }
       }
     ).finally(() => {
@@ -3570,18 +3803,48 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  async function saveAssetName() {
-    if (!projectId || !renamingAsset || !canEdit) return;
-    const displayName = renameDraft.trim();
+  async function saveAssetNameDraft(assetId: string, value: string) {
+    if (!projectId || !canEdit) return;
+    const submittedFingerprint = createArchiveRenameFingerprint(assetId, value);
+    if (pendingRenameFingerprintByAssetIdRef.current.get(assetId) === submittedFingerprint) return;
+    const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId);
+    const baselineName = currentAsset ? archiveDisplayName(currentAsset) : value;
+    updateRenameDraftState(assetId, (current) => ({
+      value,
+      savedFingerprint: current?.savedFingerprint ?? createArchiveRenameFingerprint(assetId, baselineName),
+      failedFingerprint: "",
+      error: ""
+    }));
+    const displayName = value.trim();
     if (!displayName) {
-      setRenameError("이름을 입력해주세요.");
+      const message = "이름을 입력해주세요.";
+      updateRenameDraftState(assetId, (current) => current
+        ? { ...current, failedFingerprint: submittedFingerprint, error: message }
+        : null);
+      if (renamingAssetRef.current?.id === assetId && renameFingerprintRef.current === submittedFingerprint) {
+        setFailedRenameFingerprint(submittedFingerprint);
+        setRenameError(message);
+      }
+      setErrorMessage(`${message} 로컬 이름 초안을 유지했습니다.`);
       return;
     }
-    setRenameError("");
-    const assetId = renamingAsset.id;
+    if (deletedAssetIdsRef.current.has(assetId) || !currentAsset) {
+      const message = deletedAssetIdsRef.current.has(assetId)
+        ? "삭제 중인 자료는 수정할 수 없습니다."
+        : "이름을 변경할 자료를 찾을 수 없습니다.";
+      updateRenameDraftState(assetId, (current) => current
+        ? { ...current, failedFingerprint: submittedFingerprint, error: message }
+        : null);
+      setErrorMessage(`${message} 로컬 이름 초안을 유지했습니다.`);
+      return;
+    }
+    if (renamingAssetRef.current?.id === assetId) {
+      setFailedRenameFingerprint("");
+      setRenameError("");
+    }
     const renameVersion = nextRenameOperationVersion(assetId);
     const operationProjectId = projectId;
-    setIsSaving(true);
+    markRenamePending(assetId, renameVersion, submittedFingerprint);
     try {
       const updated = await archiveMutationQueueRef.current.enqueue(
         [archiveAssetMutationKey(operationProjectId, assetId)],
@@ -3591,16 +3854,131 @@ export default function ProjectStoryboardOverheadPage() {
         })
       );
       if (activeProjectIdRef.current !== operationProjectId) return;
-      setRenamingAsset((current) => current?.id === assetId ? null : current);
       if (renameOperationVersionRef.current.get(assetId) !== renameVersion) return;
       applyArchiveAssetNameUpdate(updated);
+      updateRenameDraftState(assetId, (current) => {
+        if (!current || createArchiveRenameFingerprint(assetId, current.value) !== submittedFingerprint) {
+          return current ?? null;
+        }
+        return { ...current, savedFingerprint: submittedFingerprint, failedFingerprint: "", error: "" };
+      });
+      if (renamingAssetRef.current?.id === assetId && renameFingerprintRef.current === submittedFingerprint) {
+        setSavedRenameFingerprint(submittedFingerprint);
+        setFailedRenameFingerprint("");
+        setRenameError("");
+      }
+      setErrorMessage("");
     } catch (error) {
       if (activeProjectIdRef.current !== operationProjectId) return;
-      setRenameError(error instanceof Error ? error.message : "이름을 변경하지 못했습니다.");
+      if (renameOperationVersionRef.current.get(assetId) !== renameVersion) return;
+      const message = error instanceof Error ? error.message : "이름을 변경하지 못했습니다.";
+      updateRenameDraftState(assetId, (current) => {
+        if (!current || createArchiveRenameFingerprint(assetId, current.value) !== submittedFingerprint) {
+          return current ?? null;
+        }
+        return { ...current, failedFingerprint: submittedFingerprint, error: message };
+      });
+      if (renamingAssetRef.current?.id === assetId && renameFingerprintRef.current === submittedFingerprint) {
+        setFailedRenameFingerprint(submittedFingerprint);
+        setRenameError(message);
+      }
+      setErrorMessage(`${message} 로컬 이름 초안을 유지했습니다. 다시 시도해주세요.`);
     } finally {
-      if (activeProjectIdRef.current === operationProjectId) setIsSaving(false);
+      if (activeProjectIdRef.current === operationProjectId) clearRenamePending(assetId, renameVersion);
     }
   }
+
+  function closeAssetRename() {
+    if (!renamingAsset) return;
+    const assetId = renamingAsset.id;
+    const value = renameDraft;
+    const submittedFingerprint = createArchiveRenameFingerprint(assetId, value);
+    const localState = renameDraftStatesRef.current.get(assetId);
+    setRenamingAsset(null);
+    setRenameError("");
+    setSavedRenameFingerprint("");
+    setFailedRenameFingerprint("");
+    if (
+      submittedFingerprint === localState?.savedFingerprint
+      || submittedFingerprint === localState?.failedFingerprint
+      || pendingRenameFingerprintByAssetIdRef.current.get(assetId) === submittedFingerprint
+    ) return;
+    void saveAssetNameDraft(assetId, value);
+  }
+
+  function retryArchiveEditorDrafts() {
+    for (const [assetId, state] of metadataDraftStatesRef.current) {
+      if (createArchiveMetadataFingerprint(assetId, state.draft) === state.failedFingerprint) {
+        saveMetadataDraft(assetId, state.draft);
+      }
+    }
+    for (const [assetId, state] of renameDraftStatesRef.current) {
+      if (createArchiveRenameFingerprint(assetId, state.value) === state.failedFingerprint) {
+        void saveAssetNameDraft(assetId, state.value);
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (!projectId || !canEdit || !editingAsset) return;
+    const assetId = editingAsset.id;
+    const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId) ?? editingAsset;
+    const savedFingerprint = metadataDraftStatesRef.current.get(assetId)?.savedFingerprint
+      ?? createArchiveMetadataFingerprint(assetId, archiveMetadataDraftFromAsset(currentAsset));
+    rememberAutosaveDraft(
+      archiveMetadataDraftScopeKey(projectId, assetId),
+      metadataDraft,
+      metadataFingerprint,
+      savedFingerprint,
+      archiveMetadataDraftFromAsset(currentAsset),
+      archiveDraftWriterId
+    );
+  }, [archiveDraftWriterId, canEdit, editingAsset, metadataDraft, metadataFingerprint, projectId]);
+
+  useEffect(() => {
+    if (!projectId || !canEdit || !renamingAsset) return;
+    const assetId = renamingAsset.id;
+    const currentAsset = archiveAssetsRef.current.find((asset) => asset.id === assetId) ?? renamingAsset;
+    const savedFingerprint = renameDraftStatesRef.current.get(assetId)?.savedFingerprint
+      ?? createArchiveRenameFingerprint(assetId, archiveDisplayName(currentAsset));
+    rememberAutosaveDraft(
+      archiveRenameDraftScopeKey(projectId, assetId),
+      renameDraft,
+      renameFingerprint,
+      savedFingerprint,
+      archiveDisplayName(currentAsset),
+      archiveDraftWriterId
+    );
+  }, [archiveDraftWriterId, canEdit, projectId, renameDraft, renameFingerprint, renamingAsset]);
+
+  useEffect(() => {
+    if (
+      !editingAsset
+      || !canEdit
+      || metadataFingerprint === savedMetadataFingerprint
+      || metadataFingerprint === failedMetadataFingerprint
+      || pendingMetadataFingerprintByAssetIdRef.current.get(editingAsset.id) === metadataFingerprint
+    ) return;
+    const timeout = window.setTimeout(() => {
+      saveMetadataDraft(editingAsset.id, metadataDraft);
+    }, 900);
+    return () => window.clearTimeout(timeout);
+  }, [canEdit, editingAsset, failedMetadataFingerprint, metadataDraft, metadataFingerprint, pendingMetadataAssetIds, savedMetadataFingerprint]);
+
+  useEffect(() => {
+    if (
+      !renamingAsset
+      || !canEdit
+      || !renameDraft.trim()
+      || renameFingerprint === savedRenameFingerprint
+      || renameFingerprint === failedRenameFingerprint
+      || pendingRenameFingerprintByAssetIdRef.current.get(renamingAsset.id) === renameFingerprint
+    ) return;
+    const timeout = window.setTimeout(() => {
+      void saveAssetNameDraft(renamingAsset.id, renameDraft);
+    }, 1200);
+    return () => window.clearTimeout(timeout);
+  }, [canEdit, failedRenameFingerprint, pendingRenameAssetIds, renameDraft, renameFingerprint, renamingAsset, savedRenameFingerprint]);
 
   function openAssetContextMenu(
     asset: ProjectReferenceAsset,
@@ -3640,7 +4018,11 @@ export default function ProjectStoryboardOverheadPage() {
             <h1 className="ui-density-heading font-display break-words font-bold text-field-text [overflow-wrap:anywhere]">부감도&콘티 아카이브</h1>
             <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
-          {!canEdit ? <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span> : null}
+          {canEdit ? (
+            <AutosaveStatus status={archiveEditorAutosaveStatus} onRetry={retryArchiveEditorDrafts} />
+          ) : (
+            <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span>
+          )}
         </div>
 
         {errorMessage ? <p role="alert" className=" border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}
@@ -4306,29 +4688,62 @@ export default function ProjectStoryboardOverheadPage() {
           scenes={sceneItems}
           anchor={metadataAnchor}
           errorMessage={metadataError}
-          isSaving={false}
+          isSaving={pendingMetadataAssetIds.has(editingAsset.id)}
+          autosaveStatus={pendingMetadataAssetIds.has(editingAsset.id)
+            ? "saving"
+            : metadataFingerprint === failedMetadataFingerprint
+              ? "error"
+              : metadataFingerprint === savedMetadataFingerprint
+                ? "saved"
+                : "dirty"}
+          onRetry={() => {
+            saveMetadataDraft(editingAsset.id, metadataDraft);
+          }}
           onChange={(value) => {
+            updateMetadataDraftState(editingAsset.id, (current) => ({
+              draft: value,
+              savedFingerprint: current?.savedFingerprint ?? savedMetadataFingerprint,
+              failedFingerprint: "",
+              error: ""
+            }));
             setMetadataDraft(value);
+            setFailedMetadataFingerprint("");
             setMetadataError("");
           }}
           onClose={closeMetadata}
-          onSave={saveMetadata}
+          onSave={closeMetadata}
         />
       ) : null}
       {renamingAsset ? (
         <AssetRenameEditor
           value={renameDraft}
           errorMessage={renameError}
-          isSaving={isSaving}
+          isSaving={pendingRenameAssetIds.has(renamingAsset.id)}
+          autosaveStatus={pendingRenameAssetIds.has(renamingAsset.id)
+            ? "saving"
+            : renameFingerprint === failedRenameFingerprint
+              ? "error"
+              : renameFingerprint === savedRenameFingerprint
+                ? "saved"
+                : "dirty"}
+          onRetry={() => {
+            void saveAssetNameDraft(renamingAsset.id, renameDraft);
+          }}
           onChange={(value) => {
+            updateRenameDraftState(renamingAsset.id, (current) => ({
+              value,
+              savedFingerprint: current?.savedFingerprint ?? savedRenameFingerprint,
+              failedFingerprint: "",
+              error: ""
+            }));
             setRenameDraft(value);
+            setFailedRenameFingerprint("");
             setRenameError("");
           }}
           onClose={() => {
-            setRenamingAsset(null);
-            setRenameError("");
+            closeAssetRename();
           }}
-          onSave={saveAssetName}
+          onSave={closeAssetRename}
         />
       ) : null}
       {pendingConfirm ? (
@@ -4423,6 +4838,8 @@ function MetadataPopover({
   anchor,
   errorMessage,
   isSaving,
+  autosaveStatus,
+  onRetry,
   onChange,
   onClose,
   onSave
@@ -4432,6 +4849,8 @@ function MetadataPopover({
   anchor: MetadataAnchor | null;
   errorMessage: string;
   isSaving: boolean;
+  autosaveStatus: "idle" | "dirty" | "saving" | "saved" | "error";
+  onRetry: () => void;
   onChange: (value: MetadataDraft) => void;
   onClose: () => void;
   onSave: () => void;
@@ -4577,9 +4996,10 @@ function MetadataPopover({
         <p className="text-[11px] font-bold text-field-danger">컷은 1부터 {maxCut}까지만 선택할 수 있습니다.</p>
       ) : null}
       {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
+      <AutosaveStatus status={autosaveStatus} onRetry={onRetry} />
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">취소</button>
-        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        <button type="button" onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover">취소</button>
+        <button type="button" onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary">{isSaving ? "저장 중" : "저장"}</button>
       </div>
     </section>,
     document.body
@@ -4590,6 +5010,8 @@ function AssetRenameEditor({
   value,
   errorMessage,
   isSaving,
+  autosaveStatus,
+  onRetry,
   onChange,
   onClose,
   onSave
@@ -4597,6 +5019,8 @@ function AssetRenameEditor({
   value: string;
   errorMessage: string;
   isSaving: boolean;
+  autosaveStatus: "idle" | "dirty" | "saving" | "saved" | "error";
+  onRetry: () => void;
   onChange: (value: string) => void;
   onClose: () => void;
   onSave: () => void;
@@ -4624,9 +5048,10 @@ function AssetRenameEditor({
         />
       </label>
       {errorMessage ? <p role="alert" className="text-xs font-bold text-field-danger">{errorMessage}</p> : null}
+      <AutosaveStatus status={autosaveStatus} onRetry={onRetry} />
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" disabled={isSaving} onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">취소</button>
-        <button type="button" disabled={isSaving} onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary disabled:opacity-50">{isSaving ? "저장 중" : "저장"}</button>
+        <button type="button" onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover">취소</button>
+        <button type="button" onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary">{isSaving ? "저장 중" : "저장"}</button>
       </div>
     </section>
   );
@@ -4962,6 +5387,35 @@ function archiveAssetOrderGroupKey(asset: ProjectReferenceAsset) {
     asset.crop.sceneId?.trim() || null,
     nullableArchiveCutNumber(asset.crop.cutNumber ?? asset.cutNo)
   );
+}
+
+function createArchiveMetadataFingerprint(assetId: string, draft: MetadataDraft) {
+  return JSON.stringify([
+    assetId,
+    draft.sceneId.trim(),
+    draft.sceneNo.trim(),
+    draft.cutNo.trim()
+  ]);
+}
+
+function archiveMetadataDraftScopeKey(projectId: string, assetId: string) {
+  return `archive-metadata:${projectId}:${assetId}`;
+}
+
+function archiveMetadataDraftFromAsset(asset: ProjectReferenceAsset): MetadataDraft {
+  return {
+    sceneId: asset.crop.sceneId || "",
+    sceneNo: asset.crop.sceneNumber || asset.sceneNo || "",
+    cutNo: asset.crop.cutNumber ? String(asset.crop.cutNumber) : asset.cutNo || ""
+  };
+}
+
+function createArchiveRenameFingerprint(assetId: string, value: string) {
+  return JSON.stringify([assetId, value.trim()]);
+}
+
+function archiveRenameDraftScopeKey(projectId: string, assetId: string) {
+  return `archive-rename:${projectId}:${assetId}`;
 }
 
 function isOrderableArchiveAsset(asset: ProjectReferenceAsset) {

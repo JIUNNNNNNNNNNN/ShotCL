@@ -23,6 +23,7 @@ import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
+import { shotFromRow } from "@/lib/data/mappers";
 import { getShotDiagramKey, loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
 import {
   applyShotMediaLinks,
@@ -33,12 +34,17 @@ import {
 } from "@/lib/data/shotMediaArchive";
 import {
   updateDailyPlanScheduleItem,
+  type DailyPlanScheduleItemMutationResult,
   type DailyPlanListItem
 } from "@/lib/data/dailyPlans";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
 import { compareDailyPlanEpisodes } from "@/lib/dailyPlan/carouselPresentation";
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
-import { subscribeToShotChanges } from "@/lib/realtime/subscribeToShots";
+import {
+  subscribeToShotChanges,
+  type ShotRealtimeChange
+} from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
 import { calculateDailyProgress } from "@/lib/progress/dailyProgress";
 import { buildProgressRoundHref } from "@/lib/projectNavigation";
@@ -53,6 +59,12 @@ import {
 import type { DailyPlan, DailyPlanMealTime, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
 
 type ProgressVisualBucket = "active" | "ok" | "omit";
+type EditingScheduleState = {
+  dailyPlanId: string;
+  entryKey: string;
+  sessionId: number;
+  item: DailyPlanMealTime;
+};
 const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
 
 const DailyPlanGatheringLocations = dynamic(
@@ -172,7 +184,8 @@ export default function ProjectDetailPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [editingShot, setEditingShot] = useState<Shot | null>(null);
-  const [editingSchedule, setEditingSchedule] = useState<DailyPlanMealTime | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<EditingScheduleState | null>(null);
+  const [savingScheduleSessionId, setSavingScheduleSessionId] = useState<number | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [gatheringLocationActions, setGatheringLocationActions] = useState<GatheringLocationActions | null>(null);
   const [preview, setPreview] = useState<{
@@ -194,6 +207,9 @@ export default function ProjectDetailPage() {
   const realtimeRefreshStateRef = useRef(new Map<string, { inFlight: boolean; queued: boolean }>());
   const initializedBucketEntryRef = useRef("");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
+  const editingScheduleRef = useRef(editingSchedule);
+  const nextScheduleSessionIdRef = useRef(0);
+  editingScheduleRef.current = editingSchedule;
   const progressCutListGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.cut-list");
   const progressStatusGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.status-controls");
   const { completeGuide, requestGuide } = useContextualGuide();
@@ -232,6 +248,21 @@ export default function ProjectDetailPage() {
     () => dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null,
     [dailyPlanId, dailyPlans]
   );
+  const dailyPlansRef = useRef(dailyPlans);
+  dailyPlansRef.current = dailyPlans;
+  const commitDailyPlanPatch = useCallback((
+    targetDailyPlanId: string,
+    patch: Partial<DailyPlan> & Pick<DailyPlan, "updatedAt">
+  ) => {
+    const current = dailyPlansRef.current.find((plan) => plan.id === targetDailyPlanId);
+    if (!current || compareUpdatedAt(patch.updatedAt, current.updatedAt) < 0) return;
+    const next = { ...current, ...patch };
+    dailyPlansRef.current = [
+      next,
+      ...dailyPlansRef.current.filter((plan) => plan.id !== targetDailyPlanId)
+    ];
+    upsertDailyPlan(next);
+  }, [upsertDailyPlan]);
   const selectedDailyPlanId = selectedPlan?.id ?? "";
 
   const refresh = useCallback(async () => {
@@ -350,6 +381,11 @@ export default function ProjectDetailPage() {
     setArchiveMediaByShotId(new Map());
     setOkExpanded(false);
     setOmitExpanded(false);
+    setEditingShot(null);
+    setEditingSchedule(null);
+    setSavingScheduleSessionId(null);
+    setIsAddOpen(false);
+    setIsSaving(false);
     setIsLoading(true);
   }, [commitSessionBuckets, progressEntryKey]);
 
@@ -434,10 +470,51 @@ export default function ProjectDetailPage() {
     }
   }, [commitSessionBuckets, progressEntryKey, projectId, rebuildArchiveMedia, selectedDailyPlanId]);
 
+  const handleRealtimeShotChanges = useCallback((changes: ShotRealtimeChange[] | null) => {
+    if (!changes || changes.length === 0 || changes.some((change) => change.eventType !== "UPDATE")) {
+      void refreshSelectedShots();
+      return;
+    }
+
+    let updates: Shot[];
+    try {
+      updates = changes.map((change) => shotFromRow(change.newRow));
+    } catch {
+      void refreshSelectedShots();
+      return;
+    }
+    const currentIds = new Set(shotsRef.current.map((shot) => shot.id));
+    if (updates.some((shot) => !currentIds.has(shot.id))) {
+      void refreshSelectedShots();
+      return;
+    }
+
+    const updatesById = new Map(updates.map((shot) => [shot.id, shot]));
+    let didChange = false;
+    const nextShots = shotsRef.current.map((shot) => {
+      const remote = updatesById.get(shot.id);
+      if (!remote || remote.updatedAt === shot.updatedAt) return shot;
+      didChange = true;
+      persistedStatusByShotIdRef.current.set(remote.id, remote.status);
+      const enriched = preserveShotMedia(remote, shot);
+      const pendingStatus = pendingStatusByShotIdRef.current.get(remote.id);
+      return pendingStatus ? { ...enriched, status: pendingStatus.status } : enriched;
+    });
+    if (!didChange) return;
+    shotsRef.current = nextShots;
+    setShots(nextShots);
+    rebuildArchiveMedia(nextShots);
+    commitSessionBuckets(reconcileSessionBuckets(
+      nextShots,
+      sessionBucketByShotIdRef.current,
+      false
+    ));
+  }, [commitSessionBuckets, rebuildArchiveMedia, refreshSelectedShots]);
+
   useEffect(() => {
     if (!projectId || !selectedDailyPlanId) return undefined;
-    return subscribeToShotChanges(projectId, refreshSelectedShots, selectedDailyPlanId);
-  }, [projectId, refreshSelectedShots, selectedDailyPlanId]);
+    return subscribeToShotChanges(projectId, handleRealtimeShotChanges, selectedDailyPlanId);
+  }, [handleRealtimeShotChanges, projectId, selectedDailyPlanId]);
 
   const refreshSelectedShotMedia = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
@@ -582,8 +659,8 @@ export default function ProjectDetailPage() {
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
   ) => {
     if (!selectedPlan) return;
-    upsertDailyPlan({ ...selectedPlan, ...patch });
-  }, [selectedPlan, upsertDailyPlan]);
+    commitDailyPlanPatch(selectedPlan.id, patch);
+  }, [commitDailyPlanPatch, selectedPlan]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     completeGuide("progress.intro");
@@ -632,13 +709,14 @@ export default function ProjectDetailPage() {
         || pendingStatus?.version !== mutationVersion
       ) return;
       pendingStatusByShotIdRef.current.delete(targetShot.id);
-      const persistedStatus = persistedStatusByShotIdRef.current.get(targetShot.id) ?? currentShot.status;
-      const rolledBackShots = shotsRef.current.map((shot) => (
-        shot.id === targetShot.id ? { ...shot, status: persistedStatus } : shot
-      ));
-      shotsRef.current = rolledBackShots;
-      setShots(rolledBackShots);
-      setErrorMessage(error instanceof Error ? error.message : "상태를 변경하지 못했습니다.");
+      // Keep the optimistic latest status visible. A transient network error
+      // must not erase the field user's on-set choice; pressing the same status
+      // again retries the canonical mutation.
+      setErrorMessage(
+        error instanceof Error
+          ? `${error.message} 상태 버튼을 다시 누르면 재시도합니다.`
+          : "상태를 저장하지 못했습니다. 상태 버튼을 다시 누르면 재시도합니다."
+      );
     } finally {
       if (statusMutationQueueByShotIdRef.current.get(targetShot.id) === mutation) {
         statusMutationQueueByShotIdRef.current.delete(targetShot.id);
@@ -705,9 +783,7 @@ export default function ProjectDetailPage() {
     if (!projectId || !editingShot) return;
     const requestedEntryKey = activeProgressEntryKeyRef.current;
 
-    setIsSaving(true);
     setErrorMessage("");
-    setSuccessMessage("");
 
     try {
       const savedShot = await updateShot(editingShot.id, {
@@ -735,38 +811,104 @@ export default function ProjectDetailPage() {
         sessionBucketByShotIdRef.current,
         false
       ));
-      setEditingShot(null);
-      setSuccessMessage("컷을 저장했습니다.");
     } catch (error) {
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       setErrorMessage(error instanceof Error ? error.message : "컷을 저장하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
+      throw error;
     }
   }
 
-  async function handleSaveSchedule(values: ProgressScheduleEditorValues) {
-    if (!projectId || !dailyPlanId || !editingSchedule || progressOnly) return;
+  async function persistScheduleItemPatch(
+    targetDailyPlanId: string,
+    itemId: string,
+    patch: Partial<Pick<DailyPlanMealTime, "progressMemo" | "imageUrl">>
+  ) {
+    const basePlan = dailyPlansRef.current.find((plan) => plan.id === targetDailyPlanId);
+    if (!projectId || !basePlan) {
+      throw new Error("일촬표를 찾을 수 없습니다.");
+    }
+    let expectedUpdatedAt = basePlan.updatedAt;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await updateDailyPlanScheduleItem(
+          projectId,
+          targetDailyPlanId,
+          itemId,
+          patch,
+          expectedUpdatedAt
+        );
+        commitDailyPlanPatch(targetDailyPlanId, {
+          mealTimes: result.mealTimes,
+          updatedAt: result.updatedAt
+        });
+        return result.mealTimes;
+      } catch (error) {
+        const latest = error instanceof AutosaveConflictError
+          ? error.latest as DailyPlanScheduleItemMutationResult | null
+          : null;
+        if (attempt === 0 && latest?.updatedAt) {
+          const currentPlan = dailyPlansRef.current.find((plan) => plan.id === targetDailyPlanId);
+          expectedUpdatedAt = currentPlan
+            && compareUpdatedAt(currentPlan.updatedAt, latest.updatedAt) > 0
+            ? currentPlan.updatedAt
+            : latest.updatedAt;
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("기타일정 정보를 저장하지 못했습니다.");
+  }
 
-    setIsSaving(true);
+  function scheduleEditorTargetIsCurrent(target: EditingScheduleState) {
+    const current = editingScheduleRef.current;
+    return activeProgressEntryKeyRef.current === target.entryKey
+      && current?.sessionId === target.sessionId
+      && current.dailyPlanId === target.dailyPlanId
+      && current.item.id === target.item.id;
+  }
+
+  async function handleSaveSchedule(values: ProgressScheduleEditorValues) {
+    const target = editingSchedule;
+    if (!projectId || !target || progressOnly) return;
+
+    setSavingScheduleSessionId(target.sessionId);
     setErrorMessage("");
     setSuccessMessage("");
 
     try {
       let imageUrl = values.imageUrl;
       if (values.imageFile) {
-        imageUrl = await saveScheduleImage(projectId, dailyPlanId, editingSchedule.id, values.imageFile);
+        imageUrl = await saveScheduleImage(projectId, target.dailyPlanId, target.item.id, values.imageFile);
       }
-      const mealTimes = await updateDailyPlanScheduleItem(projectId, dailyPlanId, editingSchedule.id, {
-        progressMemo: values.progressMemo.trim(),
+      await persistScheduleItemPatch(target.dailyPlanId, target.item.id, {
         imageUrl
       });
-      if (selectedPlan) upsertDailyPlan({ ...selectedPlan, mealTimes });
-      setEditingSchedule(null);
+      if (scheduleEditorTargetIsCurrent(target)) {
+        setEditingSchedule((current) => current?.sessionId === target.sessionId ? null : current);
+      }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "기타일정 정보를 저장하지 못했습니다.");
+      if (scheduleEditorTargetIsCurrent(target)) {
+        setErrorMessage(error instanceof Error ? error.message : "기타일정 정보를 저장하지 못했습니다.");
+      }
     } finally {
-      setIsSaving(false);
+      setSavingScheduleSessionId((current) => current === target.sessionId ? null : current);
+    }
+  }
+
+  async function handleAutosaveScheduleMemo(memo: string) {
+    const target = editingSchedule;
+    if (!projectId || !target || progressOnly) return;
+    try {
+      await persistScheduleItemPatch(target.dailyPlanId, target.item.id, {
+        progressMemo: memo.trim()
+      });
+      if (scheduleEditorTargetIsCurrent(target)) setErrorMessage("");
+    } catch (error) {
+      if (scheduleEditorTargetIsCurrent(target)) {
+        setErrorMessage(error instanceof Error ? error.message : "기타일정 메모를 자동 저장하지 못했습니다.");
+      }
+      throw error;
     }
   }
 
@@ -1001,7 +1143,12 @@ export default function ProjectDetailPage() {
                   <ProgressScheduleCard
                     key={item.id}
                     item={item}
-                    onOpen={setEditingSchedule}
+                    onOpen={(scheduleItem) => setEditingSchedule({
+                      dailyPlanId,
+                      entryKey: progressEntryKey,
+                      sessionId: ++nextScheduleSessionIdRef.current,
+                      item: scheduleItem
+                    })}
                     onImagePreview={handleImagePreview}
                   />
                 ))}
@@ -1068,6 +1215,7 @@ export default function ProjectDetailPage() {
       /> : null}
 
       {editingShot ? <ShotEditorModal
+        key={editingShot.id}
         mode="edit"
         open
         shot={editingShot}
@@ -1075,17 +1223,19 @@ export default function ProjectDetailPage() {
         isSaving={isSaving}
         readOnly={progressOnly}
         onClose={() => setEditingShot(null)}
-        onSave={handleSaveExistingShot}
+        onAutoSave={handleSaveExistingShot}
         onDelete={progressOnly ? undefined : handleDeleteShot}
       /> : null}
 
       {editingSchedule ? (
         <ProgressScheduleEditorModal
-          item={editingSchedule}
+          key={`${editingSchedule.dailyPlanId}:${editingSchedule.item.id}:${editingSchedule.sessionId}`}
+          item={editingSchedule.item}
           readOnly={progressOnly}
-          isSaving={isSaving}
+          isSaving={savingScheduleSessionId === editingSchedule.sessionId}
           onClose={() => setEditingSchedule(null)}
           onSave={handleSaveSchedule}
+          onAutoSaveMemo={handleAutosaveScheduleMemo}
         />
       ) : null}
 
@@ -1192,6 +1342,15 @@ function mergeShotOrder(currentShots: Shot[], orderedShots: Shot[]) {
         : { ...shot, orderIndex };
     })
     .sort((a, b) => a.orderIndex - b.orderIndex || a.createdAt.localeCompare(b.createdAt));
+}
+
+function compareUpdatedAt(left: string, right: string) {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.localeCompare(right);
 }
 
 function EpisodeSelection({

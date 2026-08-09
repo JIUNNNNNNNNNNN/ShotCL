@@ -2,7 +2,10 @@
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { ImageIcon, Save, X } from "lucide-react";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { Button } from "@/components/ui/Button";
+import { useAutosave } from "@/hooks/useAutosave";
+import { getAutosaveDraft } from "@/lib/client/autosaveDraftCache";
 import { getDailyPlanAdditionalScheduleDisplay } from "@/lib/dailyPlan/additionalSchedule";
 import type { DailyPlanMealTime } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
@@ -18,7 +21,8 @@ type ProgressScheduleEditorModalProps = {
   readOnly: boolean;
   isSaving: boolean;
   onClose: () => void;
-  onSave?: (values: ProgressScheduleEditorValues) => void;
+  onSave?: (values: ProgressScheduleEditorValues) => void | Promise<void>;
+  onAutoSaveMemo?: (memo: string) => Promise<void>;
 };
 
 /** 기타일정의 그림과 진행 메모만 명시적으로 저장하는 작은 팝업입니다. */
@@ -27,35 +31,49 @@ export function ProgressScheduleEditorModal({
   readOnly,
   isSaving,
   onClose,
-  onSave
+  onSave,
+  onAutoSaveMemo
 }: ProgressScheduleEditorModalProps) {
-  const [values, setValues] = useState<ProgressScheduleEditorValues>({
-    progressMemo: item.progressMemo ?? "",
+  const memoScopeKey = `progress-schedule-memo:${item.id}`;
+  const [values, setValues] = useState<ProgressScheduleEditorValues>(() => ({
+    progressMemo: getAutosaveDraft<string>(memoScopeKey)?.value ?? item.progressMemo ?? "",
     imageUrl: item.imageUrl ?? null,
     imageFile: null
-  });
+  }));
   const [temporaryImageUrl, setTemporaryImageUrl] = useState<string | null>(null);
+  const [isComposing, setIsComposing] = useState(false);
   const initialFingerprint = JSON.stringify({
-    progressMemo: item.progressMemo ?? "",
     imageUrl: item.imageUrl ?? null,
     imageFile: null
   });
   const currentFingerprint = JSON.stringify({
-    progressMemo: values.progressMemo,
     imageUrl: values.imageUrl,
     imageFile: values.imageFile
       ? `${values.imageFile.name}:${values.imageFile.size}:${values.imageFile.lastModified}`
       : null
   });
   useUnsavedChangesGuard(!readOnly && currentFingerprint !== initialFingerprint);
+  const memoAutosave = useAutosave<string>({
+    value: values.progressMemo,
+    enabled: Boolean(!readOnly && onAutoSaveMemo && !isComposing),
+    delayMs: 850,
+    scopeKey: memoScopeKey,
+    initialSavedFingerprint: JSON.stringify(item.progressMemo ?? ""),
+    restoreDraft: (memo) => {
+      setValues((current) => ({ ...current, progressMemo: memo }));
+    },
+    save: async (memo) => {
+      await onAutoSaveMemo?.(memo);
+    }
+  });
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") closeEditor();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose]);
+  }, []);
 
   useEffect(() => () => {
     if (temporaryImageUrl) URL.revokeObjectURL(temporaryImageUrl);
@@ -71,9 +89,18 @@ export function ProgressScheduleEditorModal({
     setValues((current) => ({ ...current, imageFile: file, imageUrl: nextUrl }));
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!readOnly) onSave?.(values);
+    if (readOnly) return;
+    // Memo persistence is independent; do not delay an explicit image upload
+    // while a background text mutation is still in flight.
+    void memoAutosave.flush();
+    await onSave?.(values);
+  }
+
+  function closeEditor() {
+    if (!readOnly) void memoAutosave.flush();
+    onClose();
   }
 
   return (
@@ -83,11 +110,16 @@ export function ProgressScheduleEditorModal({
       aria-modal="true"
       aria-label={readOnly ? "기타일정 그림과 메모 보기" : "기타일정 그림과 메모 수정"}
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) closeEditor();
       }}
     >
       <form
         onSubmit={handleSubmit}
+        onBlurCapture={() => {
+          if (!isComposing) void memoAutosave.flush();
+        }}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={() => setIsComposing(false)}
         onPointerDown={(event) => event.stopPropagation()}
         className="mx-auto max-h-[72dvh] w-full max-w-[26rem] overflow-y-auto border border-field-border bg-field-dialog p-3 shadow-dialog"
       >
@@ -95,7 +127,7 @@ export function ProgressScheduleEditorModal({
           <span className="sr-only">{readOnly ? "기타일정 보기" : "기타일정 수정"}</span>
           <Button
             variant="ghost"
-            onClick={onClose}
+            onClick={closeEditor}
             aria-label="팝업 닫기"
             className="ml-auto !h-8 !min-h-8 !w-8 !border-0 !bg-transparent !px-0 !py-0"
           >
@@ -156,10 +188,13 @@ export function ProgressScheduleEditorModal({
         </div>
 
         {!readOnly ? (
-          <Button type="submit" disabled={isSaving} className="mt-3 w-full">
-            <Save className="h-4 w-4" aria-hidden />
-            저장
-          </Button>
+          <div className="mt-3 grid gap-2">
+            <AutosaveStatus status={memoAutosave.status} onRetry={memoAutosave.retry} />
+            <Button type="submit" disabled={isSaving} className="w-full">
+              <Save className="h-4 w-4" aria-hidden />
+              그림 저장
+            </Button>
+          </div>
         ) : null}
       </form>
     </div>

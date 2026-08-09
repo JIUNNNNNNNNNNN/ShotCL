@@ -53,13 +53,16 @@ export default function ProjectBasicInfoPage() {
     };
   }, [projectId]);
 
-  const saveBasicInfo = useCallback(async (nextValue: ProjectBasicInfo) => {
+  const persistBasicInfo = useCallback(async (nextValue: ProjectBasicInfo) => {
     if (!project) throw new Error("프로젝트를 찾을 수 없습니다.");
     const saved = await saveProjectBasicInfo(project.id, nextValue);
     setBasicInfo(saved);
     updateProjectBasicInfo(saved);
-    router.replace(`/projects/${project.id}`);
-  }, [project, router, updateProjectBasicInfo]);
+  }, [project, updateProjectBasicInfo]);
+
+  const completeBasicInfo = useCallback(() => {
+    if (project) router.replace(`/projects/${project.id}`);
+  }, [project, router]);
 
   if (isLoading) return <PageLoader />;
   if (!project || !basicInfo) {
@@ -72,9 +75,11 @@ export default function ProjectBasicInfoPage() {
 
   return (
     <ProjectBasicInfoForm
+      projectId={project.id}
       projectName={project.name}
       initialValue={basicInfo}
-      onSave={saveBasicInfo}
+      onAutoSave={persistBasicInfo}
+      onComplete={completeBasicInfo}
     />
   );
 }

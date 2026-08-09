@@ -1,15 +1,32 @@
 import { subscribeToLocalProjectChanges } from "@/lib/data/localStore";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
+export type ShotRealtimeChange = {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  newRow: Record<string, unknown>;
+  oldRow: Record<string, unknown>;
+};
+
 /** Supabase Realtime 또는 로컬 개발 이벤트로 컷 변경을 구독합니다. */
-export function subscribeToShotChanges(projectId: string, onChange: () => void, dailyPlanId?: string) {
+export function subscribeToShotChanges(
+  projectId: string,
+  onChange: (changes: ShotRealtimeChange[] | null) => void,
+  dailyPlanId?: string
+) {
   const supabase = getSupabaseBrowserClient();
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
-  const scheduleChange = () => {
+  let pendingChanges: ShotRealtimeChange[] = [];
+  let requiresFullRefresh = false;
+  const scheduleChange = (change?: ShotRealtimeChange) => {
+    if (change) pendingChanges.push(change);
+    else requiresFullRefresh = true;
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
-      onChange();
+      const changes = requiresFullRefresh ? null : pendingChanges;
+      pendingChanges = [];
+      requiresFullRefresh = false;
+      onChange(changes);
     }, 80);
   };
 
@@ -33,7 +50,11 @@ export function subscribeToShotChanges(projectId: string, onChange: () => void, 
           ? `daily_plan_id=eq.${dailyPlanId}`
           : `project_id=eq.${projectId}`
       },
-      scheduleChange
+      (payload) => scheduleChange({
+        eventType: payload.eventType,
+        newRow: (payload.new ?? {}) as Record<string, unknown>,
+        oldRow: (payload.old ?? {}) as Record<string, unknown>
+      })
     )
     .subscribe();
 

@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save } from "lucide-react";
 import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
 import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
@@ -18,16 +19,23 @@ import {
   useUnsavedChangesGuard
 } from "@/hooks/useUnsavedChangesGuard";
 import { useSceneListViewportMode } from "@/hooks/useSceneListViewportMode";
+import { useKeyedAutosave } from "@/hooks/useKeyedAutosave";
 import {
   clearProjectSceneCells,
+  createProjectSceneItemDraftPatch,
   createBlankProjectSceneItem,
   getProjectSceneList,
   reorderProjectSceneItems,
+  saveProjectSceneItemDraft,
+  saveProjectSceneReferenceDraft,
   saveProjectSceneCellMerges,
   saveProjectSceneList,
   SceneListMergeMutationError,
-  type ProjectSceneClearCell
+  type ProjectSceneClearCell,
+  type ProjectSceneItemDraftPatch,
+  type ProjectSceneReferenceAutosaveResult
 } from "@/lib/data/sceneList";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
 import { deriveLegacySceneListMerges, type SceneListMergeCell } from "@/lib/sceneListMergeModel";
@@ -53,6 +61,7 @@ type MergeSaveJob = {
   projectId: string;
   version: number;
   merges: ProjectSceneCellMerge[];
+  beforeSave: Promise<boolean>;
   expectedUpdatedAt: string | null;
   rollbackSnapshot: PersistedMergeSnapshot;
   legacyItems: ProjectSceneItem[];
@@ -64,16 +73,26 @@ type ClearSaveJob = {
   projectId: string;
   version: number;
   cells: ProjectSceneClearCell[];
+  beforeSave: Promise<boolean>;
   previousValues: Map<string, string>;
   previousVersions: Map<string, number | undefined>;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
 
+type SceneAutosaveEntity =
+  | { key: string; kind: "item"; item: ProjectSceneItem }
+  | { key: string; kind: "reference"; scenarioReference: string };
+
+type SceneAutosaveResult =
+  | { kind: "item"; item: ProjectSceneItem }
+  | { kind: "reference"; reference: ProjectSceneReferenceAutosaveResult };
+
 // SPA 내부 이동으로 page instance가 교체되어도 같은 프로젝트의 저장 완료를
 // 다음 load가 기다릴 수 있도록 module scope에서 pending tail을 공유합니다.
 const projectMergeMutationTails = new Map<string, Promise<void>>();
 const projectClearMutationTails = new Map<string, Promise<void>>();
+const projectSceneItemMutationTails = new Map<string, Promise<void>>();
 
 /** 프로젝트 공통 씬리스트를 수동 저장하며 Cut 값은 일촬표 컷수와 공유합니다. */
 export default function ProjectSceneListPage() {
@@ -98,6 +117,7 @@ export default function ProjectSceneListPage() {
   const [isMergePersisting, setIsMergePersisting] = useState(false);
   const [isClearPersisting, setIsClearPersisting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [composingAutosaveKey, setComposingAutosaveKey] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [cutInputErrors, setCutInputErrors] = useState<Record<string, string>>({});
   const desktopGuideAnchorRef = useContextualGuideAnchor("scene-list.desktop");
@@ -130,8 +150,16 @@ export default function ProjectSceneListPage() {
   const sceneCellVersionsRef = useRef(new Map<string, number>());
   const clearSaveQueueRef = useRef<ClearSaveJob[]>([]);
   const clearSaveRunningRef = useRef(false);
+  const persistedItemIdsRef = useRef(new Set<string>());
+  const autosaveItemVersionsRef = useRef(new Map<string, string>());
+  const autosaveItemSnapshotsRef = useRef(new Map<string, ProjectSceneItem>());
+  const autosaveItemIntentFieldsRef = useRef(new Map<string, Set<keyof ProjectSceneItemDraftPatch>>());
+  const autosaveReferenceVersionsRef = useRef(new Map<string, string | null>());
   activeProjectIdRef.current = projectId;
-  useUnsavedChangesGuard(isDirty || isMergePersisting || isClearPersisting);
+  // Only not-yet-created/deleted structural rows require an explicit guard.
+  // Merge/clear persistence already runs through module-scoped tails and must
+  // never hold route navigation while its background request is in flight.
+  useUnsavedChangesGuard(isDirty);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -175,6 +203,168 @@ export default function ProjectSceneListPage() {
   useEffect(() => {
     cellMergesUpdatedAtRef.current = cellMergesUpdatedAt;
   }, [cellMergesUpdatedAt]);
+
+  const sceneAutosaveEntities = useMemo<SceneAutosaveEntity[]>(() => [
+    ...items
+      .filter((item) => persistedItemIdsRef.current.has(item.id))
+      .map((item) => ({
+        key: sceneItemAutosaveKey(item.id),
+        kind: "item" as const,
+        item
+      })),
+    { key: sceneReferenceAutosaveKey(), kind: "reference", scenarioReference }
+  ], [items, scenarioReference]);
+  const validateSceneAutosaveEntity = useCallback((entity: SceneAutosaveEntity) => (
+    entity.key !== composingAutosaveKey
+      && (entity.kind === "reference" || !cutInputErrors[entity.item.id])
+  ), [composingAutosaveKey, cutInputErrors]);
+  const sceneAutosave = useKeyedAutosave<SceneAutosaveEntity, SceneAutosaveResult>({
+    values: sceneAutosaveEntities,
+    getKey: (entity) => entity.key,
+    enabled: canEdit
+      && !isLoading
+      && loadedProjectId === projectId
+      && !isSaving,
+    scopeKey: projectId || "scene-list",
+    delayMs: 750,
+    fingerprint: sceneAutosaveEntityFingerprint,
+    validate: validateSceneAutosaveEntity,
+    restoreDrafts: (drafts) => {
+      for (const restored of drafts) {
+        const entity = restored.value;
+        const savedEntity = restored.savedValue;
+        if (entity.kind === "reference") {
+          setScenarioReference(entity.scenarioReference);
+          continue;
+        }
+        const currentItem = itemsRef.current.find((item) => item.id === entity.item.id);
+        if (!currentItem) continue;
+        const savedItem = savedEntity?.kind === "item" ? savedEntity.item : currentItem;
+        const restoredFieldNames = Object.keys(
+          createProjectSceneItemDraftPatch(savedItem, entity.item)
+        ) as Array<keyof ProjectSceneItemDraftPatch>;
+        const intentFields = new Set<keyof ProjectSceneItemDraftPatch>(restoredFieldNames);
+        if (intentFields.size === 0) continue;
+        autosaveItemIntentFieldsRef.current.set(entity.item.id, intentFields);
+        const mergedItem = mergeSceneItemConflict(currentItem, entity.item, intentFields);
+        const nextItems = itemsRef.current.map((item) => (
+          item.id === entity.item.id ? mergedItem : item
+        ));
+        itemsRef.current = nextItems;
+        setItems(nextItems);
+      }
+    },
+    save: async (entity) => {
+      if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
+      if (entity.kind === "item") {
+        await projectSceneItemMutationTails.get(sceneItemMutationKey(projectId, entity.item.id));
+        const expectedUpdatedAt = autosaveItemVersionsRef.current.get(entity.item.id);
+        if (!expectedUpdatedAt) throw new Error("자동 저장할 씬의 저장 버전을 확인할 수 없습니다.");
+        const baseline = autosaveItemSnapshotsRef.current.get(entity.item.id);
+        if (!baseline) throw new Error("자동 저장할 씬의 기준값을 확인할 수 없습니다.");
+        const currentItem = autosaveItemIntentFieldsRef.current.has(entity.item.id)
+          ? itemsRef.current.find((item) => item.id === entity.item.id) ?? entity.item
+          : entity.item;
+        const patch = createProjectSceneItemDraftPatch(baseline, currentItem);
+        if (Object.keys(patch).length === 0) {
+          autosaveItemIntentFieldsRef.current.delete(entity.item.id);
+          return { kind: "item", item: { ...currentItem, updatedAt: expectedUpdatedAt } };
+        }
+        autosaveItemIntentFieldsRef.current.set(
+          entity.item.id,
+          new Set(Object.keys(patch) as Array<keyof ProjectSceneItemDraftPatch>)
+        );
+        const saved = await saveProjectSceneItemDraft(
+          projectId,
+          entity.item.id,
+          patch,
+          expectedUpdatedAt
+        );
+        autosaveItemVersionsRef.current.set(entity.item.id, saved.updatedAt);
+        autosaveItemSnapshotsRef.current.set(entity.item.id, saved);
+        autosaveItemIntentFieldsRef.current.delete(entity.item.id);
+        return { kind: "item", item: saved };
+      }
+      await projectMergeMutationTails.get(projectId);
+      const savedReference = await saveProjectSceneReferenceDraft(
+        projectId,
+        entity.scenarioReference,
+        autosaveReferenceVersionsRef.current.get(projectId) ?? null
+      );
+      autosaveReferenceVersionsRef.current.set(projectId, savedReference.updatedAt);
+      if (activeProjectIdRef.current === projectId) {
+        cellMergesUpdatedAtRef.current = savedReference.updatedAt;
+        persistedMergeSnapshotRef.current = {
+          ...persistedMergeSnapshotRef.current,
+          updatedAt: savedReference.updatedAt
+        };
+      }
+      return { kind: "reference", reference: savedReference };
+    },
+    onSaved: (result, entity) => {
+      if (activeProjectIdRef.current !== projectId) return;
+      if (result.kind === "item" && entity.kind === "item") {
+        setItems((current) => {
+          const next = current.map((item) => {
+            return item.id === entity.item.id
+              && sceneItemEditableFingerprint(item) === sceneItemEditableFingerprint(entity.item)
+              ? { ...item, updatedAt: result.item.updatedAt }
+              : item;
+          });
+          itemsRef.current = next;
+          return next;
+        });
+        return;
+      }
+      if (result.kind === "reference") {
+        setCellMergesUpdatedAt(result.reference.updatedAt);
+      }
+    },
+    onError: (error, failedEntity) => {
+      if (error instanceof AutosaveConflictError) {
+        if (error.kind === "scene-item") {
+          const latestItem = error.latest as ProjectSceneItem | null;
+          if (latestItem?.id && latestItem.updatedAt) {
+            autosaveItemVersionsRef.current.set(latestItem.id, latestItem.updatedAt);
+            autosaveItemSnapshotsRef.current.set(latestItem.id, latestItem);
+            if (failedEntity.kind === "item" && failedEntity.item.id === latestItem.id) {
+              const currentItem = itemsRef.current.find((item) => item.id === latestItem.id)
+                ?? failedEntity.item;
+              const intentFields = autosaveItemIntentFieldsRef.current.get(latestItem.id)
+                ?? new Set<keyof ProjectSceneItemDraftPatch>();
+              for (const key of Object.keys(
+                createProjectSceneItemDraftPatch(failedEntity.item, currentItem)
+              ) as Array<keyof ProjectSceneItemDraftPatch>) {
+                intentFields.add(key);
+              }
+              autosaveItemIntentFieldsRef.current.set(latestItem.id, intentFields);
+              const mergedItem = mergeSceneItemConflict(latestItem, currentItem, intentFields);
+              const nextItems = itemsRef.current.map((item) => (
+                item.id === latestItem.id ? mergedItem : item
+              ));
+              itemsRef.current = nextItems;
+              setItems(nextItems);
+            }
+          }
+        } else if (error.kind === "scene-reference") {
+          const latestReference = error.latest as ProjectSceneReferenceAutosaveResult | null;
+          if (latestReference) {
+            autosaveReferenceVersionsRef.current.set(projectId, latestReference.updatedAt);
+            if (activeProjectIdRef.current === projectId) {
+              cellMergesUpdatedAtRef.current = latestReference.updatedAt;
+              persistedMergeSnapshotRef.current = {
+                ...persistedMergeSnapshotRef.current,
+                updatedAt: latestReference.updatedAt
+              };
+              setCellMergesUpdatedAt(latestReference.updatedAt);
+            }
+          }
+        }
+      }
+      if (activeProjectIdRef.current !== projectId) return;
+      setErrorMessage(getErrorMessage(error, "씬리스트 변경사항을 자동 저장하지 못했습니다."));
+    }
+  });
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -231,6 +421,15 @@ export default function ProjectSceneListPage() {
       setCutInputErrors({});
       setIsDirty(false);
       setErrorMessage("");
+      persistedItemIdsRef.current = new Set(sceneList.items.map((item) => item.id));
+      autosaveItemVersionsRef.current = new Map(sceneList.items.map((item) => [item.id, item.updatedAt]));
+      autosaveItemSnapshotsRef.current = new Map(sceneList.items.map((item) => [item.id, item]));
+      autosaveItemIntentFieldsRef.current.clear();
+      autosaveReferenceVersionsRef.current.set(projectId, sceneList.cellMergesUpdatedAt);
+      sceneAutosave.markSaved(sceneAutosaveEntitiesFrom(
+        sceneList.items,
+        sceneList.scenarioReference
+      ));
     } catch (error) {
       if (
         mountedRef.current
@@ -250,7 +449,7 @@ export default function ProjectSceneListPage() {
         setIsLoading(false);
       }
     }
-  }, [projectId]);
+  }, [projectId, sceneAutosave.markSaved]);
 
   useEffect(() => {
     void load();
@@ -270,7 +469,7 @@ export default function ProjectSceneListPage() {
       itemsRef.current = next;
       return next;
     });
-    setIsDirty(true);
+    if (!persistedItemIdsRef.current.has(id)) setIsDirty(true);
     setErrorMessage("");
   }, [canEdit, projectId]);
 
@@ -297,8 +496,16 @@ export default function ProjectSceneListPage() {
     setErrorMessage("");
   }, [canEdit, projectId]);
 
-  const deleteItem = useCallback((item: ProjectSceneItem) => {
-    if (!canEdit) return;
+  const deleteItem = useCallback(async (item: ProjectSceneItem) => {
+    if (!canEdit || !projectId) return;
+    if (
+      persistedItemIdsRef.current.has(item.id)
+      && !await sceneAutosave.flushKeys([sceneItemAutosaveKey(item.id)])
+    ) {
+      setErrorMessage("삭제할 씬의 자동 저장에 실패했습니다. 다시 시도해주세요.");
+      return;
+    }
+    if (activeProjectIdRef.current !== projectId) return;
     setItems((current) => {
       const next = current
         .filter((candidate) => candidate.id !== item.id)
@@ -321,7 +528,7 @@ export default function ProjectSceneListPage() {
     });
     setIsDirty(true);
     setErrorMessage("");
-  }, [canEdit]);
+  }, [canEdit, projectId, sceneAutosave.flushKeys]);
 
   const drainMergeSaveQueue = useCallback(async () => {
     if (mergeSaveRunningRef.current) return;
@@ -331,6 +538,13 @@ export default function ProjectSceneListPage() {
       while (mergeSaveQueueRef.current.length > 0) {
         const job = mergeSaveQueueRef.current.shift()!;
         try {
+          if (!await job.beforeSave) {
+            throw new Error("메모 자동 저장에 실패해 셀 병합을 저장하지 못했습니다.");
+          }
+          if (activeProjectIdRef.current === job.projectId) {
+            job.expectedUpdatedAt = persistedMergeSnapshotRef.current.updatedAt;
+            job.rollbackSnapshot = clonePersistedMergeSnapshot(persistedMergeSnapshotRef.current);
+          }
           const saved = await saveProjectSceneCellMerges(
             job.projectId,
             job.merges,
@@ -341,6 +555,7 @@ export default function ProjectSceneListPage() {
             materialized: true,
             updatedAt: saved.updatedAt
           };
+          autosaveReferenceVersionsRef.current.set(job.projectId, saved.updatedAt);
           rebaseQueuedMergeJobs(mergeSaveQueueRef.current, job.projectId, snapshot);
           const isActiveProject = mountedRef.current
             && activeProjectIdRef.current === job.projectId;
@@ -374,6 +589,7 @@ export default function ProjectSceneListPage() {
               materialized: error.latestMaterialized,
               updatedAt: error.latestUpdatedAt
             };
+            autosaveReferenceVersionsRef.current.set(job.projectId, latest.updatedAt);
             const queued = takeMergeJobsForProject(mergeSaveQueueRef.current, job.projectId);
             if (mountedRef.current && activeProjectIdRef.current === job.projectId) {
               persistedMergeSnapshotRef.current = latest;
@@ -442,11 +658,13 @@ export default function ProjectSceneListPage() {
       setMergeMetadataDirty(true);
       setErrorMessage("");
     });
+    const beforeSave = sceneAutosave.flushKeys([sceneReferenceAutosaveKey()]);
     const promise = new Promise<void>((resolve, reject) => {
       mergeSaveQueueRef.current.push({
         projectId,
         version,
         merges: nextMerges,
+        beforeSave,
         expectedUpdatedAt: persistedMergeSnapshotRef.current.updatedAt,
         rollbackSnapshot: clonePersistedMergeSnapshot(persistedMergeSnapshotRef.current),
         legacyItems: itemsRef.current,
@@ -457,7 +675,7 @@ export default function ProjectSceneListPage() {
     trackProjectMutationTail(projectMergeMutationTails, projectId, promise);
     void drainMergeSaveQueue();
     return promise;
-  }, [drainMergeSaveQueue, projectId]);
+  }, [drainMergeSaveQueue, projectId, sceneAutosave.flushKeys]);
 
   const drainClearSaveQueue = useCallback(async () => {
     if (clearSaveRunningRef.current) return;
@@ -467,7 +685,30 @@ export default function ProjectSceneListPage() {
       while (clearSaveQueueRef.current.length > 0) {
         const job = clearSaveQueueRef.current.shift()!;
         try {
-          await clearProjectSceneCells(job.projectId, job.cells);
+          if (!await job.beforeSave) {
+            throw new Error("선택한 씬의 자동 저장에 실패해 칸을 비우지 못했습니다.");
+          }
+          const cleared = await clearProjectSceneCells(job.projectId, job.cells);
+          cleared.items.forEach((item) => {
+            autosaveItemVersionsRef.current.set(item.id, item.updatedAt);
+            autosaveItemSnapshotsRef.current.set(item.id, item);
+          });
+          const isActiveProject = mountedRef.current
+            && activeProjectIdRef.current === job.projectId;
+          if (isActiveProject) {
+            sceneAutosave.markSaved(cleared.items.map(sceneItemAutosaveEntity));
+          }
+          if (cleared.items.length > 0 && isActiveProject) {
+            const clearedById = new Map(cleared.items.map((item) => [item.id, item]));
+            setItems((current) => {
+              const next = current.map((item) => {
+                const saved = clearedById.get(item.id);
+                return saved ? { ...item, updatedAt: saved.updatedAt } : item;
+              });
+              itemsRef.current = next;
+              return next;
+            });
+          }
           for (const cell of job.cells) {
             const key = sceneCellKey(job.projectId, cell.sceneId, cell.column);
             rebaseQueuedClearJobs(
@@ -512,7 +753,7 @@ export default function ProjectSceneListPage() {
       clearSaveRunningRef.current = false;
       if (mountedRef.current) setIsClearPersisting(false);
     }
-  }, []);
+  }, [sceneAutosave.markSaved]);
 
   const clearCells = useCallback((cells: SceneListMergeCell[]) => {
     if (!projectId) return Promise.reject(new Error("프로젝트 ID를 확인할 수 없습니다."));
@@ -524,6 +765,9 @@ export default function ProjectSceneListPage() {
       columnsById.set(cell.sceneId, columns);
     }
     const nextItems = previous.map((item) => clearSceneItemColumns(item, columnsById.get(item.id)));
+    const beforeSave = sceneAutosave.flushKeys(
+      [...columnsById.keys()].map(sceneItemAutosaveKey)
+    );
     const version = ++sceneCellMutationVersionRef.current;
     const normalizedCells = cells as ProjectSceneClearCell[];
     const previousValues = new Map<string, string>();
@@ -545,6 +789,7 @@ export default function ProjectSceneListPage() {
         projectId,
         version,
         cells: normalizedCells,
+        beforeSave,
         previousValues,
         previousVersions,
         resolve,
@@ -552,9 +797,16 @@ export default function ProjectSceneListPage() {
       });
     });
     trackProjectMutationTail(projectClearMutationTails, projectId, promise);
+    for (const sceneId of columnsById.keys()) {
+      trackProjectMutationTail(
+        projectSceneItemMutationTails,
+        sceneItemMutationKey(projectId, sceneId),
+        promise
+      );
+    }
     void drainClearSaveQueue();
     return promise;
-  }, [drainClearSaveQueue, projectId]);
+  }, [drainClearSaveQueue, projectId, sceneAutosave.flushKeys]);
 
   const reorderLocal = useCallback((nextItems: ProjectSceneItem[]) => {
     const ordered = nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 }));
@@ -566,11 +818,44 @@ export default function ProjectSceneListPage() {
   const commitReorder = useCallback(async (nextItems: ProjectSceneItem[]) => {
     if (!projectId) throw new Error("프로젝트 ID를 확인할 수 없습니다.");
     try {
-      await reorderProjectSceneItems(projectId, nextItems.map((item) => item.id));
+      const persistedIds = nextItems
+        .filter((item) => persistedItemIdsRef.current.has(item.id))
+        .map((item) => item.id);
+      if (!await sceneAutosave.flushKeys(persistedIds.map(sceneItemAutosaveKey))) {
+        throw new Error("씬 입력값 자동 저장에 실패해 순서를 변경하지 못했습니다.");
+      }
+      const reorderPromise = reorderProjectSceneItems(
+        projectId,
+        nextItems.map((item) => item.id)
+      );
+      const settledReorder = reorderPromise.then(() => undefined, () => undefined);
+      for (const itemId of persistedIds) {
+        trackProjectMutationTail(
+          projectSceneItemMutationTails,
+          sceneItemMutationKey(projectId, itemId),
+          settledReorder
+        );
+      }
+      const savedItems = await reorderPromise;
+      savedItems.forEach((item) => {
+        autosaveItemVersionsRef.current.set(item.id, item.updatedAt);
+        autosaveItemSnapshotsRef.current.set(item.id, item);
+      });
+      if (mountedRef.current && activeProjectIdRef.current === projectId) {
+        const savedById = new Map(savedItems.map((item) => [item.id, item]));
+        setItems((current) => {
+          const next = current.map((item) => {
+            const saved = savedById.get(item.id);
+            return saved ? { ...item, sortOrder: saved.sortOrder, updatedAt: saved.updatedAt } : item;
+          });
+          itemsRef.current = next;
+          return next;
+        });
+      }
     } catch (error) {
       if (activeProjectIdRef.current === projectId) throw error;
     }
-  }, [projectId]);
+  }, [projectId, sceneAutosave.flushKeys]);
 
   const save = useCallback(async () => {
     if (
@@ -593,6 +878,10 @@ export default function ProjectSceneListPage() {
     setIsSaving(true);
     setErrorMessage("");
     try {
+      if (!await sceneAutosave.flush()) {
+        setErrorMessage("자동 저장에 실패한 입력값을 먼저 확인해주세요.");
+        return;
+      }
       const saved = await saveProjectSceneList(projectId, {
         items,
         scenarioReference,
@@ -610,6 +899,7 @@ export default function ProjectSceneListPage() {
       cellMergesRef.current = visibleMerges;
       cellMergesMaterializedRef.current = saved.cellMergesMaterialized;
       cellMergesUpdatedAtRef.current = saved.cellMergesUpdatedAt;
+      autosaveReferenceVersionsRef.current.set(projectId, saved.cellMergesUpdatedAt);
       persistedMergeSnapshotRef.current = {
         merges: visibleMerges,
         materialized: saved.cellMergesMaterialized,
@@ -623,6 +913,11 @@ export default function ProjectSceneListPage() {
       setMergeMetadataDirty(false);
       setCutInputErrors({});
       setIsDirty(false);
+      persistedItemIdsRef.current = new Set(saved.items.map((item) => item.id));
+      autosaveItemVersionsRef.current = new Map(saved.items.map((item) => [item.id, item.updatedAt]));
+      autosaveItemSnapshotsRef.current = new Map(saved.items.map((item) => [item.id, item]));
+      autosaveItemIntentFieldsRef.current.clear();
+      sceneAutosave.markSaved(sceneAutosaveEntitiesFrom(saved.items, saved.scenarioReference));
     } catch (error) {
       if (mountedRef.current && activeProjectIdRef.current === projectId) {
         setErrorMessage(getErrorMessage(error, "씬리스트를 저장하지 못했습니다."));
@@ -641,6 +936,7 @@ export default function ProjectSceneListPage() {
     mergeMetadataDirty,
     projectId,
     scenarioReference
+    , sceneAutosave
   ]);
 
   if (isLoading || loadedProjectId !== projectId) {
@@ -679,6 +975,18 @@ export default function ProjectSceneListPage() {
       className={`mx-auto w-full min-w-0 max-w-[1480px] pb-20 ${
         viewportMode === "portrait" ? "scene-list-page--portrait" : ""
       }`}
+      onCompositionStartCapture={(event) => {
+        setComposingAutosaveKey(getSceneAutosaveKeyFromTarget(event.target));
+      }}
+      onCompositionEndCapture={(event) => {
+        const key = getSceneAutosaveKeyFromTarget(event.target);
+        setComposingAutosaveKey((current) => current === key ? null : current);
+        if (key) window.setTimeout(() => void sceneAutosave.flushKeys([key]), 0);
+      }}
+      onBlurCapture={(event) => {
+        const key = getSceneAutosaveKeyFromTarget(event.target);
+        if (key && key !== composingAutosaveKey) void sceneAutosave.flushKeys([key]);
+      }}
     >
       <section className="border border-field-border bg-field-panel">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-field-border bg-field-soft px-3 py-2">
@@ -689,6 +997,13 @@ export default function ProjectSceneListPage() {
             {isMergePersisting || isClearPersisting ? (
               <p className="text-[10px] font-bold text-field-muted" role="status">변경사항 저장 중</p>
             ) : null}
+            <AutosaveStatus
+              status={sceneAutosave.status}
+              onRetry={() => {
+                setErrorMessage("");
+                sceneAutosave.retry();
+              }}
+            />
           </div>
           <div className="flex items-center gap-1.5">
             <Link
@@ -790,11 +1105,11 @@ export default function ProjectSceneListPage() {
           <div className="workspace-border border-t p-3">
             {canEdit ? (
               <textarea
+                data-scene-reference-editor
                 value={scenarioReference}
                 disabled={isSaving}
                 onChange={(event) => {
                   setScenarioReference(event.target.value);
-                  setIsDirty(true);
                 }}
                 rows={7}
                 aria-label="메모"
@@ -840,6 +1155,63 @@ function clearSceneItemColumns(
   if (columns.has("time")) next.dayNight = "";
   if (columns.has("intExt")) next.interiorExterior = "";
   return next;
+}
+
+function sceneItemAutosaveKey(itemId: string) {
+  return `item:${itemId}`;
+}
+
+function sceneReferenceAutosaveKey() {
+  return "reference";
+}
+
+function getSceneAutosaveKeyFromTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  if (target.closest("[data-scene-reference-editor]")) return sceneReferenceAutosaveKey();
+  const owner = target.closest<HTMLElement>(
+    "[data-scene-item-id],[data-scene-merge-scene-id],[data-scene-character-note-row-id]"
+  );
+  const itemId = owner?.dataset.sceneItemId
+    || owner?.dataset.sceneMergeSceneId
+    || owner?.dataset.sceneCharacterNoteRowId;
+  return itemId ? sceneItemAutosaveKey(itemId) : null;
+}
+
+function sceneItemAutosaveEntity(item: ProjectSceneItem): SceneAutosaveEntity {
+  return { key: sceneItemAutosaveKey(item.id), kind: "item", item };
+}
+
+function sceneAutosaveEntitiesFrom(
+  items: ProjectSceneItem[],
+  scenarioReference: string
+): SceneAutosaveEntity[] {
+  return [
+    ...items.map(sceneItemAutosaveEntity),
+    { key: sceneReferenceAutosaveKey(), kind: "reference", scenarioReference }
+  ];
+}
+
+function sceneAutosaveEntityFingerprint(entity: SceneAutosaveEntity) {
+  return entity.kind === "item"
+    ? sceneItemEditableFingerprint(entity.item)
+    : JSON.stringify(entity.scenarioReference);
+}
+
+function sceneItemEditableFingerprint(item: ProjectSceneItem) {
+  return JSON.stringify({
+    sceneNo: item.sceneNo,
+    mainLocation: item.mainLocation,
+    subLocation: item.subLocation,
+    dayLabel: item.dayLabel,
+    dayNight: item.dayNight,
+    interiorExterior: item.interiorExterior,
+    sceneContent: item.sceneContent,
+    characters: item.characters,
+    characterNotes: item.characterNotes,
+    actorCells: item.actorCells,
+    props: item.props,
+    cutCount: item.cutCount
+  });
 }
 
 function restoreClearJobValues(
@@ -924,6 +1296,10 @@ function sceneCellKey(
   return `${projectId}\u0000${sceneId}\u0000${column}`;
 }
 
+function sceneItemMutationKey(projectId: string, sceneId: string) {
+  return `${projectId}\u0000${sceneId}`;
+}
+
 function clonePersistedMergeSnapshot(snapshot: PersistedMergeSnapshot): PersistedMergeSnapshot {
   return {
     merges: snapshot.merges,
@@ -987,6 +1363,18 @@ function rebaseQueuedClearJobs(
       job.previousValues.set(cellKey, value);
     }
   });
+}
+
+function mergeSceneItemConflict(
+  latest: ProjectSceneItem,
+  local: ProjectSceneItem,
+  intentFields: ReadonlySet<keyof ProjectSceneItemDraftPatch>
+) {
+  const merged = { ...latest };
+  for (const field of intentFields) {
+    (merged as unknown as Record<string, unknown>)[field] = local[field];
+  }
+  return merged;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {

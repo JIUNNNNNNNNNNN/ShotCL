@@ -134,7 +134,6 @@ export function ProjectShootingCalendar({
   }
 
   async function updateEvent(eventId: string, values: ProjectCalendarEventInput) {
-    setIsMutating(true);
     try {
       const event = await updateProjectCalendarEvent(projectId, eventId, values);
       setEvents((current) => upsertEvent(current, event));
@@ -143,8 +142,6 @@ export function ProjectShootingCalendar({
       const message = error instanceof Error ? error.message : "프로젝트 일정을 수정하지 못했습니다.";
       setSyncMessage(message);
       throw error;
-    } finally {
-      setIsMutating(false);
     }
   }
 

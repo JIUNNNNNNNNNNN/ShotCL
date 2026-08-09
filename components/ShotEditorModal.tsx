@@ -2,7 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { Save, Trash2, X } from "lucide-react";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { Button } from "@/components/ui/Button";
+import { useAutosave } from "@/hooks/useAutosave";
+import { getAutosaveDraft } from "@/lib/client/autosaveDraftCache";
 import type { Shot, ShotStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
@@ -30,6 +33,7 @@ type ShotEditorModalProps = {
   readOnly?: boolean;
   onClose: () => void;
   onSave?: (values: ShotEditorValues) => void;
+  onAutoSave?: (values: ShotEditorValues) => Promise<void>;
   onDelete?: (shot: Shot) => void;
 };
 
@@ -79,31 +83,53 @@ export function ShotEditorModal({
   readOnly = false,
   onClose,
   onSave,
+  onAutoSave,
   onDelete
 }: ShotEditorModalProps) {
-  const [values, setValues] = useState<ShotEditorValues>(() => emptyValues(defaultOrderIndex));
+  const [values, setValues] = useState<ShotEditorValues>(() => (
+    shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex)
+  ));
   const [savedFingerprint, setSavedFingerprint] = useState(() => (
     shotEditorFingerprint(shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex))
   ));
+  const [isComposing, setIsComposing] = useState(false);
   useUnsavedChangesGuard(
-    open && !readOnly && shotEditorFingerprint(values) !== savedFingerprint
+    open && mode === "add" && !readOnly && shotEditorFingerprint(values) !== savedFingerprint
   );
+
+  const autosave = useAutosave<ShotEditorValues>({
+    value: values,
+    enabled: Boolean(open && mode === "edit" && shot && !readOnly && onAutoSave && !isComposing),
+    delayMs: 700,
+    scopeKey: shot?.id ?? "new-shot",
+    initialSavedFingerprint: shotEditorFingerprint(
+      shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex)
+    ),
+    restoreDraft: (draft) => setValues(draft),
+    save: async (draft) => {
+      await onAutoSave?.(draft);
+    }
+  });
 
   useEffect(() => {
     if (!open) return;
-    const nextValues = shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex);
+    const canonicalValues = shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex);
+    const cached = mode === "edit" && shot
+      ? getAutosaveDraft<ShotEditorValues>(shot.id)
+      : null;
+    const nextValues = cached?.value ?? canonicalValues;
     setValues(nextValues);
-    setSavedFingerprint(shotEditorFingerprint(nextValues));
-  }, [defaultOrderIndex, open, shot]);
+    setSavedFingerprint(shotEditorFingerprint(canonicalValues));
+  }, [defaultOrderIndex, mode, open, shot]);
 
   useEffect(() => {
     if (!open) return undefined;
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") closeEditor();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
 
@@ -113,7 +139,18 @@ export function ShotEditorModal({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!readOnly) onSave?.(values);
+    if (readOnly) return;
+    if (mode === "edit") {
+      void autosave.flush();
+      onClose();
+      return;
+    }
+    onSave?.(values);
+  }
+
+  function closeEditor() {
+    if (mode === "edit" && !readOnly) void autosave.flush();
+    onClose();
   }
 
   return (
@@ -128,11 +165,16 @@ export function ShotEditorModal({
       aria-modal="true"
       aria-label={mode === "add" ? "새 컷 추가" : readOnly ? "컷 내용 보기" : "컷 내용 수정"}
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget) closeEditor();
       }}
     >
       <form
         onSubmit={handleSubmit}
+        onBlurCapture={() => {
+          if (mode === "edit" && !isComposing) void autosave.flush();
+        }}
+        onCompositionStart={() => setIsComposing(true)}
+        onCompositionEnd={() => setIsComposing(false)}
         onPointerDown={(event) => event.stopPropagation()}
         className={cn(
           "w-full overflow-y-auto border border-field-divider bg-field-dialog shadow-dialog",
@@ -150,7 +192,7 @@ export function ShotEditorModal({
             )}
             <Button
               variant="ghost"
-              onClick={onClose}
+              onClick={closeEditor}
               aria-label="팝업 닫기"
               className="ml-auto !h-8 !min-h-8 !w-8 !border !border-field-border !bg-field-soft !px-0 !py-0 !text-field-muted hover:!border-field-divider hover:!bg-field-hover hover:!text-field-text"
             >
@@ -254,14 +296,20 @@ export function ShotEditorModal({
           </div>
 
           {!readOnly ? <div className={cn("grid grid-cols-2 gap-2", mode === "add" ? "mt-5" : "mt-3")}>
-            <Button
-              type="submit"
-              disabled={isSaving || (mode === "add" && !values.title.trim())}
-              className={mode === "edit" && shot && onDelete ? "" : "col-span-2"}
-            >
-              <Save className="h-4 w-4" aria-hidden />
-              저장
-            </Button>
+            {mode === "add" ? (
+              <Button
+                type="submit"
+                disabled={isSaving || !values.title.trim()}
+                className="col-span-2"
+              >
+                <Save className="h-4 w-4" aria-hidden />
+                저장
+              </Button>
+            ) : (
+              <div className={shot && onDelete ? "" : "col-span-2"}>
+                <AutosaveStatus status={autosave.status} onRetry={autosave.retry} />
+              </div>
+            )}
 
             {mode === "edit" && shot && onDelete ? (
               <Button variant="danger" onClick={() => onDelete(shot)} disabled={isSaving}>

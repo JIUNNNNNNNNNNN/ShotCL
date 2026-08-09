@@ -835,6 +835,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return await reorderReferenceAssetsInCut(supabase, projectId, body);
     }
 
+    if (body.operation === "update_scenario_scenes") {
+      return await updateReferenceAssetScenarioScenes(supabase, projectId, body);
+    }
+
     const id = cleanText(body.id, 100);
     if (!id) return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
     const { data: existing, error: existingError } = await supabase
@@ -846,6 +850,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (existingError) throw existingError;
     if (!existing) {
       return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
+    }
+
+    const expectedScenarioUpdatedAt = "scenarioScenes" in body
+      && body.reanalyzeScenario !== true
+      && body.expectedUpdatedAt !== undefined
+      ? cleanText(body.expectedUpdatedAt, 80)
+      : "";
+    if (
+      "scenarioScenes" in body
+      && body.reanalyzeScenario !== true
+      && body.expectedUpdatedAt !== undefined
+      && (!expectedScenarioUpdatedAt || Number.isNaN(Date.parse(expectedScenarioUpdatedAt)))
+    ) {
+      return NextResponse.json({ error: "시나리오 버전 정보가 올바르지 않습니다." }, { status: 400 });
+    }
+    if (
+      expectedScenarioUpdatedAt
+      && String(existing.updated_at ?? "") !== expectedScenarioUpdatedAt
+    ) {
+      return NextResponse.json(
+        {
+          error: "시나리오가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.",
+          asset: mapAssetRow(existing)
+        },
+        { status: 409 }
+      );
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -1031,14 +1061,37 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (Object.keys(updatePayload).length === 0) {
       return NextResponse.json({ error: "수정할 자료 설정이 없습니다." }, { status: 400 });
     }
-    const { data, error } = await supabase
+    let updateQuery = supabase
       .from("project_reference_assets")
       .update(updatePayload)
       .eq("id", id)
-      .eq("project_id", projectId)
+      .eq("project_id", projectId);
+    if (expectedScenarioUpdatedAt) {
+      updateQuery = updateQuery.eq("updated_at", expectedScenarioUpdatedAt);
+    }
+    const { data, error } = await updateQuery
       .select(SELECT_COLUMNS)
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) {
+      const { data: latest, error: latestError } = await supabase
+        .from("project_reference_assets")
+        .select(SELECT_COLUMNS)
+        .eq("id", id)
+        .eq("project_id", projectId)
+        .maybeSingle();
+      if (latestError) throw latestError;
+      if (expectedScenarioUpdatedAt) {
+        return NextResponse.json(
+          {
+            error: "시나리오가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.",
+            asset: latest ? mapAssetRow(latest) : null
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
+    }
     if (mediaLinkTypeUpdates.length > 0) {
       try {
         await applyReferenceMediaTypeUpdates(supabase, mediaLinkTypeUpdates);
@@ -1063,6 +1116,72 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (error) {
     return materialError(error, "자료 설정을 저장하지 못했습니다.");
   }
+}
+
+async function updateReferenceAssetScenarioScenes(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: ReferenceAssetPatchBody
+) {
+  const id = cleanText(body.id, 100);
+  if (!id) {
+    return NextResponse.json({ error: "자료 ID가 필요합니다." }, { status: 400 });
+  }
+
+  const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 80);
+  if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    return NextResponse.json({ error: "시나리오 버전 정보가 올바르지 않습니다." }, { status: 400 });
+  }
+
+  const scenes = normalizeScenarioScenes(body.scenarioScenes);
+  const scenarioParseError = "scenarioParseError" in body
+    ? cleanText(body.scenarioParseError, 1_000) || null
+    : scenes.length > 0
+      ? null
+      : SCENARIO_MARKER_NOT_FOUND_MESSAGE;
+  const { data, error } = await supabase
+    .from("project_reference_assets")
+    .update({
+      scenario_scenes: scenes,
+      scenario_parse_error: scenarioParseError
+    })
+    .eq("id", id)
+    .eq("project_id", projectId)
+    .eq("asset_type", "scenario")
+    .eq("updated_at", expectedUpdatedAt)
+    .select("id,scenario_scenes,scenario_parse_error,updated_at")
+    .maybeSingle();
+  if (error) throw error;
+
+  if (!data) {
+    const { data: latest, error: latestError } = await supabase
+      .from("project_reference_assets")
+      .select(SELECT_COLUMNS)
+      .eq("id", id)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    if (!latest) {
+      return NextResponse.json({ error: "시나리오 PDF를 찾을 수 없습니다." }, { status: 404 });
+    }
+    return NextResponse.json(
+      {
+        error: "시나리오가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.",
+        asset: mapAssetRow(latest)
+      },
+      { status: 409 }
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    asset: {
+      id: String(data.id ?? ""),
+      scenarioScenes: normalizeScenarioScenes(data.scenario_scenes),
+      scenarioParseError: cleanText(data.scenario_parse_error, 1_000) || null,
+      updatedAt: String(data.updated_at ?? "")
+    }
+  });
 }
 
 async function updateReferenceAssetSceneCut(

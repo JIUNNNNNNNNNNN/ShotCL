@@ -326,6 +326,103 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { projectId, supabase } = scope;
     const body = (await request.json()) as Record<string, unknown>;
 
+    if (body.action === "update-reference") {
+      const scenarioReference = normalizeText(body.scenarioReference, 50_000);
+      const expectedUpdatedAt = normalizeNullableExpectedUpdatedAt(body.expectedUpdatedAt);
+      if (!expectedUpdatedAt.ok) {
+        return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+      }
+      if (!expectedUpdatedAt.value) {
+        const { data: inserted, error: insertError } = await supabase
+          .from("project_scene_notes")
+          .insert({ project_id: projectId, scenario_reference: scenarioReference })
+          .select("scenario_reference,updated_at")
+          .single();
+        if (insertError?.code === "23505") {
+          const { data: latest, error: latestError } = await supabase
+            .from("project_scene_notes")
+            .select("scenario_reference,updated_at")
+            .eq("project_id", projectId)
+            .maybeSingle();
+          if (latestError) throw latestError;
+          return sceneReferenceConflict(latest);
+        }
+        if (insertError) throw insertError;
+        return NextResponse.json({
+          ok: true,
+          scenarioReference: inserted.scenario_reference ?? "",
+          cellMergesUpdatedAt: inserted.updated_at ?? null
+        });
+      }
+      const { data: saved, error: saveError } = await supabase
+        .from("project_scene_notes")
+        .update({ scenario_reference: scenarioReference })
+        .eq("project_id", projectId)
+        .eq("updated_at", expectedUpdatedAt.value)
+        .select("scenario_reference,updated_at")
+        .maybeSingle();
+      if (saveError) throw saveError;
+      if (!saved) {
+        const { data: latest, error: latestError } = await supabase
+          .from("project_scene_notes")
+          .select("scenario_reference,updated_at")
+          .eq("project_id", projectId)
+          .maybeSingle();
+        if (latestError) throw latestError;
+        return sceneReferenceConflict(latest);
+      }
+      return NextResponse.json({
+        ok: true,
+        scenarioReference: saved.scenario_reference ?? "",
+        cellMergesUpdatedAt: saved.updated_at ?? null
+      });
+    }
+
+    if (body.action === "update-item") {
+      if (!body.item || typeof body.item !== "object" || Array.isArray(body.item)) {
+        return NextResponse.json({ error: "자동 저장할 씬 입력값이 올바르지 않습니다." }, { status: 400 });
+      }
+      const input = body.item as SceneItemInput;
+      const id = normalizeText(input.id, 36);
+      if (!isUuid(id)) {
+        return NextResponse.json({ error: "씬 행 ID가 올바르지 않습니다." }, { status: 400 });
+      }
+      const expectedUpdatedAt = normalizeRowExpectedUpdatedAt(body.expectedUpdatedAt);
+      if (!expectedUpdatedAt.ok) {
+        return NextResponse.json({ error: expectedUpdatedAt.error }, { status: 400 });
+      }
+      const normalizedPatch = normalizeSceneItemPatch(input);
+      if (!normalizedPatch.ok) {
+        return NextResponse.json({ error: normalizedPatch.error }, { status: 400 });
+      }
+      const { data: saved, error: saveError } = await supabase
+        .from("project_scene_items")
+        .update(normalizedPatch.fields)
+        .eq("project_id", projectId)
+        .eq("id", id)
+        .eq("updated_at", expectedUpdatedAt.value)
+        .select(SCENE_COLUMNS)
+        .maybeSingle();
+      if (saveError) throw saveError;
+      if (!saved) {
+        const { data: latest, error: latestError } = await supabase
+          .from("project_scene_items")
+          .select(SCENE_COLUMNS)
+          .eq("project_id", projectId)
+          .eq("id", id)
+          .maybeSingle();
+        if (latestError) throw latestError;
+        if (!latest) {
+          return NextResponse.json({ error: "자동 저장할 씬을 찾을 수 없습니다." }, { status: 404 });
+        }
+        return NextResponse.json(
+          { error: "씬 행이 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.", item: latest },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ ok: true, item: saved });
+    }
+
     if (body.action === "cell-merges") {
       const [rowsResult, noteResult] = await Promise.all([
         supabase
@@ -451,7 +548,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         );
       }
 
-      return NextResponse.json({ ok: true, clearedCells: cells });
+      const { data: clearedRows, error: clearedRowsError } = await supabase
+        .from("project_scene_items")
+        .select(SCENE_COLUMNS)
+        .eq("project_id", projectId)
+        .in("id", [...new Set(cells.map((cell) => cell.sceneId))]);
+      if (clearedRowsError) throw clearedRowsError;
+      return NextResponse.json({ ok: true, clearedCells: cells, items: clearedRows ?? [] });
     }
 
     if (body.action === "reorder") {
@@ -526,7 +629,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         if (error) throw error;
       }
 
-      return NextResponse.json({ ok: true, orderedIds });
+      const { data: reorderedRowsResult, error: reorderedRowsError } = await supabase
+        .from("project_scene_items")
+        .select(SCENE_COLUMNS)
+        .eq("project_id", projectId)
+        .order("sort_order")
+        .order("created_at");
+      if (reorderedRowsError) throw reorderedRowsError;
+      return NextResponse.json({ ok: true, orderedIds, items: reorderedRowsResult ?? [] });
     }
 
     return NextResponse.json({ error: "지원하지 않는 씬리스트 작업입니다." }, { status: 400 });
@@ -681,6 +791,58 @@ function normalizeExpectedUpdatedAt(value: unknown):
   return { ok: true, value: normalized };
 }
 
+function normalizeRowExpectedUpdatedAt(value: unknown):
+  | { ok: true; value: string }
+  | { ok: false; error: string } {
+  if (typeof value !== "string") {
+    return { ok: false, error: "씬 행 버전 정보가 올바르지 않습니다." };
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 80 || Number.isNaN(Date.parse(normalized))) {
+    return { ok: false, error: "씬 행 버전 정보가 올바르지 않습니다." };
+  }
+  return { ok: true, value: normalized };
+}
+
+function normalizeNullableExpectedUpdatedAt(value: unknown):
+  | { ok: true; value: string | null }
+  | { ok: false; error: string } {
+  if (value === null || value === undefined || value === "") return { ok: true, value: null };
+  const normalized = normalizeRowExpectedUpdatedAt(value);
+  return normalized.ok
+    ? normalized
+    : { ok: false, error: "씬리스트 메모 버전 정보가 올바르지 않습니다." };
+}
+
+function normalizeSceneItemPatch(input: SceneItemInput):
+  | { ok: true; fields: Record<string, unknown> }
+  | { ok: false; error: string } {
+  const fields: Record<string, unknown> = {};
+  const has = (key: keyof SceneItemInput) => Object.prototype.hasOwnProperty.call(input, key);
+  if (has("sceneNo")) {
+    fields.scene_no = normalizeSceneNumber(input.sceneNo) || normalizeText(input.sceneNo, 30);
+  }
+  if (has("mainLocation")) fields.main_location = normalizeText(input.mainLocation, 120);
+  if (has("subLocation")) fields.sub_location = normalizeText(input.subLocation, 160);
+  if (has("dayLabel")) fields.day_label = normalizeText(input.dayLabel, 30);
+  if (has("dayNight")) fields.day_night = normalizeText(input.dayNight, 10);
+  if (has("interiorExterior")) fields.interior_exterior = normalizeText(input.interiorExterior, 10);
+  if (has("sceneContent")) fields.scene_content = normalizeText(input.sceneContent, 4000);
+  if (has("characters")) fields.characters = normalizeText(input.characters, 1000);
+  if (has("characterNotes")) fields.character_notes = normalizeMultilineText(input.characterNotes, 4000);
+  if (has("actorCells")) fields.actor_cells = normalizeActorCells(input.actorCells);
+  if (has("props")) fields.props = normalizeMultilineText(input.props, 1000);
+  if (has("cutCount")) {
+    const cutCount = validateSceneCutCountInput(input.cutCount);
+    if (cutCount.error) return { ok: false, error: cutCount.error };
+    fields.cut_count = cutCount.value;
+  }
+  if (Object.keys(fields).length === 0) {
+    return { ok: false, error: "자동 저장할 씬 변경사항이 없습니다." };
+  }
+  return { ok: true, fields };
+}
+
 function sameIdSet(currentIds: string[], orderedIds: string[]) {
   if (currentIds.length !== orderedIds.length) return false;
   const expected = new Set(currentIds);
@@ -741,6 +903,19 @@ function sceneListMergeConflict(cellMerges: unknown, updatedAt: unknown) {
       cellMerges: parseSceneListCellMerges(cellMerges).merges,
       cellMergesMaterialized: Array.isArray(cellMerges),
       cellMergesUpdatedAt: updatedAt ? String(updatedAt) : null
+    },
+    { status: 409 }
+  );
+}
+
+function sceneReferenceConflict(
+  latest: { scenario_reference?: unknown; updated_at?: unknown } | null
+) {
+  return NextResponse.json(
+    {
+      error: "씬리스트 메모가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.",
+      scenarioReference: latest?.scenario_reference ?? "",
+      cellMergesUpdatedAt: latest?.updated_at ?? null
     },
     { status: 409 }
   );

@@ -1,6 +1,7 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeSceneCutCount } from "@/lib/sceneCutCount";
+import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import {
   normalizeSceneListCellMerges,
   SCENE_LIST_REORDER_MERGE_ERROR,
@@ -18,6 +19,7 @@ const LOCAL_SCENE_LIST_KEY = "today-storyboard-project-scene-lists";
 
 type SceneListPayload = {
   items?: Record<string, unknown>[];
+  item?: Record<string, unknown>;
   scenarioReference?: unknown;
   actorRoles?: unknown;
   cellMerges?: unknown;
@@ -27,9 +29,35 @@ type SceneListPayload = {
   error?: string;
 };
 
+export type ProjectSceneReferenceAutosaveResult = {
+  scenarioReference: string;
+  updatedAt: string | null;
+};
+
+export type ProjectSceneItemDraftPatch = Partial<Pick<
+  ProjectSceneItem,
+  | "sceneNo"
+  | "mainLocation"
+  | "subLocation"
+  | "dayLabel"
+  | "dayNight"
+  | "interiorExterior"
+  | "sceneContent"
+  | "characters"
+  | "characterNotes"
+  | "actorCells"
+  | "props"
+  | "cutCount"
+>>;
+
 export type ProjectSceneClearCell = {
   sceneId: string;
   column: ProjectSceneMergeColumn;
+};
+
+export type ProjectSceneClearResult = {
+  clearedCells: ProjectSceneClearCell[];
+  items: ProjectSceneItem[];
 };
 
 export type ProjectSceneListResult = ProjectSceneList & {
@@ -173,6 +201,149 @@ export async function saveProjectSceneList(
   });
 }
 
+/** 기존 씬 한 행의 입력 필드만 저장하며 행 생성·삭제·순서는 건드리지 않습니다. */
+export async function saveProjectSceneItemDraft(
+  projectId: string,
+  itemId: string,
+  patch: ProjectSceneItemDraftPatch,
+  expectedUpdatedAt: string
+): Promise<ProjectSceneItem> {
+  const normalizedPatch = normalizeSceneItemDraftPatch(patch);
+  if (Object.keys(normalizedPatch).length === 0) {
+    throw new Error("자동 저장할 씬 변경사항이 없습니다.");
+  }
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-item",
+          item: { id: itemId, ...normalizedPatch },
+          expectedUpdatedAt
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload;
+    if (response.ok && payload.item) return sceneItemFromRow(payload.item);
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<ProjectSceneItem>(
+        "scene-item",
+        payload.error || "씬 행이 다른 곳에서 변경되었습니다.",
+        payload.item ? sceneItemFromRow(payload.item) : null
+      );
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "씬 입력값을 자동 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const current = readLocalSceneList(projectId);
+  const existingIndex = current.items.findIndex((candidate) => candidate.id === itemId);
+  if (existingIndex < 0) throw new Error("자동 저장할 씬을 찾을 수 없습니다.");
+  const savedItem = {
+    ...current.items[existingIndex],
+    ...normalizedPatch,
+    updatedAt: new Date().toISOString()
+  };
+  writeLocalSceneList(projectId, {
+    ...current,
+    items: current.items.map((candidate) => candidate.id === itemId ? savedItem : candidate)
+  });
+  return savedItem;
+}
+
+/** 마지막으로 저장된 행과 현재 행을 비교해 실제로 달라진 입력 필드만 반환합니다. */
+export function createProjectSceneItemDraftPatch(
+  saved: ProjectSceneItem,
+  current: ProjectSceneItem
+): ProjectSceneItemDraftPatch {
+  const patch: ProjectSceneItemDraftPatch = {};
+  const scalarFields = [
+    "sceneNo",
+    "mainLocation",
+    "subLocation",
+    "dayLabel",
+    "dayNight",
+    "interiorExterior",
+    "sceneContent",
+    "characters",
+    "characterNotes",
+    "props",
+    "cutCount"
+  ] as const;
+  for (const field of scalarFields) {
+    if (saved[field] !== current[field]) {
+      (patch as Record<string, unknown>)[field] = current[field];
+    }
+  }
+  if (serializeNormalizedActorCells(saved.actorCells) !== serializeNormalizedActorCells(current.actorCells)) {
+    patch.actorCells = current.actorCells;
+  }
+  return patch;
+}
+
+function serializeNormalizedActorCells(value: unknown) {
+  const normalized = normalizeActorCells(value);
+  return JSON.stringify(
+    Object.keys(normalized)
+      .sort((left, right) => left.localeCompare(right, "ko-KR"))
+      .map((role) => [role, normalized[role]])
+  );
+}
+
+/** 씬 행/병합 메타데이터를 건드리지 않고 메모만 저장합니다. */
+export async function saveProjectSceneReferenceDraft(
+  projectId: string,
+  scenarioReference: string,
+  expectedUpdatedAt: string | null
+): Promise<ProjectSceneReferenceAutosaveResult> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update-reference",
+          scenarioReference,
+          expectedUpdatedAt
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload;
+    if (response.ok) {
+      return {
+        scenarioReference: String(payload.scenarioReference ?? ""),
+        updatedAt: payload.cellMergesUpdatedAt ? String(payload.cellMergesUpdatedAt) : null
+      };
+    }
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<ProjectSceneReferenceAutosaveResult>(
+        "scene-reference",
+        payload.error || "씬리스트 메모가 다른 곳에서 변경되었습니다.",
+        {
+          scenarioReference: String(payload.scenarioReference ?? ""),
+          updatedAt: normalizeOptionalTimestamp(payload.cellMergesUpdatedAt)
+        }
+      );
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "씬리스트 메모를 자동 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const current = readLocalSceneList(projectId);
+  const updatedAt = new Date().toISOString();
+  writeLocalSceneList(projectId, { ...current, scenarioReference });
+  return { scenarioReference, updatedAt };
+}
+
 function normalizeSceneListContent(
   projectId: string,
   sceneList: ProjectSceneListSaveInput
@@ -203,6 +374,50 @@ function normalizeSceneListContent(
       expectedUpdatedAt: sceneList.cellMergesUpdatedAt ?? null
     } : {})
   };
+}
+
+function normalizeSceneItemDraftPatch(
+  patch: ProjectSceneItemDraftPatch
+): ProjectSceneItemDraftPatch {
+  const normalized: ProjectSceneItemDraftPatch = {};
+  if (Object.prototype.hasOwnProperty.call(patch, "sceneNo")) {
+    normalized.sceneNo = normalizeSceneNumber(patch.sceneNo)
+      || String(patch.sceneNo ?? "").trim().slice(0, 30);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "mainLocation")) {
+    normalized.mainLocation = String(patch.mainLocation ?? "").slice(0, 120);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "subLocation")) {
+    normalized.subLocation = String(patch.subLocation ?? "").slice(0, 160);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "dayLabel")) {
+    normalized.dayLabel = String(patch.dayLabel ?? "").slice(0, 30);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "dayNight")) {
+    normalized.dayNight = String(patch.dayNight ?? "").slice(0, 10);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "interiorExterior")) {
+    normalized.interiorExterior = String(patch.interiorExterior ?? "").slice(0, 10);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "sceneContent")) {
+    normalized.sceneContent = String(patch.sceneContent ?? "").slice(0, 4000);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "characters")) {
+    normalized.characters = String(patch.characters ?? "").slice(0, 1000);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "characterNotes")) {
+    normalized.characterNotes = String(patch.characterNotes ?? "").replace(/\r\n?/g, "\n").slice(0, 4000);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "actorCells")) {
+    normalized.actorCells = normalizeActorCells(patch.actorCells);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "props")) {
+    normalized.props = String(patch.props ?? "").replace(/\r\n?/g, "\n").slice(0, 1000);
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "cutCount")) {
+    normalized.cutCount = normalizeSceneCutCount(patch.cutCount);
+  }
+  return normalized;
 }
 
 /** 사용자가 병합/해제 메뉴를 확정한 시점에 병합 메타데이터만 저장합니다. */
@@ -262,7 +477,7 @@ export async function saveProjectSceneCellMerges(
 export async function clearProjectSceneCells(
   projectId: string,
   cells: ProjectSceneClearCell[]
-): Promise<ProjectSceneClearCell[]> {
+): Promise<ProjectSceneClearResult> {
   try {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
@@ -275,7 +490,10 @@ export async function clearProjectSceneCells(
     const payload = (await response.json().catch(() => ({}))) as SceneListPayload & {
       clearedCells?: unknown;
     };
-    if (response.ok) return normalizeClearCells(payload.clearedCells);
+    if (response.ok) return {
+      clearedCells: normalizeClearCells(payload.clearedCells),
+      items: (payload.items ?? []).map(sceneItemFromRow)
+    };
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
       throw new Error(payload.error || "선택 칸을 비우지 못했습니다.");
     }
@@ -291,21 +509,22 @@ export async function clearProjectSceneCells(
     clearBySceneId.set(cell.sceneId, columns);
   }
   const current = readLocalSceneList(projectId);
+  const nextItems = current.items.map((item) => clearLocalSceneItem(
+    item,
+    clearBySceneId.get(item.id)
+  ));
   writeLocalSceneList(projectId, {
     ...current,
-    items: current.items.map((item) => clearLocalSceneItem(
-      item,
-      clearBySceneId.get(item.id)
-    ))
+    items: nextItems
   });
-  return normalizedCells;
+  return { clearedCells: normalizedCells, items: nextItems };
 }
 
 /** Scene 드래그가 끝난 뒤 안정적인 ID 순서와 sort_order만 저장합니다. */
 export async function reorderProjectSceneItems(
   projectId: string,
   orderedIds: string[]
-): Promise<string[]> {
+): Promise<ProjectSceneItem[]> {
   try {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
@@ -316,8 +535,8 @@ export async function reorderProjectSceneItems(
       }
     );
     const payload = (await response.json().catch(() => ({}))) as SceneListPayload;
-    if (response.ok && Array.isArray(payload.orderedIds)) {
-      return payload.orderedIds.map(String);
+    if (response.ok && Array.isArray(payload.items)) {
+      return payload.items.map(sceneItemFromRow);
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
       throw new Error(payload.error || "씬 순서를 저장하지 못했습니다.");
@@ -340,15 +559,16 @@ export async function reorderProjectSceneItems(
   ).ok) {
     throw new Error(SCENE_LIST_REORDER_MERGE_ERROR);
   }
+  const reordered = orderedIds.map((id, index) => ({
+    ...byId.get(id)!,
+    sortOrder: index + 1,
+    updatedAt: new Date().toISOString()
+  }));
   writeLocalSceneList(projectId, {
     ...current,
-    items: orderedIds.map((id, index) => ({
-      ...byId.get(id)!,
-      sortOrder: index + 1,
-      updatedAt: new Date().toISOString()
-    }))
+    items: reordered
   });
-  return orderedIds;
+  return reordered;
 }
 
 function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {

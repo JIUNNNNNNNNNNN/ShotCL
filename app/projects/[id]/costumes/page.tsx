@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ImagePlus, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
+import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
@@ -16,6 +17,7 @@ import {
   ProjectCostumeBulkSaveError,
   saveProjectCostumeSnapshot,
   saveProjectCostume,
+  updateProjectCostumeScene,
   type ProjectCostumeBulkSaveInput,
   type ProjectCostumeBulkSaveResult
 } from "@/lib/data/projectReferenceAssets";
@@ -25,6 +27,7 @@ import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listShots } from "@/lib/data/shots";
 import { auditQuery, isQueryAuditEnabled } from "@/lib/queryAudit";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { useKeyedAutosave } from "@/hooks/useKeyedAutosave";
 import type {
   CostumeImage,
   ProjectActor,
@@ -56,6 +59,35 @@ type SceneDraft = {
   seedAllBasicActors?: boolean;
 };
 
+type CostumeAutosaveEntity =
+  | {
+    key: string;
+    kind: "scene";
+    sceneId: string;
+    sceneNo: string;
+    sceneTitle: string;
+    episodeNumbers: number[];
+  }
+  | {
+    key: string;
+    kind: "item";
+    itemId: string;
+    costumeSceneId: string;
+    actorRole: string;
+    actorName: string;
+    costumeContent: string;
+    provider: string;
+    hair: string;
+    sortOrder: number;
+    keepCostumeImagePaths: string[];
+    keepHairImagePaths: string[];
+    canAutosave: boolean;
+  };
+
+type CostumeAutosaveResult =
+  | { kind: "scene"; scene: ProjectCostumeScene }
+  | { kind: "item"; item: ProjectCostume };
+
 const providerOptions = ["소지", "대여", "구입"];
 const tempPrefix = "costume-local-";
 
@@ -86,13 +118,25 @@ export default function ProjectCostumesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ scenes: number; items: number; stage: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [noticeMessage, setNoticeMessage] = useState("");
   const saveLockRef = useRef(false);
   const dirtyRef = useRef(false);
+  const scenesRef = useRef<ProjectCostumeScene[]>([]);
+  const draftsRef = useRef<Record<string, CostumeDraft>>({});
+  const deletedSceneIdsRef = useRef(new Set<string>());
+  const deletedItemIdsRef = useRef(new Set<string>());
+  const savedCostumeEntityFingerprintsRef = useRef(new Map<string, string>());
+  const activeCostumeProjectIdRef = useRef(projectId);
   const loadRequestRef = useRef(0);
+  scenesRef.current = scenes;
+  draftsRef.current = drafts;
+  deletedSceneIdsRef.current = deletedSceneIds;
+  deletedItemIdsRef.current = deletedItemIds;
+  activeCostumeProjectIdRef.current = projectId;
   const wardrobeGuideAnchorRef = useContextualGuideAnchor("wardrobe.main");
   useAutoContextualGuide(
     "wardrobe.intro",
@@ -132,9 +176,9 @@ export default function ProjectCostumesPage() {
           automaticEpisodes.get(normalizeSceneNumber(scene.sceneNo))
         )
       }));
-      const automaticEpisodesAdded = scenesWithAutomaticEpisodes.some((scene, index) => (
-        !sameEpisodeNumbers(scene.episodeNumbers, costumeScenes[index]?.episodeNumbers ?? [])
-      ));
+      const loadedDrafts = Object.fromEntries(
+        costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))
+      );
       setProjectName(project?.name ?? "프로젝트");
       setScenes(scenesWithAutomaticEpisodes);
       setActors(basicInfo?.actors ?? []);
@@ -147,21 +191,23 @@ export default function ProjectCostumesPage() {
           ?? costumeOverview.totalEpisodes
       ));
       setAutomaticEpisodesByScene(automaticEpisodes);
-      setDrafts(Object.fromEntries(costumeScenes.flatMap((scene) => scene.items.map((item) => [item.id, toDraft(item)]))));
+      setDrafts(loadedDrafts);
       setDeletedSceneIds(new Set());
       setDeletedItemIds(new Set());
-      const hasAutomaticChanges = canEdit && automaticEpisodesAdded;
-      dirtyRef.current = hasAutomaticChanges;
-      setIsDirty(hasAutomaticChanges);
+      // Episodes inferred from daily plans are derived display state. Loading them must
+      // establish a clean autosave baseline rather than mutate the server on page entry.
+      dirtyRef.current = false;
+      setIsDirty(false);
+      savedCostumeEntityFingerprintsRef.current = new Map(
+        buildCostumeAutosaveEntities(scenesWithAutomaticEpisodes, loadedDrafts).map((entity) => (
+          [entity.key, costumeAutosaveEntityFingerprint(entity)]
+        ))
+      );
       setExpandedSceneIds((current) => new Set(
         [...current].filter((id) => costumeScenes.some((scene) => scene.id === id))
       ));
       setErrorMessage("");
-      setNoticeMessage(
-        canEdit && automaticEpisodesAdded
-          ? "일촬표에 포함된 씬의 회차 체크를 추가했습니다. 전체 저장을 눌러 반영해주세요."
-          : ""
-      );
+      setNoticeMessage("");
     } catch (error) {
       if (requestId === loadRequestRef.current && !saveLockRef.current && !dirtyRef.current) {
         setErrorMessage(error instanceof Error ? error.message : "씬별 의상 자료를 불러오지 못했습니다.");
@@ -169,13 +215,20 @@ export default function ProjectCostumesPage() {
     } finally {
       if (requestId === loadRequestRef.current) setIsLoading(false);
     }
-  }, [canEdit, dailyPlans, isWorkspaceLoading, project, projectId]);
+  }, [dailyPlans, isWorkspaceLoading, project, projectId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useUnsavedChangesGuard(isDirty);
+  const hasExplicitPendingChanges = hasExplicitCostumePendingChanges(
+    scenes,
+    drafts,
+    deletedSceneIds,
+    deletedItemIds
+  );
+
+  useUnsavedChangesGuard(canEdit && hasExplicitPendingChanges);
 
   useEffect(() => {
     if (!projectId || !selectedDailyPlanId) {
@@ -489,7 +542,10 @@ export default function ProjectCostumesPage() {
   }
 
   async function handleSaveAll() {
-    if (!projectId || !canEdit || !isDirty || isSaving || saveLockRef.current) return;
+    await costumeAutosave.flush();
+    // flush() can synchronously finish the metadata autosave and clear dirtyRef.
+    // The render-time isDirty value is stale across this await and would double-save.
+    if (!projectId || !canEdit || !dirtyRef.current || isSaving || saveLockRef.current) return;
     for (const scene of scenes) {
       for (const item of scene.items) {
         const draft = drafts[item.id];
@@ -640,11 +696,224 @@ export default function ProjectCostumesPage() {
     }
   }
 
+  const costumeAutosaveEntities = useMemo(
+    () => buildCostumeAutosaveEntities(scenes, drafts),
+    [drafts, scenes]
+  );
+
+  const canAutosaveMetadata = canEdit
+    && Boolean(projectId)
+    && !isLoading
+    && !isSaving
+    && !isComposing;
+
+  const costumeAutosave = useKeyedAutosave<CostumeAutosaveEntity, CostumeAutosaveResult>({
+    values: costumeAutosaveEntities,
+    getKey: (entity) => entity.key,
+    enabled: canAutosaveMetadata,
+    delayMs: 1_100,
+    scopeKey: `costumes:${projectId ?? "unknown"}`,
+    fingerprint: costumeAutosaveEntityFingerprint,
+    validate: (entity) => entity.kind === "scene" || entity.canAutosave,
+    restoreDrafts: (restoredDrafts) => {
+      let nextScenes = scenesRef.current;
+      let nextDrafts = draftsRef.current;
+      let didRestore = false;
+      for (const restored of restoredDrafts) {
+        const entity = restored.value;
+        const savedEntity = restored.savedValue;
+        if (entity.kind === "scene") {
+          const savedScene = savedEntity?.kind === "scene" ? savedEntity : null;
+          if (!savedScene) continue;
+          const sceneNoChanged = entity.sceneNo !== savedScene.sceneNo;
+          const titleChanged = entity.sceneTitle !== savedScene.sceneTitle;
+          const episodesChanged = JSON.stringify(entity.episodeNumbers)
+            !== JSON.stringify(savedScene.episodeNumbers);
+          if (!sceneNoChanged && !titleChanged && !episodesChanged) continue;
+          nextScenes = nextScenes.map((scene) => scene.id === entity.sceneId
+            ? {
+                ...scene,
+                ...(sceneNoChanged ? { sceneNo: entity.sceneNo } : {}),
+                ...(titleChanged ? { sceneTitle: entity.sceneTitle } : {}),
+                ...(episodesChanged ? { episodeNumbers: [...entity.episodeNumbers] } : {}),
+                items: scene.items.map((item) => sceneNoChanged
+                  ? { ...item, sceneNo: entity.sceneNo }
+                  : item)
+              }
+            : scene);
+          didRestore = true;
+          continue;
+        }
+        const savedItem = savedEntity?.kind === "item" ? savedEntity : null;
+        if (!savedItem) continue;
+        const currentScene = nextScenes.find((scene) => scene.id === entity.costumeSceneId);
+        const currentItem = currentScene?.items.find((item) => item.id === entity.itemId);
+        if (!currentItem) continue;
+        const currentDraft = nextDrafts[entity.itemId] ?? toDraft(currentItem);
+        const restoredPatch: Partial<CostumeDraft> = {};
+        if (entity.actorRole !== savedItem.actorRole) restoredPatch.actorRole = entity.actorRole;
+        if (entity.actorName !== savedItem.actorName) restoredPatch.actorName = entity.actorName;
+        if (entity.costumeContent !== savedItem.costumeContent) restoredPatch.costumeContent = entity.costumeContent;
+        if (entity.provider !== savedItem.provider) restoredPatch.provider = entity.provider;
+        if (entity.hair !== savedItem.hair) restoredPatch.hair = entity.hair;
+        if (Object.keys(restoredPatch).length === 0 && entity.sortOrder === savedItem.sortOrder) continue;
+        const mergedDraft = { ...currentDraft, ...restoredPatch };
+        nextDrafts = { ...nextDrafts, [entity.itemId]: mergedDraft };
+        nextScenes = nextScenes.map((scene) => scene.id === entity.costumeSceneId
+          ? {
+              ...scene,
+              items: scene.items.map((item) => item.id === entity.itemId
+                ? {
+                    ...item,
+                    actorRole: mergedDraft.actorRole,
+                    actorName: mergedDraft.actorName,
+                    costumeContent: mergedDraft.costumeContent,
+                    provider: mergedDraft.provider,
+                    hair: mergedDraft.hair,
+                    sortOrder: entity.sortOrder !== savedItem.sortOrder ? entity.sortOrder : item.sortOrder
+                  }
+                : item)
+            }
+          : scene);
+        didRestore = true;
+      }
+      if (!didRestore) return;
+      scenesRef.current = nextScenes;
+      draftsRef.current = nextDrafts;
+      setScenes(nextScenes);
+      setDrafts(nextDrafts);
+      dirtyRef.current = true;
+      setIsDirty(true);
+    },
+    save: async (entity) => {
+      if (!projectId || saveLockRef.current) throw new Error("의상 정보를 자동 저장할 수 없습니다.");
+      if (entity.kind === "scene") {
+        const scene = await auditQuery(
+          "costume.autosave.scene",
+          `app/projects/[id]/costumes/page.tsx:${entity.sceneId}`,
+          () => updateProjectCostumeScene(projectId, {
+            id: entity.sceneId,
+            sceneNo: entity.sceneNo,
+            sceneTitle: entity.sceneTitle,
+            episodeNumbers: entity.episodeNumbers
+          })
+        );
+        return { kind: "scene", scene };
+      }
+      if (!entity.actorRole.trim() && !entity.actorName.trim()) {
+        throw new Error("배역과 배우 이름을 모두 비워둘 수 없습니다.");
+      }
+      const item = await auditQuery(
+        "costume.autosave.item",
+        `app/projects/[id]/costumes/page.tsx:${entity.itemId}`,
+        () => saveProjectCostume(projectId, {
+          id: entity.itemId,
+          costumeSceneId: entity.costumeSceneId,
+          actorRole: entity.actorRole,
+          actorName: entity.actorName,
+          costumeContent: entity.costumeContent,
+          provider: entity.provider,
+          hair: entity.hair,
+          sortOrder: entity.sortOrder,
+          keepCostumeImagePaths: entity.keepCostumeImagePaths,
+          keepHairImagePaths: entity.keepHairImagePaths,
+          costumeFiles: [],
+          hairFiles: []
+        })
+      );
+      return { kind: "item", item };
+    },
+    onSaved: (result, entity) => {
+      if (activeCostumeProjectIdRef.current !== projectId) return;
+      const submittedFingerprint = costumeAutosaveEntityFingerprint(entity);
+      savedCostumeEntityFingerprintsRef.current.set(entity.key, submittedFingerprint);
+      const currentEntity = buildCostumeAutosaveEntities(
+        scenesRef.current,
+        draftsRef.current
+      ).find((candidate) => candidate.key === entity.key);
+      const submissionIsLatest = Boolean(
+        currentEntity
+        && costumeAutosaveEntityFingerprint(currentEntity) === submittedFingerprint
+      );
+
+      if (submissionIsLatest && result.kind === "scene" && entity.kind === "scene") {
+        setScenes((current) => current.map((scene) => scene.id === entity.sceneId
+          ? {
+              ...scene,
+              sceneNo: entity.sceneNo,
+              sceneTitle: entity.sceneTitle,
+              episodeNumbers: [...entity.episodeNumbers],
+              updatedAt: result.scene.updatedAt || scene.updatedAt,
+              items: scene.items.map((item) => ({ ...item, sceneNo: entity.sceneNo }))
+            }
+          : scene));
+      } else if (submissionIsLatest && result.kind === "item" && entity.kind === "item") {
+        setScenes((current) => current.map((scene) => ({
+          ...scene,
+          items: scene.items.map((item) => item.id === entity.itemId
+            ? {
+                ...item,
+                actorRole: entity.actorRole,
+                actorName: entity.actorName,
+                costumeContent: entity.costumeContent,
+                provider: entity.provider,
+                hair: entity.hair,
+                images: result.item.images,
+                updatedAt: result.item.updatedAt || item.updatedAt
+              }
+            : item)
+        })));
+      }
+
+      const currentEntities = buildCostumeAutosaveEntities(
+        scenesRef.current,
+        draftsRef.current
+      );
+      const hasPendingMetadata = currentEntities.some((candidate) => (
+        savedCostumeEntityFingerprintsRef.current.get(candidate.key)
+          !== costumeAutosaveEntityFingerprint(candidate)
+      ));
+      const hasExplicitPending = hasExplicitCostumePendingChanges(
+        scenesRef.current,
+        draftsRef.current,
+        deletedSceneIdsRef.current,
+        deletedItemIdsRef.current
+      );
+      if (!hasPendingMetadata && !hasExplicitPending) {
+        dirtyRef.current = false;
+        setIsDirty(false);
+        setNoticeMessage("");
+      }
+      setErrorMessage("");
+    },
+    onError: (error) => {
+      if (activeCostumeProjectIdRef.current !== projectId) return;
+      dirtyRef.current = true;
+      setIsDirty(true);
+      setErrorMessage(error instanceof Error ? error.message : "의상 정보를 자동 저장하지 못했습니다.");
+    }
+  });
+  useEffect(() => {
+    if (isDirty) return;
+    savedCostumeEntityFingerprintsRef.current = new Map(
+      costumeAutosaveEntities.map((entity) => [entity.key, costumeAutosaveEntityFingerprint(entity)])
+    );
+    costumeAutosave.markSaved(costumeAutosaveEntities);
+  }, [costumeAutosave.markSaved, costumeAutosaveEntities, isDirty]);
+
   if (isLoading) return <PageLoader />;
 
   return (
     <>
-      <div ref={wardrobeGuideAnchorRef} className="mx-auto grid w-full max-w-6xl gap-2.5">
+      <div
+        ref={wardrobeGuideAnchorRef}
+        className="mx-auto grid w-full max-w-6xl gap-2.5"
+        onCompositionStartCapture={() => setIsComposing(true)}
+        onCompositionEndCapture={() => setIsComposing(false)}
+        onBlur={() => {
+          if (canAutosaveMetadata && !isComposing) void costumeAutosave.flush();
+        }}
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <h1 className="ui-density-heading font-display break-words font-bold text-field-text">의상</h1>
@@ -684,6 +953,7 @@ export default function ProjectCostumesPage() {
                   ? `${saveProgress.stage} · 씬 ${saveProgress.scenes} / 항목 ${saveProgress.items}`
                   : "전체 저장"}
               </Button>
+              <AutosaveStatus status={costumeAutosave.status} onRetry={costumeAutosave.retry} />
             </>
           ) : (
             <span className="rounded-md border border-field-border bg-field-panel px-2.5 py-1.5 text-[11px] font-semibold text-field-muted">읽기 전용</span>
@@ -1520,6 +1790,83 @@ function verifyCostumeSave(
   return errors;
 }
 
+function buildCostumeAutosaveEntities(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>
+): CostumeAutosaveEntity[] {
+  return scenes.flatMap((scene) => {
+    if (isTemporaryId(scene.id)) return [];
+    const sceneEntity: CostumeAutosaveEntity = {
+      key: `scene:${scene.id}`,
+      kind: "scene",
+      sceneId: scene.id,
+      sceneNo: scene.sceneNo,
+      sceneTitle: scene.sceneTitle,
+      episodeNumbers: [...scene.episodeNumbers]
+    };
+    const itemEntities = scene.items.flatMap((item): CostumeAutosaveEntity[] => {
+      if (isTemporaryId(item.id)) return [];
+      const draft = drafts[item.id] ?? toDraft(item);
+      return [{
+        key: `item:${item.id}`,
+        kind: "item",
+        itemId: item.id,
+        costumeSceneId: scene.id,
+        actorRole: draft.actorRole,
+        actorName: draft.actorName,
+        costumeContent: draft.costumeContent,
+        provider: draft.provider,
+        hair: draft.hair,
+        sortOrder: item.sortOrder,
+        keepCostumeImagePaths: draft.costumeImages.map((image) => image.path),
+        keepHairImagePaths: draft.hairImages.map((image) => image.path),
+        canAutosave: draft.costumeFiles.length === 0
+          && draft.hairFiles.length === 0
+          && !hasPendingCostumeItemImageRemoval(item, draft)
+      }];
+    });
+    return [sceneEntity, ...itemEntities];
+  });
+}
+
+function costumeAutosaveEntityFingerprint(entity: CostumeAutosaveEntity) {
+  return entity.kind === "scene"
+    ? JSON.stringify([
+        entity.kind,
+        entity.sceneId,
+        entity.sceneNo,
+        entity.sceneTitle,
+        entity.episodeNumbers
+      ])
+    : JSON.stringify([
+        entity.kind,
+        entity.itemId,
+        entity.costumeSceneId,
+        entity.actorRole,
+        entity.actorName,
+        entity.costumeContent,
+        entity.provider,
+        entity.hair,
+        entity.sortOrder
+      ]);
+}
+
+function hasExplicitCostumePendingChanges(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>,
+  deletedSceneIds: Set<string>,
+  deletedItemIds: Set<string>
+) {
+  return deletedSceneIds.size > 0
+    || deletedItemIds.size > 0
+    || countPendingFileItems(scenes, drafts) > 0
+    || hasPendingCostumeImageRemoval(scenes, drafts)
+    || scenes.some((scene) => (
+      isTemporaryId(scene.id)
+      || scene.items.some((item) => isTemporaryId(item.id))
+    ));
+}
+
 function countPendingFileItems(
   scenes: ProjectCostumeScene[],
   drafts: Record<string, CostumeDraft>
@@ -1528,6 +1875,24 @@ function countPendingFileItems(
     const draft = drafts[item.id];
     return Boolean(draft && (draft.costumeFiles.length > 0 || draft.hairFiles.length > 0));
   }).length, 0);
+}
+
+function hasPendingCostumeImageRemoval(
+  scenes: ProjectCostumeScene[],
+  drafts: Record<string, CostumeDraft>
+) {
+  return scenes.some((scene) => scene.items.some((item) => {
+    const draft = drafts[item.id];
+    return draft ? hasPendingCostumeItemImageRemoval(item, draft) : false;
+  }));
+}
+
+function hasPendingCostumeItemImageRemoval(item: ProjectCostume, draft: CostumeDraft) {
+  const keptPaths = new Set([
+    ...draft.costumeImages.map((image) => image.path),
+    ...draft.hairImages.map((image) => image.path)
+  ]);
+  return item.images.some((image) => !keptPaths.has(image.path));
 }
 
 function logCostumeSaveAudit(values: Record<string, unknown>) {
@@ -1621,10 +1986,6 @@ function mergeEpisodeNumbers(current: number[], automatic?: Iterable<number>) {
     ...current.filter((episode) => Number.isInteger(episode) && episode > 0),
     ...(automatic ?? [])
   ])).sort((left, right) => left - right);
-}
-
-function sameEpisodeNumbers(left: number[], right: number[]) {
-  return left.length === right.length && left.every((episode, index) => episode === right[index]);
 }
 
 function getMissingSceneActors(

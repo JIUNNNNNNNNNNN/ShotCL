@@ -101,6 +101,9 @@ export function ProjectWorkspaceProvider({
   const upsertDailyPlan = useCallback((plan: DailyPlan, summary: DailyPlanSummaryPatch = {}) => {
     setDailyPlans((current) => {
       const previous = current.find((item) => item.id === plan.id);
+      // Independent autosaves can resolve out of order. Never let an older
+      // server echo replace a plan version that the workspace already knows.
+      if (previous && compareUpdatedAt(plan.updatedAt, previous.updatedAt) < 0) return current;
       const next: DailyPlanListItem = {
         ...plan,
         shotCount: summary.shotCount ?? previous?.shotCount ?? 0,
@@ -151,4 +154,13 @@ export function useProjectWorkspace() {
   const value = useContext(ProjectWorkspaceContext);
   if (!value) throw new Error("useProjectWorkspace must be used inside ProjectWorkspaceProvider.");
   return value;
+}
+
+function compareUpdatedAt(left: string, right: string) {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.localeCompare(right);
 }
