@@ -209,6 +209,8 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     permission: "any",
     replayLabel: "프로젝트 참여 입력"
   },
+  // Legacy definition: keep old completion tokens readable without exposing or triggering
+  // a second Go guide after the canonical main.intro-go introduction.
   "main.go-first-use": {
     id: "main.go-first-use",
     version: 1,
@@ -222,7 +224,8 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     compactAnchor: "main.action-go",
     preferredPlacement: "auto",
     permission: "any",
-    replayLabel: "Go 빠른 이동"
+    replayLabel: "Go 빠른 이동",
+    replayHidden: true
   },
   "home.intro": {
     id: "home.intro",
@@ -551,8 +554,7 @@ const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
   main: [
     ...MAIN_INTRO_GUIDE_IDS,
     ...MAIN_NEW_FEATURE_GUIDE_IDS,
-    "main.join-fields",
-    "main.go-first-use"
+    "main.join-fields"
   ],
   home: ["home.intro", "home.calendar-create", "home.calendar-range", "home.invite-staff"],
   basicInfo: ["basic-info.intro"],

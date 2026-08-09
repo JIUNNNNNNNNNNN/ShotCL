@@ -602,6 +602,7 @@ function ContextualGuideCoach({
     <aside
       ref={coachRef}
       data-contextual-guide
+      data-guide-page={definition.page}
       data-closing={closing ? "true" : "false"}
       data-positioned={position ? "true" : "false"}
       data-presentation={presentation}

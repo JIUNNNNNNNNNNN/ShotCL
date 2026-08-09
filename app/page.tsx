@@ -526,7 +526,6 @@ function MainHomeContent() {
     setSelectedAction(null);
     setNewProjectError("");
     setJoinProjectError("");
-    if (requestGuide("main.go-first-use", "feature", triggerElement)) return;
     void resolveGoProject();
   }
 

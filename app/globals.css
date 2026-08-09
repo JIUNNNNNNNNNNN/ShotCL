@@ -3271,23 +3271,31 @@ button {
   font-size: 14px;
   font-weight: 800;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .contextual-guide-coach__body {
+  width: 100%;
   min-width: 0;
   max-height: 132px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 8px 14px 0;
 }
 
 .contextual-guide-coach__body p {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   color: var(--ui-text-secondary);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
+  white-space: normal;
   word-break: keep-all;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .contextual-guide-coach[data-presentation="page"] .contextual-guide-coach__body {
@@ -3330,6 +3338,7 @@ button {
 
 .contextual-guide-coach__footer {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   padding: 10px 14px 14px;
@@ -3395,6 +3404,16 @@ button {
   left: max(12px, env(safe-area-inset-left));
   width: auto;
   max-height: min(30dvh, 220px);
+}
+
+.contextual-guide-coach[data-guide-page="main"][data-presentation="anchor"] {
+  width: min(280px, calc(100vw - 32px));
+  max-width: min(320px, calc(100vw - 32px));
+}
+
+.contextual-guide-coach[data-guide-page="main"][data-presentation="bottom-coach"] {
+  width: min(280px, calc(100vw - 32px));
+  margin-inline: auto;
 }
 
 @media (pointer: coarse) {

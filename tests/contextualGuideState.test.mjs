@@ -7,6 +7,10 @@ import {
   serializeCompletedGuideTokens,
   shouldLearnGuideOnExit
 } from "../lib/contextualGuideState.ts";
+import {
+  getGuideIdsForPage,
+  MAIN_INTRO_GUIDE_IDS
+} from "../lib/contextualGuides.ts";
 
 test("automatic and feature exits learn while replay exits stay runtime-only", () => {
   assert.equal(shouldLearnGuideOnExit("auto"), true);
@@ -43,4 +47,13 @@ test("partial Main sequence resumes with only unique incomplete guides", () => {
     (id) => completed.has(id)
   );
   assert.deepEqual(pending, ["main.intro-go"]);
+});
+
+test("Main intro and Help replay expose one canonical Go guide", () => {
+  assert.deepEqual(
+    [...MAIN_INTRO_GUIDE_IDS],
+    ["main.intro-new", "main.intro-join", "main.intro-go"]
+  );
+  assert.equal(MAIN_INTRO_GUIDE_IDS.filter((id) => id.includes("go")).length, 1);
+  assert.equal(getGuideIdsForPage("main").includes("main.go-first-use"), false);
 });
