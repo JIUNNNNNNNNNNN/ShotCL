@@ -36,6 +36,10 @@ import {
   setActorCellState,
   type SceneListPaletteStyle
 } from "@/lib/sceneListDisplay";
+import {
+  getSceneListEditorKeyAction,
+  resolveSceneListCompositionEnd
+} from "@/lib/sceneListIme";
 import type {
   ProjectSceneCellMerge,
   ProjectSceneItem,
@@ -168,6 +172,7 @@ export function SceneListNativeTable({
     if (!selection && !menu && !sceneMenu) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (event.isComposing || event.keyCode === 229) return;
       setSelection(null);
       setMenu(null);
       setSceneMenu(null);
@@ -761,7 +766,9 @@ const SceneNativeRow = memo(function SceneNativeRow({
           if (!suppressClickRef.current && canEdit) onEdit(columnKey);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && canEdit) onEdit(columnKey);
+          if (event.target === event.currentTarget && event.key === "Enter" && canEdit) {
+            onEdit(columnKey);
+          }
         }}
       >
         {editor ? renderMergeEditor(column, value, item, patchKey, onUpdate, onEditEnd) : (
@@ -790,14 +797,11 @@ const SceneNativeRow = memo(function SceneNativeRow({
         title={canEdit ? "드래그하여 씬 순서 변경 · 우클릭하여 삭제" : undefined}
       >
         {isEditing("sceneNo") ? (
-          <input
+          <SceneListTextEditor
             autoFocus
             value={item.sceneNo}
-            onChange={(event) => onUpdate(item.id, { sceneNo: event.target.value })}
-            onBlur={onEditEnd}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
-            }}
+            onChange={(value) => onUpdate(item.id, { sceneNo: value })}
+            onEditEnd={onEditEnd}
             aria-label={`${index + 1}번째 씬 번호`}
             className={tableInputClass}
           />
@@ -1080,14 +1084,11 @@ function renderMergeEditor(
     );
   }
   return (
-    <input
+    <SceneListTextEditor
       autoFocus
       value={value}
-      onChange={(event) => onUpdate(item.id, { [patchKey]: event.target.value })}
-      onBlur={onEditEnd}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
-      }}
+      onChange={(nextValue) => onUpdate(item.id, { [patchKey]: nextValue })}
+      onEditEnd={onEditEnd}
       className={tableInputClass}
       aria-label={`${item.sceneNo || "현재 씬"} ${column}`}
     />
@@ -1122,17 +1123,12 @@ function EditableTextCell({
     >
       {editing && canEdit ? (
         multiline ? (
-          <textarea
+          <SceneListTextEditor
             autoFocus
+            multiline
             value={value}
-            onChange={(event) => onChange(event.target.value)}
-            onBlur={onEditEnd}
-            onKeyDown={(event) => {
-              if (event.key === "Escape" || (event.key === "Enter" && !event.shiftKey)) {
-                event.preventDefault();
-                event.currentTarget.blur();
-              }
-            }}
+            onChange={onChange}
+            onEditEnd={onEditEnd}
             rows={Math.max(1, Math.min(5, value.split("\n").length))}
             aria-label={ariaLabel}
             className="block min-h-9 w-full resize-none border-0 bg-transparent px-1.5 py-2 text-left text-[12px] font-medium leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111]"
@@ -1145,6 +1141,143 @@ function EditableTextCell({
       )}
     </td>
   );
+}
+
+function SceneListTextEditor({
+  value,
+  onChange,
+  onEditEnd,
+  multiline = false,
+  autoFocus,
+  rows,
+  className,
+  "aria-label": ariaLabel
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onEditEnd: () => void;
+  multiline?: boolean;
+  autoFocus?: boolean;
+  rows?: number;
+  className?: string;
+  "aria-label": string;
+}) {
+  const compositionActiveRef = useRef(false);
+  const compositionJustEndedRef = useRef(false);
+  const pendingEnterExitRef = useRef(false);
+  const deferredBlurTimerRef = useRef<number | null>(null);
+  const compositionBoundaryTimerRef = useRef<number | null>(null);
+
+  const clearDeferredBlur = useCallback(() => {
+    if (deferredBlurTimerRef.current == null) return;
+    window.clearTimeout(deferredBlurTimerRef.current);
+    deferredBlurTimerRef.current = null;
+  }, []);
+
+  const clearCompositionBoundary = useCallback(() => {
+    if (compositionBoundaryTimerRef.current == null) return;
+    window.clearTimeout(compositionBoundaryTimerRef.current);
+    compositionBoundaryTimerRef.current = null;
+  }, []);
+
+  useEffect(() => () => {
+    clearDeferredBlur();
+    clearCompositionBoundary();
+  }, [clearCompositionBoundary, clearDeferredBlur]);
+
+  const deferBlurUntilFinalInput = useCallback((target: HTMLInputElement | HTMLTextAreaElement) => {
+    clearDeferredBlur();
+    deferredBlurTimerRef.current = window.setTimeout(() => {
+      deferredBlurTimerRef.current = null;
+      if (target.isConnected && document.activeElement === target) target.blur();
+    }, 0);
+  }, [clearDeferredBlur]);
+
+  const handleCompositionStart = useCallback(() => {
+    clearCompositionBoundary();
+    compositionActiveRef.current = true;
+    compositionJustEndedRef.current = false;
+    pendingEnterExitRef.current = false;
+  }, [clearCompositionBoundary]);
+
+  const handleCompositionEnd = useCallback((event: React.CompositionEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const target = event.currentTarget;
+    const result = resolveSceneListCompositionEnd(
+      value,
+      target.value,
+      pendingEnterExitRef.current
+    );
+    compositionActiveRef.current = false;
+    compositionJustEndedRef.current = true;
+    clearCompositionBoundary();
+    compositionBoundaryTimerRef.current = window.setTimeout(() => {
+      compositionBoundaryTimerRef.current = null;
+      compositionJustEndedRef.current = false;
+    }, 0);
+
+    // Some browser/IME combinations emit the final input after compositionend.
+    // Capture the DOM's completed replacement value now; never append a key.
+    if (result.replacementValue != null) onChange(result.replacementValue);
+
+    if (!result.shouldExit) return;
+    pendingEnterExitRef.current = false;
+    deferBlurUntilFinalInput(target);
+  }, [clearCompositionBoundary, deferBlurUntilFinalInput, onChange, value]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const action = getSceneListEditorKeyAction({
+      key: event.key,
+      shiftKey: event.shiftKey,
+      multiline,
+      compositionActive: compositionActiveRef.current,
+      compositionJustEnded: compositionJustEndedRef.current,
+      nativeIsComposing: event.nativeEvent.isComposing,
+      legacyKeyCode: event.nativeEvent.keyCode
+    });
+
+    if (action === "allow") return;
+
+    // The focused editor owns Enter/Escape. This prevents the parent table cell
+    // from reopening the editor while the same physical key is completing IME.
+    event.stopPropagation();
+
+    if (action === "ime-only") return;
+    if (action === "defer-enter-exit") {
+      pendingEnterExitRef.current = true;
+      // Safari can expose only keyCode 229 after compositionend. In that case
+      // there will be no later compositionend callback, so exit next task.
+      if (!compositionActiveRef.current && !event.nativeEvent.isComposing) {
+        pendingEnterExitRef.current = false;
+        deferBlurUntilFinalInput(event.currentTarget);
+      }
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.blur();
+  }, [deferBlurUntilFinalInput, multiline]);
+
+  const handleBlur = useCallback(() => {
+    clearDeferredBlur();
+    pendingEnterExitRef.current = false;
+    onEditEnd();
+  }, [clearDeferredBlur, onEditEnd]);
+
+  const sharedProps = {
+    autoFocus,
+    value,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value),
+    onBlur: handleBlur,
+    onCompositionStart: handleCompositionStart,
+    onCompositionEnd: handleCompositionEnd,
+    onKeyDown: handleKeyDown,
+    "aria-label": ariaLabel,
+    className
+  };
+
+  return multiline
+    ? <textarea {...sharedProps} rows={rows} />
+    : <input {...sharedProps} />;
 }
 
 function SceneTableHeader({
@@ -1306,9 +1439,14 @@ function ActorTextDialog({
   const current = item ? getActorCellState(item, role) : { mode: "empty" as const, text: "" };
   const text = current.mode === "text" ? current.text : "";
   return (
-    <div data-scene-floating-ui className="light-workspace scene-workspace fixed inset-0 z-[130] grid place-items-center bg-black/25 p-4" onPointerDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
+    <div
+      data-scene-floating-ui
+      data-scene-character-note-row-id={item?.id}
+      className="light-workspace scene-workspace fixed inset-0 z-[130] grid place-items-center bg-black/25 p-4"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <div className="workspace-popup w-full max-w-xs border p-3 shadow-xl" role="dialog" aria-modal="true">
         <p className="text-xs font-black">{role} · Scene {item?.sceneNo || "—"}</p>
         {canEdit ? (
