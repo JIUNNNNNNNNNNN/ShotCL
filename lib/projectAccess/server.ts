@@ -61,6 +61,15 @@ export function getJoinAttemptKey(request: NextRequest, normalizedProjectName: s
   return createHash("sha256").update(`${forwardedFor}:${normalizedProjectName}`).digest("hex");
 }
 
+/** 기존 Join rate-limit 저장소를 프로젝트별 Key staff 승격에도 분리해 재사용합니다. */
+export function getKeyStaffUpgradeAttemptKey(request: NextRequest, projectId: string) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const databaseProjectId = normalizeProjectId(projectId);
+  return createHash("sha256")
+    .update(`${forwardedFor}:key-staff-upgrade:${databaseProjectId}`)
+    .digest("hex");
+}
+
 export async function isJoinRateLimited(attemptKeyHash: string) {
   const supabase = requireProjectAccessDb();
   const { data, error } = await supabase.from("project_access_attempts").select("blocked_until").eq("attempt_key_hash", attemptKeyHash).maybeSingle();
@@ -130,6 +139,37 @@ export async function saveAccessGrant(token: string, projectId: string, role: Sh
     { onConflict: "browser_token_hash,project_id" }
   );
   if (error) throw error;
+}
+
+export type AccessGrantUpgradeResult = "upgraded" | "already-admin" | "missing";
+
+/**
+ * 현재 브라우저의 현재 프로젝트 Staff grant 한 행만 Key staff로 올립니다.
+ * upsert를 쓰지 않아 만료·누락된 membership을 새로 만들거나 다른 프로젝트를 변경하지 않습니다.
+ */
+export async function upgradeAccessGrantToAdmin(
+  token: string,
+  projectId: string
+): Promise<AccessGrantUpgradeResult> {
+  const supabase = requireProjectAccessDb();
+  const databaseProjectId = normalizeProjectId(projectId);
+  const now = new Date().toISOString();
+  const tokenHash = hashProjectSessionToken(token);
+  const { data, error } = await supabase
+    .from("project_access_sessions")
+    .update({ role: "admin" })
+    .eq("browser_token_hash", tokenHash)
+    .eq("project_id", databaseProjectId)
+    .eq("role", "progress")
+    .gt("expires_at", now)
+    .select("role")
+    .maybeSingle();
+  if (error) throw error;
+  if (data?.role === "admin") return "upgraded";
+
+  // 동시에 제출된 첫 요청이 이미 승격했다면 두 번째 요청도 안전한 no-op 성공입니다.
+  const currentGrant = await getAccessGrantByToken(token, databaseProjectId);
+  return currentGrant?.role === "admin" ? "already-admin" : "missing";
 }
 
 export async function getAccessGrant(request: NextRequest, projectId: string): Promise<ProjectAccessGrant | null> {

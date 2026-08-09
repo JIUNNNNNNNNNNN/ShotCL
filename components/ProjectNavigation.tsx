@@ -33,6 +33,7 @@ import {
   ProjectNavigationCardGrid,
   type ProjectNavigationCardItem
 } from "@/components/ProjectNavigationCardGrid";
+import { ProjectKeyStaffUpgrade } from "@/components/ProjectKeyStaffUpgrade";
 import {
   ContextualGuideHelpButton,
   useContextualGuide,
@@ -100,8 +101,8 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const router = useRouter();
   const { role } = useProjectAccess();
   const {
-    projectId,
     project,
+    projectId,
     projectName,
     dailyPlans,
     isLoading,
@@ -130,7 +131,8 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const visibleItems = useMemo(() => getVisibleProjectNavigationItems(role), [role]);
   const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
-  const canManageDailyPlans = role !== "progress" && project?.accessRole !== "progress";
+  // ProjectAccessGate의 project-scoped role이 승격 직후에도 canonical source입니다.
+  const canManageDailyPlans = (role ?? project?.accessRole) !== "progress";
   const instanceId = drawer ? "drawer" : "panel";
   const projectHomeHref = buildProjectBasePath(projectId);
   const navigationRouteKey = `${pathname}?view=${searchParams.get("view") ?? ""}&dailyPlanId=${searchParams.get("dailyPlanId") ?? ""}`;
@@ -344,6 +346,8 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
             </p>
           ) : null}
         </div>
+
+        <ProjectKeyStaffUpgrade projectId={projectId} />
       </nav>
 
       {contextMenu && typeof document !== "undefined" ? createPortal(

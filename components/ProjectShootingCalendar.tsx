@@ -48,6 +48,8 @@ export function ProjectShootingCalendar({
   const [isMutating, setIsMutating] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
   const loadVersionRef = useRef(0);
+  const canManageEventsRef = useRef(canManageEvents);
+  canManageEventsRef.current = canManageEvents;
 
   useAutoContextualGuide(
     "home.intro",
@@ -61,6 +63,12 @@ export function ProjectShootingCalendar({
     href: buildDailyPlanRoundHref(projectId, plan.id)
   })), [dailyPlans, projectId]);
 
+  // 권한 전환은 이미 로드한 일정 데이터를 폐기하거나 다시 요청하지 않습니다.
+  // ProjectAccessGate의 검증된 project-scoped role만 즉시 편집 가능 상태에 반영합니다.
+  useEffect(() => {
+    setServerCanEdit(canManageEvents);
+  }, [canManageEvents]);
+
   useEffect(() => {
     let disposed = false;
     let requestInFlight = false;
@@ -68,7 +76,6 @@ export function ProjectShootingCalendar({
     let backgroundRefreshEnabled = false;
 
     setEvents([]);
-    setServerCanEdit(canManageEvents);
     setIsLoadingEvents(true);
     setSyncMessage("");
 
@@ -83,7 +90,8 @@ export function ProjectShootingCalendar({
         const result = await listProjectCalendarEvents(projectId);
         if (disposed || loadVersionRef.current !== version) return;
         setEvents(result.events);
-        setServerCanEdit(result.canEdit);
+        // Staff로 시작한 요청이 승격 뒤 늦게 끝나도 최신 admin 권한을 되돌리지 않습니다.
+        setServerCanEdit(canManageEventsRef.current || result.canEdit);
         setSyncMessage("");
         lastLoadedAt = Date.now();
         backgroundRefreshEnabled = true;
@@ -116,7 +124,7 @@ export function ProjectShootingCalendar({
       document.removeEventListener("visibilitychange", refreshWhenVisible);
       window.removeEventListener("focus", refreshWhenFocused);
     };
-  }, [canManageEvents, projectId]);
+  }, [projectId]);
 
   async function createEvent(values: ProjectCalendarEventInput) {
     setIsMutating(true);

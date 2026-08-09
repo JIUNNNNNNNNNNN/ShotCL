@@ -346,7 +346,8 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const documentOrientation = useDailyPlanDocumentOrientation();
   const { role: projectAccessRole } = useProjectAccess();
   const { upsertDailyPlan } = useProjectWorkspace();
-  const canManageTimetable = projectAccessRole !== "progress" && project.accessRole !== "progress";
+  // 공유 프로젝트 권한은 ProjectAccessGate가 project별로 즉시 갱신하는 role을 기준으로 합니다.
+  const canManageTimetable = (projectAccessRole ?? project.accessRole) !== "progress";
   const initialEditorState = useMemo(() => {
     const isNewDailyPlan = !initialPlan && !initialDraft;
     const activeProjectBasicInfo = isConfiguredProjectBasicInfo(projectBasicInfo) ? projectBasicInfo : null;
