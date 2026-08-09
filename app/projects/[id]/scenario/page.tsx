@@ -15,13 +15,21 @@ import {
   X
 } from "lucide-react";
 import { useParams } from "next/navigation";
-import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
+import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
-import { useAutoContextualGuide } from "@/components/guides/ContextualGuideProvider";
+import {
+  useAutoContextualGuide,
+  useContextualGuideBlocker
+} from "@/components/guides/ContextualGuideProvider";
 import {
   useProjectPageActionMenu,
   type ProjectPageActionMenuRegistration
 } from "@/components/ProjectPageActions";
+import {
+  ScenarioUploadProgress,
+  type ScenarioUploadProgressState,
+  type ScenarioUploadStage
+} from "@/components/ScenarioUploadProgress";
 import { MotionPresence } from "@/components/ui/MotionPresence";
 import {
   deleteProjectReferenceAsset,
@@ -41,6 +49,8 @@ type ScenarioConfirmation =
   | { kind: "asset-delete"; asset: ProjectReferenceAsset }
   | { kind: "scene-delete"; sceneId: string; title: string };
 
+const MAX_SCENARIO_PDF_BYTES = 50 * 1024 * 1024;
+
 const ScenarioPdfSceneSegments = dynamic(
   () => import("@/components/ScenarioPdfSceneSegments").then((module) => module.ScenarioPdfSceneSegments),
   { ssr: false, loading: () => <SectionLoader /> }
@@ -53,6 +63,9 @@ export default function ProjectScenarioPage() {
   const canEdit = role !== "progress";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectedAssetIdRef = useRef("");
+  const uploadInFlightRef = useRef(false);
+  const uploadSuccessTimerRef = useRef<number | null>(null);
+  const isMountedRef = useRef(true);
   const [projectName, setProjectName] = useState("");
   const [assets, setAssets] = useState<ProjectReferenceAsset[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -64,6 +77,7 @@ export default function ProjectScenarioPage() {
   const [hasChanges, setHasChanges] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<ScenarioUploadProgressState | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -87,11 +101,23 @@ export default function ProjectScenarioPage() {
     () => assets.find((asset) => asset.id === selectedId) ?? null,
     [assets, selectedId]
   );
-  useAutoContextualGuide("scenario.intro", !isLoading);
+  const isUploadFeedbackVisible = uploadProgress !== null;
+  useAutoContextualGuide("scenario.intro", !isLoading && !isUploadFeedbackVisible);
+  useContextualGuideBlocker("scenario-upload-processing", isUploadFeedbackVisible);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (uploadSuccessTimerRef.current !== null) {
+        window.clearTimeout(uploadSuccessTimerRef.current);
+      }
+    };
+  }, []);
 
   const load = useCallback(async ({ withLoader = true }: { withLoader?: boolean } = {}) => {
     if (!projectId) return false;
-    if (withLoader) setIsLoading(true);
+    if (withLoader && isMountedRef.current) setIsLoading(true);
     try {
       const [project, scenarioAssets] = await Promise.all([
         auditQuery(
@@ -105,6 +131,7 @@ export default function ProjectScenarioPage() {
           () => listProjectReferenceAssets(projectId, "scenario")
         )
       ]);
+      if (!isMountedRef.current) return false;
       setProjectName(project?.name ?? "프로젝트");
       setAssets(scenarioAssets);
       setSelectedId((current) => scenarioAssets.some((asset) => asset.id === current)
@@ -113,10 +140,13 @@ export default function ProjectScenarioPage() {
       setErrorMessage("");
       return true;
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "시나리오 자료를 불러오지 못했습니다.");
+      console.error("[scenario:load]", error);
+      if (isMountedRef.current) {
+        setErrorMessage("시나리오 자료를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
       return false;
     } finally {
-      if (withLoader) setIsLoading(false);
+      if (withLoader && isMountedRef.current) setIsLoading(false);
     }
   }, [projectId]);
 
@@ -154,43 +184,120 @@ export default function ProjectScenarioPage() {
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!projectId || files.length === 0) return;
+    if (!projectId || files.length === 0 || uploadInFlightRef.current) return;
+    const uploadedIds: string[] = [];
+    const analysisWarnings: string[] = [];
+    let uploadedId = "";
+    uploadInFlightRef.current = true;
+    if (uploadSuccessTimerRef.current !== null) {
+      window.clearTimeout(uploadSuccessTimerRef.current);
+      uploadSuccessTimerRef.current = null;
+    }
     setIsUploading(true);
     setErrorMessage("");
     setStatusMessage("");
+    setUploadProgress(createUploadProgress("validating", files[0], 0, files.length));
     try {
-      let uploadedId = "";
-      let analysisWarning = "";
-      for (const file of files) {
-        const uploadedAsset = await uploadProjectReferenceAsset(projectId, "scenario", file);
+      const validationError = validateScenarioUploadFiles(files);
+      if (validationError) throw new ScenarioUploadValidationError(validationError);
+
+      for (let index = 0; index < files.length; index += 1) {
+        if (!isMountedRef.current) return;
+        const file = files[index];
+        if (isMountedRef.current) {
+          setUploadProgress(createUploadProgress("uploading", file, index, files.length));
+        }
+        const assetId = await createScenarioUploadAssetId(projectId, file);
+        if (!isMountedRef.current) return;
+        const uploadedAsset = await uploadProjectReferenceAsset(
+          projectId,
+          "scenario",
+          file,
+          assetId ? { assetId } : {}
+        );
         uploadedId = uploadedAsset.id;
+        uploadedIds.push(uploadedAsset.id);
+        if (!isMountedRef.current) return;
+        if (isMountedRef.current) {
+          setUploadProgress(createUploadProgress("analyzing", file, index, files.length));
+        }
+
+        let imageScenes: ProjectScenarioScene[] = uploadedAsset.scenarioScenes ?? [];
+        let analysisWarning = "";
         try {
           const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
-          const imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
-          await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
-            scenarioScenes: imageScenes
-          });
+          imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
         } catch (analysisError) {
-          analysisWarning = analysisError instanceof Error
-            ? analysisError.message
-            : "PDF 이미지 분할에 실패했습니다.";
-          await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
-            scenarioScenes: [],
-            scenarioParseError: analysisWarning
-          });
+          console.error("[scenario:pdf-analysis]", { filename: file.name, error: analysisError });
+          analysisWarning = getSafeScenarioAnalysisWarning(analysisError);
+          analysisWarnings.push(`${file.name}: ${analysisWarning}`);
         }
+        if (!isMountedRef.current) return;
+        if (isMountedRef.current) {
+          setUploadProgress(createUploadProgress("saving", file, index, files.length));
+        }
+        await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
+          scenarioScenes: imageScenes,
+          scenarioParseError: analysisWarning || null
+        });
       }
-      await load({ withLoader: false });
-      if (uploadedId) setSelectedId(uploadedId);
+      const finalFile = files[files.length - 1];
+      if (!isMountedRef.current) return;
+      setUploadProgress(createUploadProgress("refreshing", finalFile, files.length - 1, files.length));
+      const reloaded = await load({ withLoader: false });
+      if (!isMountedRef.current) return;
+      if (reloaded && uploadedId) setSelectedId(uploadedId);
       setViewMode("scenes");
-      setStatusMessage(analysisWarning
-        ? "PDF 업로드는 완료되었습니다."
-        : "PDF 업로드와 씬 이미지 분석이 완료되었습니다.");
-      if (analysisWarning) setErrorMessage(analysisWarning);
+      const completionMessage = !reloaded
+        ? "PDF 처리는 완료되었지만 목록을 새로고침하지 못했습니다."
+        : analysisWarnings.length > 0
+          ? "PDF 업로드는 완료되었습니다. 씬 구성을 확인해주세요."
+          : "PDF 업로드와 씬 이미지 분석이 완료되었습니다.";
+      setStatusMessage(completionMessage);
+      if (!reloaded) {
+        setErrorMessage("업로드한 시나리오 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.");
+      } else if (analysisWarnings.length > 0) {
+        setErrorMessage(analysisWarnings.join(" · "));
+      }
+      setUploadProgress({
+        ...createUploadProgress(
+          reloaded && analysisWarnings.length === 0 ? "success" : "warning",
+          finalFile,
+          files.length - 1,
+          files.length
+        ),
+        detail: !reloaded
+          ? "업로드는 끝났지만 목록을 다시 불러오지 못했습니다."
+          : analysisWarnings.length > 0
+            ? "업로드는 끝났지만 씬 구성을 확인해야 합니다."
+            : undefined
+      });
+      uploadSuccessTimerRef.current = window.setTimeout(() => {
+        if (isMountedRef.current) setUploadProgress(null);
+        uploadSuccessTimerRef.current = null;
+      }, 450);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "PDF를 업로드하지 못했습니다.");
+      console.error("[scenario:upload-processing]", error);
+      if (uploadedIds.length > 0 && isMountedRef.current) {
+        const lastUploadedFile = files[Math.min(uploadedIds.length - 1, files.length - 1)];
+        setUploadProgress(createUploadProgress(
+          "refreshing",
+          lastUploadedFile,
+          uploadedIds.length - 1,
+          files.length
+        ));
+        await load({ withLoader: false });
+      }
+      if (isMountedRef.current) {
+        setUploadProgress(null);
+        setStatusMessage(uploadedIds.length > 0
+          ? `${uploadedIds.length}개 PDF는 업로드되었지만 나머지 처리를 완료하지 못했습니다.`
+          : "");
+        setErrorMessage(getSafeScenarioUploadError(error));
+      }
     } finally {
-      setIsUploading(false);
+      uploadInFlightRef.current = false;
+      if (isMountedRef.current) setIsUploading(false);
     }
   }
 
@@ -493,18 +600,20 @@ export default function ProjectScenarioPage() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading || isSaving || isDeleting || isRefreshing || hasChanges}
-                aria-label={isUploading ? "PDF 업로드 중" : "PDF 업로드"}
+                aria-label={isUploading ? "시나리오 처리 중" : "PDF 업로드"}
+                aria-busy={isUploading}
                 title="PDF 업로드"
                 className="inline-flex min-h-9 items-center gap-1 border border-field-primary bg-field-primary px-2.5 text-[11px] font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary active:scale-95 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               >
-                {isUploading ? <InlineLoader /> : <Upload className="h-3.5 w-3.5" aria-hidden />}
-                <span>{isUploading ? "분석 중" : "+ PDF"}</span>
+                <Upload className="h-3.5 w-3.5" aria-hidden />
+                <span>{isUploading ? "처리 중" : "+ PDF"}</span>
               </button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf,.pdf"
                 multiple
+                disabled={isUploading || isSaving || isDeleting || isRefreshing || hasChanges}
                 className="sr-only"
                 onChange={handleUpload}
               />
@@ -512,6 +621,8 @@ export default function ProjectScenarioPage() {
           ) : null}
         </div>
       </div>
+
+      <ScenarioUploadProgress progress={uploadProgress} />
 
       {selectedAsset && viewMode === "scenes" ? (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -552,7 +663,7 @@ export default function ProjectScenarioPage() {
       ) : null}
 
       {errorMessage ? (
-        <p role="alert" className="border-l-2 border-field-danger bg-field-danger/10 px-2.5 py-1.5 text-xs font-bold text-field-danger">
+        <p role="alert" className="min-w-0 break-words border-l-2 border-field-danger bg-field-danger/10 px-2.5 py-1.5 text-xs font-bold text-field-danger [overflow-wrap:anywhere]">
           {errorMessage}
         </p>
       ) : null}
@@ -979,6 +1090,74 @@ function EmptyState({
       </div>
     </div>
   );
+}
+
+function createUploadProgress(
+  stage: ScenarioUploadStage,
+  file: File,
+  fileIndex: number,
+  totalFiles: number
+): ScenarioUploadProgressState {
+  return {
+    stage,
+    filename: file.name,
+    currentFile: fileIndex + 1,
+    totalFiles
+  };
+}
+
+function validateScenarioUploadFiles(files: File[]) {
+  for (const file of files) {
+    const filename = file.name.toLocaleLowerCase("ko-KR");
+    const isPdf = file.type === "application/pdf" || filename.endsWith(".pdf");
+    if (!isPdf) return `${file.name}: PDF 파일만 업로드할 수 있습니다.`;
+    if (file.size === 0) return `${file.name}: 비어 있는 PDF는 업로드할 수 없습니다.`;
+    if (file.size > MAX_SCENARIO_PDF_BYTES) {
+      return `${file.name}: PDF 파일은 50MB 이하만 업로드할 수 있습니다.`;
+    }
+  }
+  return "";
+}
+
+class ScenarioUploadValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ScenarioUploadValidationError";
+  }
+}
+
+function getSafeScenarioAnalysisWarning(error: unknown) {
+  if (error instanceof Error && error.message === SCENARIO_MARKER_NOT_FOUND_MESSAGE) {
+    return SCENARIO_MARKER_NOT_FOUND_MESSAGE;
+  }
+  return "씬 분석을 완료하지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요.";
+}
+
+function getSafeScenarioUploadError(error: unknown) {
+  if (error instanceof ScenarioUploadValidationError) return error.message;
+  const message = error instanceof Error ? error.message : "";
+  if (/권한|key staff/i.test(message)) {
+    return "시나리오를 업로드할 권한이 없습니다.";
+  }
+  return "시나리오를 처리하지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요.";
+}
+
+async function createScenarioUploadAssetId(projectId: string, file: File) {
+  if (typeof crypto === "undefined" || !crypto.subtle) return "";
+  const fingerprint = [
+    "scenario",
+    projectId,
+    file.name.normalize("NFC"),
+    file.size,
+    file.lastModified,
+    file.type
+  ].join("\u001f");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(fingerprint));
+  const bytes = new Uint8Array(digest.slice(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function createBlankScene(index: number): ProjectScenarioScene {

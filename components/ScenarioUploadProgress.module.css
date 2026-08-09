@@ -1,0 +1,128 @@
+.card {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  padding: 12px 14px;
+  overflow: hidden;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius-card);
+  background: var(--field-panel);
+  box-shadow: var(--shadow-card);
+}
+
+.headingRow {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.copy {
+  min-width: 0;
+}
+
+.title {
+  color: var(--field-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.detail,
+.hint,
+.counter {
+  color: var(--field-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.detail {
+  margin-top: 2px;
+}
+
+.counter {
+  flex: 0 0 auto;
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.filename {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--field-secondary-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--field-line);
+}
+
+.indicator {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: var(--field-accent);
+  transform: translateX(-110%);
+  animation: scenario-upload-indeterminate 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+.completeIndicator,
+.warningIndicator {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+}
+
+.completeIndicator {
+  background: var(--field-accent);
+}
+
+.warningIndicator {
+  background: var(--field-divider);
+}
+
+@keyframes scenario-upload-indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(290%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indicator {
+    width: 45%;
+    animation: none;
+    opacity: 0.8;
+    transform: none;
+    will-change: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .card {
+    gap: 7px;
+    padding: 10px 11px;
+  }
+
+  .headingRow {
+    gap: 8px;
+  }
+}
