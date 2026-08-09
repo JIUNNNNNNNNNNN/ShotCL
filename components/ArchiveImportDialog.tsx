@@ -102,6 +102,12 @@ type StoryboardCandidateChangeOptions = {
   customSize?: boolean;
 };
 
+type StoryboardCropMetadataField = "scene" | "cut";
+type StoryboardCropMetadataInput = HTMLInputElement | HTMLSelectElement;
+type StoryboardCropMetadataInputRefs = Partial<
+  Record<StoryboardCropMetadataField, StoryboardCropMetadataInput>
+>;
+
 const DEFAULT_CROP: RelativeCrop = { x: 0.06, y: 0.08, width: 0.46, height: 0.16 };
 
 export function ArchiveImportDialog({
@@ -827,6 +833,12 @@ function StoryboardCropWorkflow({
   hasInvalidCropMetadata: boolean;
   onConfirmExtraction: () => void;
 }) {
+  const metadataInputRefsByCropId = useRef(new Map<string, StoryboardCropMetadataInputRefs>());
+  const focusedMetadataInputRef = useRef<{
+    cropId: string;
+    field: StoryboardCropMetadataField;
+    element: StoryboardCropMetadataInput;
+  } | null>(null);
   const isEditorLocked = isSaving || Boolean(saveReport);
   const metadataEditDisabled = isSaving || Boolean(saveReport && saveReport.failures.length === 0);
   const metadataLockedCandidateIds = new Set(saveReport?.succeededResultIds ?? []);
@@ -841,6 +853,58 @@ function StoryboardCropWorkflow({
   const activePageIndex = activePage
     ? Math.max(0, pages.findIndex((page) => page.id === activePage.id))
     : 0;
+
+  function registerMetadataInput(
+    cropId: string,
+    field: StoryboardCropMetadataField,
+    element: StoryboardCropMetadataInput | null
+  ) {
+    const current = metadataInputRefsByCropId.current.get(cropId) ?? {};
+    if (element) {
+      metadataInputRefsByCropId.current.set(cropId, { ...current, [field]: element });
+      return;
+    }
+
+    if (current[field]) delete current[field];
+    if (current.scene || current.cut) {
+      metadataInputRefsByCropId.current.set(cropId, current);
+    } else {
+      metadataInputRefsByCropId.current.delete(cropId);
+    }
+  }
+
+  function markMetadataInputFocused(
+    cropId: string,
+    field: StoryboardCropMetadataField,
+    element: StoryboardCropMetadataInput
+  ) {
+    focusedMetadataInputRef.current = { cropId, field, element };
+  }
+
+  function markMetadataInputBlurred(element: StoryboardCropMetadataInput) {
+    if (focusedMetadataInputRef.current?.element === element) {
+      focusedMetadataInputRef.current = null;
+    }
+  }
+
+  function releaseMetadataFocus(nextCropId: string | null) {
+    const focused = focusedMetadataInputRef.current;
+    if (!focused || focused.cropId === nextCropId) return;
+
+    const registered = metadataInputRefsByCropId.current.get(focused.cropId)?.[focused.field];
+    const element = registered === focused.element ? registered : focused.element;
+    if (typeof document !== "undefined" && document.activeElement === element) {
+      element.blur();
+    }
+    if (focusedMetadataInputRef.current?.element === element) {
+      focusedMetadataInputRef.current = null;
+    }
+  }
+
+  function changeActiveCrop(nextCropId: string | null) {
+    releaseMetadataFocus(nextCropId);
+    onEditCandidate(nextCropId);
+  }
 
   useEffect(() => {
     function handleDelete(event: KeyboardEvent) {
@@ -857,9 +921,18 @@ function StoryboardCropWorkflow({
   function movePage(delta: number) {
     const nextPage = pages[activePageIndex + delta];
     if (!nextPage) return;
-    onEditCandidate(null);
+    changeActiveCrop(null);
     onActivePageChange(nextPage.id);
   }
+
+  useEffect(() => {
+    const focused = focusedMetadataInputRef.current;
+    if (!focused) return;
+    const activeCropId = editingCandidate && editingCandidate.page.id === activePage?.id
+      ? editingCandidate.id
+      : null;
+    if (focused.cropId !== activeCropId) releaseMetadataFocus(activeCropId);
+  }, [activePage?.id, editingCandidate?.id]);
 
   return (
     <div className="mx-auto grid max-w-5xl content-start gap-2">
@@ -874,6 +947,7 @@ function StoryboardCropWorkflow({
 
       {activePage ? (
         <StoryboardCropCanvas
+          key={activePage.id}
           page={activePage}
           referenceCrop={referenceCrop}
           referenceSelected={referenceSelected}
@@ -893,9 +967,12 @@ function StoryboardCropWorkflow({
           onConfirmTemplate={onConfirmTemplate}
           onPlace={(x, y) => onAddCandidate(activePage, x, y)}
           onSelectRange={(selection) => onAddCandidates(activePage, selection)}
-          onSelect={onEditCandidate}
+          onSelect={changeActiveCrop}
           onCandidateChange={onCandidateChange}
           onCandidateMetadataChange={onCandidateMetadataChange}
+          onMetadataInputRef={registerMetadataInput}
+          onMetadataInputFocus={markMetadataInputFocused}
+          onMetadataInputBlur={markMetadataInputBlurred}
         />
       ) : referencePage ? (
         <p className="p-6 text-center text-sm text-field-muted">페이지를 표시할 수 없습니다.</p>
@@ -1047,7 +1124,10 @@ function StoryboardCropCanvas({
   onSelectRange,
   onSelect,
   onCandidateChange,
-  onCandidateMetadataChange
+  onCandidateMetadataChange,
+  onMetadataInputRef,
+  onMetadataInputFocus,
+  onMetadataInputBlur
 }: {
   page: ArchiveImportPage;
   referenceCrop: RelativeCrop;
@@ -1075,6 +1155,17 @@ function StoryboardCropCanvas({
     options?: StoryboardCandidateChangeOptions
   ) => void;
   onCandidateMetadataChange: (id: string, value: ArchiveImportCropMetadata) => void;
+  onMetadataInputRef: (
+    cropId: string,
+    field: StoryboardCropMetadataField,
+    element: StoryboardCropMetadataInput | null
+  ) => void;
+  onMetadataInputFocus: (
+    cropId: string,
+    field: StoryboardCropMetadataField,
+    element: StoryboardCropMetadataInput
+  ) => void;
+  onMetadataInputBlur: (element: StoryboardCropMetadataInput) => void;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<CanvasDrag | null>(null);
@@ -1458,11 +1549,19 @@ function StoryboardCropCanvas({
               <span className="shrink-0">씬</span>
               {scenes.length > 0 || metadata.sceneId ? (
                 <select
+                  ref={(element) => onMetadataInputRef(candidate.id, "scene", element)}
                   disabled={metadataDisabled}
                   aria-invalid={metadataError === "missing_scene" || undefined}
                   aria-label={`crop 후보 ${candidateNumber} 씬`}
+                  data-storyboard-crop-id={candidate.id}
+                  data-storyboard-crop-field="scene"
+                  tabIndex={selectedCandidateId === candidate.id ? 0 : -1}
                   value={metadata.sceneId}
-                  onFocus={() => onSelect(candidate.id)}
+                  onFocus={(event) => {
+                    onMetadataInputFocus(candidate.id, "scene", event.currentTarget);
+                    onSelect(candidate.id);
+                  }}
+                  onBlur={(event) => onMetadataInputBlur(event.currentTarget)}
                   onPointerDown={(event) => event.stopPropagation()}
                   onChange={(event) => {
                     const scene = scenes.find((entry) => entry.id === event.target.value);
@@ -1496,11 +1595,19 @@ function StoryboardCropCanvas({
             <label className={`flex min-h-11 min-w-0 basis-[48%] items-center gap-1 border bg-field-floating/95 px-1.5 text-[10px] font-bold text-field-muted shadow-sm focus-within:ring-2 focus-within:ring-field-primary/25 ${metadataError ? "border-field-danger" : "border-field-border focus-within:border-field-primary"}`}>
               <span className="shrink-0">컷</span>
               <input
+                ref={(element) => onMetadataInputRef(candidate.id, "cut", element)}
                 disabled={metadataDisabled || scenes.length === 0}
                 aria-invalid={Boolean(metadataError) || undefined}
                 aria-label={`crop 후보 ${candidateNumber} 컷`}
+                data-storyboard-crop-id={candidate.id}
+                data-storyboard-crop-field="cut"
+                tabIndex={selectedCandidateId === candidate.id ? 0 : -1}
                 value={metadata.cutNo}
-                onFocus={() => onSelect(candidate.id)}
+                onFocus={(event) => {
+                  onMetadataInputFocus(candidate.id, "cut", event.currentTarget);
+                  onSelect(candidate.id);
+                }}
+                onBlur={(event) => onMetadataInputBlur(event.currentTarget)}
                 onPointerDown={(event) => event.stopPropagation()}
                 onChange={(event) => {
                   if (!/^\d*$/.test(event.target.value)) return;
