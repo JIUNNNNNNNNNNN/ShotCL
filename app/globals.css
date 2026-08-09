@@ -2543,48 +2543,56 @@ button {
 
 .project-navigation {
   display: flex;
+  width: 100%;
+  max-width: 100%;
   flex-direction: column;
   overflow: hidden;
   padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
+  container-name: project-navigation;
+  container-type: inline-size;
+}
+
+.project-navigation__top-toolbar {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: var(--ui-panel-gap);
 }
 
 .project-navigation__menu-scroll {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--ui-border-strong) transparent;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
   scroll-padding-block: 6px;
-  padding-right: 2px;
+  padding-right: 0;
   padding-bottom: 6px;
   -webkit-overflow-scrolling: touch;
 }
 
 .project-navigation__menu-scroll::-webkit-scrollbar {
-  width: 7px;
-}
-
-.project-navigation__menu-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.project-navigation__menu-scroll::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background: var(--ui-border-strong);
-  background-clip: padding-box;
+  width: 0;
+  height: 0;
 }
 
 .project-navigation__home {
   display: flex;
   min-width: 0;
   min-height: 44px;
+  flex: 0 1 auto;
   align-items: center;
   gap: var(--ui-card-gap);
-  margin-bottom: var(--ui-panel-gap);
   padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
   border: 1px solid transparent;
   border-radius: var(--ui-radius-control);
@@ -2615,7 +2623,10 @@ button {
 }
 
 .project-navigation__project-summary {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
+  flex: 0 0 auto;
   margin-bottom: var(--ui-panel-gap);
   padding: 0 4px var(--ui-card-padding-block);
   border-bottom: 1px solid var(--ui-border-default);
@@ -2624,9 +2635,17 @@ button {
 
 .project-navigation__card-grid {
   display: grid;
+  width: 100%;
+  max-width: 100%;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--ui-card-gap);
   min-width: 0;
+}
+
+.project-navigation__card-grid > li,
+.project-navigation__card {
+  width: 100%;
+  max-width: 100%;
 }
 
 .project-navigation__card {
@@ -2761,7 +2780,6 @@ button {
 
 .project-shell__navigation-drawer .project-navigation__home {
   min-height: 44px;
-  margin-bottom: 6px;
   padding: 6px 8px;
 }
 
@@ -2782,7 +2800,7 @@ button {
 
 .project-shell__navigation-drawer .project-navigation__menu-scroll {
   overflow-x: hidden;
-  padding-right: 3px;
+  padding-right: 0;
   padding-bottom: 4px;
 }
 
@@ -2933,7 +2951,6 @@ button {
 
   .project-shell[data-project-shell-mode="persistent"] .project-navigation__home {
     min-height: 44px;
-    margin-bottom: 6px;
     gap: 7px;
     padding: 6px 8px;
     font-size: 0.8125rem;
@@ -3395,24 +3412,24 @@ button {
 .contextual-guide-help {
   position: relative;
   z-index: 4;
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 2px 8px;
+  display: block;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
 }
 
 .contextual-guide-help__trigger {
-  display: inline-flex;
+  display: grid;
+  width: 40px;
+  height: 40px;
   min-height: 40px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-control);
   background: var(--ui-surface-2);
-  padding: 6px 10px;
+  padding: 0;
   color: var(--ui-text-secondary);
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .contextual-guide-help__trigger:hover,
@@ -3423,17 +3440,20 @@ button {
 }
 
 .contextual-guide-help__trigger svg {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
 }
 
 .contextual-guide-help__menu {
   position: absolute;
-  top: 44px;
-  right: 2px;
+  top: calc(100% + 6px);
+  right: 0;
   z-index: 82;
   display: grid;
   width: min(220px, calc(100vw - 32px));
+  max-width: calc(100cqi - 16px);
+  max-height: min(50dvh, 260px);
+  overflow-y: auto;
   gap: 3px;
   border: 1px solid var(--ui-border-strong);
   border-radius: var(--ui-radius-card);
@@ -3459,9 +3479,21 @@ button {
 }
 
 @media (max-width: 719px), (max-height: 699px) {
-  .contextual-guide-help__trigger,
   .contextual-guide-help__menu button {
     min-height: 44px;
+  }
+}
+
+@media (pointer: coarse) {
+  .contextual-guide-help,
+  .contextual-guide-help__trigger {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .contextual-guide-help {
+    flex-basis: 44px;
   }
 }
 

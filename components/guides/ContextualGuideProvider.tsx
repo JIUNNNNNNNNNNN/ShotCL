@@ -375,13 +375,14 @@ export function ContextualGuideHelpButton({
       <button
         type="button"
         className="contextual-guide-help__trigger"
-        aria-label="현재 페이지 도움말"
+        aria-label="도움말"
+        title="도움말"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
         <HelpCircle aria-hidden />
-        <span>도움말</span>
+        <span className="sr-only">도움말</span>
       </button>
       {open ? (
         <div role="menu" aria-label="현재 페이지 도움말" className="contextual-guide-help__menu">

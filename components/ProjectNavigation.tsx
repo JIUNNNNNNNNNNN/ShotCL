@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -121,12 +122,18 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const duplicateLockRef = useRef("");
   const { requestGuide } = useContextualGuide();
   const dailyPlansGuideRef = useContextualGuideAnchor<HTMLDivElement>("shell.navigation.daily-plans");
+  const collapseExpandableNavigation = useCallback(() => {
+    setExpandedGroups((current) => current.dailyPlans || current.progress
+      ? { dailyPlans: false, progress: false }
+      : current);
+  }, []);
   const visibleItems = useMemo(() => getVisibleProjectNavigationItems(role), [role]);
   const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
   const canManageDailyPlans = role !== "progress" && project?.accessRole !== "progress";
   const instanceId = drawer ? "drawer" : "panel";
   const projectHomeHref = buildProjectBasePath(projectId);
+  const navigationRouteKey = `${pathname}?view=${searchParams.get("view") ?? ""}&dailyPlanId=${searchParams.get("dailyPlanId") ?? ""}`;
   const cardItems = useMemo<ProjectNavigationCardItem[]>(() => [
     {
       id: "projectHome",
@@ -151,9 +158,9 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
     })
   ], [activeItem, expandedGroups, pathname, projectHomeHref, projectId, visibleItems]);
 
-  useEffect(() => {
-    setExpandedGroups({ dailyPlans: false, progress: false });
-  }, [projectId]);
+  useLayoutEffect(() => {
+    collapseExpandableNavigation();
+  }, [collapseExpandableNavigation, navigationRouteKey, projectId]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -194,9 +201,10 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [isDeleting, pendingDelete]);
 
-  function notifyNavigation(href: string) {
+  const notifyNavigation = useCallback((href: string) => {
+    collapseExpandableNavigation();
     onNavigate?.(href);
-  }
+  }, [collapseExpandableNavigation, onNavigate]);
 
   function guardLinkNavigation(event: React.MouseEvent<HTMLAnchorElement>, href: string) {
     if (!confirmUnsavedChangesNavigation()) {
@@ -294,16 +302,19 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
         aria-label="프로젝트 기능"
         className={`project-navigation min-h-0 min-w-0 ${drawer ? "flex-1" : "h-full"}`}
       >
-        <Link
-          href="/"
-          onClick={(event) => guardLinkNavigation(event, "/")}
-          aria-label="Main"
-          title="Main"
-          className="project-navigation__home"
-        >
-          <House className="h-4 w-4 shrink-0" aria-hidden />
-          <span>Main</span>
-        </Link>
+        <div className="project-navigation__top-toolbar">
+          <Link
+            href="/"
+            onClick={(event) => guardLinkNavigation(event, "/")}
+            aria-label="Main"
+            title="Main"
+            className="project-navigation__home"
+          >
+            <House className="h-4 w-4 shrink-0" aria-hidden />
+            <span>Main</span>
+          </Link>
+          <ContextualGuideHelpButton onBeforeReplay={onGuideReplay} />
+        </div>
 
         <div className="project-navigation__project-summary text-center">
           <p className="break-words text-sm font-black leading-5 text-field-text [overflow-wrap:anywhere]" title={projectName}>
@@ -312,8 +323,6 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
           {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
           {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트 메뉴를 불러오지 못했습니다.")}</p> : null}
         </div>
-
-        <ContextualGuideHelpButton onBeforeReplay={onGuideReplay} />
 
         <div className="project-navigation__menu-scroll">
           <ProjectNavigationCardGrid
