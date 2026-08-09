@@ -1,6 +1,7 @@
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 
 export type ContextualGuidePage =
+  | "main"
   | "home"
   | "basicInfo"
   | "dailyPlan"
@@ -12,6 +13,13 @@ export type ContextualGuidePage =
   | "archive";
 
 export type ContextualGuideId =
+  | "main.intro-new"
+  | "main.intro-join"
+  | "main.intro-go"
+  | "main.new-key-staff-password"
+  | "main.new-staff-password"
+  | "main.join-fields"
+  | "main.go-first-use"
   | "home.intro"
   | "home.calendar-create"
   | "home.calendar-range"
@@ -37,6 +45,12 @@ export type ContextualGuideId =
   | "archive.folder-upload";
 
 export type ContextualGuideAnchorKey =
+  | "main.action-new"
+  | "main.action-join"
+  | "main.action-go"
+  | "main.new-key-staff-password"
+  | "main.new-staff-password"
+  | "main.join-fields"
   | "home.calendar-grid"
   | "home.invite-action"
   | "basic-info.form"
@@ -71,6 +85,7 @@ type ContextualGuideDefinitionBase = {
   permission: "any" | "manage" | "admin";
   capability?: "fine-pointer" | "touch";
   replayLabel: string;
+  replayHidden?: boolean;
 };
 
 export type ContextualGuideDefinition = ContextualGuideDefinitionBase & (
@@ -88,7 +103,127 @@ export type ContextualGuideDefinition = ContextualGuideDefinitionBase & (
     }
 );
 
+/** Main의 첫 방문 소개는 이 순서를 변경하지 않고 한 항목씩 진행합니다. */
+export const MAIN_INTRO_GUIDE_IDS = [
+  "main.intro-new",
+  "main.intro-join",
+  "main.intro-go"
+] as const satisfies readonly ContextualGuideId[];
+
+/** New form이 실제로 열린 뒤 password field에 순서대로 연결합니다. */
+export const MAIN_NEW_FEATURE_GUIDE_IDS = [
+  "main.new-key-staff-password",
+  "main.new-staff-password"
+] as const satisfies readonly ContextualGuideId[];
+
 export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinition> = {
+  "main.intro-new": {
+    id: "main.intro-new",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "page",
+    priority: 50,
+    title: "New",
+    description: "프로젝트를 만들 수 있습니다.",
+    persistentAnchor: "main.action-new",
+    compactAnchor: "main.action-new",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Main 안내 (New → Join → Go)"
+  },
+  "main.intro-join": {
+    id: "main.intro-join",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "page",
+    priority: 50,
+    title: "Join",
+    description: "만들어진 프로젝트에 참여할 수 있습니다. 처음 프로젝트 이름과 비밀번호로 참여하면 참여 권한이 저장됩니다.",
+    persistentAnchor: "main.action-join",
+    compactAnchor: "main.action-join",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Join 안내",
+    replayHidden: true
+  },
+  "main.intro-go": {
+    id: "main.intro-go",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "page",
+    priority: 50,
+    title: "Go",
+    description: "가장 최근에 참여한 프로젝트의 현장 진행도를 확인할 수 있습니다.",
+    persistentAnchor: "main.action-go",
+    compactAnchor: "main.action-go",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Go 안내",
+    replayHidden: true
+  },
+  "main.new-key-staff-password": {
+    id: "main.new-key-staff-password",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "Key staff 비밀번호",
+    description: "프로젝트의 모든 내용을 수정 및 관리할 수 있습니다.",
+    persistentAnchor: "main.new-key-staff-password",
+    compactAnchor: "main.new-key-staff-password",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Key staff 비밀번호"
+  },
+  "main.new-staff-password": {
+    id: "main.new-staff-password",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "Staff 비밀번호",
+    description: "프로젝트의 내용을 확인할 수 있습니다.",
+    persistentAnchor: "main.new-staff-password",
+    compactAnchor: "main.new-staff-password",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Staff 비밀번호"
+  },
+  "main.join-fields": {
+    id: "main.join-fields",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "프로젝트 참여",
+    description: "프로젝트 이름과 비밀번호로 처음 참여하면 참여 권한이 저장되어 다음부터 목록에서 빠르게 열 수 있습니다.",
+    persistentAnchor: "main.join-fields",
+    compactAnchor: "main.join-fields",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "프로젝트 참여 입력"
+  },
+  "main.go-first-use": {
+    id: "main.go-first-use",
+    version: 1,
+    page: "main",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "Go",
+    description: "가장 최근에 참여한 프로젝트의 현장 진행도를 확인할 수 있습니다.",
+    persistentAnchor: "main.action-go",
+    compactAnchor: "main.action-go",
+    preferredPlacement: "auto",
+    permission: "any",
+    replayLabel: "Go 빠른 이동"
+  },
   "home.intro": {
     id: "home.intro",
     version: 1,
@@ -413,6 +548,12 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
 };
 
 const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
+  main: [
+    ...MAIN_INTRO_GUIDE_IDS,
+    ...MAIN_NEW_FEATURE_GUIDE_IDS,
+    "main.join-fields",
+    "main.go-first-use"
+  ],
   home: ["home.intro", "home.calendar-create", "home.calendar-range", "home.invite-staff"],
   basicInfo: ["basic-info.intro"],
   dailyPlan: ["daily-plan.intro", "daily-plan.round-select", "daily-plan.pdf"],
@@ -431,6 +572,7 @@ const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
 };
 
 export function getGuidePage(pathname: string, searchParams: Pick<URLSearchParams, "get">) {
+  if (pathname === "/") return "main";
   if (/^\/projects\/[^/]+\/?$/u.test(pathname)) {
     return searchParams.get("view") === "progress" || Boolean(searchParams.get("dailyPlanId"))
       ? "progress"

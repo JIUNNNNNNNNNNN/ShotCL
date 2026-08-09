@@ -18,6 +18,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
 import {
   CONTEXTUAL_GUIDES,
+  MAIN_INTRO_GUIDE_IDS,
   canUseGuide,
   getGuideIdsForPage,
   getGuidePage,
@@ -42,6 +43,7 @@ type ActiveGuide = {
 type GuideContextValue = {
   role: SharedProjectRole | null;
   persistentShell: boolean;
+  activeGuideId: ContextualGuideId | null;
   readinessVersion: number;
   registerAnchor: (key: ContextualGuideAnchorKey, element: HTMLElement | null) => () => void;
   requestGuide: (
@@ -49,6 +51,7 @@ type GuideContextValue = {
     source?: GuideRequestSource,
     preferredAnchor?: HTMLElement | null
   ) => boolean;
+  isGuideCompleted: (id: ContextualGuideId) => boolean;
   completeGuide: (id: ContextualGuideId) => void;
   dismissActiveGuide: () => void;
   registerBlocker: (key: string, blocked: boolean) => void;
@@ -58,6 +61,7 @@ type GuideContextValue = {
 const ContextualGuideContext = createContext<GuideContextValue | null>(null);
 const GUIDE_ANONYMOUS_KEY = "shotcl:guide-anonymous:v1";
 const GUIDE_STORAGE_PREFIX = "shotcl:guides";
+const MAIN_INTRO_GUIDE_ID_SET = new Set<ContextualGuideId>(MAIN_INTRO_GUIDE_IDS);
 
 export function ContextualGuideProvider({
   userNamespace,
@@ -164,13 +168,22 @@ export function ContextualGuideProvider({
     if (activeGuideRef.current?.id === id) dismissActiveGuide();
   }, [dismissActiveGuide, persistCompletion]);
 
+  const isGuideCompleted = useCallback((id: ContextualGuideId) => (
+    completedRef.current.has(getGuideStorageToken(id))
+  ), []);
+
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
       routeInteractionRef.current = true;
       const active = activeGuideRef.current;
       const target = event.target instanceof Node ? event.target : null;
       if (!active || !target) return;
-      if (target instanceof Element && target.closest("[data-contextual-guide]")) return;
+      const insideGuide = target instanceof Element && Boolean(target.closest("[data-contextual-guide]"));
+      if (MAIN_INTRO_GUIDE_ID_SET.has(active.id) && (!persistentShell || !insideGuide)) {
+        completeGuide(active.id);
+        return;
+      }
+      if (insideGuide) return;
       if (active.anchor?.contains(target)) completeGuide(active.id);
       else dismissActiveGuide();
     };
@@ -179,13 +192,18 @@ export function ContextualGuideProvider({
       const target = event.target instanceof Node ? event.target : null;
       const active = activeGuideRef.current;
       if (!active || (target instanceof Element && target.closest("[data-contextual-guide]"))) return;
-      if (target && active.anchor?.contains(target)) completeGuide(active.id);
+      if (MAIN_INTRO_GUIDE_ID_SET.has(active.id) || (target && active.anchor?.contains(target))) {
+        completeGuide(active.id);
+      }
       else dismissActiveGuide();
     };
     const handleScroll = (event: Event) => {
       routeInteractionRef.current = true;
       if (event.target instanceof Element && event.target.closest("[data-contextual-guide]")) return;
-      if (activeGuideRef.current) dismissActiveGuide();
+      const active = activeGuideRef.current;
+      if (!active) return;
+      if (MAIN_INTRO_GUIDE_ID_SET.has(active.id)) completeGuide(active.id);
+      else dismissActiveGuide();
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
     document.addEventListener("keydown", handleKeyDown, true);
@@ -195,7 +213,7 @@ export function ContextualGuideProvider({
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("scroll", handleScroll, true);
     };
-  }, [completeGuide, dismissActiveGuide, routeKey]);
+  }, [completeGuide, dismissActiveGuide, persistentShell, routeKey]);
 
   const requestGuide = useCallback((
     id: ContextualGuideId,
@@ -254,6 +272,7 @@ export function ContextualGuideProvider({
   const getReplayGuides = useCallback(() => getGuideIdsForPage(page)
     .map((id) => CONTEXTUAL_GUIDES[id])
     .filter((definition) => {
+      if (definition.replayHidden) return false;
       if (!canUseGuide(definition, role) || !canUseGuideCapability(definition)) return false;
       if (definition.type === "page") return true;
       const anchorKey = persistentShell ? definition.persistentAnchor : definition.compactAnchor;
@@ -263,14 +282,17 @@ export function ContextualGuideProvider({
   const contextValue = useMemo<GuideContextValue>(() => ({
     role,
     persistentShell,
+    activeGuideId: activeGuide?.id ?? null,
     readinessVersion: readinessVersion + (persistenceReady ? 1 : 0),
     registerAnchor,
     requestGuide,
+    isGuideCompleted,
     completeGuide,
     dismissActiveGuide,
     registerBlocker,
     getReplayGuides
   }), [
+    activeGuide?.id,
     completeGuide,
     dismissActiveGuide,
     getReplayGuides,
@@ -279,6 +301,7 @@ export function ContextualGuideProvider({
     readinessVersion,
     registerAnchor,
     registerBlocker,
+    isGuideCompleted,
     requestGuide,
     role
   ]);
@@ -292,7 +315,9 @@ export function ContextualGuideProvider({
           activeGuide={activeGuide}
           persistent={persistentShell}
           role={role}
-          onDismiss={dismissActiveGuide}
+          onDismiss={() => MAIN_INTRO_GUIDE_ID_SET.has(activeGuide.id)
+            ? completeGuide(activeGuide.id)
+            : dismissActiveGuide()}
           onComplete={() => completeGuide(activeGuide.id)}
         />,
         document.body
@@ -343,9 +368,11 @@ export function useContextualGuideBlocker(key: string, blocked: boolean) {
 }
 
 export function ContextualGuideHelpButton({
-  onBeforeReplay
+  onBeforeReplay,
+  onReplayGuide
 }: {
   onBeforeReplay?: () => void;
+  onReplayGuide?: (id: ContextualGuideId) => boolean;
 } = {}) {
   const { getReplayGuides, requestGuide, readinessVersion } = useContextualGuide();
   const [open, setOpen] = useState(false);
@@ -394,6 +421,7 @@ export function ContextualGuideHelpButton({
               onClick={() => {
                 setOpen(false);
                 onBeforeReplay?.();
+                if (onReplayGuide?.(guide.id)) return;
                 window.setTimeout(() => requestGuide(guide.id, "replay"), onBeforeReplay ? 220 : 0);
               }}
             >

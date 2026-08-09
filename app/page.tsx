@@ -1,8 +1,14 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { InlineLoader } from "@/components/PixelDogLoader";
+import {
+  ContextualGuideHelpButton,
+  ContextualGuideProvider,
+  useContextualGuide,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
 import {
   RememberedProjectActions,
   RememberedProjectCard
@@ -28,6 +34,11 @@ import {
   buildProgressRoundHref,
   buildProjectNavigationHref
 } from "@/lib/projectNavigation";
+import {
+  MAIN_INTRO_GUIDE_IDS,
+  MAIN_NEW_FEATURE_GUIDE_IDS,
+  type ContextualGuideId
+} from "@/lib/contextualGuides";
 import type { Project } from "@/lib/types";
 
 type ContextualAction = "new" | "join";
@@ -49,6 +60,8 @@ const NAVIGATION_LOCK_RELEASE_MS = 1500;
 const PROJECT_CONTEXT_MENU_WIDTH = 176;
 const PROJECT_CONTEXT_MENU_HEIGHT = 52;
 const PROJECT_CONTEXT_MENU_EDGE = 8;
+const MAIN_GUIDE_STEP_DELAY_MS = 220;
+const MAIN_FORM_GUIDE_DELAY_MS = 280;
 
 const homeActions = [
   {
@@ -78,7 +91,34 @@ const homeActions = [
 
 /** New, Join, Go를 고정 카드로 제공하는 앱 진입 화면입니다. */
 export default function HomePage() {
+  return (
+    <Suspense fallback={<MainPageFallback />}>
+      <ContextualGuideProvider userNamespace="" role={null}>
+        <MainHomeContent />
+      </ContextualGuideProvider>
+    </Suspense>
+  );
+}
+
+function MainPageFallback() {
+  return (
+    <section
+      aria-label="프로젝트 시작 준비 중"
+      className="flex min-h-[100dvh] w-full items-center justify-center"
+    >
+      <InlineLoader />
+    </section>
+  );
+}
+
+function MainHomeContent() {
   const router = useRouter();
+  const {
+    activeGuideId,
+    isGuideCompleted,
+    readinessVersion,
+    requestGuide
+  } = useContextualGuide();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasLoadedProjects, setHasLoadedProjects] = useState(false);
@@ -97,7 +137,14 @@ export default function HomePage() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [rememberedProjectMenu, setRememberedProjectMenu] = useState<RememberedProjectMenuTarget | null>(null);
   const [pendingProjectDismissal, setPendingProjectDismissal] = useState<Project | null>(null);
+  const [introReplayQueue, setIntroReplayQueue] = useState<ContextualGuideId[] | null>(null);
 
+  const newActionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("main.action-new");
+  const joinActionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("main.action-join");
+  const goActionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("main.action-go");
+  const keyStaffGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>("main.new-key-staff-password");
+  const staffGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>("main.new-staff-password");
+  const joinFieldsGuideAnchorRef = useContextualGuideAnchor<HTMLFormElement>("main.join-fields");
   const newProjectNameRef = useRef<HTMLInputElement | null>(null);
   const joinProjectNameRef = useRef<HTMLInputElement | null>(null);
   const selectedActionTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -113,6 +160,7 @@ export default function HomePage() {
   const navigationAttemptRef = useRef(0);
   const joinSubmissionRef = useRef(false);
   const isMountedRef = useRef(true);
+  const replayStartedGuideRef = useRef<ContextualGuideId | null>(null);
 
   const interactionLocked = isCreatingProject
     || isResolvingGo
@@ -129,6 +177,8 @@ export default function HomePage() {
       setIsResolvingGo(false);
       setRememberedProjectMenu(null);
       setPendingProjectDismissal(null);
+      setIntroReplayQueue(null);
+      replayStartedGuideRef.current = null;
       rememberedProjectTriggerRef.current = null;
     }
 
@@ -153,6 +203,80 @@ export default function HomePage() {
       : joinProjectNameRef.current;
     input?.focus({ preventScroll: true });
   }, [selectedAction]);
+
+  useEffect(() => {
+    if (selectedAction !== null || interactionLocked || activeGuideId || introReplayQueue) return undefined;
+    const nextGuideId = MAIN_INTRO_GUIDE_IDS.find((id) => !isGuideCompleted(id));
+    if (!nextGuideId) return undefined;
+    const timer = window.setTimeout(() => {
+      requestGuide(nextGuideId, "feature");
+    }, MAIN_GUIDE_STEP_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeGuideId,
+    interactionLocked,
+    introReplayQueue,
+    isGuideCompleted,
+    readinessVersion,
+    requestGuide,
+    selectedAction
+  ]);
+
+  useEffect(() => {
+    if (selectedAction !== "new" || interactionLocked || activeGuideId) return undefined;
+    const nextGuideId = MAIN_NEW_FEATURE_GUIDE_IDS.find((id) => !isGuideCompleted(id));
+    if (!nextGuideId) return undefined;
+    const timer = window.setTimeout(() => {
+      requestGuide(nextGuideId, "feature");
+    }, MAIN_FORM_GUIDE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeGuideId,
+    interactionLocked,
+    isGuideCompleted,
+    readinessVersion,
+    requestGuide,
+    selectedAction
+  ]);
+
+  useEffect(() => {
+    if (selectedAction !== "join" || interactionLocked || activeGuideId) return undefined;
+    if (isGuideCompleted("main.join-fields")) return undefined;
+    const timer = window.setTimeout(() => {
+      requestGuide("main.join-fields", "feature");
+    }, MAIN_FORM_GUIDE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    activeGuideId,
+    interactionLocked,
+    isGuideCompleted,
+    readinessVersion,
+    requestGuide,
+    selectedAction
+  ]);
+
+  useEffect(() => {
+    const nextGuideId = introReplayQueue?.[0];
+    if (!nextGuideId || selectedAction !== null) return undefined;
+    if (activeGuideId === nextGuideId) {
+      replayStartedGuideRef.current = nextGuideId;
+      return undefined;
+    }
+    if (activeGuideId) return undefined;
+    if (replayStartedGuideRef.current === nextGuideId) {
+      replayStartedGuideRef.current = null;
+      setIntroReplayQueue((current) => {
+        if (current?.[0] !== nextGuideId) return current;
+        const remaining = current.slice(1);
+        return remaining.length > 0 ? remaining : null;
+      });
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      if (requestGuide(nextGuideId, "replay")) replayStartedGuideRef.current = nextGuideId;
+    }, MAIN_GUIDE_STEP_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeGuideId, introReplayQueue, readinessVersion, requestGuide, selectedAction]);
 
   useEffect(() => {
     function handleDocumentPointerDown(event: PointerEvent) {
@@ -401,7 +525,18 @@ export default function HomePage() {
     setSelectedAction(null);
     setNewProjectError("");
     setJoinProjectError("");
+    if (requestGuide("main.go-first-use", "feature", triggerElement)) return;
     void resolveGoProject();
+  }
+
+  function handleGuideReplay(guideId: ContextualGuideId) {
+    if (!MAIN_INTRO_GUIDE_IDS.some((id) => id === guideId)) return false;
+    replayStartedGuideRef.current = null;
+    setSelectedAction(null);
+    setNewProjectError("");
+    setJoinProjectError("");
+    setIntroReplayQueue([...MAIN_INTRO_GUIDE_IDS]);
+    return true;
   }
 
   function openRememberedProjectMenu(
@@ -644,7 +779,11 @@ export default function HomePage() {
               className="min-h-11 w-full min-w-0 rounded-[10px] border border-field-border bg-field-input px-3 text-sm text-field-text outline-none placeholder:text-field-muted"
             />
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle" htmlFor="new-project-admin-password">
+          <label
+            ref={keyStaffGuideAnchorRef}
+            className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle"
+            htmlFor="new-project-admin-password"
+          >
             Key staff 비밀번호
             <input
               id="new-project-admin-password"
@@ -662,7 +801,11 @@ export default function HomePage() {
               className="min-h-11 w-full min-w-0 rounded-[10px] border border-field-border bg-field-input px-3 text-sm tracking-[0.2em] text-field-text outline-none placeholder:tracking-normal placeholder:text-field-muted"
             />
           </label>
-          <label className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle" htmlFor="new-project-progress-password">
+          <label
+            ref={staffGuideAnchorRef}
+            className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle"
+            htmlFor="new-project-progress-password"
+          >
             Staff 비밀번호
             <input
               id="new-project-progress-password"
@@ -707,7 +850,11 @@ export default function HomePage() {
         <h2 id="join-project-panel-title" className="font-display text-center text-sm font-black text-field-text">
           프로젝트 참여
         </h2>
-        <form onSubmit={handleJoinProject} className="mt-4 grid min-w-0 gap-3">
+        <form
+          ref={joinFieldsGuideAnchorRef}
+          onSubmit={handleJoinProject}
+          className="mt-4 grid min-w-0 gap-3"
+        >
           <label className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle" htmlFor="join-project-name">
             프로젝트 이름
             <input
@@ -813,6 +960,9 @@ export default function HomePage() {
       }}
     >
       <h1 id="home-actions-title" className="sr-only">프로젝트 시작</h1>
+      <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-20">
+        <ContextualGuideHelpButton onReplayGuide={handleGuideReplay} />
+      </div>
       <div
         className="mx-auto grid w-full min-w-0 max-w-3xl content-center gap-3 min-[1180px]:max-w-[86rem] min-[1180px]:grid-cols-[minmax(220px,0.85fr)_minmax(340px,1.2fr)_minmax(260px,0.95fr)] min-[1180px]:grid-rows-[repeat(3,minmax(7rem,auto))] min-[1180px]:gap-x-[clamp(1rem,2vw,1.75rem)] min-[1180px]:gap-y-3"
       >
@@ -828,6 +978,11 @@ export default function HomePage() {
           return (
             <div key={action.id} className="contents">
               <button
+                ref={action.id === "new"
+                  ? newActionGuideAnchorRef
+                  : action.id === "join"
+                    ? joinActionGuideAnchorRef
+                    : goActionGuideAnchorRef}
                 type="button"
                 disabled={interactionLocked}
                 aria-label={action.ariaLabel}
