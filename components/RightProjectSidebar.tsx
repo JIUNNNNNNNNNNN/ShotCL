@@ -186,7 +186,15 @@ function PageActionItem({
     : action.id.startsWith("scenario")
       ? "scenario.actions"
       : null;
+  const guideId = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf"
+    ? "daily-plan.pdf"
+    : action.id.startsWith("scenario")
+      ? "scenario.actions"
+      : null;
   const guideAnchorRef = useContextualGuideAnchor<HTMLAnchorElement | HTMLButtonElement>(guideAnchorKey);
+  const showFeatureGuide = (anchor: HTMLElement) => {
+    if (guideId) requestGuide(guideId, "feature", anchor);
+  };
   const sharedClassName = `project-action-menu__item flex w-full items-center justify-center rounded-md border text-center text-sm font-semibold transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg ${
     action.tone === "danger"
       ? "border-field-danger/55 bg-transparent text-field-danger hover:border-field-danger hover:bg-field-danger/10 focus-visible:ring-field-danger"
@@ -211,6 +219,8 @@ function PageActionItem({
         ref={guideAnchorRef}
         href={action.href}
         data-project-action-id={action.id}
+        onPointerEnter={(event) => showFeatureGuide(event.currentTarget)}
+        onFocus={(event) => showFeatureGuide(event.currentTarget)}
         onClick={(event) => {
           if (!confirmUnsavedChangesNavigation()) {
             event.preventDefault();
@@ -231,17 +241,18 @@ function PageActionItem({
       ref={guideAnchorRef}
       type="button"
       data-project-action-id={action.id}
+      onPointerEnter={(event) => showFeatureGuide(event.currentTarget)}
+      onFocus={(event) => showFeatureGuide(event.currentTarget)}
       onClick={() => {
         if (action.disabled) return;
         action.onSelect?.();
-        const isPdfAction = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf";
         const closesDrawer = action.closeDrawerOnSelect !== false;
         if (closesDrawer) onAction?.();
-        if (isPdfAction) {
+        if (guideId) {
           if (!persistentShell && closesDrawer && onAction) {
-            window.setTimeout(() => requestGuide("daily-plan.pdf", "feature"), 220);
+            window.setTimeout(() => requestGuide(guideId, "feature"), 220);
           } else {
-            requestGuide("daily-plan.pdf", "feature");
+            requestGuide(guideId, "feature");
           }
         }
       }}

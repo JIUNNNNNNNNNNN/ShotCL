@@ -87,7 +87,7 @@ export default function ProjectScenarioPage() {
     () => assets.find((asset) => asset.id === selectedId) ?? null,
     [assets, selectedId]
   );
-  useAutoContextualGuide("scenario.actions", !isLoading && Boolean(selectedAsset));
+  useAutoContextualGuide("scenario.intro", !isLoading);
 
   const load = useCallback(async ({ withLoader = true }: { withLoader?: boolean } = {}) => {
     if (!projectId) return false;

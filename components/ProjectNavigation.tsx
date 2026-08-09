@@ -34,6 +34,7 @@ import {
 } from "@/components/ProjectNavigationCardGrid";
 import {
   ContextualGuideHelpButton,
+  useContextualGuide,
   useContextualGuideAnchor
 } from "@/components/guides/ContextualGuideProvider";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -118,6 +119,7 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   });
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const duplicateLockRef = useRef("");
+  const { requestGuide } = useContextualGuide();
   const dailyPlansGuideRef = useContextualGuideAnchor<HTMLDivElement>("shell.navigation.daily-plans");
   const visibleItems = useMemo(() => getVisibleProjectNavigationItems(role), [role]);
   const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
@@ -324,6 +326,7 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
             }))}
             renderRoundContent={renderRoundContent}
             dailyPlansGuideRef={dailyPlansGuideRef}
+            onDailyPlansGuide={(anchor) => requestGuide("daily-plan.round-select", "feature", anchor)}
           />
 
           {mutationError && !pendingDelete ? (

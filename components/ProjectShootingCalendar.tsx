@@ -50,8 +50,8 @@ export function ProjectShootingCalendar({
   const loadVersionRef = useRef(0);
 
   useAutoContextualGuide(
-    "home.calendar-create",
-    !isLoadingEvents && !syncMessage && canManageEvents && serverCanEdit
+    "home.intro",
+    !isLoadingEvents && !syncMessage
   );
 
   const calendarDailyPlans = useMemo(() => dailyPlans.map((plan) => ({

@@ -22,6 +22,7 @@ type ProjectNavigationCardGridProps = {
   onToggleRounds: (kind: "dailyPlans" | "progress") => void;
   renderRoundContent: (kind: "dailyPlans" | "progress") => ReactNode;
   dailyPlansGuideRef?: RefCallback<HTMLDivElement>;
+  onDailyPlansGuide?: (anchor: HTMLDivElement) => void;
 };
 
 /** 데스크톱 고정 패널과 모바일 drawer가 공유하는 프로젝트 기능 카드 grid입니다. */
@@ -31,7 +32,8 @@ export function ProjectNavigationCardGrid({
   onLinkClick,
   onToggleRounds,
   renderRoundContent,
-  dailyPlansGuideRef
+  dailyPlansGuideRef,
+  onDailyPlansGuide
 }: ProjectNavigationCardGridProps) {
   return (
     <ul className="project-navigation__card-grid">
@@ -42,6 +44,12 @@ export function ProjectNavigationCardGrid({
           <li key={item.id} className="min-w-0">
             <div
               ref={item.id === "dailyPlans" ? dailyPlansGuideRef : undefined}
+              onPointerEnter={item.id === "dailyPlans"
+                ? (event) => onDailyPlansGuide?.(event.currentTarget)
+                : undefined}
+              onFocusCapture={item.id === "dailyPlans"
+                ? (event) => onDailyPlansGuide?.(event.currentTarget)
+                : undefined}
               className="project-navigation__card"
               data-active={item.active ? "true" : "false"}
               data-has-rounds={roundKind ? "true" : "false"}

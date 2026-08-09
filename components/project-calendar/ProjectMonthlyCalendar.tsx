@@ -451,6 +451,14 @@ export function ProjectMonthlyCalendar({
             role="grid"
             aria-label={`${visibleMonth.year}년 ${visibleMonth.month}월 프로젝트 일정`}
             aria-readonly={!canEditEvents}
+            onPointerEnter={(event) => {
+              if (canEditEvents && event.pointerType !== "touch") {
+                requestGuide("home.calendar-create", "feature", event.currentTarget);
+              }
+            }}
+            onFocusCapture={(event) => {
+              if (canEditEvents) requestGuide("home.calendar-create", "feature", event.currentTarget);
+            }}
           >
             <div className={styles.weekdayGrid} role="row" aria-label="요일">
               {WEEKDAYS.map((weekday) => <span key={weekday} role="columnheader">{weekday}</span>)}

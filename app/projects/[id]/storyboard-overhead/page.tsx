@@ -380,15 +380,11 @@ export default function ProjectStoryboardOverheadPage() {
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
   const { completeGuide, registerAnchor, requestGuide } = useContextualGuide();
-  const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>("archive.upload");
+  const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>("archive.upload");
   const selectionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("archive.selection");
-  const folderUploadGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>(
+  const folderUploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
     supportsDirectoryPicker ? "archive.folder-upload" : null
   );
-  const uploadActionsGuideAnchorRef = useCallback((element: HTMLDivElement | null) => {
-    uploadGuideAnchorRef(element);
-    folderUploadGuideAnchorRef(element);
-  }, [folderUploadGuideAnchorRef, uploadGuideAnchorRef]);
   const guideOverlayOpen = Boolean(
     pendingImport
     || diagramDraft
@@ -400,10 +396,9 @@ export default function ProjectStoryboardOverheadPage() {
   );
   useContextualGuideBlocker("archive-editor-overlay", guideOverlayOpen);
   useAutoContextualGuide(
-    "archive.upload",
+    "archive.intro",
     Boolean(
-      canEdit
-      && projectId
+      projectId
       && !isLoading
       && loadedArchiveProjectId === projectId
     )
@@ -1209,18 +1204,21 @@ export default function ProjectStoryboardOverheadPage() {
   async function preparePdf(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    if (files.length > 0) completeGuide("archive.upload");
     await prepareFiles(assetType, files, "pdf");
   }
 
   async function prepareImages(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    if (files.length > 0) completeGuide("archive.upload");
     await prepareFiles(assetType, files, "images", assetType === "overhead");
   }
 
   async function prepareMixedUpload(assetType: ArchiveType, event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
+    if (files.length > 0) completeGuide("archive.upload");
     await prepareFiles(
       assetType,
       files,
@@ -3720,7 +3718,7 @@ export default function ProjectStoryboardOverheadPage() {
               <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="제목, 메모, 씬, 컷 검색" />
             </label>
             {canEdit ? (
-              <div ref={uploadActionsGuideAnchorRef} className="flex flex-wrap justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 {activeType !== "storyboard" ? (
                   <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                     <MapIcon className="h-4 w-4" aria-hidden />
@@ -3729,7 +3727,12 @@ export default function ProjectStoryboardOverheadPage() {
                 ) : null}
                 {selectedArchiveType ? (
                   <>
-                    <label className="neon-primary inline-flex min-h-10 cursor-pointer items-center gap-1.5 border px-3 text-xs font-bold transition-colors">
+                    <label
+                      ref={uploadGuideAnchorRef}
+                      className="neon-primary inline-flex min-h-10 cursor-pointer items-center gap-1.5 border px-3 text-xs font-bold transition-colors"
+                      onPointerEnter={(event) => requestGuide("archive.upload", "feature", event.currentTarget)}
+                      onFocusCapture={(event) => requestGuide("archive.upload", "feature", event.currentTarget)}
+                    >
                       <ImagePlus className="h-4 w-4" aria-hidden />
                       이미지
                       <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareImages(selectedArchiveType, event)} />
@@ -3740,7 +3743,12 @@ export default function ProjectStoryboardOverheadPage() {
                       <input type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => preparePdf(selectedArchiveType, event)} />
                     </label>
                     {supportsDirectoryPicker ? (
-                      <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40">
+                      <label
+                        ref={folderUploadGuideAnchorRef}
+                        className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40"
+                        onPointerEnter={(event) => requestGuide("archive.folder-upload", "feature", event.currentTarget)}
+                        onFocusCapture={(event) => requestGuide("archive.folder-upload", "feature", event.currentTarget)}
+                      >
                         <FolderUp className="h-4 w-4" aria-hidden />
                         폴더 업로드
                         <input
@@ -3760,13 +3768,33 @@ export default function ProjectStoryboardOverheadPage() {
                   </>
                 ) : (
                   (["overhead", "storyboard"] as const).flatMap((type) => [
-                    <label key={`${type}-files`} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
+                    <label
+                      key={`${type}-files`}
+                      ref={type === "overhead" ? uploadGuideAnchorRef : undefined}
+                      className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover"
+                      onPointerEnter={type === "overhead"
+                        ? (event) => requestGuide("archive.upload", "feature", event.currentTarget)
+                        : undefined}
+                      onFocusCapture={type === "overhead"
+                        ? (event) => requestGuide("archive.upload", "feature", event.currentTarget)
+                        : undefined}
+                    >
                       <Upload className="h-4 w-4" aria-hidden />
                       {type === "overhead" ? "부감도 업로드" : "콘티 업로드"}
                       <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" multiple className="sr-only" disabled={isPreparing || isSaving} onChange={(event) => prepareMixedUpload(type, event)} />
                     </label>,
                     supportsDirectoryPicker ? (
-                      <label key={`${type}-folder`} className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40">
+                      <label
+                        key={`${type}-folder`}
+                        ref={type === "overhead" ? folderUploadGuideAnchorRef : undefined}
+                        className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover focus-within:ring-2 focus-within:ring-field-primary/40"
+                        onPointerEnter={type === "overhead"
+                          ? (event) => requestGuide("archive.folder-upload", "feature", event.currentTarget)
+                          : undefined}
+                        onFocusCapture={type === "overhead"
+                          ? (event) => requestGuide("archive.folder-upload", "feature", event.currentTarget)
+                          : undefined}
+                      >
                         <FolderUp className="h-4 w-4" aria-hidden />
                         {type === "overhead" ? "부감도 폴더 업로드" : "콘티 폴더 업로드"}
                         <input

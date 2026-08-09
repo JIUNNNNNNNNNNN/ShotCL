@@ -12,11 +12,13 @@ export type ContextualGuidePage =
   | "archive";
 
 export type ContextualGuideId =
+  | "home.intro"
   | "home.calendar-create"
   | "home.calendar-range"
   | "home.invite-staff"
   | "basic-info.intro"
   | "daily-plan.intro"
+  | "daily-plan.round-select"
   | "daily-plan.pdf"
   | "progress.intro"
   | "progress.status"
@@ -25,8 +27,10 @@ export type ContextualGuideId =
   | "staff.intro"
   | "staff.participation"
   | "staff.participation-summary"
+  | "scenario.intro"
   | "scenario.actions"
   | "wardrobe.intro"
+  | "archive.intro"
   | "archive.upload"
   | "archive.selection.desktop"
   | "archive.selection.mobile"
@@ -52,7 +56,9 @@ export type ContextualGuideAnchorKey =
   | "archive.selection"
   | "archive.folder-upload";
 
-export type ContextualGuideDefinition = {
+export type ContextualGuidePlacement = "auto" | "left" | "right" | "top" | "bottom";
+
+type ContextualGuideDefinitionBase = {
   id: ContextualGuideId;
   version: number;
   page: ContextualGuidePage;
@@ -62,25 +68,52 @@ export type ContextualGuideDefinition = {
   description: string;
   readOnlyDescription?: string;
   compactDescription?: string;
-  persistentAnchor: ContextualGuideAnchorKey;
-  compactAnchor: ContextualGuideAnchorKey;
   permission: "any" | "manage" | "admin";
   capability?: "fine-pointer" | "touch";
   replayLabel: string;
 };
 
+export type ContextualGuideDefinition = ContextualGuideDefinitionBase & (
+  | {
+      type: "page";
+      persistentAnchor?: never;
+      compactAnchor?: never;
+      preferredPlacement?: never;
+    }
+  | {
+      type: "anchor";
+      persistentAnchor: ContextualGuideAnchorKey;
+      compactAnchor: ContextualGuideAnchorKey;
+      preferredPlacement?: ContextualGuidePlacement;
+    }
+);
+
 export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinition> = {
+  "home.intro": {
+    id: "home.intro",
+    version: 1,
+    page: "home",
+    type: "page",
+    trigger: "page",
+    priority: 50,
+    title: "프로젝트 Home",
+    description: "촬영 일정과 프로젝트 현황을 한눈에 확인할 수 있습니다.",
+    permission: "any",
+    replayLabel: "프로젝트 Home"
+  },
   "home.calendar-create": {
     id: "home.calendar-create",
     version: 1,
     page: "home",
-    trigger: "page",
-    priority: 50,
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
     title: "일정 추가",
-    description: "날짜를 클릭해 일정을 추가하세요. 여러 날짜는 드래그해서 기간으로 선택할 수 있습니다.",
-    compactDescription: "날짜를 눌러 일정을 추가하세요.",
+    description: "날짜를 누르거나 드래그해 일정을 만들 수 있습니다.",
+    compactDescription: "날짜를 눌러 일정을 만들 수 있습니다.",
     persistentAnchor: "home.calendar-grid",
     compactAnchor: "home.calendar-grid",
+    preferredPlacement: "bottom",
     permission: "manage",
     replayLabel: "일정 추가"
   },
@@ -88,12 +121,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "home.calendar-range",
     version: 1,
     page: "home",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "기간 일정",
     description: "시작일부터 종료일까지 드래그하면 여러 날짜를 한 번에 선택할 수 있습니다.",
     persistentAnchor: "home.calendar-grid",
     compactAnchor: "home.calendar-grid",
+    preferredPlacement: "bottom",
     permission: "manage",
     capability: "fine-pointer",
     replayLabel: "기간 일정"
@@ -102,12 +137,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "home.invite-staff",
     version: 1,
     page: "home",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "스탭 초대",
-    description: "카카오톡으로 복사하면 프로젝트 이름과 초대 링크를 바로 전달할 수 있습니다.",
+    description: "카카오톡으로 초대 링크를 바로 복사할 수 있습니다.",
     persistentAnchor: "home.invite-action",
     compactAnchor: "home.invite-action",
+    preferredPlacement: "left",
     permission: "admin",
     replayLabel: "스탭 초대"
   },
@@ -115,12 +152,11 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "basic-info.intro",
     version: 1,
     page: "basicInfo",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "프로젝트 기본정보",
-    description: "촬영 기간과 프로젝트 정보를 입력한 뒤 저장하세요.",
-    persistentAnchor: "basic-info.form",
-    compactAnchor: "basic-info.form",
+    title: "기본정보",
+    description: "프로젝트와 촬영에 필요한 기본 정보를 관리합니다.",
     permission: "manage",
     replayLabel: "기본정보 입력"
   },
@@ -128,13 +164,11 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "daily-plan.intro",
     version: 1,
     page: "dailyPlan",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "회차별 일촬표",
-    description: "왼쪽 메뉴에서 촬영 회차를 선택하고 일촬표를 확인할 수 있습니다. 저장과 PDF 기능은 오른쪽 메뉴에서 사용할 수 있습니다.",
-    compactDescription: "메뉴에서 촬영 회차를 선택할 수 있습니다. 저장과 PDF 기능은 오른쪽 메뉴에서 사용할 수 있습니다.",
-    persistentAnchor: "shell.navigation.daily-plans",
-    compactAnchor: "shell.navigation-toggle",
+    title: "일촬표",
+    description: "회차별 촬영 일정과 인원 정보를 확인하고 관리합니다.",
     permission: "manage",
     replayLabel: "일촬표 메뉴"
   },
@@ -142,25 +176,41 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "daily-plan.pdf",
     version: 1,
     page: "dailyPlan",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "PDF 저장",
-    description: "기본 PDF와 세로형 PDF를 필요에 맞게 선택할 수 있습니다.",
+    description: "기본 또는 세로형 PDF로 저장할 수 있습니다.",
     persistentAnchor: "daily-plan.pdf-actions",
     compactAnchor: "shell.action-toggle",
+    preferredPlacement: "left",
     permission: "manage",
     replayLabel: "PDF 저장"
+  },
+  "daily-plan.round-select": {
+    id: "daily-plan.round-select",
+    version: 1,
+    page: "dailyPlan",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "회차 선택",
+    description: "일촬표를 확인하거나 편집할 촬영 회차를 선택합니다.",
+    persistentAnchor: "shell.navigation.daily-plans",
+    compactAnchor: "shell.navigation-toggle",
+    preferredPlacement: "right",
+    permission: "manage",
+    replayLabel: "일촬표 회차 선택"
   },
   "progress.intro": {
     id: "progress.intro",
     version: 1,
     page: "progress",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "촬영 진행도",
-    description: "컷별 촬영 상태를 현장에서 바로 확인하고 변경할 수 있습니다.",
-    persistentAnchor: "progress.cut-list",
-    compactAnchor: "progress.cut-list",
+    title: "진행도",
+    description: "현재 촬영 중인 컷과 완료 상태를 확인합니다.",
     permission: "any",
     replayLabel: "진행도 보기"
   },
@@ -168,12 +218,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "progress.status",
     version: 1,
     page: "progress",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "컷 상태",
     description: "촬영 상황에 맞게 상태를 변경하면 프로젝트 구성원에게 반영됩니다.",
     persistentAnchor: "progress.status-controls",
     compactAnchor: "progress.status-controls",
+    preferredPlacement: "left",
     permission: "any",
     replayLabel: "컷 상태"
   },
@@ -181,12 +233,11 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "scene-list.desktop-intro",
     version: 1,
     page: "sceneList",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "씬리스트 편집",
-    description: "셀을 선택해 수정하고 여러 셀을 드래그해서 선택할 수 있습니다.",
-    persistentAnchor: "scene-list.desktop",
-    compactAnchor: "scene-list.desktop",
+    title: "씬리스트",
+    description: "씬별 촬영 정보를 한눈에 확인할 수 있습니다.",
     permission: "manage",
     replayLabel: "씬리스트 편집"
   },
@@ -194,12 +245,11 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "scene-list.mobile-intro",
     version: 1,
     page: "sceneList",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "씬 확인하기",
-    description: "각 씬을 눌러 상세 내용을 펼쳐볼 수 있습니다.",
-    persistentAnchor: "scene-list.mobile",
-    compactAnchor: "scene-list.mobile",
+    title: "씬리스트",
+    description: "씬별 촬영 정보를 한눈에 확인할 수 있습니다.",
     permission: "any",
     replayLabel: "모바일 씬 확인"
   },
@@ -207,13 +257,12 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "staff.intro",
     version: 1,
     page: "staff",
+    type: "page",
     trigger: "page",
     priority: 50,
-    title: "스탭 관리",
-    description: "스탭 정보와 촬영 회차별 참여 여부를 확인할 수 있습니다.",
-    readOnlyDescription: "스탭 정보와 촬영 회차별 참여 여부를 확인할 수 있습니다.",
-    persistentAnchor: "staff.main",
-    compactAnchor: "staff.main",
+    title: "스탭리스트",
+    description: "스탭 정보와 회차별 참여 여부를 관리합니다.",
+    readOnlyDescription: "스탭 정보와 회차별 참여 여부를 확인할 수 있습니다.",
     permission: "any",
     replayLabel: "스탭 관리"
   },
@@ -221,12 +270,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "staff.participation",
     version: 1,
     page: "staff",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "참여 회차",
     description: "번호를 눌러 해당 스탭의 촬영 참여 여부를 변경합니다.",
     persistentAnchor: "staff.participation",
     compactAnchor: "staff.participation",
+    preferredPlacement: "top",
     permission: "manage",
     replayLabel: "참여 회차"
   },
@@ -234,26 +285,42 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "staff.participation-summary",
     version: 1,
     page: "staff",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "참여 회차 보기",
     description: "참여 요약을 누르면 전체 회차를 확인하고 수정할 수 있습니다.",
     persistentAnchor: "staff.participation",
     compactAnchor: "staff.participation",
+    preferredPlacement: "top",
     permission: "manage",
     replayLabel: "참여 회차 요약"
+  },
+  "scenario.intro": {
+    id: "scenario.intro",
+    version: 1,
+    page: "scenario",
+    type: "page",
+    trigger: "page",
+    priority: 50,
+    title: "시나리오",
+    description: "시나리오를 씬별 또는 전체 형태로 확인할 수 있습니다.",
+    permission: "any",
+    replayLabel: "시나리오"
   },
   "scenario.actions": {
     id: "scenario.actions",
     version: 1,
     page: "scenario",
-    trigger: "page",
-    priority: 50,
-    title: "시나리오 보기",
-    description: "오른쪽 메뉴에서 씬별 보기, 전체 보기, 편집과 공유 기능을 사용할 수 있습니다.",
-    compactDescription: "오른쪽 메뉴를 열어 보기 방식과 공유 기능을 사용할 수 있습니다.",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "시나리오 기능",
+    description: "씬별 보기, 편집과 공유 기능을 사용할 수 있습니다.",
+    compactDescription: "메뉴를 열어 보기와 공유 기능을 사용할 수 있습니다.",
     persistentAnchor: "scenario.actions",
     compactAnchor: "shell.action-toggle",
+    preferredPlacement: "left",
     permission: "any",
     replayLabel: "시나리오 메뉴"
   },
@@ -261,25 +328,38 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "wardrobe.intro",
     version: 1,
     page: "wardrobe",
+    type: "page",
     trigger: "page",
     priority: 50,
     title: "의상 자료",
     description: "씬별 의상 사진과 정보를 여기에서 확인할 수 있습니다.",
-    persistentAnchor: "wardrobe.main",
-    compactAnchor: "wardrobe.main",
     permission: "any",
     replayLabel: "의상 자료"
+  },
+  "archive.intro": {
+    id: "archive.intro",
+    version: 1,
+    page: "archive",
+    type: "page",
+    trigger: "page",
+    priority: 50,
+    title: "부감도 & 콘티",
+    description: "촬영 자료를 씬과 컷별로 정리하고 확인할 수 있습니다.",
+    permission: "any",
+    replayLabel: "부감도 & 콘티"
   },
   "archive.upload": {
     id: "archive.upload",
     version: 1,
     page: "archive",
-    trigger: "page",
-    priority: 50,
-    title: "자료 추가",
-    description: "이미지와 PDF뿐 아니라 폴더 전체도 업로드할 수 있습니다. 하위 폴더의 파일도 자동으로 가져옵니다.",
+    type: "anchor",
+    trigger: "feature",
+    priority: 100,
+    title: "자료 업로드",
+    description: "이미지·PDF 또는 폴더 전체를 올릴 수 있습니다.",
     persistentAnchor: "archive.upload",
     compactAnchor: "archive.upload",
+    preferredPlacement: "bottom",
     permission: "manage",
     replayLabel: "자료 추가"
   },
@@ -287,12 +367,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "archive.selection.desktop",
     version: 1,
     page: "archive",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "여러 장 선택",
     description: "Shift 범위 선택 · ⌘ / Ctrl 개별 선택",
     persistentAnchor: "archive.selection",
     compactAnchor: "archive.selection",
+    preferredPlacement: "top",
     permission: "any",
     capability: "fine-pointer",
     replayLabel: "여러 장 선택"
@@ -301,12 +383,14 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "archive.selection.mobile",
     version: 1,
     page: "archive",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "여러 장 선택",
     description: "항목을 눌러 여러 장을 선택하거나 해제할 수 있습니다.",
     persistentAnchor: "archive.selection",
     compactAnchor: "archive.selection",
+    preferredPlacement: "top",
     permission: "any",
     capability: "touch",
     replayLabel: "모바일 여러 장 선택"
@@ -315,27 +399,30 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     id: "archive.folder-upload",
     version: 1,
     page: "archive",
+    type: "anchor",
     trigger: "feature",
     priority: 100,
     title: "폴더 업로드",
-    description: "폴더 안의 이미지와 PDF를 하위 폴더까지 찾아 자동으로 업로드합니다.",
+    description: "하위 폴더의 이미지와 PDF도 자동으로 가져옵니다.",
     persistentAnchor: "archive.folder-upload",
     compactAnchor: "archive.folder-upload",
+    preferredPlacement: "bottom",
     permission: "manage",
     replayLabel: "폴더 업로드"
   }
 };
 
 const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
-  home: ["home.calendar-create", "home.calendar-range", "home.invite-staff"],
+  home: ["home.intro", "home.calendar-create", "home.calendar-range", "home.invite-staff"],
   basicInfo: ["basic-info.intro"],
-  dailyPlan: ["daily-plan.intro", "daily-plan.pdf"],
+  dailyPlan: ["daily-plan.intro", "daily-plan.round-select", "daily-plan.pdf"],
   progress: ["progress.intro", "progress.status"],
   sceneList: ["scene-list.desktop-intro", "scene-list.mobile-intro"],
   staff: ["staff.intro", "staff.participation", "staff.participation-summary"],
-  scenario: ["scenario.actions"],
+  scenario: ["scenario.intro", "scenario.actions"],
   wardrobe: ["wardrobe.intro"],
   archive: [
+    "archive.intro",
     "archive.upload",
     "archive.selection.desktop",
     "archive.selection.mobile",
