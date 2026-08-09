@@ -6,14 +6,25 @@ const TIME_ONLY_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/u;
 export const CALENDAR_GRID_DAY_COUNT = 42;
 
 export const CALENDAR_EVENT_COLORS = [
-  { key: "lime", label: "라임", hex: "#D5FF40", text: "#11140A" },
-  { key: "yellow", label: "노랑", hex: "#FFF45C", text: "#16150A" },
-  { key: "cyan", label: "시안", hex: "#45F5D2", text: "#071412" },
-  { key: "blue", label: "파랑", hex: "#5B9CFF", text: "#081225" },
-  { key: "magenta", label: "마젠타", hex: "#FF62C8", text: "#210A19" }
+  { key: "magenta", department: "directing", label: "연출", hex: "#FF62C8", text: "#210A19" },
+  { key: "yellow", department: "production", label: "제작", hex: "#FFF45C", text: "#16150A" },
+  { key: "lime", department: "camera-lighting", label: "촬영조명", hex: "#D5FF40", text: "#11140A" },
+  { key: "blue", department: "art", label: "미술", hex: "#5B9CFF", text: "#081225" },
+  { key: "cyan", department: "sound", label: "음향", hex: "#45F5D2", text: "#071412" }
 ] as const;
 
 export type CalendarEventColorKey = typeof CALENDAR_EVENT_COLORS[number]["key"];
+export type CalendarEventDepartment = typeof CALENDAR_EVENT_COLORS[number]["department"];
+
+/** 저장된 color_key를 화면에서 사용하는 제작 부서 metadata로 해석합니다. */
+export function getCalendarDepartmentFromColorKey(colorKey: unknown) {
+  return CALENDAR_EVENT_COLORS.find((entry) => entry.key === colorKey) ?? null;
+}
+
+/** 제작 부서 선택을 기존 DB의 canonical color_key로 변환합니다. */
+export function getCalendarColorKeyFromDepartment(department: CalendarEventDepartment) {
+  return CALENDAR_EVENT_COLORS.find((entry) => entry.department === department)?.key ?? null;
+}
 
 export type DateOnlyParts = {
   year: number;
@@ -480,7 +491,7 @@ export function validateCalendarEventInput(value: CalendarEventInputLike): Calen
     errors.endTime = "종료 시간은 시작 시간보다 빠를 수 없습니다.";
   }
   if (location.length > 120) errors.location = "장소는 120자 이하로 입력해주세요.";
-  if (!isCalendarEventColorKey(value.colorKey)) errors.colorKey = "제공된 일정 색상 중 하나를 선택해주세요.";
+  if (!isCalendarEventColorKey(value.colorKey)) errors.colorKey = "일정 부서를 선택해주세요.";
 
   if (Object.keys(errors).length > 0) return { ok: false, errors };
   return {

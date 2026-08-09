@@ -108,7 +108,8 @@
 .dayButton:focus-visible,
 .eventBar:focus-visible,
 .detailEventButton:focus-visible,
-.colorSwatch:focus-visible {
+.departmentOption:focus-visible,
+.detailCreateButton:focus-visible {
   outline: 2px solid var(--ui-accent);
   outline-offset: 2px;
 }
@@ -224,6 +225,7 @@
   color: var(--ui-text-secondary);
   cursor: pointer;
   text-align: left;
+  -webkit-touch-callout: none;
 }
 
 .dayCell[data-outside="true"] .dayButton {
@@ -236,6 +238,11 @@
 
 .dayCell[data-selected="true"] .dayButton {
   box-shadow: inset 0 0 0 2px var(--ui-text-primary), inset 0 0 0 4px var(--ui-surface-1);
+}
+
+.dayCell[data-create-active="true"] .dayButton {
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ui-accent) 78%, transparent);
 }
 
 .dayNumber {
@@ -503,6 +510,32 @@
   letter-spacing: 0.02em;
 }
 
+.detailSectionHeading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.detailCreateButton {
+  min-height: 30px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 38%, var(--ui-border-default));
+  border-radius: var(--ui-radius-control);
+  background: color-mix(in srgb, var(--ui-accent) 7%, var(--ui-surface-3));
+  padding: 4px 8px;
+  color: var(--ui-accent);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.detailCreateButton:hover {
+  border-color: color-mix(in srgb, var(--ui-accent) 62%, var(--ui-border-default));
+  background: color-mix(in srgb, var(--ui-accent) 11%, var(--ui-surface-3));
+}
+
 .detailPlanLink,
 .detailEventButton,
 .detailEmpty {
@@ -564,6 +597,68 @@
   gap: 2px;
   word-break: keep-all;
   overflow-wrap: anywhere;
+}
+
+.detailEventDepartment {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-text-secondary) !important;
+  font-weight: 700;
+}
+
+.detailEventDepartmentDot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--event-color);
+}
+
+.departmentLegendViewport {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  padding-top: 9px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.departmentLegendViewport::-webkit-scrollbar {
+  display: none;
+}
+
+.departmentLegend {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: clamp(12px, 2vw, 18px);
+  margin: 0;
+  padding: 0 2px;
+  color: var(--ui-text-muted);
+  font-size: clamp(0.68rem, 1.2vw, 0.76rem);
+  line-height: 1.3;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.departmentLegendItem {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+
+.departmentLegendDot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--event-color);
 }
 
 .detailEmpty {
@@ -749,45 +844,63 @@
   padding-left: 32px;
 }
 
-.colorFieldset {
+.departmentFieldset {
   min-width: 0;
   border: 0;
   padding: 0;
 }
 
-.colorFieldset legend {
+.departmentFieldset legend {
   margin-bottom: 6px;
   color: var(--ui-text-secondary);
   font-size: 0.7rem;
   font-weight: 700;
 }
 
-.colorSwatches {
+.departmentOptions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 2px;
+  scrollbar-width: none;
 }
 
-.colorSwatch {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 2px solid transparent;
+.departmentOptions::-webkit-scrollbar {
+  display: none;
+}
+
+.departmentOption {
+  display: inline-flex;
+  min-width: max-content;
+  min-height: 36px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-3);
+  padding: 6px 8px;
+  color: var(--ui-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.departmentOptionSelected {
+  border-color: var(--event-color);
+  background: color-mix(in srgb, var(--event-color) 10%, var(--ui-surface-3));
+  color: var(--ui-text-primary);
+}
+
+.departmentDot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
   background: var(--event-color);
-  color: #080908;
-}
-
-.colorSwatchSelected {
-  border-color: var(--ui-text-primary);
-  box-shadow: 0 0 0 2px var(--dialog);
-}
-
-.colorSwatch svg {
-  width: 15px;
-  height: 15px;
-  stroke-width: 3;
 }
 
 .formError,
@@ -867,6 +980,10 @@
     min-height: 16px;
     padding: 1px 2px;
     font-size: 0.48rem;
+  }
+
+  .departmentLegend {
+    justify-content: flex-start;
   }
 
 }

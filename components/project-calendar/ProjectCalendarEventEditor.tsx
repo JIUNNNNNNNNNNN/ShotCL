@@ -12,7 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, MapPin, Trash2, X } from "lucide-react";
+import { MapPin, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import {
   CALENDAR_EVENT_COLORS,
@@ -54,7 +54,10 @@ type ProjectCalendarEventEditorProps = {
   onClose: (restoreFocus?: boolean) => void;
 };
 
-const DEFAULT_COLOR: ProjectCalendarEventColor = "cyan";
+type ProjectCalendarEventEditorValues = Omit<ProjectCalendarEventInput, "colorKey"> & {
+  colorKey: ProjectCalendarEventColor | "";
+};
+
 const DESKTOP_POPOVER_WIDTH = 340;
 const DESKTOP_POPOVER_MAX_HEIGHT = 520;
 const VIEWPORT_PADDING = 16;
@@ -74,14 +77,14 @@ export function ProjectCalendarEventEditor({
   onDelete,
   onClose
 }: ProjectCalendarEventEditorProps) {
-  const initialValues = useMemo<ProjectCalendarEventInput>(() => ({
+  const initialValues = useMemo<ProjectCalendarEventEditorValues>(() => ({
     title: event?.title ?? "",
     startDate: normalizeDateOnly(event?.startDate || initialStartDate),
     endDate: normalizeDateOnly(event?.endDate || initialEndDate),
     startTime: event?.startTime ?? "",
     endTime: event?.endTime ?? "",
     location: event?.location ?? "",
-    colorKey: event?.colorKey ?? DEFAULT_COLOR
+    colorKey: event?.colorKey ?? ""
   }), [event, initialEndDate, initialStartDate]);
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -260,9 +263,9 @@ export function ProjectCalendarEventEditor({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [closeWithMotion, deleteConfirmationOpen, isDirty, isSheet, readOnly]);
 
-  function updateValue<Key extends keyof ProjectCalendarEventInput>(
+  function updateValue<Key extends keyof ProjectCalendarEventEditorValues>(
     key: Key,
-    value: ProjectCalendarEventInput[Key]
+    value: ProjectCalendarEventEditorValues[Key]
   ) {
     setDismissHint("");
     setErrors((current) => ({ ...current, [key]: "", form: "" }));
@@ -468,22 +471,23 @@ export function ProjectCalendarEventEditor({
                 </div>
               </EditorField>
 
-              <fieldset className={styles.colorFieldset} disabled={readOnly}>
-                <legend>색상</legend>
-                <div className={styles.colorSwatches}>
+              <fieldset className={styles.departmentFieldset} disabled={readOnly}>
+                <legend>부서</legend>
+                <div className={styles.departmentOptions}>
                   {CALENDAR_EVENT_COLORS.map((color) => {
                     const selected = values.colorKey === color.key;
                     return (
                       <button
                         key={color.key}
                         type="button"
-                        className={cn(styles.colorSwatch, selected && styles.colorSwatchSelected)}
+                        className={cn(styles.departmentOption, selected && styles.departmentOptionSelected)}
                         style={{ "--event-color": color.hex } as CSSProperties}
-                        aria-label={`${color.label} 색상`}
+                        aria-label={`${color.label} 부서`}
                         aria-pressed={selected}
                         onClick={() => updateValue("colorKey", color.key as ProjectCalendarEventColor)}
                       >
-                        {selected ? <Check aria-hidden /> : null}
+                        <span className={styles.departmentDot} aria-hidden />
+                        <span>{color.label}</span>
                       </button>
                     );
                   })}

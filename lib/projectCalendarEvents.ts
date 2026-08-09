@@ -91,7 +91,7 @@ export function validateProjectCalendarEventInput(value: unknown): ProjectCalend
 
   const colorKey = normalizeProjectCalendarEventColorKey(value.colorKey);
   if (!colorKey) {
-    return { ok: false, error: "일정 색상을 선택해주세요.", field: "colorKey" };
+    return { ok: false, error: "일정 부서를 선택해주세요.", field: "colorKey" };
   }
 
   const location = normalizeText(value.location);

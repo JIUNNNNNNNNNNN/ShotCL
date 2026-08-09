@@ -15,6 +15,7 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react";
@@ -32,6 +33,7 @@ import {
   buildCalendarMonthDays,
   buildDailyPlanDateIndex,
   compareCalendarEvents,
+  getCalendarDepartmentFromColorKey,
   getInitialCalendarDate,
   getLocalTodayDateKey,
   isDateInRange,
@@ -51,7 +53,8 @@ import type {
 } from "./types";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"] as const;
-const DRAG_THRESHOLD_PX = 8;
+const LONG_PRESS_DURATION_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 const MAX_EVENT_LANES = 2;
 const SYNTHETIC_CLICK_WINDOW_MS = 320;
 
@@ -65,13 +68,15 @@ type EditorState = {
   presentation: EditorPresentation;
 };
 
-type DragState = {
+type LongPressState = {
   pointerId: number;
+  pointerType: string;
   startDate: string;
   currentDate: string;
   startX: number;
   startY: number;
-  dragging: boolean;
+  activated: boolean;
+  timerId: number | null;
 };
 
 type VisibleEventSegment = CalendarEventSegment<ProjectCalendarEvent> & {
@@ -129,9 +134,10 @@ export function ProjectMonthlyCalendar({
   const [selectedDate, setSelectedDate] = useState(initialFallback);
   const [monthDirection, setMonthDirection] = useState<"next" | "previous" | "none">("none");
   const [dragPreview, setDragPreview] = useState<{ startDate: string; endDate: string } | null>(null);
+  const [longPressActiveDate, setLongPressActiveDate] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<DragState | null>(null);
+  const longPressRef = useRef<LongPressState | null>(null);
   const suppressedClickRef = useRef<{ date: string | null; until: number } | null>(null);
   const suppressClickTimerRef = useRef<number | null>(null);
   const lastPointerTypeRef = useRef<string>("mouse");
@@ -207,24 +213,46 @@ export function ProjectMonthlyCalendar({
   const activePreviewRange = dragPreview
     ?? (editor && !editor.event ? { startDate: editor.startDate, endDate: editor.endDate } : null);
 
-  const cleanupDrag = useCallback((pointerId?: number) => {
+  const cleanupLongPress = useCallback((pointerId?: number, clearVisualState = true) => {
     const grid = gridRef.current;
-    const activePointerId = pointerId ?? dragRef.current?.pointerId;
-    dragRef.current = null;
-    setDragPreview(null);
+    const activePress = longPressRef.current;
+    const activePointerId = pointerId ?? activePress?.pointerId;
+    if (activePress?.timerId !== null && activePress?.timerId !== undefined) {
+      window.clearTimeout(activePress.timerId);
+    }
+    longPressRef.current = null;
+    if (clearVisualState) {
+      setDragPreview(null);
+      setLongPressActiveDate(null);
+    }
     if (grid && activePointerId !== undefined && grid.hasPointerCapture(activePointerId)) {
-      grid.releasePointerCapture(activePointerId);
+      try {
+        grid.releasePointerCapture(activePointerId);
+      } catch {
+        // The browser may already have released capture after pointercancel.
+      }
     }
   }, []);
 
   useEffect(() => () => {
-    cleanupDrag();
+    cleanupLongPress(undefined, false);
     if (suppressClickTimerRef.current !== null) {
       window.clearTimeout(suppressClickTimerRef.current);
     }
-  }, [cleanupDrag]);
+  }, [cleanupLongPress]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return undefined;
+    const preventScrollAfterActivation = (touchEvent: TouchEvent) => {
+      if (longPressRef.current?.activated) touchEvent.preventDefault();
+    };
+    grid.addEventListener("touchmove", preventScrollAfterActivation, { passive: false });
+    return () => grid.removeEventListener("touchmove", preventScrollAfterActivation);
+  }, [visibleMonth.month, visibleMonth.year]);
 
   function setMonth(offset: -1 | 1) {
+    cleanupLongPress();
     closeEditor(false);
     const nextMonth = shiftMonth(visibleMonth, offset);
     setMonthDirection(offset > 0 ? "next" : "previous");
@@ -240,6 +268,7 @@ export function ProjectMonthlyCalendar({
   }
 
   function goToToday() {
+    cleanupLongPress();
     closeEditor(false);
     const today = todayKey || getLocalTodayDateKey();
     const nextMonth = monthFromDateKey(today);
@@ -308,104 +337,129 @@ export function ProjectMonthlyCalendar({
     }, SYNTHETIC_CLICK_WINDOW_MS);
   }
 
-  function handleDayClick(clickEvent: React.MouseEvent<HTMLButtonElement>, date: string) {
+  function handleDayClick(clickEvent: ReactMouseEvent<HTMLButtonElement>, date: string) {
     const suppressed = suppressedClickRef.current;
     if (suppressed && performance.now() <= suppressed.until && (!suppressed.date || suppressed.date === date)) {
       suppressedClickRef.current = null;
       return;
     }
-    const presentation = resolveEditorPresentation(clickEvent.detail === 0 ? "keyboard" : lastPointerTypeRef.current);
-    openCreateEditor(date, clickEvent.currentTarget, presentation);
+    setSelectedDate(date);
   }
 
   function handleGridPointerDown(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
     lastPointerTypeRef.current = pointerEvent.pointerType;
     if (!canEditEvents || !onCreateEvent) return;
-    if (pointerEvent.pointerType === "touch" || pointerEvent.button !== 0) return;
+    if (!pointerEvent.isPrimary || pointerEvent.button !== 0 || pointerEvent.ctrlKey) return;
     const interactive = (pointerEvent.target as HTMLElement).closest("[data-calendar-interactive='true']");
     if (interactive) return;
     const cell = (pointerEvent.target as HTMLElement).closest<HTMLElement>("[data-calendar-date]");
     const date = cell?.dataset.calendarDate;
     if (!date) return;
 
-    dragRef.current = {
+    cleanupLongPress();
+    const press: LongPressState = {
       pointerId: pointerEvent.pointerId,
+      pointerType: pointerEvent.pointerType,
       startDate: date,
       currentDate: date,
       startX: pointerEvent.clientX,
       startY: pointerEvent.clientY,
-      dragging: false
+      activated: false,
+      timerId: null
     };
+    longPressRef.current = press;
+    if (!pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
+      try {
+        pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
+      } catch {
+        // Pointer capture may be unavailable for a pointer that already ended.
+      }
+    }
+    press.timerId = window.setTimeout(() => {
+      const activePress = longPressRef.current;
+      if (!activePress || activePress.pointerId !== pointerEvent.pointerId) return;
+      activePress.timerId = null;
+      activePress.activated = true;
+      setSelectedDate(activePress.startDate);
+      setLongPressActiveDate(activePress.startDate);
+      setDragPreview(normalizeRange(activePress.startDate, activePress.currentDate));
+    }, LONG_PRESS_DURATION_MS);
   }
 
   function handleGridPointerMove(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== pointerEvent.pointerId) return;
-    const distance = Math.hypot(pointerEvent.clientX - drag.startX, pointerEvent.clientY - drag.startY);
-    if (!drag.dragging && distance < DRAG_THRESHOLD_PX) return;
-    if (!drag.dragging) {
-      drag.dragging = true;
-      if (!pointerEvent.currentTarget.hasPointerCapture(pointerEvent.pointerId)) {
-        pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
-      }
-      setDragPreview(normalizeRange(drag.startDate, drag.currentDate));
+    const press = longPressRef.current;
+    if (!press || press.pointerId !== pointerEvent.pointerId) return;
+    const distance = Math.hypot(pointerEvent.clientX - press.startX, pointerEvent.clientY - press.startY);
+    if (!press.activated) {
+      if (distance <= LONG_PRESS_MOVE_TOLERANCE_PX) return;
+      cleanupLongPress(pointerEvent.pointerId);
+      return;
     }
     pointerEvent.preventDefault();
 
-    const hovered = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)
-      ?.closest<HTMLElement>("[data-calendar-date]");
-    const nextDate = hovered?.dataset.calendarDate;
-    if (!nextDate || !visibleDateKeys.has(nextDate) || nextDate === drag.currentDate) return;
-    drag.currentDate = nextDate;
-    setDragPreview(normalizeRange(drag.startDate, nextDate));
+    const nextDate = getCalendarDateAtPoint(
+      pointerEvent.currentTarget,
+      pointerEvent.clientX,
+      pointerEvent.clientY
+    );
+    if (!nextDate || !visibleDateKeys.has(nextDate) || nextDate === press.currentDate) return;
+    press.currentDate = nextDate;
+    setLongPressActiveDate(nextDate);
+    setDragPreview(normalizeRange(press.startDate, nextDate));
   }
 
   function handleGridPointerUp(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== pointerEvent.pointerId) return;
-    if (drag.dragging) {
-      const range = normalizeRange(drag.startDate, drag.currentDate);
+    const press = longPressRef.current;
+    if (!press || press.pointerId !== pointerEvent.pointerId) return;
+    if (press.activated) {
+      const range = normalizeRange(press.startDate, press.currentDate);
+      const anchorElement = dateButtonRefs.current.get(range.endDate)
+        ?? dateButtonRefs.current.get(range.startDate);
       armSyntheticClickSuppression(null);
-      setSelectedDate(range.endDate);
-      if (canEditEvents && onCreateEvent) {
-        const anchorElement = dateButtonRefs.current.get(range.endDate)
-          ?? dateButtonRefs.current.get(range.startDate);
-        if (anchorElement) {
-          openCreateEditor(
-            range.startDate,
-            anchorElement,
-            resolveEditorPresentation(pointerEvent.pointerType),
-            range.endDate,
-            anchorElement,
-            range.endDate
-          );
-        }
-      }
-    } else {
-      const focusTarget = dateButtonRefs.current.get(drag.startDate);
-      if (focusTarget) {
-        armSyntheticClickSuppression(drag.startDate);
+      cleanupLongPress(pointerEvent.pointerId);
+      if (anchorElement) {
         openCreateEditor(
-          drag.startDate,
-          focusTarget,
-          resolveEditorPresentation(pointerEvent.pointerType)
+          range.startDate,
+          anchorElement,
+          resolveEditorPresentation(press.pointerType),
+          range.endDate,
+          anchorElement,
+          range.endDate
         );
       }
+    } else {
+      armSyntheticClickSuppression(press.startDate);
+      setSelectedDate(press.startDate);
+      cleanupLongPress(pointerEvent.pointerId);
     }
-    cleanupDrag(pointerEvent.pointerId);
   }
 
   function handleGridPointerCancel(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId !== pointerEvent.pointerId) return;
-    cleanupDrag(pointerEvent.pointerId);
+    if (longPressRef.current?.pointerId !== pointerEvent.pointerId) return;
+    cleanupLongPress(pointerEvent.pointerId);
   }
 
   function handleGridLostPointerCapture(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId !== pointerEvent.pointerId) return;
-    cleanupDrag(pointerEvent.pointerId);
+    if (longPressRef.current?.pointerId !== pointerEvent.pointerId) return;
+    cleanupLongPress(pointerEvent.pointerId);
+  }
+
+  function handleGridContextMenu(contextMenuEvent: ReactMouseEvent<HTMLDivElement>) {
+    if (!canEditEvents || !onCreateEvent) return;
+    const target = contextMenuEvent.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest("[data-calendar-interactive='true']")) return;
+    if (!target.closest("[data-calendar-date]")) return;
+    contextMenuEvent.preventDefault();
+    cleanupLongPress();
   }
 
   function handleDayKeyboard(keyboardEvent: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    if (keyboardEvent.key === "Enter" || keyboardEvent.key === " ") {
+      keyboardEvent.preventDefault();
+      setSelectedDate(monthDays[index]?.key ?? selectedDate);
+      return;
+    }
     const offsets: Record<string, number> = {
       ArrowLeft: -1,
       ArrowRight: 1,
@@ -478,6 +532,7 @@ export function ProjectMonthlyCalendar({
                 onPointerUp={handleGridPointerUp}
                 onPointerCancel={handleGridPointerCancel}
                 onLostPointerCapture={handleGridLostPointerCapture}
+                onContextMenu={handleGridContextMenu}
               >
               {Array.from({ length: 6 }, (_, weekIndex) => {
                 const weekDays = monthDays.slice(weekIndex * 7, weekIndex * 7 + 7);
@@ -521,6 +576,7 @@ export function ProjectMonthlyCalendar({
                     data-shooting={shooting}
                     data-selected={selected}
                     data-today={today}
+                    data-create-active={longPressActiveDate === day.key}
                     aria-selected={selected}
                   >
                     <button
@@ -554,7 +610,14 @@ export function ProjectMonthlyCalendar({
                           {dayPlans.map((plan) => plan.episodeLabel).join(" · ")}
                         </Link>
                       ) : (
-                        <span className={styles.shootingPlanRow}>{dayPlans.map((plan) => plan.episodeLabel).join(" · ")}</span>
+                        <span
+                          className={styles.shootingPlanRow}
+                          data-calendar-interactive="true"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {dayPlans.map((plan) => plan.episodeLabel).join(" · ")}
+                        </span>
                       )) : null}
                     </div>
                     {hiddenEventCount > 0 ? (
@@ -654,6 +717,7 @@ export function ProjectMonthlyCalendar({
               </div>
             </div>
           </div>
+          <CalendarDepartmentLegend />
         </div>
 
         <div className={styles.detailColumn}>
@@ -691,7 +755,30 @@ export function ProjectMonthlyCalendar({
             ) : null}
 
             <section className={styles.detailSection} aria-labelledby="selected-date-user-events">
-              <h4 id="selected-date-user-events" className={styles.detailSectionTitle}>프로젝트 일정</h4>
+              <div className={styles.detailSectionHeading}>
+                <h4 id="selected-date-user-events" className={styles.detailSectionTitle}>프로젝트 일정</h4>
+                {canEditEvents && onCreateEvent ? (
+                  <button
+                    type="button"
+                    className={styles.detailCreateButton}
+                    onPointerDown={(pointerEvent) => {
+                      lastPointerTypeRef.current = pointerEvent.pointerType;
+                    }}
+                    onClick={(clickEvent) => {
+                      const anchorElement = dateButtonRefs.current.get(selectedDate) ?? clickEvent.currentTarget;
+                      openCreateEditor(
+                        selectedDate,
+                        clickEvent.currentTarget,
+                        resolveEditorPresentation(clickEvent.detail === 0 ? "keyboard" : lastPointerTypeRef.current),
+                        selectedDate,
+                        anchorElement
+                      );
+                    }}
+                  >
+                    일정 추가
+                  </button>
+                ) : null}
+              </div>
               {selectedEvents.length > 0 ? selectedEvents.map((calendarEvent) => (
                 <button
                   key={calendarEvent.id}
@@ -714,6 +801,10 @@ export function ProjectMonthlyCalendar({
                 >
                   <span className={styles.detailEventIndicator} aria-hidden />
                   <span className={styles.detailEventText}>
+                    <small className={styles.detailEventDepartment}>
+                      <span className={styles.detailEventDepartmentDot} aria-hidden />
+                      {getCalendarDepartmentFromColorKey(calendarEvent.colorKey)?.label ?? "부서 미지정"}
+                    </small>
                     <strong>{calendarEvent.title}</strong>
                     <small>
                       <Clock3 className="mr-1 inline h-3 w-3" aria-hidden />
@@ -771,8 +862,46 @@ function normalizeRange(firstDate: string, secondDate: string) {
     ?? { startDate: firstDate, endDate: secondDate };
 }
 
+function getCalendarDateAtPoint(grid: HTMLElement, clientX: number, clientY: number) {
+  const hitTarget = document.elementFromPoint(clientX, clientY);
+  const directCell = hitTarget?.closest<HTMLElement>("[data-calendar-date]");
+  if (directCell?.dataset.calendarDate) return directCell.dataset.calendarDate;
+
+  for (const row of Array.from(grid.children)) {
+    if (!(row instanceof HTMLElement)) continue;
+    const rowRect = row.getBoundingClientRect();
+    if (clientY < rowRect.top || clientY > rowRect.bottom) continue;
+    for (const cell of Array.from(row.querySelectorAll<HTMLElement>("[data-calendar-date]"))) {
+      const cellRect = cell.getBoundingClientRect();
+      if (clientX >= cellRect.left && clientX <= cellRect.right) {
+        return cell.dataset.calendarDate ?? null;
+      }
+    }
+  }
+  return null;
+}
+
 function getEventColor(colorKey: ProjectCalendarEvent["colorKey"]) {
-  return CALENDAR_EVENT_COLORS.find((color) => color.key === colorKey)?.hex ?? "#45F5D2";
+  return getCalendarDepartmentFromColorKey(colorKey)?.hex ?? "#45F5D2";
+}
+
+function CalendarDepartmentLegend() {
+  return (
+    <div className={styles.departmentLegendViewport}>
+      <ul className={styles.departmentLegend} aria-label="일정 부서 색상 안내">
+        {CALENDAR_EVENT_COLORS.map((department) => (
+          <li key={department.department} className={styles.departmentLegendItem}>
+            <span
+              className={styles.departmentLegendDot}
+              style={{ "--event-color": department.hex } as CSSProperties}
+              aria-hidden
+            />
+            <span>{department.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function resolveEditorPresentation(pointerType: string): EditorPresentation {
@@ -895,7 +1024,10 @@ function formatEventTime(event: ProjectCalendarEvent) {
 }
 
 function buildEventAccessibleLabel(event: ProjectCalendarEvent) {
-  return [event.title, formatEventTime(event), event.location].filter(Boolean).join(", ");
+  const department = getCalendarDepartmentFromColorKey(event.colorKey)?.label;
+  return [department ? `${department} 부서` : "", event.title, formatEventTime(event), event.location]
+    .filter(Boolean)
+    .join(", ");
 }
 
 function buildDayAccessibleLabel(
