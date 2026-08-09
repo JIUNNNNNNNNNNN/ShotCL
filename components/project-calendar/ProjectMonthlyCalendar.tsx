@@ -41,6 +41,11 @@ import {
   normalizeUnorderedDateRange,
   parseDateOnly
 } from "@/lib/projectCalendar";
+import { getKoreaDateOnly } from "@/lib/koreaDate";
+import {
+  buildKoreanHolidayIndex,
+  getKoreanCalendarDayTone
+} from "@/lib/koreanHolidays";
 import type { CalendarEventSegment } from "@/lib/projectCalendar";
 import styles from "./ProjectMonthlyCalendar.module.css";
 import { ProjectCalendarEventEditor } from "./ProjectCalendarEventEditor";
@@ -128,6 +133,7 @@ export function ProjectMonthlyCalendar({
   const initialFallback = normalizedShootingStart
     || normalizeDateOnly(events[0]?.startDate)
     || normalizeDateOnly(dailyPlans[0]?.shootingDate)
+    || getKoreaDateOnly()
     || getLocalTodayDateKey();
   const [todayKey, setTodayKey] = useState("");
   const [visibleMonth, setVisibleMonth] = useState(() => monthFromDateKey(initialFallback));
@@ -161,7 +167,7 @@ export function ProjectMonthlyCalendar({
   }, [editor, requestGuide]);
 
   useEffect(() => {
-    const today = getLocalTodayDateKey();
+    const today = getKoreaDateOnly() || getLocalTodayDateKey();
     setTodayKey(today);
     if (didInitializeRef.current) return;
     didInitializeRef.current = true;
@@ -183,6 +189,10 @@ export function ProjectMonthlyCalendar({
   const monthDays = useMemo(
     () => buildCalendarMonthDays(visibleMonth),
     [visibleMonth]
+  );
+  const holidaysByDate = useMemo(
+    () => buildKoreanHolidayIndex(monthDays.map((day) => day.key)),
+    [monthDays]
   );
   const visibleDateKeys = useMemo(() => new Set(monthDays.map((day) => day.key)), [monthDays]);
   const dailyPlansByDate = useMemo(() => buildDailyPlanDateIndex(dailyPlans), [dailyPlans]);
@@ -270,7 +280,7 @@ export function ProjectMonthlyCalendar({
   function goToToday() {
     cleanupLongPress();
     closeEditor(false);
-    const today = todayKey || getLocalTodayDateKey();
+    const today = todayKey || getKoreaDateOnly() || getLocalTodayDateKey();
     const nextMonth = monthFromDateKey(today);
     const currentOrdinal = visibleMonth.year * 12 + visibleMonth.month;
     const nextOrdinal = nextMonth.year * 12 + nextMonth.month;
@@ -515,7 +525,15 @@ export function ProjectMonthlyCalendar({
             }}
           >
             <div className={styles.weekdayGrid} role="row" aria-label="요일">
-              {WEEKDAYS.map((weekday) => <span key={weekday} role="columnheader">{weekday}</span>)}
+              {WEEKDAYS.map((weekday, index) => (
+                <span
+                  key={weekday}
+                  role="columnheader"
+                  data-day-tone={index === 0 ? "holiday" : index === 6 ? "saturday" : "weekday"}
+                >
+                  {weekday}
+                </span>
+              ))}
             </div>
             <div
               key={`${visibleMonth.year}-${visibleMonth.month}`}
@@ -558,10 +576,13 @@ export function ProjectMonthlyCalendar({
                 const selected = day.key === selectedDate;
                 const today = day.key === todayKey;
                 const shooting = dayPlans.length > 0;
+                const holidayNames = holidaysByDate.get(day.key) ?? [];
+                const dayTone = getKoreanCalendarDayTone(day.key, day.weekday, holidayNames);
                 const accessibleDescription = buildDayAccessibleLabel(day, {
                   period,
                   selected,
                   today,
+                  holidayNames,
                   plans: dayPlans,
                   events: dayEvents
                 });
@@ -576,6 +597,9 @@ export function ProjectMonthlyCalendar({
                     data-shooting={shooting}
                     data-selected={selected}
                     data-today={today}
+                    data-day-tone={dayTone}
+                    data-holiday={holidayNames.length > 0}
+                    data-holiday-name={holidayNames.join(", ") || undefined}
                     data-create-active={longPressActiveDate === day.key}
                     aria-selected={selected}
                   >
@@ -683,6 +707,7 @@ export function ProjectMonthlyCalendar({
                           gridRow: segment.lane + 1
                         } as CSSProperties}
                         data-calendar-interactive="true"
+                        data-calendar-event-id={calendarEvent.id}
                         data-segment-start={segment.isEventStart}
                         data-segment-end={segment.isEventEnd}
                         data-segment-kind={getRangeSegmentKind(segment.isEventStart, segment.isEventEnd)}
@@ -720,7 +745,7 @@ export function ProjectMonthlyCalendar({
           <CalendarDepartmentLegend />
         </div>
 
-        <div className={styles.detailColumn}>
+        <div className={styles.detailColumn} data-project-calendar-detail-column>
           <aside
             className={styles.detailPanel}
             aria-live="polite"
@@ -822,7 +847,11 @@ export function ProjectMonthlyCalendar({
             </section>
             </div>
           </aside>
-          {detailFooter ? <div className={styles.detailFooter}>{detailFooter}</div> : null}
+          {detailFooter ? (
+            <div className={styles.detailFooter} data-project-calendar-detail-footer>
+              {detailFooter}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1036,6 +1065,7 @@ function buildDayAccessibleLabel(
     period: boolean;
     selected: boolean;
     today: boolean;
+    holidayNames: readonly string[];
     plans: readonly ProjectCalendarDailyPlan[];
     events: readonly ProjectCalendarEvent[];
   }
@@ -1044,6 +1074,7 @@ function buildDayAccessibleLabel(
     `${day.year}년 ${day.month}월 ${day.day}일`,
     state.today ? "오늘" : "",
     state.selected ? "선택됨" : "",
+    ...state.holidayNames.map((name) => `공휴일 ${name}`),
     state.period ? "기본 촬영기간" : "",
     ...state.plans.map((plan) => `${plan.episodeLabel} 촬영일`),
     ...state.events.map((event) => buildEventAccessibleLabel(event))

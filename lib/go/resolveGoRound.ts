@@ -1,11 +1,13 @@
 import { compareDailyPlanEpisodes } from "@/lib/dailyPlan/carouselPresentation";
 import { normalizeDailyPlanDateOnly } from "@/lib/dailyPlan/dateOnly";
+import { getKoreaDateOnly, KOREA_TIME_ZONE } from "@/lib/koreaDate";
 import {
   isDailyProgressComplete,
   type DailyProgressCompletion
 } from "@/lib/progress/dailyProgress";
 
-export const GO_ROUND_TIME_ZONE = "Asia/Seoul" as const;
+export const GO_ROUND_TIME_ZONE = KOREA_TIME_ZONE;
+export { getKoreaDateOnly };
 
 export type GoRoundCandidate = {
   id: string;
@@ -41,24 +43,6 @@ type DatedGoRound<T extends GoRoundCandidate> = {
   round: T;
   date: string;
 };
-
-/**
- * 클릭 순간의 시각을 대한민국 표준시 기준 date-only 값으로 변환합니다.
- * device·Node/Vercel local timezone과 UTC 날짜 문자열에 의존하지 않습니다.
- */
-export function getKoreaDateOnly(now: Date = new Date()) {
-  if (!Number.isFinite(now.getTime())) return null;
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: GO_ROUND_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(now);
-  const values = new Map(parts.map((part) => [part.type, part.value]));
-  return normalizeDailyPlanDateOnly(
-    `${values.get("year") ?? ""}-${values.get("month") ?? ""}-${values.get("day") ?? ""}`
-  );
-}
 
 /** 날짜 → canonical 회차 순서 → stable id 순으로 복사 정렬합니다. */
 export function sortGoRoundsByCanonicalOrder<T extends GoRoundCandidate>(rounds: readonly T[]) {
