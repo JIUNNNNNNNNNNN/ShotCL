@@ -30,12 +30,17 @@ import {
 } from "@/lib/contextualGuides";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { resolveDismissedProjectOwnerId } from "@/lib/projectAccess/dismissedProjects";
-
-type GuideRequestSource = "auto" | "feature" | "replay";
+import {
+  mergeCompletedGuideTokens,
+  parseCompletedGuideTokens,
+  serializeCompletedGuideTokens,
+  shouldLearnGuideOnExit,
+  type ContextualGuideRequestSource
+} from "@/lib/contextualGuideState";
 
 type ActiveGuide = {
   id: ContextualGuideId;
-  source: GuideRequestSource;
+  source: ContextualGuideRequestSource;
   anchorKey?: ContextualGuideAnchorKey;
   anchor?: HTMLElement;
 };
@@ -48,7 +53,7 @@ type GuideContextValue = {
   registerAnchor: (key: ContextualGuideAnchorKey, element: HTMLElement | null) => () => void;
   requestGuide: (
     id: ContextualGuideId,
-    source?: GuideRequestSource,
+    source?: ContextualGuideRequestSource,
     preferredAnchor?: HTMLElement | null
   ) => boolean;
   isGuideCompleted: (id: ContextualGuideId) => boolean;
@@ -83,6 +88,7 @@ export function ContextualGuideProvider({
   const activeGuideRef = useRef<ActiveGuide | null>(null);
   const routeInteractionRef = useRef(false);
   const storageKeyRef = useRef("");
+  const pendingCompletionTokensRef = useRef(new Set<string>());
   const [activeGuide, setActiveGuide] = useState<ActiveGuide | null>(null);
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [readinessVersion, setReadinessVersion] = useState(0);
@@ -92,7 +98,10 @@ export function ContextualGuideProvider({
     let activeStorageKey = "";
     const handleStorage = (event: StorageEvent) => {
       if (!activeStorageKey || event.key !== activeStorageKey) return;
-      completedRef.current = readCompletedGuideTokens(activeStorageKey);
+      completedRef.current = mergeCompletedGuideTokens(
+        completedRef.current,
+        readCompletedGuideTokens(activeStorageKey)
+      );
       setReadinessVersion((current) => current + 1);
     };
 
@@ -106,7 +115,11 @@ export function ContextualGuideProvider({
       if (cancelled) return;
       activeStorageKey = `${GUIDE_STORAGE_PREFIX}:${encodeURIComponent(namespace)}:v1`;
       storageKeyRef.current = activeStorageKey;
-      completedRef.current = readCompletedGuideTokens(activeStorageKey);
+      const storedTokens = readCompletedGuideTokens(activeStorageKey);
+      const pendingTokens = pendingCompletionTokensRef.current;
+      completedRef.current = mergeCompletedGuideTokens(storedTokens, pendingTokens);
+      pendingCompletionTokensRef.current = new Set();
+      if (pendingTokens.size > 0) writeCompletedGuideTokens(activeStorageKey, completedRef.current);
       setPersistenceReady(true);
       setReadinessVersion((current) => current + 1);
       window.addEventListener("storage", handleStorage);
@@ -149,23 +162,39 @@ export function ContextualGuideProvider({
     completedRef.current.add(token);
     const storageKey = storageKeyRef.current;
     if (storageKey) {
-      try {
-        window.localStorage.setItem(storageKey, JSON.stringify(Array.from(completedRef.current).sort()));
-      } catch {
-        // 가이드 상태 저장 실패는 핵심 화면이나 기능을 막지 않습니다.
-      }
+      completedRef.current = mergeCompletedGuideTokens(
+        readCompletedGuideTokens(storageKey),
+        completedRef.current
+      );
+      writeCompletedGuideTokens(storageKey, completedRef.current);
+    } else {
+      pendingCompletionTokensRef.current.add(token);
     }
     setReadinessVersion((current) => current + 1);
   }, []);
 
-  const dismissActiveGuide = useCallback(() => {
+  const dismissActiveGuide = useCallback((expectedId?: ContextualGuideId) => {
+    if (expectedId && activeGuideRef.current?.id !== expectedId) return;
     activeGuideRef.current = null;
     setActiveGuide(null);
   }, []);
 
+  const learnActiveGuide = useCallback((expectedId?: ContextualGuideId) => {
+    const active = activeGuideRef.current;
+    if (!active || (expectedId && active.id !== expectedId)) return;
+    if (shouldLearnGuideOnExit(active.source)) persistCompletion(active.id);
+  }, [persistCompletion]);
+
+  const acknowledgeActiveGuide = useCallback((expectedId?: ContextualGuideId) => {
+    const active = activeGuideRef.current;
+    if (!active || (expectedId && active.id !== expectedId)) return;
+    if (shouldLearnGuideOnExit(active.source)) persistCompletion(active.id);
+    dismissActiveGuide(active.id);
+  }, [dismissActiveGuide, persistCompletion]);
+
   const completeGuide = useCallback((id: ContextualGuideId) => {
     persistCompletion(id);
-    if (activeGuideRef.current?.id === id) dismissActiveGuide();
+    if (activeGuideRef.current?.id === id) dismissActiveGuide(id);
   }, [dismissActiveGuide, persistCompletion]);
 
   const isGuideCompleted = useCallback((id: ContextualGuideId) => (
@@ -180,30 +209,34 @@ export function ContextualGuideProvider({
       if (!active || !target) return;
       const insideGuide = target instanceof Element && Boolean(target.closest("[data-contextual-guide]"));
       if (MAIN_INTRO_GUIDE_ID_SET.has(active.id) && (!persistentShell || !insideGuide)) {
-        completeGuide(active.id);
+        acknowledgeActiveGuide(active.id);
         return;
       }
       if (insideGuide) return;
       if (active.anchor?.contains(target)) completeGuide(active.id);
-      else dismissActiveGuide();
+      else acknowledgeActiveGuide(active.id);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       routeInteractionRef.current = true;
       const target = event.target instanceof Node ? event.target : null;
       const active = activeGuideRef.current;
-      if (!active || (target instanceof Element && target.closest("[data-contextual-guide]"))) return;
-      if (MAIN_INTRO_GUIDE_ID_SET.has(active.id) || (target && active.anchor?.contains(target))) {
+      if (!active) return;
+      if (event.key === "Escape") {
+        if (target instanceof Element && target.closest("[data-contextual-guide]")) return;
+        acknowledgeActiveGuide(active.id);
+        return;
+      }
+      if (target instanceof Element && target.closest("[data-contextual-guide]")) return;
+      if ((event.key === "Enter" || event.key === " ") && target && active.anchor?.contains(target)) {
         completeGuide(active.id);
       }
-      else dismissActiveGuide();
     };
     const handleScroll = (event: Event) => {
       routeInteractionRef.current = true;
       if (event.target instanceof Element && event.target.closest("[data-contextual-guide]")) return;
       const active = activeGuideRef.current;
       if (!active) return;
-      if (MAIN_INTRO_GUIDE_ID_SET.has(active.id)) completeGuide(active.id);
-      else dismissActiveGuide();
+      acknowledgeActiveGuide(active.id);
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
     document.addEventListener("keydown", handleKeyDown, true);
@@ -213,11 +246,11 @@ export function ContextualGuideProvider({
       document.removeEventListener("keydown", handleKeyDown, true);
       document.removeEventListener("scroll", handleScroll, true);
     };
-  }, [completeGuide, dismissActiveGuide, persistentShell, routeKey]);
+  }, [acknowledgeActiveGuide, completeGuide, persistentShell, routeKey]);
 
   const requestGuide = useCallback((
     id: ContextualGuideId,
-    source: GuideRequestSource = "feature",
+    source: ContextualGuideRequestSource = "feature",
     preferredAnchor?: HTMLElement | null
   ) => {
     const definition = CONTEXTUAL_GUIDES[id];
@@ -227,7 +260,7 @@ export function ContextualGuideProvider({
       || !canUseGuide(definition, role)
       || !canUseGuideCapability(definition)
     ) return false;
-    if (!persistenceReady && source !== "replay") return false;
+    if (!persistenceReady) return false;
     if (source !== "replay" && completedRef.current.has(getGuideStorageToken(id))) return false;
     if (source === "auto" && routeInteractionRef.current) return false;
     if (blockersRef.current.size > 0 || hasVisibleInteractiveOverlay()) return false;
@@ -269,7 +302,7 @@ export function ContextualGuideProvider({
     setReadinessVersion((current) => current + 1);
   }, [dismissActiveGuide]);
 
-  const getReplayGuides = useCallback(() => getGuideIdsForPage(page)
+  const getReplayGuides = useCallback(() => (persistenceReady ? getGuideIdsForPage(page) : [])
     .map((id) => CONTEXTUAL_GUIDES[id])
     .filter((definition) => {
       if (definition.replayHidden) return false;
@@ -277,7 +310,7 @@ export function ContextualGuideProvider({
       if (definition.type === "page") return true;
       const anchorKey = persistentShell ? definition.persistentAnchor : definition.compactAnchor;
       return Boolean(getVisibleGuideAnchor(anchorsRef.current.get(anchorKey)));
-    }), [page, persistentShell, readinessVersion, role]);
+    }), [page, persistenceReady, persistentShell, readinessVersion, role]);
 
   const contextValue = useMemo<GuideContextValue>(() => ({
     role,
@@ -315,10 +348,9 @@ export function ContextualGuideProvider({
           activeGuide={activeGuide}
           persistent={persistentShell}
           role={role}
-          onDismiss={() => MAIN_INTRO_GUIDE_ID_SET.has(activeGuide.id)
-            ? completeGuide(activeGuide.id)
-            : dismissActiveGuide()}
-          onComplete={() => completeGuide(activeGuide.id)}
+          onCancel={() => dismissActiveGuide(activeGuide.id)}
+          onExitStart={() => learnActiveGuide(activeGuide.id)}
+          onExitComplete={() => dismissActiveGuide(activeGuide.id)}
         />,
         document.body
       ) : null}
@@ -377,7 +409,12 @@ export function ContextualGuideHelpButton({
   const { getReplayGuides, requestGuide, readinessVersion } = useContextualGuide();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const replayTimerRef = useRef<number | null>(null);
   const guides = useMemo(() => getReplayGuides(), [getReplayGuides, readinessVersion]);
+
+  useEffect(() => () => {
+    if (replayTimerRef.current !== null) window.clearTimeout(replayTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -420,9 +457,16 @@ export function ContextualGuideHelpButton({
               role="menuitem"
               onClick={() => {
                 setOpen(false);
+                if (replayTimerRef.current !== null) {
+                  window.clearTimeout(replayTimerRef.current);
+                  replayTimerRef.current = null;
+                }
                 onBeforeReplay?.();
                 if (onReplayGuide?.(guide.id)) return;
-                window.setTimeout(() => requestGuide(guide.id, "replay"), onBeforeReplay ? 220 : 0);
+                replayTimerRef.current = window.setTimeout(() => {
+                  replayTimerRef.current = null;
+                  requestGuide(guide.id, "replay");
+                }, onBeforeReplay ? 220 : 0);
               }}
             >
               {guide.replayLabel}
@@ -438,14 +482,16 @@ function ContextualGuideCoach({
   activeGuide,
   persistent,
   role,
-  onDismiss,
-  onComplete
+  onCancel,
+  onExitStart,
+  onExitComplete
 }: {
   activeGuide: ActiveGuide;
   persistent: boolean;
   role: SharedProjectRole | null;
-  onDismiss: () => void;
-  onComplete: () => void;
+  onCancel: () => void;
+  onExitStart: () => void;
+  onExitComplete: () => void;
 }) {
   const definition = CONTEXTUAL_GUIDES[activeGuide.id];
   const coachRef = useRef<HTMLElement | null>(null);
@@ -461,15 +507,13 @@ function ContextualGuideCoach({
       ? definition.readOnlyDescription
       : definition.description;
 
-  const requestExit = useCallback((callback: () => void) => {
+  const requestExit = useCallback(() => {
     if (closingRef.current) return;
     closingRef.current = true;
+    onExitStart();
     setClosing(true);
-    closeTimerRef.current = window.setTimeout(callback, 130);
-  }, []);
-
-  const requestComplete = useCallback(() => requestExit(onComplete), [onComplete, requestExit]);
-  const requestDismiss = useCallback(() => requestExit(onDismiss), [onDismiss, requestExit]);
+    closeTimerRef.current = window.setTimeout(onExitComplete, 130);
+  }, [onExitComplete, onExitStart]);
 
   useEffect(() => () => {
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
@@ -488,7 +532,7 @@ function ContextualGuideCoach({
         } else {
           const anchor = activeGuide.anchor;
           if (!anchor || !isVisibleGuideAnchor(anchor)) {
-            onDismiss();
+            onCancel();
             return;
           }
           nextPosition = calculateAnchorGuidePosition(
@@ -520,7 +564,7 @@ function ContextualGuideCoach({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [activeGuide.anchor, definition.preferredPlacement, definition.type, onDismiss]);
+  }, [activeGuide.anchor, definition.preferredPlacement, definition.type, onCancel]);
 
   useEffect(() => {
     const anchor = activeGuide.anchor;
@@ -539,11 +583,11 @@ function ContextualGuideCoach({
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") requestDismiss();
+      if (event.key === "Escape") requestExit();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [requestDismiss]);
+  }, [requestExit]);
 
   const presentation = position?.presentation ?? definition.type;
   const style = position && presentation !== "bottom-coach" ? {
@@ -578,7 +622,7 @@ function ContextualGuideCoach({
           type="button"
           className="contextual-guide-coach__close"
           aria-label="가이드 닫기"
-          onClick={requestComplete}
+          onClick={requestExit}
         >
           <X aria-hidden />
         </button>
@@ -587,7 +631,7 @@ function ContextualGuideCoach({
         <p id={descriptionId}>{description}</p>
       </div>
       <footer className="contextual-guide-coach__footer">
-        <button type="button" className="contextual-guide-coach__ack" onClick={requestComplete}>
+        <button type="button" className="contextual-guide-coach__ack" onClick={requestExit}>
           <Check aria-hidden />
           확인
         </button>
@@ -871,10 +915,17 @@ function canUseGuideCapability(definition: ContextualGuideDefinition) {
 
 function readCompletedGuideTokens(storageKey: string) {
   try {
-    const value = JSON.parse(window.localStorage.getItem(storageKey) ?? "[]") as unknown;
-    return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []);
+    return parseCompletedGuideTokens(window.localStorage.getItem(storageKey));
   } catch {
     return new Set<string>();
+  }
+}
+
+function writeCompletedGuideTokens(storageKey: string, tokens: Iterable<string>) {
+  try {
+    window.localStorage.setItem(storageKey, serializeCompletedGuideTokens(tokens));
+  } catch {
+    // 가이드 상태 저장 실패는 핵심 화면이나 기능을 막지 않습니다.
   }
 }
 

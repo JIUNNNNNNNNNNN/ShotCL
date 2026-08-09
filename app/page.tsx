@@ -39,6 +39,7 @@ import {
   MAIN_NEW_FEATURE_GUIDE_IDS,
   type ContextualGuideId
 } from "@/lib/contextualGuides";
+import { getPendingGuideIds } from "@/lib/contextualGuideState";
 import type { Project } from "@/lib/types";
 
 type ContextualAction = "new" | "join";
@@ -206,7 +207,7 @@ function MainHomeContent() {
 
   useEffect(() => {
     if (selectedAction !== null || interactionLocked || activeGuideId || introReplayQueue) return undefined;
-    const nextGuideId = MAIN_INTRO_GUIDE_IDS.find((id) => !isGuideCompleted(id));
+    const nextGuideId = getPendingGuideIds(MAIN_INTRO_GUIDE_IDS, isGuideCompleted)[0];
     if (!nextGuideId) return undefined;
     const timer = window.setTimeout(() => {
       requestGuide(nextGuideId, "feature");
@@ -224,7 +225,7 @@ function MainHomeContent() {
 
   useEffect(() => {
     if (selectedAction !== "new" || interactionLocked || activeGuideId) return undefined;
-    const nextGuideId = MAIN_NEW_FEATURE_GUIDE_IDS.find((id) => !isGuideCompleted(id));
+    const nextGuideId = getPendingGuideIds(MAIN_NEW_FEATURE_GUIDE_IDS, isGuideCompleted)[0];
     if (!nextGuideId) return undefined;
     const timer = window.setTimeout(() => {
       requestGuide(nextGuideId, "feature");
@@ -535,7 +536,7 @@ function MainHomeContent() {
     setSelectedAction(null);
     setNewProjectError("");
     setJoinProjectError("");
-    setIntroReplayQueue([...MAIN_INTRO_GUIDE_IDS]);
+    setIntroReplayQueue(getPendingGuideIds(MAIN_INTRO_GUIDE_IDS, () => false));
     return true;
   }
 

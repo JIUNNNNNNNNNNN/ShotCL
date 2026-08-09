@@ -1,0 +1,46 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  getPendingGuideIds,
+  mergeCompletedGuideTokens,
+  parseCompletedGuideTokens,
+  serializeCompletedGuideTokens,
+  shouldLearnGuideOnExit
+} from "../lib/contextualGuideState.ts";
+
+test("automatic and feature exits learn while replay exits stay runtime-only", () => {
+  assert.equal(shouldLearnGuideOnExit("auto"), true);
+  assert.equal(shouldLearnGuideOnExit("feature"), true);
+  assert.equal(shouldLearnGuideOnExit("replay"), false);
+});
+
+test("completion storage keeps the existing sorted string-array format", () => {
+  const parsed = parseCompletedGuideTokens('["main.intro-go@1",3,"","main.intro-new@1"]');
+  assert.deepEqual([...parsed], ["main.intro-go@1", "main.intro-new@1"]);
+  assert.equal(
+    serializeCompletedGuideTokens(parsed),
+    '["main.intro-go@1","main.intro-new@1"]'
+  );
+  assert.deepEqual([...parseCompletedGuideTokens("not-json")], []);
+});
+
+test("cross-tab completion merge is monotonic and deduplicated", () => {
+  const merged = mergeCompletedGuideTokens(
+    new Set(["home.intro@1", "home.calendar-create@1"]),
+    new Set(["home.calendar-create@1", "home.calendar-range@1"])
+  );
+  assert.deepEqual([...merged], [
+    "home.intro@1",
+    "home.calendar-create@1",
+    "home.calendar-range@1"
+  ]);
+});
+
+test("partial Main sequence resumes with only unique incomplete guides", () => {
+  const completed = new Set(["main.intro-new", "main.intro-join"]);
+  const pending = getPendingGuideIds(
+    ["main.intro-new", "main.intro-join", "main.intro-go", "main.intro-go"],
+    (id) => completed.has(id)
+  );
+  assert.deepEqual(pending, ["main.intro-go"]);
+});
