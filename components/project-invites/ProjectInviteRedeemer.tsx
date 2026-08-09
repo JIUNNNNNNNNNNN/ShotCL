@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 type InviteScreenState =
-  | { status: "valid"; projectName: string; projectId: string }
-  | { status: "already_member"; projectName: string; projectId: string }
+  | { status: "valid"; projectName: string; projectId: string; destination: string }
+  | { status: "already_member"; projectName: string; projectId: string; destination: string }
   | { status: "invalid" }
   | { status: "unavailable" };
 
@@ -17,6 +17,7 @@ type InviteApiPayload = {
   status?: string;
   projectId?: string;
   projectName?: string;
+  destination?: string;
   error?: string;
 };
 
@@ -42,8 +43,9 @@ export function ProjectInviteRedeemer({
     };
   }, []);
 
-  function openProject(projectId: string) {
-    window.location.assign(`/projects/${encodeURIComponent(projectId)}`);
+  function openProgress(destination: string) {
+    // 전체 navigation으로 새 access cookie를 server layout에 반영하되 invite POST는 history에서 제거합니다.
+    window.location.replace(destination);
   }
 
   async function joinProject() {
@@ -64,7 +66,7 @@ export function ProjectInviteRedeemer({
       });
       const payload = await readPayload(response);
       if (controller.signal.aborted || !mountedRef.current) return;
-      if (!response.ok || !payload.ok || !payload.projectId) {
+      if (!response.ok || !payload.ok || !payload.projectId || !payload.destination) {
         if (payload.status === "invalid") {
           setState({ status: "invalid" });
           setErrorMessage("");
@@ -81,11 +83,11 @@ export function ProjectInviteRedeemer({
       const nextState: InviteScreenState = {
         status: payload.status === "already_member" ? "already_member" : "valid",
         projectId: payload.projectId,
-        projectName: payload.projectName || state.projectName
+        projectName: payload.projectName || state.projectName,
+        destination: payload.destination
       };
       setState(nextState);
-      // Set-Cookie 응답이 완료된 뒤 전체 navigation으로 프로젝트 server layout을 다시 판정합니다.
-      openProject(payload.projectId);
+      openProgress(payload.destination);
     } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return;
       setErrorMessage(error instanceof Error ? error.message : "프로젝트에 참여하지 못했습니다.");
@@ -122,8 +124,8 @@ export function ProjectInviteRedeemer({
 
             <div className="mt-6 grid gap-2">
               {alreadyMember ? (
-                <Button className="min-h-11 w-full" onClick={() => openProject(state.projectId)}>
-                  프로젝트 열기
+                <Button className="min-h-11 w-full" onClick={() => openProgress(state.destination)}>
+                  진행도 열기
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </Button>
               ) : (

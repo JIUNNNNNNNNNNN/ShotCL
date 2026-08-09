@@ -12,6 +12,7 @@ import {
   ProjectStaffInviteUnavailableError,
   redeemProjectStaffInvite
 } from "@/lib/projectStaffInvites.server";
+import { buildProjectNavigationHref } from "@/lib/projectNavigation";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
       status: result.alreadyMember ? "already_member" : "joined",
       projectId: result.projectId,
       projectName: result.projectName,
-      alreadyMember: result.alreadyMember
+      alreadyMember: result.alreadyMember,
+      destination: buildProjectNavigationHref(result.projectId, "progress")
     });
     setProjectSessionCookie(response, browserSessionToken);
     return response;

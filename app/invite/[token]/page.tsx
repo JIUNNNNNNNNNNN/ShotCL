@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import {
   ProjectInviteRedeemer,
   type InviteScreenState
@@ -13,6 +14,7 @@ import {
   ProjectStaffInviteMigrationRequiredError,
   ProjectStaffInviteUnavailableError
 } from "@/lib/projectStaffInvites.server";
+import { buildProjectNavigationHref } from "@/lib/projectNavigation";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function ProjectInvitePage({
 }) {
   const { token } = await params;
   const initialState = await resolveInitialState(token);
+  if (initialState.status === "already_member") redirect(initialState.destination);
   return <ProjectInviteRedeemer token={token} initialState={initialState} />;
 }
 
@@ -46,7 +49,8 @@ async function resolveInitialState(token: string): Promise<InviteScreenState> {
     return {
       status: grant ? "already_member" : "valid",
       projectId: invite.projectId,
-      projectName: invite.projectName
+      projectName: invite.projectName,
+      destination: buildProjectNavigationHref(invite.projectId, "progress")
     };
   } catch (error) {
     if (
