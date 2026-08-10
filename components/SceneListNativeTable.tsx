@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { SceneReorderList, type SceneReorderRowProps } from "@/components/SceneReorderList";
+import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import {
   SCENE_LIST_MERGE_COLUMNS,
   buildSceneListMergeLayout,
@@ -498,6 +499,7 @@ export function SceneListNativeTable({
                   mergeLayout={mergeLayout}
                   resolvedSelection={resolvedSelection}
                   canEdit={canEdit}
+                  hasMultipleScenes={items.length >= 2}
                   hasPendingMutation={hasPendingMutation}
                   editingCell={editingCell}
                   suppressClickRef={suppressClickRef}
@@ -662,6 +664,7 @@ type SceneNativeRowProps = {
   mergeLayout: ReturnType<typeof buildSceneListMergeLayout>;
   resolvedSelection: SceneListResolvedCellRange | null;
   canEdit: boolean;
+  hasMultipleScenes: boolean;
   hasPendingMutation: boolean;
   editingCell: { sceneId: string; column: SceneEditableColumn } | null;
   suppressClickRef: React.MutableRefObject<boolean>;
@@ -687,6 +690,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
   mergeLayout,
   resolvedSelection,
   canEdit,
+  hasMultipleScenes,
   hasPendingMutation,
   editingCell,
   suppressClickRef,
@@ -701,6 +705,29 @@ const SceneNativeRow = memo(function SceneNativeRow({
   onActorTextEdit,
   onCutValidationChange
 }: SceneNativeRowProps) {
+  const mergeCellGuideAnchorRef = useContextualGuideAnchor<HTMLTableCellElement>(
+    canEdit && index === 0 ? "scene-list.merge-cell" : null
+  );
+  const mergeRangeGuideAnchorRef = useContextualGuideAnchor<HTMLTableCellElement>(
+    canEdit && hasMultipleScenes && index === 0 ? "scene-list.merge-range-cell" : null
+  );
+  const sceneNumberGuideAnchorRef = useContextualGuideAnchor<HTMLTableCellElement>(
+    canEdit && index === 0 ? "scene-list.scene-number" : null
+  );
+  const sceneReorderGuideAnchorRef = useContextualGuideAnchor<HTMLTableCellElement>(
+    canEdit && hasMultipleScenes && index === 0 ? "scene-list.scene-reorder" : null
+  );
+  const actorCellGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    canEdit && index === 0 && actorRoles.length > 0 ? "scene-list.actor-cell" : null
+  );
+  const combinedMergeCellGuideAnchorRef = useCallback((element: HTMLTableCellElement | null) => {
+    mergeCellGuideAnchorRef(element);
+    mergeRangeGuideAnchorRef(element);
+  }, [mergeCellGuideAnchorRef, mergeRangeGuideAnchorRef]);
+  const combinedSceneNumberGuideAnchorRef = useCallback((element: HTMLTableCellElement | null) => {
+    sceneNumberGuideAnchorRef(element);
+    sceneReorderGuideAnchorRef(element);
+  }, [sceneNumberGuideAnchorRef, sceneReorderGuideAnchorRef]);
   const isEditing = (column: SceneEditableColumn) => (
     editingCell?.sceneId === item.id && editingCell.column === column
   );
@@ -747,6 +774,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
     const editor = isEditing(columnKey);
     return (
       <td
+        ref={column === "location" ? combinedMergeCellGuideAnchorRef : undefined}
         key={column}
         rowSpan={state?.kind === "anchor" ? rowSpan : undefined}
         colSpan={state?.kind === "anchor" ? colSpan : undefined}
@@ -787,6 +815,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
       className={`${trProps.className ?? ""} bg-white hover:bg-[#f7f7f7]`}
     >
       <td
+        ref={combinedSceneNumberGuideAnchorRef}
         className={`relative h-9 border-b border-r border-[#d6d6d6] bg-white p-0 text-center align-middle ${
           canEdit ? "cursor-grab active:cursor-grabbing" : ""
         }`}
@@ -861,6 +890,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
                       }}
                     >
                       <button
+                        ref={actorIndex === 0 ? actorCellGuideAnchorRef : undefined}
                         type="button"
                         disabled={!canEdit}
                         className="h-full min-h-9 w-full touch-pan-y overflow-hidden px-1 text-[10px] font-bold disabled:cursor-default"
@@ -987,6 +1017,7 @@ function areSceneNativeRowPropsEqual(
     || previous.actorRoles !== next.actorRoles
     || previous.actorStyles !== next.actorStyles
     || previous.canEdit !== next.canEdit
+    || previous.hasMultipleScenes !== next.hasMultipleScenes
     || previous.hasPendingMutation !== next.hasPendingMutation
     || previous.locationStyle.background !== next.locationStyle.background
     || previous.locationStyle.color !== next.locationStyle.color

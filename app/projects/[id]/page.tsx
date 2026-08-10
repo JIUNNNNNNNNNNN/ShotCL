@@ -47,7 +47,9 @@ import {
 } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
 import { calculateDailyProgress } from "@/lib/progress/dailyProgress";
+import { buildProgressMediaGalleryItems } from "@/lib/progress/mediaGallery";
 import { buildProgressRoundHref } from "@/lib/projectNavigation";
+import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
@@ -66,6 +68,35 @@ type EditingScheduleState = {
   item: DailyPlanMealTime;
 };
 const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
+
+function hasMultipleProgressGalleryItems(
+  shot: Shot,
+  archiveMedia: readonly ProgressArchiveMediaAsset[]
+) {
+  const storyboardItems = buildProgressMediaGalleryItems(
+    archiveMedia,
+    "storyboard",
+    shot.storyboardImageUrl ? {
+      id: `${shot.id}:legacy-storyboard`,
+      title: "",
+      url: shot.storyboardImageUrl,
+      thumbnailUrl: ""
+    } : null
+  );
+  if (storyboardItems.length >= 2) return true;
+
+  const overheadItems = buildProgressMediaGalleryItems(
+    archiveMedia,
+    "overhead",
+    shot.overheadImageUrl ? {
+      id: `${shot.id}:legacy-overhead`,
+      title: "",
+      url: shot.overheadImageUrl,
+      thumbnailUrl: ""
+    } : null
+  );
+  return overheadItems.length + (hasShotOverheadContent(shot.overheadDiagram) ? 1 : 0) >= 2;
+}
 
 const DailyPlanGatheringLocations = dynamic(
   () => import("@/components/DailyPlanGatheringLocations").then((module) => module.DailyPlanGatheringLocations),
@@ -589,6 +620,24 @@ export default function ProjectDetailPage() {
     () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "omit"),
     [sessionBucketByShotId, shots]
   );
+  const visibleShotsForMediaGuide = useMemo(() => [
+    ...activeShots,
+    ...(okExpanded ? okShots : []),
+    ...(omitExpanded ? omitShots : [])
+  ], [activeShots, okExpanded, okShots, omitExpanded, omitShots]);
+  const mediaGuideShotId = useMemo(() => (
+    visibleShotsForMediaGuide.find((shot) => hasMultipleProgressGalleryItems(
+      shot,
+      archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA
+    ))?.id ?? null
+  ), [archiveMediaByShotId, visibleShotsForMediaGuide]);
+  const reorderGuideBucket = useMemo<ProgressVisualBucket | null>(() => {
+    if (role !== "admin" || isReordering) return null;
+    if (activeShots.length >= 2) return "active";
+    if (okExpanded && okShots.length >= 2) return "ok";
+    if (omitExpanded && omitShots.length >= 2) return "omit";
+    return null;
+  }, [activeShots.length, isReordering, okExpanded, okShots.length, omitExpanded, omitShots.length, role]);
   const scheduleRowsByIndex = useMemo(
     () => selectedPlan ? placeScheduleRows(shots, selectedPlan.mealTimes, decodeDailyPlanMemo(selectedPlan.memo).timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
     [selectedPlan, shots]
@@ -965,8 +1014,9 @@ export default function ProjectDetailPage() {
       archiveMedia={archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
+      interactionMediaGuideTarget={shot.id === mediaGuideShotId}
     />
-  ), [archiveMediaByShotId, handleOpenMedia, handleStatusChange, progressOnly]);
+  ), [archiveMediaByShotId, handleOpenMedia, handleStatusChange, mediaGuideShotId, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -1118,6 +1168,7 @@ export default function ProjectDetailPage() {
                 allShots={shots}
                 visibleShots={activeShots}
                 disabled={role !== "admin" || isReordering}
+                interactionGuideTarget={reorderGuideBucket === "active"}
                 onReorder={handleReorderShots}
                 renderShot={renderShot}
                 renderRowsBeforeIndex={(index) => activeScheduleRowsByIndex.get(index)?.map((item) => (
@@ -1147,6 +1198,7 @@ export default function ProjectDetailPage() {
                   allShots={shots}
                   visibleShots={okShots}
                   disabled={role !== "admin" || isReordering}
+                  interactionGuideTarget={reorderGuideBucket === "ok"}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
                 />
@@ -1164,6 +1216,7 @@ export default function ProjectDetailPage() {
                   allShots={shots}
                   visibleShots={omitShots}
                   disabled={role !== "admin" || isReordering}
+                  interactionGuideTarget={reorderGuideBucket === "omit"}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
                 />

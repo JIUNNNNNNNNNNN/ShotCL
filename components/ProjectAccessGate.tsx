@@ -113,7 +113,13 @@ export function ProjectAccessGate({
 
   return (
     <ProjectAccessContext.Provider value={accessValue}>
-      <ContextualGuideProvider userNamespace={accessPreferenceScope} role={currentRole}>
+      <ContextualGuideProvider
+        userNamespace={accessPreferenceScope}
+        // A project opened without a shared-project grant is the legacy/direct
+        // owner flow. The product itself treats that flow as editable, so guide
+        // permissions must use the same effective Key staff capability.
+        role={currentRole ?? "admin"}
+      >
         <ProjectPageActionsProvider>
           <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
             <ProjectWorkspaceShell>{children}</ProjectWorkspaceShell>

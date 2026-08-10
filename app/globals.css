@@ -3484,6 +3484,11 @@ button {
   outline-offset: 2px;
 }
 
+[data-contextual-interaction-active-anchor="true"] {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 72%, transparent);
+  outline-offset: 2px;
+}
+
 .contextual-guide-coach :where(button):focus-visible,
 .contextual-guide-help :where(button):focus-visible {
   outline: 2px solid var(--ui-accent-focus);
@@ -3506,6 +3511,767 @@ button {
 .contextual-guide-coach[data-guide-page="main"][data-presentation="bottom-coach"] {
   width: min(280px, calc(100vw - 32px));
   margin-inline: auto;
+}
+
+.contextual-interaction-guide {
+  --contextual-guide-enter-x: 0;
+  --contextual-guide-enter-y: 4px;
+  position: fixed;
+  z-index: 84;
+  display: grid;
+  width: min(300px, calc(100vw - 32px));
+  max-height: min(520px, calc(100dvh - 32px));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: visible;
+  border: 1px solid var(--ui-accent-border);
+  border-radius: var(--ui-radius-panel);
+  background: color-mix(in srgb, var(--ui-surface-3) 97%, black);
+  color: var(--ui-text-primary);
+  box-shadow: var(--shadow-floating);
+  animation: contextual-guide-enter 170ms var(--ease-out-native) both;
+  isolation: isolate;
+  overscroll-behavior: contain;
+  transition:
+    opacity 130ms var(--ease-in-native),
+    transform 130ms var(--ease-in-native);
+}
+
+.contextual-interaction-guide[data-positioned="false"] {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.contextual-interaction-guide[data-closing="true"] {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.contextual-interaction-guide[data-side="right"] {
+  --contextual-guide-enter-x: -4px;
+  --contextual-guide-enter-y: 0;
+}
+
+.contextual-interaction-guide[data-side="left"] {
+  --contextual-guide-enter-x: 4px;
+  --contextual-guide-enter-y: 0;
+}
+
+.contextual-interaction-guide[data-side="bottom"] {
+  --contextual-guide-enter-y: -4px;
+}
+
+.contextual-interaction-guide[data-side="top"] {
+  --contextual-guide-enter-y: 4px;
+}
+
+.contextual-interaction-guide__header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 0 14px;
+}
+
+.contextual-interaction-guide__header h2 {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.contextual-interaction-guide__close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--ui-radius-control);
+  color: var(--ui-text-muted);
+}
+
+.contextual-interaction-guide__close:hover {
+  background: var(--ui-surface-4);
+  color: var(--ui-text-primary);
+}
+
+.contextual-interaction-guide__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.contextual-interaction-guide__body {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px 14px 0;
+}
+
+.contextual-interaction-guide__body p {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.55;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.contextual-interaction-guide__body .contextual-interaction-guide__detail {
+  margin-top: 5px;
+  color: var(--ui-accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.contextual-interaction-guide__footer {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+
+.contextual-interaction-guide__count {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.contextual-interaction-guide__actions {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.contextual-interaction-guide__actions button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-2);
+  padding: 7px 9px;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.contextual-interaction-guide__actions button:hover:not(:disabled) {
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text-primary);
+}
+
+.contextual-interaction-guide__actions button.is-primary {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}
+
+.contextual-interaction-guide__actions button:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.contextual-interaction-guide__actions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.contextual-interaction-guide__caret {
+  position: absolute;
+  z-index: 0;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--ui-accent-border);
+  background: color-mix(in srgb, var(--ui-surface-3) 97%, black);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.contextual-interaction-guide[data-side="right"] .contextual-interaction-guide__caret {
+  top: var(--contextual-guide-caret-offset, 50%);
+  left: 0;
+}
+
+.contextual-interaction-guide[data-side="left"] .contextual-interaction-guide__caret {
+  top: var(--contextual-guide-caret-offset, 50%);
+  left: 100%;
+}
+
+.contextual-interaction-guide[data-side="bottom"] .contextual-interaction-guide__caret {
+  top: 0;
+  left: var(--contextual-guide-caret-offset, 50%);
+}
+
+.contextual-interaction-guide[data-side="top"] .contextual-interaction-guide__caret {
+  top: 100%;
+  left: var(--contextual-guide-caret-offset, 50%);
+}
+
+.contextual-interaction-guide[data-presentation="bottom-coach"] {
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: max(16px, env(safe-area-inset-left));
+  width: min(300px, calc(100vw - 32px));
+  margin-inline: auto;
+}
+
+.contextual-interaction-guide :where(button):focus-visible {
+  outline: 2px solid var(--ui-accent-focus);
+  outline-offset: 2px;
+}
+
+/* Detailed help uses one abstract, mutation-free interaction illustration at a time. */
+.interaction-demo {
+  --interaction-demo-loop: 2.4s;
+  --interaction-demo-press-ring-animation: interaction-demo-press-ring-550;
+  width: 100%;
+  min-width: 0;
+  margin-top: 10px;
+}
+
+.interaction-demo[data-duration-ms="220"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-220; }
+.interaction-demo[data-duration-ms="330"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-330; }
+.interaction-demo[data-duration-ms="480"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-480; }
+.interaction-demo[data-duration-ms="500"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-500; }
+.interaction-demo[data-duration-ms="520"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-520; }
+.interaction-demo[data-duration-ms="540"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-540; }
+.interaction-demo[data-duration-ms="550"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-550; }
+.interaction-demo[data-duration-ms="575"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-575; }
+.interaction-demo[data-duration-ms="600"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-600; }
+
+.interaction-demo__surface {
+  position: relative;
+  width: 100%;
+  height: 88px;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ui-surface-4) 72%, transparent), transparent),
+    var(--ui-surface-2);
+}
+
+.interaction-demo__item {
+  position: absolute;
+  top: 26px;
+  left: 22px;
+  display: grid;
+  width: 92px;
+  height: 38px;
+  align-content: center;
+  gap: 5px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 5px;
+  background: var(--ui-surface-3);
+  padding: 9px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 14%);
+}
+
+.interaction-demo__item > span {
+  display: block;
+  width: 72%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ui-text-muted);
+  opacity: 0.62;
+}
+
+.interaction-demo__item > span + span {
+  width: 48%;
+}
+
+.interaction-demo__selection {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-accent-soft);
+}
+
+.interaction-demo__pointer {
+  position: absolute;
+  top: 19px;
+  left: 154px;
+  width: 24px;
+  height: 35px;
+  border: 1px solid var(--ui-text-secondary);
+  border-radius: 11px 11px 9px 9px;
+  background: var(--ui-surface-4);
+  animation: interaction-demo-pointer var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__pointer-shape {
+  position: absolute;
+  top: -8px;
+  left: -9px;
+  width: 10px;
+  height: 16px;
+  border-left: 2px solid var(--ui-text-primary);
+  transform: rotate(-25deg);
+  transform-origin: bottom;
+}
+
+.interaction-demo__pointer-button {
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 12px;
+  border-bottom: 1px solid var(--ui-border-default);
+}
+
+.interaction-demo__pointer-button--left {
+  left: 0;
+  border-right: 1px solid var(--ui-border-default);
+  border-radius: 10px 0 0;
+}
+
+.interaction-demo__pointer-button--right {
+  right: 0;
+  border-radius: 0 10px 0 0;
+}
+
+.interaction-demo[data-type="right-click"] .interaction-demo__pointer-button--right {
+  animation: interaction-demo-click var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__menu {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  display: grid;
+  width: 64px;
+  gap: 5px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 5px;
+  background: var(--ui-surface-4);
+  padding: 8px;
+  opacity: 0;
+  transform: translateY(3px) scale(0.98);
+  animation: interaction-demo-menu var(--interaction-demo-loop) var(--ease-out-native) infinite;
+}
+
+.interaction-demo__menu > span {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ui-text-muted);
+}
+
+.interaction-demo__finger {
+  position: absolute;
+  top: 23px;
+  left: 153px;
+  width: 25px;
+  height: 42px;
+  animation: interaction-demo-finger var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__finger-tip {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 17px;
+  height: 31px;
+  border: 2px solid var(--ui-text-secondary);
+  border-radius: 10px 10px 7px 7px;
+  background: var(--ui-surface-4);
+}
+
+.interaction-demo__press-ring {
+  position: absolute;
+  top: -7px;
+  left: -4px;
+  width: 31px;
+  height: 31px;
+  border: 2px solid var(--ui-accent);
+  border-radius: 50%;
+  opacity: 0;
+  transform: scale(0.45);
+  animation: var(--interaction-demo-press-ring-animation) var(--interaction-demo-loop) linear infinite;
+}
+
+.interaction-demo__items .interaction-demo__item {
+  left: 18px;
+  width: 76px;
+  height: 25px;
+  padding: 6px;
+}
+
+.interaction-demo__items .interaction-demo__item--before {
+  top: 8px;
+}
+
+.interaction-demo__items .interaction-demo__item--source {
+  top: 32px;
+  z-index: 2;
+  animation: interaction-demo-drag-item var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__items .interaction-demo__item--after {
+  top: 56px;
+  animation: interaction-demo-neighbor var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__items .interaction-demo__finger {
+  top: 31px;
+  left: 69px;
+  z-index: 3;
+  animation-name: interaction-demo-drag-finger;
+}
+
+.interaction-demo__drop-line {
+  position: absolute;
+  top: 58px;
+  right: 20px;
+  width: 72px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ui-accent);
+  opacity: 0;
+  animation: interaction-demo-drop-line var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo[data-type="drag-trash"] .interaction-demo__item--source {
+  top: 26px;
+  left: 24px;
+  animation: interaction-demo-trash-item var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo[data-type="drag-trash"] .interaction-demo__finger {
+  top: 27px;
+  left: 78px;
+  z-index: 3;
+  animation-name: interaction-demo-trash-finger;
+}
+
+.interaction-demo__trash {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--field-danger) 58%, transparent);
+  border-radius: 6px;
+  color: var(--field-danger);
+  animation: interaction-demo-trash-zone var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__trash svg {
+  width: 17px;
+  height: 17px;
+}
+
+.interaction-demo__images {
+  position: absolute;
+  inset: 12px 18px;
+  overflow: hidden;
+  border-radius: 6px;
+}
+
+.interaction-demo__image {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, transparent 48%, color-mix(in srgb, var(--ui-text-muted) 38%, transparent) 49% 51%, transparent 52%),
+    var(--ui-surface-4);
+}
+
+.interaction-demo__image--current {
+  animation: interaction-demo-swipe-current var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__image--next {
+  transform: translateX(108%);
+  animation: interaction-demo-swipe-next var(--interaction-demo-loop) var(--ease-standard-native) infinite;
+}
+
+.interaction-demo__images .interaction-demo__finger {
+  top: 24px;
+  left: auto;
+  right: 22px;
+  z-index: 3;
+  animation-name: interaction-demo-swipe-finger;
+}
+
+.interaction-demo__swipe-arrow {
+  position: absolute;
+  right: 56px;
+  bottom: 4px;
+  color: var(--ui-accent);
+  font-size: 16px;
+  font-weight: 800;
+  opacity: 0.72;
+}
+
+.interaction-demo__items--selection {
+  position: absolute;
+  top: 30px;
+  left: 18px;
+  display: grid;
+  width: 176px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.interaction-demo__items--selection .interaction-demo__item--cell {
+  position: static;
+  width: auto;
+  height: 28px;
+  padding: 0;
+  box-shadow: none;
+  animation: interaction-demo-selection var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__key {
+  position: absolute;
+  right: 16px;
+  bottom: 10px;
+  min-width: 42px;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 4px;
+  background: var(--ui-surface-4);
+  padding: 4px 7px;
+  color: var(--ui-text-secondary);
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+  animation: interaction-demo-key var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo[data-type="shift-range"] .interaction-demo__pointer,
+.interaction-demo[data-type="modifier-toggle"] .interaction-demo__pointer {
+  top: 22px;
+  left: 197px;
+  transform: scale(0.76);
+}
+
+.interaction-demo[data-type="range-drag"] .interaction-demo__finger {
+  top: 24px;
+  left: 63px;
+  z-index: 3;
+  animation-name: interaction-demo-range-finger;
+}
+
+.interaction-demo__range-line {
+  position: absolute;
+  top: 64px;
+  left: 50px;
+  width: 136px;
+  height: 2px;
+  background: var(--ui-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: interaction-demo-range-line var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__open-mark {
+  position: absolute;
+  top: 34px;
+  right: 30px;
+  color: var(--ui-accent);
+  font-size: 18px;
+  font-weight: 800;
+  opacity: 0;
+  animation: interaction-demo-open var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo[data-type="tap"] .interaction-demo__finger {
+  top: 25px;
+  left: 82px;
+}
+
+@keyframes interaction-demo-pointer {
+  0%, 10%, 80%, 100% { transform: translate(18px, 10px); }
+  26%, 66% { transform: translate(0, 0); }
+  74% { transform: translate(8px, 4px); }
+}
+
+@keyframes interaction-demo-click {
+  0%, 28%, 42%, 100% { background: transparent; }
+  32%, 38% { background: var(--ui-accent); }
+}
+
+@keyframes interaction-demo-menu {
+  0%, 40%, 78%, 100% { opacity: 0; transform: translateY(3px) scale(0.98); }
+  46%, 68% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes interaction-demo-finger {
+  0%, 8%, 82%, 100% { transform: translateY(10px); opacity: 0; }
+  18%, 70% { transform: translateY(0); opacity: 1; }
+  78% { transform: translateY(5px); opacity: 0; }
+}
+
+/* The ring always starts at 20% of the 2.4s loop. Each audited threshold
+   receives its own end keyframe, so the visible fill itself lasts exactly
+   220–600ms while the whole demo still keeps a calm 480ms rest frame. */
+@keyframes interaction-demo-press-ring-220 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  29.167% { opacity: 0.8; transform: scale(1); }
+  33%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-330 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  33.75% { opacity: 0.8; transform: scale(1); }
+  38%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-480 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  40% { opacity: 0.8; transform: scale(1); }
+  44%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-500 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  40.833% { opacity: 0.8; transform: scale(1); }
+  45%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-520 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  41.667% { opacity: 0.8; transform: scale(1); }
+  46%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-540 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  42.5% { opacity: 0.8; transform: scale(1); }
+  47%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-550 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  42.917% { opacity: 0.8; transform: scale(1); }
+  47%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-575 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  43.958% { opacity: 0.8; transform: scale(1); }
+  48%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-600 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  45% { opacity: 0.8; transform: scale(1); }
+  49%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-drag-item {
+  0%, 20%, 82%, 100% { transform: translate(0, 0) scale(1); }
+  25%, 46% { transform: translate(0, 0) scale(0.96); }
+  66%, 72% { transform: translate(112px, 26px) scale(0.96); }
+  80% { transform: translate(0, 0) scale(1); }
+}
+
+@keyframes interaction-demo-drag-finger {
+  0%, 14%, 82%, 100% { transform: translate(0, 8px); opacity: 0; }
+  20%, 46% { transform: translate(0, 0); opacity: 1; }
+  66%, 72% { transform: translate(112px, 26px); opacity: 1; }
+  80% { transform: translate(0, 8px); opacity: 0; }
+}
+
+@keyframes interaction-demo-neighbor {
+  0%, 48%, 82%, 100% { transform: translateY(0); }
+  66%, 72% { transform: translateY(-25px); }
+  80% { transform: translateY(0); }
+}
+
+@keyframes interaction-demo-drop-line {
+  0%, 50%, 80%, 100% { opacity: 0; }
+  60%, 72% { opacity: 1; }
+}
+
+@keyframes interaction-demo-trash-item {
+  0%, 20%, 82%, 100% { transform: translate(0, 0) scale(1); opacity: 1; }
+  25%, 46% { transform: translate(0, 0) scale(0.96); opacity: 1; }
+  66% { transform: translate(132px, 16px) scale(0.86); opacity: 1; }
+  72%, 78% { transform: translate(132px, 16px) scale(0.82); opacity: 0; }
+}
+
+@keyframes interaction-demo-trash-finger {
+  0%, 14%, 82%, 100% { transform: translate(0, 7px); opacity: 0; }
+  20%, 46% { transform: translate(0, 0); opacity: 1; }
+  66%, 72% { transform: translate(132px, 16px); opacity: 1; }
+  80% { transform: translate(0, 7px); opacity: 0; }
+}
+
+@keyframes interaction-demo-trash-zone {
+  0%, 52%, 80%, 100% { background: transparent; transform: scale(1); }
+  64%, 74% { background: color-mix(in srgb, var(--field-danger) 14%, transparent); transform: scale(1.04); }
+}
+
+@keyframes interaction-demo-swipe-current {
+  0%, 28%, 80%, 100% { transform: translateX(0); opacity: 1; }
+  58%, 68% { transform: translateX(-108%); opacity: 0.7; }
+  76% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes interaction-demo-swipe-next {
+  0%, 28%, 80%, 100% { transform: translateX(108%); }
+  58%, 68% { transform: translateX(0); }
+  76% { transform: translateX(108%); }
+}
+
+@keyframes interaction-demo-swipe-finger {
+  0%, 18%, 82%, 100% { transform: translateX(0); opacity: 0; }
+  28% { transform: translateX(0); opacity: 1; }
+  58%, 68% { transform: translateX(-116px); opacity: 1; }
+  76% { transform: translateX(-116px); opacity: 0; }
+}
+
+@keyframes interaction-demo-key {
+  0%, 24%, 78%, 100% { border-color: var(--ui-border-strong); color: var(--ui-text-secondary); }
+  32%, 64% { border-color: var(--ui-accent-border); color: var(--ui-accent); }
+}
+
+@keyframes interaction-demo-selection {
+  0%, 26%, 80%, 100% { filter: saturate(0.5); }
+  42%, 68% { filter: saturate(1.25); }
+}
+
+@keyframes interaction-demo-range-finger {
+  0%, 14%, 82%, 100% { transform: translate(0, 7px); opacity: 0; }
+  20%, 46% { transform: translate(0, 0); opacity: 1; }
+  66%, 72% { transform: translate(108px, 0); opacity: 1; }
+  80% { transform: translate(108px, 7px); opacity: 0; }
+}
+
+@keyframes interaction-demo-range-line {
+  0%, 42%, 82%, 100% { transform: scaleX(0); opacity: 0; }
+  46% { transform: scaleX(0); opacity: 1; }
+  66%, 72% { transform: scaleX(1); opacity: 1; }
+  80% { transform: scaleX(1); opacity: 0; }
+}
+
+@keyframes interaction-demo-open {
+  0%, 38%, 78%, 100% { opacity: 0; transform: scale(0.85); }
+  46%, 68% { opacity: 1; transform: scale(1); }
 }
 
 @media (pointer: coarse) {
@@ -3589,6 +4355,29 @@ button {
   color: var(--ui-text-primary);
 }
 
+.contextual-guide-help__label {
+  padding: 5px 9px 2px;
+  color: var(--ui-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.contextual-guide-help__divider {
+  height: 1px;
+  margin: 3px 5px;
+  background: var(--ui-border-default);
+}
+
+.contextual-guide-help__menu button.contextual-guide-help__interaction {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--ui-accent-border);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}
+
 @media (max-width: 719px), (max-height: 699px) {
   .contextual-guide-help__menu button {
     min-height: 44px;
@@ -3605,6 +4394,12 @@ button {
 
   .contextual-guide-help {
     flex-basis: 44px;
+  }
+
+  .contextual-interaction-guide__close,
+  .contextual-interaction-guide__actions button {
+    min-width: 44px;
+    min-height: 44px;
   }
 }
 
@@ -3635,6 +4430,8 @@ button {
     [data-weather-region-popover],
     [data-shooting-order-popover],
     .contextual-guide-coach,
+    .contextual-interaction-guide,
+    .interaction-demo *,
     .contextual-guide-help__menu,
     [data-scene-portrait-body],
     div[id^="archive-scene-"]
@@ -3656,6 +4453,73 @@ button {
 
   .ui-accordion > .ui-accordion-inner {
     transform: none;
+  }
+
+  /* Keep the interaction explanation legible without motion by freezing each
+     miniature illustration at its meaningful result state. */
+  .interaction-demo__menu {
+    opacity: 1;
+    transform: none;
+  }
+
+  .interaction-demo[data-type="right-click"] .interaction-demo__pointer-button--right,
+  .interaction-demo__key {
+    border-color: var(--ui-accent-border);
+    color: var(--ui-accent);
+  }
+
+  .interaction-demo[data-type="right-click"] .interaction-demo__pointer-button--right {
+    background: var(--ui-accent);
+  }
+
+  .interaction-demo__press-ring {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
+  .interaction-demo[data-type="drag"] .interaction-demo__item--source {
+    transform: translate(112px, 26px) scale(0.96);
+  }
+
+  .interaction-demo[data-type="drag"] .interaction-demo__item--after {
+    transform: translateY(-25px);
+  }
+
+  .interaction-demo[data-type="drag"] .interaction-demo__drop-line {
+    opacity: 1;
+  }
+
+  .interaction-demo[data-type="drag-trash"] .interaction-demo__item--source {
+    opacity: 0.45;
+    transform: translate(132px, 16px) scale(0.82);
+  }
+
+  .interaction-demo[data-type="drag-trash"] .interaction-demo__trash {
+    background: color-mix(in srgb, var(--field-danger) 14%, transparent);
+    transform: scale(1.04);
+  }
+
+  .interaction-demo[data-type="swipe"] .interaction-demo__image--current {
+    opacity: 0.72;
+    transform: translateX(-38%);
+  }
+
+  .interaction-demo[data-type="swipe"] .interaction-demo__image--next {
+    transform: translateX(65%);
+  }
+
+  .interaction-demo__items--selection .interaction-demo__item--cell {
+    filter: saturate(1.25);
+  }
+
+  .interaction-demo__range-line {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  .interaction-demo__open-mark {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

@@ -931,12 +931,13 @@ function MainHomeContent() {
             </p>
           ) : (
             <div className="grid min-w-0 gap-2">
-              {projects.map((project) => (
+              {projects.map((project, index) => (
                 <RememberedProjectCard
                   key={project.id}
                   project={project}
                   disabled={isCreatingProject || Boolean(selectedProjectId)}
                   isOpening={selectedProjectId === project.id}
+                  guideAnchor={index === 0}
                   onOpen={(targetProject) => {
                     void openPreviouslyJoinedProject(targetProject);
                   }}

@@ -1,4 +1,7 @@
-import type { SharedProjectRole } from "@/lib/projectAccess/core";
+// Node's type-stripping tests need an explicit extension, while Next resolves
+// the same module during application builds.
+// @ts-ignore -- explicit .ts import is intentional for the pure node tests.
+import { isKeyStaffProjectRole, type SharedProjectRole } from "./projectAccess/core.ts";
 
 export type ContextualGuidePage =
   | "main"
@@ -48,6 +51,7 @@ export type ContextualGuideAnchorKey =
   | "main.action-new"
   | "main.action-join"
   | "main.action-go"
+  | "main.remembered-project"
   | "main.new-key-staff-password"
   | "main.new-staff-password"
   | "main.join-fields"
@@ -56,21 +60,38 @@ export type ContextualGuideAnchorKey =
   | "basic-info.form"
   | "shell.navigation.daily-plans"
   | "shell.navigation-toggle"
+  | "daily-plan.round-card"
+  | "daily-plan.timetable-row"
+  | "daily-plan.timetable-reorder-row"
+  | "daily-plan.actor-row"
   | "daily-plan.pdf-actions"
   | "shell.action-toggle"
   | "progress.cut-list"
+  | "progress.shot-card"
+  | "progress.media-gallery"
   | "progress.status-controls"
   | "scene-list.desktop"
   | "scene-list.mobile"
+  | "scene-list.merge-cell"
+  | "scene-list.merge-range-cell"
+  | "scene-list.scene-number"
+  | "scene-list.scene-reorder"
+  | "scene-list.actor-cell"
   | "staff.main"
+  | "staff.member-row"
+  | "staff.member-reorder-row"
   | "staff.participation"
   | "scenario.actions"
   | "wardrobe.main"
   | "archive.upload"
+  | "archive.asset"
+  | "archive.asset-reorder"
+  | "archive.asset-multi-select"
   | "archive.selection"
   | "archive.folder-upload";
 
 export type ContextualGuidePlacement = "auto" | "left" | "right" | "top" | "bottom";
+export type ContextualGuidePermission = "any" | "manage" | "admin";
 
 type ContextualGuideDefinitionBase = {
   id: ContextualGuideId;
@@ -82,7 +103,7 @@ type ContextualGuideDefinitionBase = {
   description: string;
   readOnlyDescription?: string;
   compactDescription?: string;
-  permission: "any" | "manage" | "admin";
+  permission: ContextualGuidePermission;
   capability?: "fine-pointer" | "touch";
   replayLabel: string;
   replayHidden?: boolean;
@@ -600,7 +621,15 @@ export function getGuideStorageToken(id: ContextualGuideId) {
 }
 
 export function canUseGuide(definition: ContextualGuideDefinition, role: SharedProjectRole | null) {
-  if (definition.permission === "admin") return role === "admin";
-  if (definition.permission === "manage") return role !== "progress";
+  return canUseGuidePermission(definition.permission, role);
+}
+
+/** Page guides and manual interaction guides share this canonical role gate. */
+export function canUseGuidePermission(
+  permission: ContextualGuidePermission,
+  role: SharedProjectRole | null
+) {
+  if (permission === "admin") return role === "admin";
+  if (permission === "manage") return isKeyStaffProjectRole(role);
   return true;
 }

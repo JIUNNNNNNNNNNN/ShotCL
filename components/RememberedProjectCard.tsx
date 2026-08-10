@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import type { Project } from "@/lib/types";
 
 const LONG_PRESS_MS = 600;
@@ -10,6 +11,7 @@ type RememberedProjectCardProps = {
   project: Project;
   disabled: boolean;
   isOpening: boolean;
+  guideAnchor?: boolean;
   onOpen: (project: Project) => void;
   onOpenMenu: (
     project: Project,
@@ -35,11 +37,15 @@ export function RememberedProjectCard({
   project,
   disabled,
   isOpening,
+  guideAnchor = false,
   onOpen,
   onOpenMenu
 }: RememberedProjectCardProps) {
   const pointerSessionRef = useRef<PointerSession | null>(null);
   const suppressNextClickRef = useRef(false);
+  const interactionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    !disabled && guideAnchor ? "main.remembered-project" : null
+  );
 
   useEffect(() => {
     return () => clearPointerSession();
@@ -71,6 +77,7 @@ export function RememberedProjectCard({
 
   return (
     <button
+      ref={interactionGuideAnchorRef}
       type="button"
       disabled={disabled}
       draggable={false}

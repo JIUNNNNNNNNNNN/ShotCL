@@ -998,6 +998,125 @@ export default function ProjectStoryboardOverheadPage() {
     [visibleSelectionKeys]
   );
   const scopeSelectionKeys = visibleSelectionKeys;
+  const firstVisibleArchiveAssetId = useMemo(() => {
+    for (const group of archiveGroups) {
+      if (collapsedSceneKeys.has(group.key)) continue;
+      const asset = group.items.find((item) => (
+        item.kind === "asset" && !deletedAssetIdsRef.current.has(item.asset.id)
+      ));
+      if (asset?.kind === "asset") return asset.asset.id;
+    }
+    return null;
+  }, [archiveGroups, collapsedSceneKeys]);
+  const archiveReorderGuideAssetId = useMemo(() => {
+    if (
+      !canEdit
+      || query.trim()
+      || selectionMode
+      || selectedKeys.size > 0
+      || isSaving
+      || pendingConfirm
+      || pendingDeleteAsset
+    ) return null;
+
+    for (const group of archiveGroups) {
+      if (collapsedSceneKeys.has(group.key)) continue;
+      for (const cutGroup of groupArchiveItemsByCut(group.items)) {
+        const orderedAssets = cutGroup.items.flatMap((item) => (
+          item.kind === "asset" && !deletedAssetIdsRef.current.has(item.asset.id)
+            ? [item.asset]
+            : []
+        ));
+        if (orderedAssets.length < 2) continue;
+        const orderGroupKey = archiveOrderGroupKey(group.sceneId, cutGroup.cutNumber);
+        const completeOrderedAssetIds = completeArchiveOrderByGroupKey.get(orderGroupKey)
+          ?? orderedAssets.map((asset) => asset.id);
+        const isValidGroup = !(group.sceneId && !group.scene)
+          && !(group.sceneId === null && cutGroup.cutNumber !== null)
+          && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
+          && orderedAssets.every((asset) => completeOrderedAssetIds.includes(asset.id));
+        if (isValidGroup) return orderedAssets[0]?.id ?? null;
+      }
+    }
+    return null;
+  }, [
+    archiveGroups,
+    canEdit,
+    collapsedSceneKeys,
+    completeArchiveOrderByGroupKey,
+    isSaving,
+    pendingConfirm,
+    pendingDeleteAsset,
+    query,
+    selectedKeys.size,
+    selectionMode
+  ]);
+  const archiveInteractionGuideAssetId = useMemo(() => {
+    if (
+      !canEdit
+      || selectionMode
+      || selectedKeys.size > 0
+      || isSaving
+      || pendingConfirm
+      || pendingDeleteAsset
+    ) return null;
+    return archiveReorderGuideAssetId ?? firstVisibleArchiveAssetId;
+  }, [
+    archiveReorderGuideAssetId,
+    canEdit,
+    firstVisibleArchiveAssetId,
+    isSaving,
+    pendingConfirm,
+    pendingDeleteAsset,
+    selectedKeys.size,
+    selectionMode
+  ]);
+  const archiveInteractionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    archiveInteractionGuideAssetId ? "archive.asset" : null
+  );
+  const archiveMultiSelectGuideAssetId = canEdit
+    && visibleSelectionKeys.length >= 2
+    && !isSaving
+    && !pendingConfirm
+    && !pendingDeleteAsset
+    ? firstVisibleArchiveAssetId
+    : null;
+  const archiveMultiSelectGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    archiveMultiSelectGuideAssetId ? "archive.asset-multi-select" : null
+  );
+  const archiveReorderGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    archiveReorderGuideAssetId ? "archive.asset-reorder" : null
+  );
+  const archiveInteractionGuideRefsByAssetId = useMemo(() => {
+    const refs = new Map<string, Array<(element: HTMLButtonElement | null) => void>>();
+    const addRef = (
+      assetId: string | null,
+      ref: (element: HTMLButtonElement | null) => void
+    ) => {
+      if (!assetId) return;
+      const current = refs.get(assetId);
+      if (current) current.push(ref);
+      else refs.set(assetId, [ref]);
+    };
+    addRef(archiveInteractionGuideAssetId, archiveInteractionGuideAnchorRef);
+    addRef(archiveMultiSelectGuideAssetId, archiveMultiSelectGuideAnchorRef);
+    addRef(archiveReorderGuideAssetId, archiveReorderGuideAnchorRef);
+    return new Map(
+      [...refs.entries()].map(([assetId, assetRefs]) => [
+        assetId,
+        (element: HTMLButtonElement | null) => {
+          for (const ref of assetRefs) ref(element);
+        }
+      ])
+    );
+  }, [
+    archiveInteractionGuideAnchorRef,
+    archiveInteractionGuideAssetId,
+    archiveMultiSelectGuideAnchorRef,
+    archiveMultiSelectGuideAssetId,
+    archiveReorderGuideAnchorRef,
+    archiveReorderGuideAssetId
+  ]);
 
   useEffect(() => {
     if (selectionAnchorKey && !visibleSelectionKeySet.has(selectionAnchorKey)) {
@@ -4442,6 +4561,7 @@ export default function ProjectStoryboardOverheadPage() {
                             {orderNumber}
                           </span>
                           <button
+                            ref={archiveInteractionGuideRefsByAssetId.get(asset.id)}
                             type="button"
                             data-archive-reorder-handle={asset.id}
                             onPointerDown={(event) => {

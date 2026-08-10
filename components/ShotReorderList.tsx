@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import type { Shot } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ type ShotReorderListProps = {
   visibleShots: Shot[];
   className?: string;
   disabled?: boolean;
+  interactionGuideTarget?: boolean;
   onReorder: (shots: Shot[]) => Promise<void> | void;
   renderShot: (shot: Shot) => ReactNode;
   renderRowsBeforeIndex?: (index: number) => ReactNode;
@@ -68,6 +70,7 @@ export function ShotReorderList({
   visibleShots,
   className,
   disabled = false,
+  interactionGuideTarget = false,
   onReorder,
   renderShot,
   renderRowsBeforeIndex
@@ -77,8 +80,23 @@ export function ShotReorderList({
   const cleanupPointerSessionRef = useRef<(() => void) | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const reorderGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>(
+    interactionGuideTarget && !disabled && visibleShots.length >= 2 ? "progress.shot-card" : null
+  );
+  const reorderGuideShotId = interactionGuideTarget && !disabled && visibleShots.length >= 2
+    ? visibleShots[0]?.id ?? null
+    : null;
 
   useEffect(() => () => cleanupPointerSessionRef.current?.(), []);
+
+  useEffect(() => {
+    reorderGuideAnchorRef(
+      reorderGuideShotId ? cardRefs.current.get(reorderGuideShotId) ?? null : null
+    );
+    return () => {
+      reorderGuideAnchorRef(null);
+    };
+  }, [reorderGuideAnchorRef, reorderGuideShotId]);
 
   useEffect(() => {
     const list = listRef.current;

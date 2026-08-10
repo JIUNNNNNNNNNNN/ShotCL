@@ -411,7 +411,7 @@ function RoundNavigationList({
         </li>
       ) : null}
 
-      {plans.map((plan) => {
+      {plans.map((plan, index) => {
         const href = kind === "dailyPlans"
           ? buildDailyPlanRoundHref(projectId, plan.id)
           : buildProgressRoundHref(projectId, plan.id);
@@ -425,6 +425,7 @@ function RoundNavigationList({
               href={href}
               active={active}
               contextMenuEnabled={kind === "dailyPlans" && canManage && !isBusy}
+              guideAnchor={index === 0}
               onNavigate={onNavigate}
               onOpenContextMenu={onOpenContextMenu}
             />
@@ -472,6 +473,7 @@ function RoundNavigationLink({
   href,
   active,
   contextMenuEnabled,
+  guideAnchor,
   onNavigate,
   onOpenContextMenu
 }: {
@@ -479,9 +481,13 @@ function RoundNavigationLink({
   href: string;
   active: boolean;
   contextMenuEnabled: boolean;
+  guideAnchor: boolean;
   onNavigate: (href: string) => void;
   onOpenContextMenu: (plan: DailyPlan, clientX: number, clientY: number) => void;
 }) {
+  const interactionGuideAnchorRef = useContextualGuideAnchor<HTMLAnchorElement>(
+    contextMenuEnabled && guideAnchor ? "daily-plan.round-card" : null
+  );
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerRef = useRef<{
     id: number;
@@ -533,6 +539,7 @@ function RoundNavigationLink({
 
   return (
     <Link
+      ref={interactionGuideAnchorRef}
       href={href}
       draggable={false}
       aria-current={active ? "page" : undefined}

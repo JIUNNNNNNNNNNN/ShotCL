@@ -1127,6 +1127,11 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
   const displayedMemberNumbers = useMemo(() => new Map(
     rowKeys.map((memberId, index) => [memberId, index + 1])
   ), [rowKeys]);
+  const reorderGuideMemberId = useMemo(() => {
+    if (!canEdit) return null;
+    const section = sections.find((candidate) => candidate.members.length >= 2);
+    return section?.members[0]?.id ?? null;
+  }, [canEdit, sections]);
 
   const registerSection = useCallback((sectionKey: string) => {
     const existing = sectionRefCallbacksRef.current.get(sectionKey);
@@ -1245,6 +1250,7 @@ const StaffCardsWorkspace = memo(function StaffCardsWorkspace({
                     isWorkspaceDragging={interaction.draggingRowKey !== null}
                     isPending={pendingSectionKeys.has(section.sectionKey) || pendingDeleteMemberId === member.id}
                     canEdit={canEdit}
+                    isReorderGuideTarget={member.id === reorderGuideMemberId}
                     totalEpisodes={totalEpisodes}
                     isParticipationOpen={openParticipationMemberId === member.id}
                     participationSupportsHover={participationSupportsHover}
@@ -1308,6 +1314,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   isWorkspaceDragging,
   isPending,
   canEdit,
+  isReorderGuideTarget,
   totalEpisodes,
   isParticipationOpen,
   participationSupportsHover,
@@ -1329,6 +1336,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
   isWorkspaceDragging: boolean;
   isPending: boolean;
   canEdit: boolean;
+  isReorderGuideTarget: boolean;
   totalEpisodes: number;
   isParticipationOpen: boolean;
   participationSupportsHover: boolean;
@@ -1343,6 +1351,20 @@ const StaffMemberRow = memo(function StaffMemberRow({
 }) {
   const departmentColor = getStaffDepartmentColor(member.department, departmentColorIndex);
   const notesInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const interactionRowRef = registerRow(member.id);
+  const memberGuideAnchorRef = useContextualGuideAnchor<HTMLElement>(
+    canEdit && number === 1 && !isPending && !isWorkspaceDragging ? "staff.member-row" : null
+  );
+  const memberReorderGuideAnchorRef = useContextualGuideAnchor<HTMLElement>(
+    canEdit && isReorderGuideTarget && !isPending && !isWorkspaceDragging
+      ? "staff.member-reorder-row"
+      : null
+  );
+  const combinedRowRef = useCallback((element: HTMLElement | null) => {
+    interactionRowRef(element);
+    memberGuideAnchorRef(element);
+    memberReorderGuideAnchorRef(element);
+  }, [interactionRowRef, memberGuideAnchorRef, memberReorderGuideAnchorRef]);
   const handleParticipationOpenChange = useCallback((open: boolean) => {
     onParticipationOpenChange(member.id, open);
   }, [member.id, onParticipationOpenChange]);
@@ -1353,7 +1375,7 @@ const StaffMemberRow = memo(function StaffMemberRow({
 
   return (
     <article
-      ref={registerRow(member.id)}
+      ref={combinedRowRef}
       className={`staff-member-row staff-member-row-grid relative grid items-center gap-1.5 overflow-visible p-1.5 text-center transition workspace-row workspace-border ${showBottomBorder ? "border-b" : ""} ${isSelected ? "rounded-[var(--radius-selection)] neon-selected ring-2 ring-inset ring-field-primary/50" : ""} ${isDragging ? "rounded-[var(--radius-selection)] scale-[0.995] opacity-45" : ""} ${isPending ? "cursor-wait" : ""}`}
       aria-label={`${number}번 스탭`}
       data-staff-member-id={member.id}

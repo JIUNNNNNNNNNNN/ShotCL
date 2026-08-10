@@ -122,6 +122,7 @@ import { useDailyPlanDocumentOrientation } from "@/hooks/useDailyPlanDocumentOri
 import { useAutosave } from "@/hooks/useAutosave";
 import {
   useAutoContextualGuide,
+  useContextualGuideAnchor,
   useContextualGuideBlocker
 } from "@/components/guides/ContextualGuideProvider";
 
@@ -592,6 +593,70 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       setActiveDragSource((current) => current === "actor" ? null : current);
     }
   });
+  const timetableInteractionGuideRowKey = useMemo(() => {
+    if (!canManageTimetable) return null;
+    const guideRow = timetableRows.find((row) => (
+      row.type === "scene"
+      && Boolean(row.item.sourceSceneId || row.item.sceneNumber.trim())
+      && (normalizeSceneCutCount(row.item.cutCount) ?? 0) > 0
+    ));
+    return guideRow ? getEditorTimetableRowKey(guideRow) : null;
+  }, [canManageTimetable, timetableRows]);
+  const timetableInteractionGuideAnchorRef = useContextualGuideAnchor<HTMLTableRowElement>(
+    timetableInteractionGuideRowKey ? "daily-plan.timetable-row" : null
+  );
+  const timetableReorderGuideRowKey = canManageTimetable && timetableRows.length >= 2
+    ? getEditorTimetableRowKey(timetableRows[0])
+    : null;
+  const timetableReorderGuideAnchorRef = useContextualGuideAnchor<HTMLTableRowElement>(
+    timetableReorderGuideRowKey ? "daily-plan.timetable-reorder-row" : null
+  );
+  const timetableInteractionGuideRowRef = useCallback((element: HTMLTableRowElement | null) => {
+    if (!timetableInteractionGuideRowKey) return;
+    timetableInteraction.registerRow(timetableInteractionGuideRowKey)(element);
+    timetableInteractionGuideAnchorRef(element);
+  }, [timetableInteraction.registerRow, timetableInteractionGuideAnchorRef, timetableInteractionGuideRowKey]);
+  const timetableReorderGuideRowRef = useCallback((element: HTMLTableRowElement | null) => {
+    if (!timetableReorderGuideRowKey) return;
+    timetableInteraction.registerRow(timetableReorderGuideRowKey)(element);
+    timetableReorderGuideAnchorRef(element);
+  }, [timetableInteraction.registerRow, timetableReorderGuideAnchorRef, timetableReorderGuideRowKey]);
+  const timetableCombinedGuideRowRef = useCallback((element: HTMLTableRowElement | null) => {
+    if (!timetableInteractionGuideRowKey || timetableInteractionGuideRowKey !== timetableReorderGuideRowKey) return;
+    timetableInteraction.registerRow(timetableInteractionGuideRowKey)(element);
+    timetableInteractionGuideAnchorRef(element);
+    timetableReorderGuideAnchorRef(element);
+  }, [
+    timetableInteraction.registerRow,
+    timetableInteractionGuideAnchorRef,
+    timetableInteractionGuideRowKey,
+    timetableReorderGuideAnchorRef,
+    timetableReorderGuideRowKey
+  ]);
+  const getTimetableInteractionRowRef = useCallback((rowKey: string) => {
+    const isContextGuideRow = rowKey === timetableInteractionGuideRowKey;
+    const isReorderGuideRow = rowKey === timetableReorderGuideRowKey;
+    if (isContextGuideRow && isReorderGuideRow) return timetableCombinedGuideRowRef;
+    if (isContextGuideRow) return timetableInteractionGuideRowRef;
+    if (isReorderGuideRow) return timetableReorderGuideRowRef;
+    return timetableInteraction.registerRow(rowKey);
+  }, [
+    timetableCombinedGuideRowRef,
+    timetableInteraction.registerRow,
+    timetableInteractionGuideRowKey,
+    timetableInteractionGuideRowRef,
+    timetableReorderGuideRowKey,
+    timetableReorderGuideRowRef
+  ]);
+  const actorInteractionGuideRowKey = canManageTimetable ? actorRowKeys[0] ?? null : null;
+  const actorInteractionGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>(
+    actorInteractionGuideRowKey ? "daily-plan.actor-row" : null
+  );
+  const actorInteractionGuideRowRef = useCallback((element: HTMLDivElement | null) => {
+    if (!actorInteractionGuideRowKey) return;
+    actorInteraction.registerRow(actorInteractionGuideRowKey)(element);
+    actorInteractionGuideAnchorRef(element);
+  }, [actorInteraction.registerRow, actorInteractionGuideAnchorRef, actorInteractionGuideRowKey]);
   const sceneLocationOptions = useMemo(
     () => buildSceneLocationOptions(sceneListItems),
     [sceneListItems]
@@ -2205,7 +2270,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     return (
                       <tr
                         key={meal.id}
-                        ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
+                        ref={getTimetableInteractionRowRef(rowKey) as React.Ref<HTMLTableRowElement>}
                         className={`daily-plan-timetable-row daily-plan-timetable-row--event bg-field-soft align-middle ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                         data-selected={isSelected ? "true" : undefined}
                         data-dragging={isDragging ? "true" : undefined}
@@ -2256,7 +2321,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   return (
                     <tr
                       key={scene.id}
-                      ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
+                      ref={getTimetableInteractionRowRef(rowKey) as React.Ref<HTMLTableRowElement>}
                       className={`daily-plan-timetable-row daily-plan-timetable-row--scene align-middle ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                       data-selected={isSelected ? "true" : undefined}
                       data-dragging={isDragging ? "true" : undefined}
@@ -2417,7 +2482,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   return (
                     <div
                       key={person.id}
-                      ref={actorInteraction.registerRow(rowKey) as React.Ref<HTMLDivElement>}
+                      ref={rowKey === actorInteractionGuideRowKey
+                        ? actorInteractionGuideRowRef
+                        : actorInteraction.registerRow(rowKey) as React.Ref<HTMLDivElement>}
                       className={`grid w-full min-w-0 max-w-full items-center gap-2 rounded-[var(--radius-card)] border p-2 text-center transition-colors md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] ${
                         isSelected
                           ? "border-field-primary bg-field-primary/10"

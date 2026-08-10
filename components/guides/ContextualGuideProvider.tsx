@@ -13,7 +13,7 @@ import {
   type RefCallback
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, HelpCircle, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, HelpCircle, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
 import {
@@ -28,6 +28,24 @@ import {
   type ContextualGuideId,
   type ContextualGuidePlacement
 } from "@/lib/contextualGuides";
+import {
+  INTERACTION_GUIDES,
+  canUseInteractionGuide,
+  getInteractionGuideIdsForPage,
+  getInteractionGuideInputMode,
+  getInteractionGuideVariant,
+  type ContextualInteractionGuideDefinition,
+  type ContextualInteractionGuideId,
+  type ContextualInteractionGuideVariant,
+  type InteractionGuideInputMode
+} from "@/lib/contextualInteractionGuides";
+import { InteractionDemo } from "@/components/guides/InteractionDemo";
+import {
+  moveInteractionGuideSession,
+  skipUnavailableInteractionGuideSteps,
+  startInteractionGuideSession,
+  type InteractionGuideSession
+} from "@/lib/contextualInteractionGuideState";
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { resolveDismissedProjectOwnerId } from "@/lib/projectAccess/dismissedProjects";
 import {
@@ -43,6 +61,16 @@ type ActiveGuide = {
   source: ContextualGuideRequestSource;
   anchorKey?: ContextualGuideAnchorKey;
   anchor?: HTMLElement;
+};
+
+type ResolvedInteractionGuide = {
+  definition: ContextualInteractionGuideDefinition;
+  variant: ContextualInteractionGuideVariant;
+  anchor: HTMLElement;
+};
+
+type ActiveInteractionSession = InteractionGuideSession<ResolvedInteractionGuide> & {
+  pointerMode: InteractionGuideInputMode;
 };
 
 type GuideContextValue = {
@@ -61,6 +89,10 @@ type GuideContextValue = {
   dismissActiveGuide: () => void;
   registerBlocker: (key: string, blocked: boolean) => void;
   getReplayGuides: () => ContextualGuideDefinition[];
+  activeInteractionGuideId: ContextualInteractionGuideId | null;
+  getInteractionGuideCount: () => number;
+  startInteractionGuide: () => boolean;
+  closeInteractionGuide: () => void;
 };
 
 const ContextualGuideContext = createContext<GuideContextValue | null>(null);
@@ -90,6 +122,7 @@ export function ContextualGuideProvider({
   const storageKeyRef = useRef("");
   const pendingCompletionTokensRef = useRef(new Set<string>());
   const [activeGuide, setActiveGuide] = useState<ActiveGuide | null>(null);
+  const [interactionSession, setInteractionSession] = useState<ActiveInteractionSession | null>(null);
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [readinessVersion, setReadinessVersion] = useState(0);
 
@@ -109,6 +142,7 @@ export function ContextualGuideProvider({
     completedRef.current = new Set();
     activeGuideRef.current = null;
     setActiveGuide(null);
+    setInteractionSession(null);
     setPersistenceReady(false);
 
     void resolveGuideUserNamespace(userNamespace).then((namespace) => {
@@ -135,8 +169,15 @@ export function ContextualGuideProvider({
     routeInteractionRef.current = false;
     activeGuideRef.current = null;
     setActiveGuide(null);
+    setInteractionSession(null);
     setReadinessVersion((current) => current + 1);
   }, [routeKey]);
+
+  useEffect(() => {
+    // A permission change (including Key staff promotion/demotion) rebuilds the
+    // available manual tour from Help instead of keeping a stale step snapshot.
+    setInteractionSession(null);
+  }, [role]);
 
   const registerAnchor = useCallback((key: ContextualGuideAnchorKey, element: HTMLElement | null) => {
     if (!element) return () => undefined;
@@ -208,6 +249,9 @@ export function ContextualGuideProvider({
       const target = event.target instanceof Node ? event.target : null;
       if (!active || !target) return;
       const insideGuide = target instanceof Element && Boolean(target.closest("[data-contextual-guide]"));
+      // Opening Help is an explicit switch between guide modes, not evidence
+      // that the current first-use message was learned.
+      if (target instanceof Element && target.closest(".contextual-guide-help")) return;
       if (MAIN_INTRO_GUIDE_ID_SET.has(active.id) && (!persistentShell || !insideGuide)) {
         acknowledgeActiveGuide(active.id);
         return;
@@ -253,6 +297,10 @@ export function ContextualGuideProvider({
     source: ContextualGuideRequestSource = "feature",
     preferredAnchor?: HTMLElement | null
   ) => {
+    // A Help-launched interaction tour owns the coach surface until the user
+    // finishes or closes it. Automatic/feature guides may resume afterwards,
+    // but must never replace a manual step mid-tour.
+    if (interactionSession) return false;
     const definition = CONTEXTUAL_GUIDES[id];
     if (
       !definition
@@ -286,10 +334,11 @@ export function ContextualGuideProvider({
     }
 
     const nextGuide = { id, source, anchorKey, anchor } satisfies ActiveGuide;
+    setInteractionSession(null);
     activeGuideRef.current = nextGuide;
     setActiveGuide(nextGuide);
     return true;
-  }, [page, persistenceReady, persistentShell, role]);
+  }, [interactionSession, page, persistenceReady, persistentShell, role]);
 
   const registerBlocker = useCallback((key: string, blocked: boolean) => {
     const changed = blocked
@@ -299,6 +348,7 @@ export function ContextualGuideProvider({
     if (blocked) blockersRef.current.add(key);
     else blockersRef.current.delete(key);
     if (blocked && activeGuideRef.current) dismissActiveGuide();
+    if (blocked) setInteractionSession(null);
     setReadinessVersion((current) => current + 1);
   }, [dismissActiveGuide]);
 
@@ -312,6 +362,104 @@ export function ContextualGuideProvider({
       return Boolean(getVisibleGuideAnchor(anchorsRef.current.get(anchorKey)));
     }), [page, persistenceReady, persistentShell, readinessVersion, role]);
 
+  const resolveInteractionGuides = useCallback(({
+    allowTransientShellDrawer = false
+  }: {
+    allowTransientShellDrawer?: boolean;
+  } = {}) => {
+    if (!persistenceReady || !page || typeof window === "undefined") return [];
+    const onlyTransientShellDrawerBlocks = allowTransientShellDrawer
+      && blockersRef.current.size === 1
+      && blockersRef.current.has("project-shell-drawer");
+    if ((!onlyTransientShellDrawerBlocks && blockersRef.current.size > 0)
+      || hasVisibleInteractiveOverlay({ ignoreProjectShellDrawer: allowTransientShellDrawer })) {
+      return [];
+    }
+    const pointerMode = getInteractionGuideInputMode(
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches
+    );
+    return getInteractionGuideIdsForPage(page).flatMap((id) => {
+      const definition = INTERACTION_GUIDES[id];
+      if (!definition || !canUseInteractionGuide(definition, role)) return [];
+      const variant = getInteractionGuideVariant(definition, pointerMode);
+      if (!variant) return [];
+      const anchorKey = persistentShell
+        ? definition.anchor
+        : definition.compactAnchor ?? definition.anchor;
+      const anchor = allowTransientShellDrawer
+        ? getPotentialInteractionGuideAnchor(anchorsRef.current.get(anchorKey))
+        : getVisibleGuideAnchor(anchorsRef.current.get(anchorKey));
+      return anchor ? [{ definition, variant, anchor }] : [];
+    });
+  }, [page, persistenceReady, persistentShell, readinessVersion, role]);
+
+  const getInteractionGuideCount = useCallback(
+    () => resolveInteractionGuides({ allowTransientShellDrawer: true }).length,
+    [resolveInteractionGuides]
+  );
+
+  const closeInteractionGuide = useCallback(() => {
+    setInteractionSession(null);
+  }, []);
+
+  const startInteractionGuide = useCallback(() => {
+    const steps = resolveInteractionGuides();
+    if (steps.length === 0) return false;
+    const pointerMode = getInteractionGuideInputMode(
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches
+    );
+    // 상세 동작 가이드는 기존 first-use completion과 완전히 분리된 수동 세션입니다.
+    dismissActiveGuide();
+    const session = startInteractionGuideSession(steps);
+    setInteractionSession(session ? { ...session, pointerMode } : null);
+    return true;
+  }, [dismissActiveGuide, resolveInteractionGuides]);
+
+  const moveInteractionGuide = useCallback((direction: -1 | 1) => {
+    setInteractionSession((current) => {
+      if (!current) return null;
+      const next = moveInteractionGuideSession(current, direction);
+      return next.index === current.index ? current : { ...current, index: next.index };
+    });
+  }, []);
+
+  const skipUnavailableInteractionGuide = useCallback(() => {
+    setInteractionSession((current) => {
+      if (!current) return null;
+      const next = skipUnavailableInteractionGuideSteps(
+        current,
+        (step) => isVisibleGuideAnchor(step.anchor)
+      );
+      return next ? { ...current, index: next.index } : null;
+    });
+  }, []);
+
+  const activeInteractionStep = interactionSession?.steps[interactionSession.index] ?? null;
+
+  useEffect(() => {
+    if (!activeInteractionStep || isVisibleGuideAnchor(activeInteractionStep.anchor)) return;
+    skipUnavailableInteractionGuide();
+  }, [activeInteractionStep, readinessVersion, skipUnavailableInteractionGuide]);
+
+  useEffect(() => {
+    if (!interactionSession) return undefined;
+    const closeIfProductOverlayOpened = () => {
+      window.setTimeout(() => {
+        if (hasVisibleInteractiveOverlay()) setInteractionSession(null);
+      }, 0);
+    };
+    document.addEventListener("click", closeIfProductOverlayOpened, true);
+    document.addEventListener("contextmenu", closeIfProductOverlayOpened, true);
+    document.addEventListener("keydown", closeIfProductOverlayOpened, true);
+    document.addEventListener("pointerup", closeIfProductOverlayOpened, true);
+    return () => {
+      document.removeEventListener("click", closeIfProductOverlayOpened, true);
+      document.removeEventListener("contextmenu", closeIfProductOverlayOpened, true);
+      document.removeEventListener("keydown", closeIfProductOverlayOpened, true);
+      document.removeEventListener("pointerup", closeIfProductOverlayOpened, true);
+    };
+  }, [interactionSession]);
+
   const contextValue = useMemo<GuideContextValue>(() => ({
     role,
     persistentShell,
@@ -323,12 +471,18 @@ export function ContextualGuideProvider({
     completeGuide,
     dismissActiveGuide,
     registerBlocker,
-    getReplayGuides
+    getReplayGuides,
+    activeInteractionGuideId: activeInteractionStep?.definition.id ?? null,
+    getInteractionGuideCount,
+    startInteractionGuide,
+    closeInteractionGuide
   }), [
+    activeInteractionStep?.definition.id,
     activeGuide?.id,
     completeGuide,
     dismissActiveGuide,
     getReplayGuides,
+    getInteractionGuideCount,
     persistenceReady,
     persistentShell,
     readinessVersion,
@@ -336,7 +490,9 @@ export function ContextualGuideProvider({
     registerBlocker,
     isGuideCompleted,
     requestGuide,
-    role
+    role,
+    startInteractionGuide,
+    closeInteractionGuide
   ]);
 
   return (
@@ -351,6 +507,19 @@ export function ContextualGuideProvider({
           onCancel={() => dismissActiveGuide(activeGuide.id)}
           onExitStart={() => learnActiveGuide(activeGuide.id)}
           onExitComplete={() => dismissActiveGuide(activeGuide.id)}
+        />,
+        document.body
+      ) : null}
+      {activeInteractionStep && interactionSession && typeof document !== "undefined" ? createPortal(
+        <ContextualInteractionGuideCoach
+          step={activeInteractionStep}
+          index={interactionSession.index}
+          count={interactionSession.steps.length}
+          pointerMode={interactionSession.pointerMode}
+          onPrevious={() => moveInteractionGuide(-1)}
+          onNext={() => moveInteractionGuide(1)}
+          onClose={closeInteractionGuide}
+          onUnavailable={skipUnavailableInteractionGuide}
         />,
         document.body
       ) : null}
@@ -406,11 +575,21 @@ export function ContextualGuideHelpButton({
   onBeforeReplay?: () => void;
   onReplayGuide?: (id: ContextualGuideId) => boolean;
 } = {}) {
-  const { getReplayGuides, requestGuide, readinessVersion } = useContextualGuide();
+  const {
+    getReplayGuides,
+    requestGuide,
+    readinessVersion,
+    getInteractionGuideCount,
+    startInteractionGuide
+  } = useContextualGuide();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const replayTimerRef = useRef<number | null>(null);
   const guides = useMemo(() => getReplayGuides(), [getReplayGuides, readinessVersion]);
+  // Accordion/collapsible content can become visible without remounting its
+  // registered anchor. Re-evaluate on every Help render (including opening the
+  // menu) so the manual step count always reflects what is visible right now.
+  const interactionGuideCount = getInteractionGuideCount();
 
   useEffect(() => () => {
     if (replayTimerRef.current !== null) window.clearTimeout(replayTimerRef.current);
@@ -432,10 +611,10 @@ export function ContextualGuideHelpButton({
     };
   }, [open]);
 
-  if (guides.length === 0) return null;
+  if (guides.length === 0 && interactionGuideCount === 0) return null;
 
   return (
-    <div ref={containerRef} className="contextual-guide-help no-print">
+    <div ref={containerRef} className="contextual-guide-help no-print" data-contextual-guide>
       <button
         type="button"
         className="contextual-guide-help__trigger"
@@ -450,6 +629,9 @@ export function ContextualGuideHelpButton({
       </button>
       {open ? (
         <div role="menu" aria-label="현재 페이지 도움말" className="contextual-guide-help__menu">
+          {guides.length > 0 ? (
+            <p className="contextual-guide-help__label" role="presentation">페이지 안내</p>
+          ) : null}
           {guides.map((guide) => (
             <button
               key={guide.id}
@@ -472,9 +654,217 @@ export function ContextualGuideHelpButton({
               {guide.replayLabel}
             </button>
           ))}
+          {interactionGuideCount > 0 ? (
+            <>
+              {guides.length > 0 ? <span className="contextual-guide-help__divider" role="separator" /> : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="contextual-guide-help__interaction"
+                onClick={() => {
+                  setOpen(false);
+                  if (replayTimerRef.current !== null) window.clearTimeout(replayTimerRef.current);
+                  onBeforeReplay?.();
+                  replayTimerRef.current = window.setTimeout(() => {
+                    replayTimerRef.current = null;
+                    startInteractionGuide();
+                  }, onBeforeReplay ? 220 : 0);
+                }}
+              >
+                <span>동작 가이드</span>
+                <span aria-label={`${interactionGuideCount}개`}>· {interactionGuideCount}</span>
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ContextualInteractionGuideCoach({
+  step,
+  index,
+  count,
+  pointerMode,
+  onPrevious,
+  onNext,
+  onClose,
+  onUnavailable
+}: {
+  step: ResolvedInteractionGuide;
+  index: number;
+  count: number;
+  pointerMode: InteractionGuideInputMode;
+  onPrevious: () => void;
+  onNext: () => void;
+  onClose: () => void;
+  onUnavailable: () => void;
+}) {
+  const coachRef = useRef<HTMLElement | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+  const closingRef = useRef(false);
+  const [closing, setClosing] = useState(false);
+  const [position, setPosition] = useState<GuidePosition | null>(null);
+  const titleId = `interaction-guide-title-${step.definition.id.replaceAll(".", "-")}`;
+  const descriptionId = `interaction-guide-description-${step.definition.id.replaceAll(".", "-")}`;
+  const isLast = index === count - 1;
+
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(onClose, 130);
+  }, [onClose]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frame = window.requestAnimationFrame(() => coachRef.current?.focus({ preventScroll: true }));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      previouslyFocused?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    let frame = 0;
+    const updatePosition = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const coach = coachRef.current;
+        if (!coach) return;
+        if (!isVisibleGuideAnchor(step.anchor)) {
+          onUnavailable();
+          return;
+        }
+        const nextPosition = calculateAnchorGuidePosition(
+          step.anchor,
+          coach,
+          step.definition.preferredPlacement ?? "auto"
+        );
+        setPosition((current) => isSameGuidePosition(current, nextPosition) ? current : nextPosition);
+      });
+    };
+    updatePosition();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updatePosition);
+    if (coachRef.current) resizeObserver?.observe(coachRef.current);
+    resizeObserver?.observe(step.anchor);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    window.visualViewport?.addEventListener("resize", updatePosition);
+    window.visualViewport?.addEventListener("scroll", updatePosition);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.visualViewport?.removeEventListener("resize", updatePosition);
+      window.visualViewport?.removeEventListener("scroll", updatePosition);
+    };
+  }, [onUnavailable, step.anchor, step.definition.preferredPlacement]);
+
+  useEffect(() => {
+    const anchor = step.anchor;
+    const previousDescription = anchor.getAttribute("aria-describedby");
+    const descriptionIds = new Set(previousDescription?.split(/\s+/u).filter(Boolean) ?? []);
+    descriptionIds.add(descriptionId);
+    anchor.setAttribute("aria-describedby", Array.from(descriptionIds).join(" "));
+    anchor.setAttribute("data-contextual-interaction-active-anchor", "true");
+    return () => {
+      anchor.removeAttribute("data-contextual-interaction-active-anchor");
+      if (previousDescription) anchor.setAttribute("aria-describedby", previousDescription);
+      else anchor.removeAttribute("aria-describedby");
+    };
+  }, [descriptionId, step.anchor]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      requestClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [requestClose]);
+
+  const presentation = position?.presentation ?? "anchor";
+  const style = position && presentation !== "bottom-coach" ? {
+    left: `${position.left}px`,
+    top: `${position.top}px`,
+    "--contextual-guide-caret-offset": position.caretOffset === undefined
+      ? undefined
+      : `${position.caretOffset}px`
+  } as CSSProperties : undefined;
+
+  return (
+    <aside
+      ref={coachRef}
+      tabIndex={-1}
+      data-contextual-guide
+      data-contextual-interaction-guide
+      data-guide-page={step.definition.page}
+      data-pointer-mode={pointerMode}
+      data-closing={closing ? "true" : "false"}
+      data-positioned={position ? "true" : "false"}
+      data-presentation={presentation}
+      data-side={position?.side}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      className="contextual-interaction-guide no-print"
+      style={style}
+    >
+      {presentation === "anchor" ? (
+        <span className="contextual-interaction-guide__caret" aria-hidden />
+      ) : null}
+      <header className="contextual-interaction-guide__header">
+        <h2 id={titleId}>{step.variant.title}</h2>
+        <button
+          type="button"
+          className="contextual-interaction-guide__close"
+          aria-label="동작 가이드 닫기"
+          onClick={requestClose}
+        >
+          <X aria-hidden />
+        </button>
+      </header>
+      <div className="contextual-interaction-guide__body">
+        <p id={descriptionId}>{step.variant.description}</p>
+        {step.variant.detail ? (
+          <p className="contextual-interaction-guide__detail">{step.variant.detail}</p>
+        ) : null}
+        <InteractionDemo
+          type={step.variant.demo}
+          durationMs={step.variant.durationMs}
+          modifierLabel={step.variant.modifierLabel}
+          direction={step.variant.direction}
+        />
+      </div>
+      <footer className="contextual-interaction-guide__footer">
+        <span className="contextual-interaction-guide__count" aria-label={`${count}단계 중 ${index + 1}단계`}>
+          {index + 1} / {count}
+        </span>
+        <div className="contextual-interaction-guide__actions">
+          <button type="button" onClick={onPrevious} disabled={index === 0}>
+            <ChevronLeft aria-hidden />
+            이전
+          </button>
+          <button type="button" className="is-primary" onClick={isLast ? requestClose : onNext}>
+            {isLast ? "완료" : "다음"}
+            {!isLast ? <ChevronRight aria-hidden /> : <Check aria-hidden />}
+          </button>
+        </div>
+      </footer>
+    </aside>
   );
 }
 
@@ -879,8 +1269,32 @@ function getVisibleGuideAnchor(elements: Set<HTMLElement> | undefined) {
   return null;
 }
 
+function getPotentialInteractionGuideAnchor(elements: Set<HTMLElement> | undefined) {
+  if (!elements) return null;
+  for (const element of elements) {
+    if (isPotentialInteractionGuideAnchor(element)) return element;
+  }
+  return null;
+}
+
 function isVisibleGuideAnchor(element: HTMLElement) {
   if (!element.isConnected || element.closest('[inert], [aria-hidden="true"]')) return false;
+  return hasVisibleGuideAnchorGeometry(element);
+}
+
+function isPotentialInteractionGuideAnchor(element: HTMLElement) {
+  if (!element.isConnected) return false;
+  const hiddenAncestor = element.closest<HTMLElement>('[inert], [aria-hidden="true"]');
+  // In compact App Shell mode Help lives inside the navigation drawer, which
+  // temporarily makes the app bar and page content inert. Count those targets
+  // now; the drawer closes before the manual tour resolves its real anchors.
+  if (hiddenAncestor && !hiddenAncestor.matches(
+    ".project-shell__content[inert], .project-shell__app-bar[inert]"
+  )) return false;
+  return hasVisibleGuideAnchorGeometry(element);
+}
+
+function hasVisibleGuideAnchorGeometry(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const style = window.getComputedStyle(element);
   if (rect.width <= 0 || rect.height <= 0 || style.display === "none" || style.visibility === "hidden") {
@@ -894,12 +1308,17 @@ function isVisibleGuideAnchor(element: HTMLElement) {
   return rect.right > left && rect.left < right && rect.bottom > top && rect.top < bottom;
 }
 
-function hasVisibleInteractiveOverlay() {
+function hasVisibleInteractiveOverlay({
+  ignoreProjectShellDrawer = false
+}: {
+  ignoreProjectShellDrawer?: boolean;
+} = {}) {
   const overlays = document.querySelectorAll<HTMLElement>(
     '[role="dialog"], [role="alertdialog"], [role="menu"], [data-memo-popover], [data-weather-region-popover], [data-shooting-order-popover]'
   );
   return Array.from(overlays).some((element) => {
     if (element.hasAttribute("data-contextual-guide") || element.closest(".contextual-guide-help")) return false;
+    if (ignoreProjectShellDrawer && element.classList.contains("project-shell__navigation-drawer")) return false;
     if (element.closest('[inert], [aria-hidden="true"]')) return false;
     const rect = element.getBoundingClientRect();
     const style = window.getComputedStyle(element);

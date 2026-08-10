@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState, type RefCallback } from "react";
 import { Images, Map } from "lucide-react";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
+import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import type { ProgressArchiveMediaAsset } from "@/lib/data/shotMediaArchive";
 import {
   buildProgressMediaGalleryItems,
@@ -24,6 +25,7 @@ type ShotCardProps = {
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
   progressOnly?: boolean;
   isOverheadLoading?: boolean;
+  interactionMediaGuideTarget?: boolean;
 };
 
 /** 컷 중심 현장 진행표 카드입니다. 버튼 클릭은 카드 수정 모달과 분리합니다. */
@@ -34,7 +36,8 @@ export const ShotCard = memo(function ShotCard({
   archiveMedia = [],
   onStatusChange,
   progressOnly = false,
-  isOverheadLoading = false
+  isOverheadLoading = false,
+  interactionMediaGuideTarget = false
 }: ShotCardProps) {
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
@@ -66,6 +69,16 @@ export const ShotCard = memo(function ShotCard({
   const hasStoryboard = storyboardGallery.length > 0;
   const hasOverhead = overheadGallery.length > 0 || hasOverheadDiagram;
   const hasAnyMedia = hasStoryboard || hasOverhead;
+  const interactionMediaGuideCategory = interactionMediaGuideTarget
+    ? storyboardGallery.length >= 2
+      ? "storyboard"
+      : overheadGallery.length + (hasOverheadDiagram ? 1 : 0) >= 2
+        ? "overhead"
+        : null
+    : null;
+  const mediaGalleryGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    interactionMediaGuideCategory ? "progress.media-gallery" : null
+  );
   const [activeGallery, setActiveGallery] = useState<ProgressMediaCategory | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const storyboardGalleryImages = useMemo(
@@ -192,12 +205,18 @@ export const ShotCard = memo(function ShotCard({
               <ProgressMediaPreviewTile
                 label="콘티"
                 items={storyboardGallery}
+                guideAnchorRef={interactionMediaGuideCategory === "storyboard"
+                  ? mediaGalleryGuideAnchorRef
+                  : undefined}
                 onOpen={(event) => openGallery(event, "storyboard")}
               />
               <ProgressMediaPreviewTile
                 label="부감도"
                 items={overheadGallery}
                 diagram={hasOverheadDiagram ? shot.overheadDiagram : null}
+                guideAnchorRef={interactionMediaGuideCategory === "overhead"
+                  ? mediaGalleryGuideAnchorRef
+                  : undefined}
                 onOpen={(event) => openGallery(event, "overhead")}
               />
             </div>
@@ -255,11 +274,13 @@ function ProgressMediaPreviewTile({
   label,
   items,
   diagram,
+  guideAnchorRef,
   onOpen
 }: {
   label: "콘티" | "부감도";
   items: ProgressMediaGalleryItem[];
   diagram?: Shot["overheadDiagram"] | null;
+  guideAnchorRef?: RefCallback<HTMLButtonElement>;
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const firstItem = items[0] ?? null;
@@ -282,6 +303,7 @@ function ProgressMediaPreviewTile({
 
   return (
     <button
+      ref={guideAnchorRef}
       type="button"
       data-no-drag="true"
       onClick={onOpen}
