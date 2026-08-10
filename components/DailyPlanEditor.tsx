@@ -50,6 +50,17 @@ import {
   resolveAllocatedCutNumbers
 } from "@/lib/dailyPlan/cutAllocation";
 import {
+  SPLIT_SHOOTING_ORDER_ERROR,
+  appendRemainingShootingOrderCuts,
+  formatShootingOrderForDraft,
+  formatShootingOrderForOutput,
+  getShootingOrderCutsMissingFromSelection,
+  getShootingOrderValidation,
+  isShootingOrderDraftAllowed,
+  normalizeShootingOrder,
+  sanitizeShootingOrderInput
+} from "@/lib/dailyPlan/shootingOrder";
+import {
   DAILY_PLAN_DAY_NIGHT_OPTIONS,
   normalizeDailyPlanDayNight,
   resolveTimetableDayNightFromScene
@@ -503,6 +514,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   );
   const isSavingRef = useRef(false);
   const dailyPlanUpdatedAtRef = useRef<string | null>(initialPlan?.updatedAt ?? null);
+  const pendingMultiRoundEnableSceneIdRef = useRef<string | null>(null);
   const dailyPlanAutosaveSaveNowRef = useRef<(
     snapshot: DailyPlanAutosaveSnapshot
   ) => Promise<boolean>>(() => Promise.resolve(true));
@@ -593,6 +605,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       setActiveDragSource((current) => current === "actor" ? null : current);
     }
   });
+  useEffect(() => {
+    if (!openCutSelectorSceneId) return;
+    const activeSceneStillExists = scenes.some((scene) => (
+      scene.id === openCutSelectorSceneId && scene.selectedCutNumbers !== null
+    ));
+    if (!activeSceneStillExists) {
+      if (pendingMultiRoundEnableSceneIdRef.current === openCutSelectorSceneId) {
+        pendingMultiRoundEnableSceneIdRef.current = null;
+      }
+      setOpenCutSelectorSceneId(null);
+    }
+  }, [openCutSelectorSceneId, scenes]);
   const timetableInteractionGuideRowKey = useMemo(() => {
     if (!canManageTimetable) return null;
     const guideRow = timetableRows.find((row) => (
@@ -1115,6 +1139,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           dayNight: "",
           subject: "",
           cutCount: "",
+          shootingOrder: "",
           cuts: []
         };
       }
@@ -1209,6 +1234,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   function enableMultiRoundShooting(rowKey: string) {
     const sceneId = getSceneIdFromTimetableRowKey(rowKey);
     if (!sceneId) return;
+    pendingMultiRoundEnableSceneIdRef.current = sceneId;
     setScenes((current) => current.map((scene) => (
       scene.id === sceneId
         && (scene.sourceSceneId || scene.sceneNumber.trim())
@@ -1217,6 +1243,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         : scene
     )));
     setTimetableSceneContextMenu(null);
+    timetableInteraction.clearSelection();
     setOpenCutSelectorSceneId(sceneId);
   }
 
@@ -1224,6 +1251,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     const sceneId = getSceneIdFromTimetableRowKey(rowKey);
     if (!sceneId) return;
     setTimetableSceneContextMenu(null);
+    timetableInteraction.clearSelection();
     setOpenCutSelectorSceneId(sceneId);
   }
 
@@ -2325,6 +2353,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       className={`daily-plan-timetable-row daily-plan-timetable-row--scene align-middle ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                       data-selected={isSelected ? "true" : undefined}
                       data-dragging={isDragging ? "true" : undefined}
+                      data-split-editing={openCutSelectorSceneId === scene.id ? "true" : undefined}
                       style={{ touchAction: "pan-x pan-y", WebkitTouchCallout: "none" }}
                       onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
                       onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
@@ -2377,8 +2406,21 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             assignments={cutAssignments}
                             disabled={!canManageTimetable || totalCuts === 0}
                             isOpen={openCutSelectorSceneId === scene.id}
-                            onOpenChange={(open) => setOpenCutSelectorSceneId(open ? scene.id : null)}
-                            onChange={(value) => updateSceneCutSelection(sceneIndex, value)}
+                            shootingOrder={scene.shootingOrder}
+                            onOpenChange={(open) => {
+                              timetableInteraction.clearSelection();
+                              if (!open && pendingMultiRoundEnableSceneIdRef.current === scene.id) {
+                                pendingMultiRoundEnableSceneIdRef.current = null;
+                                setScenes((current) => current.map((item) => (
+                                  item.id === scene.id ? { ...item, selectedCutNumbers: null } : item
+                                )));
+                              }
+                              setOpenCutSelectorSceneId(open ? scene.id : null);
+                            }}
+                            onChange={(value) => {
+                              pendingMultiRoundEnableSceneIdRef.current = null;
+                              updateSceneCutSelection(sceneIndex, value);
+                            }}
                           />
                         )}
                       </td>
@@ -2420,6 +2462,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         <ShootingOrderField
                           value={scene.shootingOrder}
                           totalCut={scene.cutCount}
+                          allowedCutNumbers={scene.selectedCutNumbers === null ? null : selectedCutNumbers}
                           onChange={(value) => updateScene(sceneIndex, { shootingOrder: value })}
                           ariaLabel={`촬영 행 ${sceneIndex + 1} 촬영 순서`}
                         />
@@ -2676,10 +2719,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             className="w-full max-w-sm rounded-[var(--radius-card)] border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
           >
             <h2 id="multi-round-disable-title" className="text-base font-black text-field-text">
-              다회차 촬영 해제
+              분할 촬영 해제
             </h2>
             <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
-              {formatSceneNumber(pendingDisableMultiRoundScene?.sceneNumber ?? "") || "선택한 Scene"}의 컷 분할 배정을 해제하고 전체 컷 촬영으로 돌아갈까요?
+              {formatSceneNumber(pendingDisableMultiRoundScene?.sceneNumber ?? "") || "선택한 Scene"}의 분할 촬영 설정을 해제하고 전체 컷 촬영으로 돌아갈까요?
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
@@ -3447,42 +3490,64 @@ function normalizeGatheringLocationNameForInput(value: string) {
 function ShootingOrderField({
   value,
   totalCut,
+  allowedCutNumbers,
   onChange,
   ariaLabel
 }: {
   value: string;
   totalCut: string;
+  allowedCutNumbers: number[] | null;
   onChange: (value: string) => void;
   ariaLabel: string;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const initialDraftValue = formatShootingOrderForDraft(value, totalCut);
+  const initialDraftValue = formatShootingOrderForDraft(value, totalCut, allowedCutNumbers);
   const [draftValue, setDraftValue] = useState(initialDraftValue);
   const [draftNumbers, setDraftNumbers] = useState<number[]>(
-    getShootingOrderValidation(value, totalCut).numbers
+    getShootingOrderValidation(value, totalCut, allowedCutNumbers).numbers
   );
+  const [inputWarning, setInputWarning] = useState("");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const draftValueRef = useRef(initialDraftValue);
   const totalCutCount = parseCutCount(totalCut);
-  const savedValidation = getShootingOrderValidation(value, totalCut);
+  const savedValidation = getShootingOrderValidation(value, totalCut, allowedCutNumbers);
   const savedNumbers = savedValidation.numbers;
-  const draftValidation = getShootingOrderValidation(draftValue, totalCut);
+  const draftValidation = getShootingOrderValidation(draftValue, totalCut, allowedCutNumbers);
+  const draftAllowsMoreDigits = isShootingOrderDraftAllowed(
+    draftValue,
+    totalCut,
+    allowedCutNumbers
+  );
+  const isTransientSplitPrefix = allowedCutNumbers !== null
+    && draftValidation.error === SPLIT_SHOOTING_ORDER_ERROR
+    && draftAllowsMoreDigits;
+  const draftError = inputWarning || (isTransientSplitPrefix ? "" : draftValidation.error);
+  const canCommitDraft = !inputWarning && !draftValidation.error;
   const displayValue = savedNumbers.join("-");
   const isInputDisabled = totalCutCount === 0;
 
   function updateDraft(nextValue: string) {
     const sanitized = sanitizeShootingOrderInput(nextValue);
+    if (!isShootingOrderDraftAllowed(sanitized, totalCut, allowedCutNumbers)) {
+      setInputWarning(SPLIT_SHOOTING_ORDER_ERROR);
+      return false;
+    }
+    setInputWarning("");
     draftValueRef.current = sanitized;
     setDraftValue(sanitized);
-    const validation = getShootingOrderValidation(sanitized, totalCut);
+    const validation = getShootingOrderValidation(sanitized, totalCut, allowedCutNumbers);
     setDraftNumbers(validation.numbers);
+    return true;
   }
 
   function commitAndClose() {
-    const validation = getShootingOrderValidation(draftValueRef.current, totalCut);
+    const validation = getShootingOrderValidation(draftValueRef.current, totalCut, allowedCutNumbers);
     setDraftNumbers(validation.numbers);
-    if (validation.error) return;
+    if (validation.error) {
+      setInputWarning(validation.error);
+      return;
+    }
     const normalized = validation.numbers.join("-");
     if (normalized !== value) onChange(normalized);
     setIsOpen(false);
@@ -3490,25 +3555,26 @@ function ShootingOrderField({
   }
 
   function cancelAndClose() {
-    const originalDraft = formatShootingOrderForDraft(value, totalCut);
+    const originalDraft = formatShootingOrderForDraft(value, totalCut, allowedCutNumbers);
     draftValueRef.current = originalDraft;
     setDraftValue(originalDraft);
     setDraftNumbers(savedNumbers);
+    setInputWarning("");
     setIsOpen(false);
   }
 
   function appendRemainingCutsToDraft() {
-    const validation = getShootingOrderValidation(draftValueRef.current, totalCut);
+    const validation = appendRemainingShootingOrderCuts(
+      draftValueRef.current,
+      totalCut,
+      allowedCutNumbers
+    );
     setDraftNumbers(validation.numbers);
-    if (isInputDisabled || validation.error) return;
-    const usedNumbers = new Set(validation.numbers);
-    const remainingNumbers = Array.from(
-      { length: totalCutCount },
-      (_, index) => index + 1
-    ).filter((cutNumber) => !usedNumbers.has(cutNumber));
-    if (remainingNumbers.length > 0) {
-      updateDraft([...validation.numbers, ...remainingNumbers].join(" "));
+    if (isInputDisabled || validation.error) {
+      if (validation.error) setInputWarning(validation.error);
+      return;
     }
+    updateDraft(validation.numbers.join(" "));
   }
 
   function insertAtCursor(text: string) {
@@ -3519,8 +3585,8 @@ function ShootingOrderField({
       : draftValueRef.current.length;
     const end = isInputFocused ? input.selectionEnd ?? start : start;
     const nextValue = `${draftValueRef.current.slice(0, start)}${text}${draftValueRef.current.slice(end)}`;
-    updateDraft(nextValue);
-    if (isInputFocused) window.setTimeout(() => {
+    const didUpdate = updateDraft(nextValue);
+    if (didUpdate && isInputFocused) window.setTimeout(() => {
       input?.setSelectionRange(start + text.length, start + text.length);
     });
   }
@@ -3535,8 +3601,8 @@ function ShootingOrderField({
     if (start === 0 && end === 0) return;
     const deleteStart = start === end ? start - 1 : start;
     const nextValue = `${draftValueRef.current.slice(0, deleteStart)}${draftValueRef.current.slice(end)}`;
-    updateDraft(nextValue);
-    if (isInputFocused) window.setTimeout(() => {
+    const didUpdate = updateDraft(nextValue);
+    if (didUpdate && isInputFocused) window.setTimeout(() => {
       input?.setSelectionRange(deleteStart, deleteStart);
     });
   }
@@ -3552,7 +3618,7 @@ function ShootingOrderField({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, value, totalCut]);
+  }, [allowedCutNumbers, isOpen, value, totalCut]);
 
   return (
     <>
@@ -3568,11 +3634,12 @@ function ShootingOrderField({
         } disabled:cursor-not-allowed disabled:border-field-border disabled:bg-field-disabled disabled:text-field-panel`}
         onClick={() => {
           if (isInputDisabled) return;
-          const normalizedDraft = formatShootingOrderForDraft(value, totalCut);
-          const normalizedNumbers = getShootingOrderValidation(value, totalCut).numbers;
+          const normalizedDraft = formatShootingOrderForDraft(value, totalCut, allowedCutNumbers);
+          const normalizedNumbers = getShootingOrderValidation(value, totalCut, allowedCutNumbers).numbers;
           draftValueRef.current = normalizedDraft;
           setDraftValue(normalizedDraft);
           setDraftNumbers(normalizedNumbers);
+          setInputWarning("");
           setIsOpen(true);
         }}
         disabled={isInputDisabled}
@@ -3614,6 +3681,21 @@ function ShootingOrderField({
               className={`${compactInputClass} min-h-11 w-full text-center text-base`}
               value={draftValue}
               onChange={(event) => updateDraft(event.currentTarget.value)}
+              onPaste={(event) => {
+                const input = event.currentTarget;
+                const start = input.selectionStart ?? draftValueRef.current.length;
+                const end = input.selectionEnd ?? start;
+                const pastedText = event.clipboardData.getData("text");
+                const prospectiveValue = `${draftValueRef.current.slice(0, start)}${pastedText}${draftValueRef.current.slice(end)}`;
+                const validation = getShootingOrderValidation(
+                  prospectiveValue,
+                  totalCut,
+                  allowedCutNumbers
+                );
+                if (!validation.error) return;
+                event.preventDefault();
+                setInputWarning(validation.error);
+              }}
               onKeyDown={(event) => {
                 if (
                   !event.metaKey
@@ -3631,11 +3713,11 @@ function ShootingOrderField({
               }}
               placeholder="예: 4 2 1 3 5"
               aria-label={`${ariaLabel} 값`}
-              aria-invalid={Boolean(draftValidation.error)}
+              aria-invalid={Boolean(draftError)}
             />
             <div className="mt-2 min-h-5" aria-live="polite">
-              {draftValidation.error ? (
-                <p className="text-[11px] font-normal leading-[1.35] text-field-danger">{draftValidation.error}</p>
+              {draftError ? (
+                <p className="text-[11px] font-normal leading-[1.35] text-field-danger">{draftError}</p>
               ) : draftNumbers.length > 0 ? (
                 <p className="break-words text-center text-[11px] font-normal leading-[1.35] text-field-muted [overflow-wrap:anywhere]">
                   {draftNumbers.join("-")}
@@ -3686,7 +3768,7 @@ function ShootingOrderField({
                 className="min-h-10 border border-field-border bg-field-soft px-2 py-2 text-xs font-bold leading-[1.35] text-field-text transition-colors hover:border-field-divider hover:bg-field-hover disabled:cursor-not-allowed disabled:bg-field-disabled disabled:text-field-panel"
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={appendRemainingCutsToDraft}
-                disabled={Boolean(draftValidation.error)}
+                disabled={!canCommitDraft}
               >
                 이후 순서대로
               </button>
@@ -3712,7 +3794,7 @@ function ShootingOrderField({
                 type="button"
                 className="min-h-10 border border-field-primary bg-field-primary px-3 py-2 text-sm font-bold leading-[1.35] text-field-accent-foreground transition-colors hover:bg-field-secondary disabled:cursor-not-allowed disabled:border-field-disabled disabled:bg-field-disabled disabled:text-field-panel"
                 onClick={commitAndClose}
-                disabled={Boolean(draftValidation.error)}
+                disabled={!canCommitDraft}
               >
                 완료
               </button>
@@ -3932,7 +4014,7 @@ function TimetableSceneActionMenu({
               className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
               onClick={onEdit}
             >
-              다회차 촬영 편집
+              분할 촬영 편집
             </button>
             <button
               type="button"
@@ -3940,7 +4022,7 @@ function TimetableSceneActionMenu({
               className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold text-field-danger transition-colors hover:bg-field-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
               onClick={onDisable}
             >
-              다회차 촬영 해제
+              분할 촬영 해제
             </button>
           </>
         ) : (
@@ -3951,7 +4033,7 @@ function TimetableSceneActionMenu({
             className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
             onClick={onEnable}
           >
-            다회차 촬영
+            분할 촬영
           </button>
         )}
       </div>
@@ -3966,6 +4048,7 @@ function SceneCutAllocationSelector({
   assignments,
   disabled,
   isOpen,
+  shootingOrder,
   onOpenChange,
   onChange
 }: {
@@ -3975,10 +4058,12 @@ function SceneCutAllocationSelector({
   assignments: SceneCutAssignmentMap;
   disabled: boolean;
   isOpen: boolean;
+  shootingOrder: string;
   onOpenChange: (open: boolean) => void;
   onChange: (value: number[]) => void;
 }) {
   const [draftValue, setDraftValue] = useState<number[]>(value);
+  const [selectionWarning, setSelectionWarning] = useState("");
   const selectorRef = useRef<HTMLDivElement | null>(null);
   const lastToggledCutRef = useRef<number | null>(null);
   const allCuts = getAllCutNumbers(totalCuts);
@@ -3991,7 +4076,10 @@ function SceneCutAllocationSelector({
   const selectableUnassignedCuts = getRemainingCutNumbers(totalCuts, assignedElsewhere);
 
   useEffect(() => {
-    if (!isOpen) setDraftValue(value);
+    if (!isOpen) {
+      setDraftValue(value);
+      setSelectionWarning("");
+    }
   }, [isOpen, value]);
 
   useEffect(() => {
@@ -4013,28 +4101,46 @@ function SceneCutAllocationSelector({
   function toggleCut(cutNumber: number, shiftKey: boolean) {
     const assignedLabels = assignments.get(cutNumber) ?? [];
     if (assignedLabels.length > 0 && !currentSet.has(cutNumber)) return;
-    setDraftValue((current) => {
-      const next = new Set(current);
-      const last = lastToggledCutRef.current;
-      if (shiftKey && last !== null) {
-        const from = Math.min(last, cutNumber);
-        const to = Math.max(last, cutNumber);
-        const shouldSelect = !next.has(cutNumber);
-        for (let value = from; value <= to; value += 1) {
-          if ((assignments.get(value)?.length ?? 0) > 0 && !next.has(value)) continue;
-          if (shouldSelect) next.add(value);
-          else next.delete(value);
-        }
-      } else if (next.has(cutNumber)) next.delete(cutNumber);
-      else next.add(cutNumber);
-      lastToggledCutRef.current = cutNumber;
-      return [...next].sort((left, right) => left - right);
-    });
+    const next = new Set(draftValue);
+    const last = lastToggledCutRef.current;
+    if (shiftKey && last !== null) {
+      const from = Math.min(last, cutNumber);
+      const to = Math.max(last, cutNumber);
+      const shouldSelect = !next.has(cutNumber);
+      for (let value = from; value <= to; value += 1) {
+        if ((assignments.get(value)?.length ?? 0) > 0 && !next.has(value)) continue;
+        if (shouldSelect) next.add(value);
+        else next.delete(value);
+      }
+    } else if (next.has(cutNumber)) next.delete(cutNumber);
+    else next.add(cutNumber);
+
+    const nextValue = [...next].sort((left, right) => left - right);
+    if (!applyDraftSelection(nextValue)) return;
+    lastToggledCutRef.current = cutNumber;
   }
 
   function finishSelection() {
+    if (!applyDraftSelection(draftValue, true)) return;
     onChange(draftValue);
     onOpenChange(false);
+  }
+
+  function applyDraftSelection(nextValue: number[], requireComplete = false) {
+    const missingOrderCuts = getShootingOrderCutsMissingFromSelection(
+      shootingOrder,
+      totalCuts,
+      nextValue
+    );
+    const removedCuts = new Set(draftValue.filter((cutNumber) => !nextValue.includes(cutNumber)));
+    const removedOrderCut = missingOrderCuts.some((cutNumber) => removedCuts.has(cutNumber));
+    if (removedOrderCut || (requireComplete && missingOrderCuts.length > 0)) {
+      setSelectionWarning("촬영 순서에 포함된 컷입니다. 먼저 촬영 순서에서 제거해주세요.");
+      return false;
+    }
+    setSelectionWarning("");
+    setDraftValue(nextValue);
+    return true;
   }
 
   const displayLabel = formatTimetableCutDisplay(value, totalCuts);
@@ -4072,8 +4178,8 @@ function SceneCutAllocationSelector({
                 <strong className="text-sm text-field-text">{sceneLabel} 촬영 컷</strong>
                 <span className="text-xs font-normal text-field-muted">{draftValue.length}컷 선택</span>
               </div>
-              <p className="mt-1 text-[11px] font-normal leading-[1.4] text-field-subtle">
-                총 {totalCuts} · 현재 {draftValue.length} · 다른 행/회차 {assignedElsewhere.size} · 미배정 {remainingCuts.length}
+              <p className={`mt-1 min-h-4 text-[11px] font-normal leading-[1.4] ${selectionWarning ? "text-field-danger" : "text-field-subtle"}`} aria-live="polite">
+                {selectionWarning || `총 ${totalCuts} · 현재 ${draftValue.length} · 다른 행/회차 ${assignedElsewhere.size} · 미배정 ${remainingCuts.length}`}
               </p>
             </div>
             <div className="grid min-h-0 flex-1 grid-cols-5 gap-1 overflow-y-auto p-2 sm:grid-cols-6">
@@ -4098,9 +4204,9 @@ function SceneCutAllocationSelector({
               })}
             </div>
             <div className="grid grid-cols-3 gap-1 border-t border-field-border p-2">
-              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(allCuts.filter((cutNumber) => !assignedElsewhere.has(cutNumber) || currentSet.has(cutNumber)))}>전체 선택</button>
-              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(selectableUnassignedCuts)}>남은 컷 선택</button>
-              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue([])}>전체 해제</button>
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => applyDraftSelection(allCuts.filter((cutNumber) => !assignedElsewhere.has(cutNumber) || currentSet.has(cutNumber)))}>전체 선택</button>
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => applyDraftSelection(selectableUnassignedCuts)}>남은 컷 선택</button>
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => applyDraftSelection([])}>전체 해제</button>
               <button type="button" className="col-span-1 min-h-10 border border-field-border bg-field-input px-3 text-xs font-bold text-field-subtle hover:bg-field-hover" onClick={() => onOpenChange(false)}>취소</button>
               <button type="button" className="col-span-2 min-h-10 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground hover:bg-field-secondary" onClick={finishSelection}>완료</button>
             </div>
@@ -5338,6 +5444,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     subLocation: sourceSnapshot.subLocation,
     dayNight: sourceSnapshot.dayNight,
     subject: sourceSnapshot.characters,
+    shootingOrder: "",
     cuts: []
   };
   return applyEffectiveCutCount(nextScene, sourceSnapshot.totalCuts, null);
@@ -5646,7 +5753,10 @@ function scenesToShotDrafts(scenes: SceneBlockInput[], locations: DailyPlanLocat
         description: scene.description,
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
-        sceneMemo: encodeSceneMemoMetadata(scene.sceneMemo, normalizeShootingOrder(scene.shootingOrder, scene.cutCount)),
+        sceneMemo: encodeSceneMemoMetadata(
+          scene.sceneMemo,
+          normalizeShootingOrder(scene.shootingOrder, scene.cutCount, scene.selectedCutNumbers)
+        ),
         memo: scene.notes || cut?.memo || "",
         status: "촬영 전"
       };
@@ -5728,8 +5838,9 @@ function cloneScene(scene: SceneBlockInput, fallbackSceneNumber: number): SceneB
   return {
     ...scene,
     id: makeLocalId("scene"),
-    // 다회차 행은 컷 중복 없이 빈 배정으로 복제하고, 일반 행은 일반 상태를 유지합니다.
+    // 분할 행은 컷 중복 없이 빈 배정/빈 순서로 복제하고, 일반 행은 일반 상태를 유지합니다.
     selectedCutNumbers: scene.selectedCutNumbers === null ? null : [],
+    shootingOrder: scene.selectedCutNumbers === null ? scene.shootingOrder : "",
     sceneNumber: scene.sourceSceneId
       ? scene.sceneNumber
       : getNextCutNumber(scene.sceneNumber, fallbackSceneNumber),
@@ -6044,78 +6155,17 @@ function getTimetableValidationMessage(scenes: SceneBlockInput[]) {
   const invalidShootingOrder = scenes
     .map((scene, index) => ({
       label: formatSceneNumber(scene.sceneNumber) || `촬영 행 ${index + 1}`,
-      validation: getShootingOrderValidation(scene.shootingOrder, scene.cutCount)
+      validation: getShootingOrderValidation(
+        scene.shootingOrder,
+        scene.cutCount,
+        scene.selectedCutNumbers
+      )
     }))
     .find((item) => item.validation.error);
 
   return invalidShootingOrder
     ? `${invalidShootingOrder.label} 촬영 순서: ${invalidShootingOrder.validation.error}`
     : "";
-}
-
-type ShootingOrderValue = string | number[] | null | undefined;
-
-function normalizeShootingOrder(value: ShootingOrderValue, totalCut: string) {
-  const validation = getShootingOrderValidation(value, totalCut);
-  return validation.error ? "" : validation.numbers.join("-");
-}
-
-function formatShootingOrderForDisplay(value: ShootingOrderValue, totalCut: string) {
-  const validation = getShootingOrderValidation(value, totalCut);
-  return validation.error
-    ? formatRawShootingOrder(value, "-")
-    : validation.numbers.join("-");
-}
-
-function formatShootingOrderForDraft(value: ShootingOrderValue, totalCut: string) {
-  const validation = getShootingOrderValidation(value, totalCut);
-  return validation.error
-    ? formatRawShootingOrder(value, " ")
-    : validation.numbers.join(" ");
-}
-
-function formatRawShootingOrder(value: ShootingOrderValue, separator: "-" | " ") {
-  const source = Array.isArray(value) ? value.join(" ") : String(value ?? "");
-  return source
-    .replace(/[^0-9,\-\/\s]/g, "")
-    .split(/[-,/\s]+/)
-    .filter(Boolean)
-    .join(separator);
-}
-
-function getShootingOrderValidation(value: ShootingOrderValue, totalCut: string): {
-  numbers: number[];
-  error: string;
-} {
-  const source = (Array.isArray(value) ? value.join(" ") : String(value ?? "")).trim();
-  if (!source) return { numbers: [], error: "" };
-  const count = parseCutCount(totalCut);
-  if (count === 0) {
-    return { numbers: parseShootingOrderTokens(source, 0), error: "총 컷수를 먼저 입력해주세요." };
-  }
-  if (/[^0-9,\-\/\s]/.test(source)) {
-    return { numbers: [], error: "촬영 순서는 숫자만 입력해주세요." };
-  }
-
-  const numbers = parseShootingOrderTokens(source, count);
-
-  if (numbers.length === 0) {
-    return { numbers: [], error: `1부터 ${count}까지의 컷 번호를 입력해주세요.` };
-  }
-  const outOfRange = numbers.find((cutNumber) => (
-    !Number.isInteger(cutNumber) || cutNumber < 1 || cutNumber > count
-  ));
-  if (outOfRange !== undefined) {
-    return {
-      numbers,
-      error: `${outOfRange}은(는) 총 컷수 ${count}의 범위를 벗어납니다.`
-    };
-  }
-  const duplicate = numbers.find((cutNumber, index) => numbers.indexOf(cutNumber) !== index);
-  if (duplicate !== undefined) {
-    return { numbers, error: `컷 ${duplicate}이(가) 중복되었습니다.` };
-  }
-  return { numbers, error: "" };
 }
 
 const sceneShootingOrderPrefix = "[[SHOTCL_SHOOTING_ORDER:";
@@ -6310,7 +6360,11 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
         dayNight: normalizeDailyPlanDayNight(scene.dayNight),
         storyDay: scene.storyDay,
-        shootingOrder: formatShootingOrderForDisplay(scene.shootingOrder, scene.cutCount),
+        shootingOrder: formatShootingOrderForOutput(
+          scene.shootingOrder,
+          scene.cutCount,
+          scene.selectedCutNumbers
+        ),
         notes: scene.notes || cuts[0]?.memo || "",
         subject: scene.subject,
         props: scene.props,
@@ -6378,55 +6432,6 @@ function formatProgressSyncFailure(saved: SaveDailyPlanResult) {
     diagnostic ? `단계/코드: ${diagnostic}.` : "",
     saved.progressSyncError ? `원인: ${saved.progressSyncError}` : ""
   ].filter(Boolean).join(" ");
-}
-
-function sanitizeShootingOrderInput(value: string) {
-  const allowed = value.replace(/[^0-9,\-\/\s]/g, "");
-  const hasTrailingSeparator = /[-,/\s]$/.test(allowed);
-  const normalized = allowed
-    .split(/[-,/\s]+/)
-    .filter(Boolean)
-    .join(" ");
-  return hasTrailingSeparator && normalized ? `${normalized} ` : normalized;
-}
-
-function parseShootingOrderTokens(value: string, totalCut: number) {
-  const hasSeparator = /[-,/\s]/.test(value);
-  if (hasSeparator) {
-    return value.split(/[-,/\s]+/).filter(Boolean).map(Number);
-  }
-  if (totalCut <= 0) {
-    return /^\d+$/.test(value) ? [Number(value)] : [];
-  }
-  return parseCompactShootingOrder(value, totalCut);
-}
-
-function parseCompactShootingOrder(value: string, totalCut: number) {
-  const memo = new Map<number, number[] | null>();
-  const maxTokenLength = String(totalCut).length;
-
-  function parseFrom(index: number): number[] | null {
-    if (index === value.length) return [];
-    if (memo.has(index)) return memo.get(index) ?? null;
-
-    for (let length = Math.min(maxTokenLength, value.length - index); length >= 1; length -= 1) {
-      const token = value.slice(index, index + length);
-      if (token.startsWith("0")) continue;
-      const cutNumber = Number(token);
-      if (cutNumber < 1 || cutNumber > totalCut) continue;
-      const remainder = parseFrom(index + length);
-      if (remainder) {
-        const result = [cutNumber, ...remainder];
-        memo.set(index, result);
-        return result;
-      }
-    }
-
-    memo.set(index, null);
-    return null;
-  }
-
-  return parseFrom(0) ?? [];
 }
 
 function isValidHHMM(value: string) {

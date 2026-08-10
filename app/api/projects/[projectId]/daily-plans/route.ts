@@ -10,6 +10,10 @@ import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import { mergeLatestGatheringPhotoMetadata } from "@/lib/dailyPlan/gatheringPoints";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
 import { decodeDailyPlanMemo, encodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
+import {
+  getSplitShotAllocationSaveError,
+  getSplitShootingOrderSaveError
+} from "@/lib/dailyPlan/shootingOrder";
 import { ProgressShotsSyncError, syncProgressShotsForDailyPlan } from "@/lib/dailyPlan/syncProgressShots.server";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
@@ -138,6 +142,15 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pr
       // 알 수 없는 지역 문자열은 서울 등 임의 지역으로 대체하지 않고 미선택으로 저장합니다.
       memo: encodeDailyPlanMemo(decodeDailyPlanMemo(body.plan.memo))
     };
+    const submittedPrintMeta = decodeDailyPlanMemo(body.plan.memo);
+    const splitConsistencyError = getSplitShootingOrderSaveError(submittedPrintMeta.timetableScenes)
+      || getSplitShotAllocationSaveError(submittedPrintMeta.timetableScenes, body.shots);
+    if (splitConsistencyError) {
+      return NextResponse.json(
+        { ok: false, status: "failed", error: splitConsistencyError },
+        { status: 400 }
+      );
+    }
     if (!body.dailyPlanId && !body.allowDuplicate) {
       const duplicate = await findDuplicateDailyPlan(supabase, projectId, body.plan);
       if (duplicate) {

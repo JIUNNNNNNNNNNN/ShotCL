@@ -75,7 +75,8 @@ test("daily-plan wording stays within the audited feature semantics", () => {
     INTERACTION_GUIDES["daily-plan.interaction-actor-reorder-trash"],
     "coarse"
   );
-  assert.match(rowActions?.description ?? "", /다회차 촬영/u);
+  assert.match(rowActions?.description ?? "", /분할 촬영/u);
+  assert.doesNotMatch(rowActions?.description ?? "", /다회차 촬영/u);
   assert.doesNotMatch(rowActions?.description ?? "", /행 관리/u);
   assert.match(actorMove?.description ?? "", /배우 카드/u);
   assert.doesNotMatch(actorMove?.description ?? "", /부서|팀 카드/u);

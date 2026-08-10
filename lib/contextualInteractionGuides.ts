@@ -219,13 +219,13 @@ export const INTERACTION_GUIDES: Record<
     manualOnly: true,
     variants: {
       fine: {
-        title: "다회차 촬영 메뉴",
-        description: "여러 회차로 나눌 수 있는 촬영 행을 우클릭하면 다회차 촬영 메뉴를 열 수 있습니다.",
+        title: "분할 촬영 메뉴",
+        description: "여러 회차로 나눌 수 있는 촬영 행을 우클릭하면 분할 촬영 메뉴를 열 수 있습니다.",
         demo: "right-click"
       },
       coarse: {
-        title: "다회차 촬영 메뉴",
-        description: "여러 회차로 나눌 수 있는 촬영 행을 약 0.575초 동안 길게 누르면 다회차 촬영 메뉴가 열립니다.",
+        title: "분할 촬영 메뉴",
+        description: "여러 회차로 나눌 수 있는 촬영 행을 약 0.575초 동안 길게 누르면 분할 촬영 메뉴가 열립니다.",
         demo: "long-press",
         durationMs: 575
       }
@@ -241,15 +241,15 @@ export const INTERACTION_GUIDES: Record<
     manualOnly: true,
     variants: {
       fine: {
-        title: "다회차 촬영 배정",
-        description: "한 씬을 여러 회차로 나눠 촬영하려면 행을 우클릭하고 다회차 촬영을 선택하세요.",
-        detail: "10/29는 전체 29컷 중 이번 회차에 10컷을 촬영한다는 뜻입니다.",
+        title: "분할 촬영",
+        description: "한 씬을 여러 회차로 나눠 찍을 때 촬영 행을 우클릭하고 분할 촬영을 선택하세요.",
+        detail: "10/29는 전체 29컷 중 이번 회차에 10컷을 촬영한다는 뜻이며, 선택한 컷만 촬영 순서에 입력할 수 있습니다.",
         demo: "right-click"
       },
       coarse: {
-        title: "다회차 촬영 배정",
-        description: "한 씬을 여러 회차로 나눠 촬영하려면 행을 약 0.575초 길게 누르고 다회차 촬영을 선택하세요.",
-        detail: "10/29는 전체 29컷 중 이번 회차에 10컷을 촬영한다는 뜻입니다.",
+        title: "분할 촬영",
+        description: "한 씬을 여러 회차로 나눠 찍을 때 촬영 행을 약 0.575초 길게 누르고 분할 촬영을 선택하세요.",
+        detail: "10/29는 전체 29컷 중 이번 회차에 10컷을 촬영한다는 뜻이며, 선택한 컷만 촬영 순서에 입력할 수 있습니다.",
         demo: "long-press",
         durationMs: 575
       }

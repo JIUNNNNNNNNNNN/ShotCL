@@ -1820,14 +1820,14 @@ button {
   }
 }
 
-.daily-plan-timetable-row[data-selected="true"] > td {
+.daily-plan-timetable-row:is([data-selected="true"], [data-split-editing="true"]) > td {
   box-shadow:
     inset 0 0 0 9999px var(--accent-neon-soft),
     inset 0 1px var(--accent-neon-border),
     inset 0 -1px var(--accent-neon-border);
 }
 
-.daily-plan-timetable-row[data-selected="true"] > td:first-child {
+.daily-plan-timetable-row:is([data-selected="true"], [data-split-editing="true"]) > td:first-child {
   border-radius: var(--radius-selection) 0 0 var(--radius-selection);
   box-shadow:
     inset 0 0 0 9999px var(--accent-neon-soft),
@@ -1836,7 +1836,7 @@ button {
     inset 0 -1px var(--accent-neon-border);
 }
 
-.daily-plan-timetable-row[data-selected="true"] > td:last-child {
+.daily-plan-timetable-row:is([data-selected="true"], [data-split-editing="true"]) > td:last-child {
   border-radius: 0 var(--radius-selection) var(--radius-selection) 0;
   box-shadow:
     inset 0 0 0 9999px var(--accent-neon-soft),
@@ -1851,13 +1851,13 @@ button {
 }
 
 @media (max-width: 1023px) {
-  .daily-plan-timetable-row[data-selected="true"] {
+  .daily-plan-timetable-row:is([data-selected="true"], [data-split-editing="true"]) {
     border-radius: var(--radius-selection);
     outline: 1px solid var(--accent-neon-border);
     outline-offset: -1px;
   }
 
-  .daily-plan-timetable-row[data-selected="true"] > td {
+  .daily-plan-timetable-row:is([data-selected="true"], [data-split-editing="true"]) > td {
     box-shadow: none;
   }
 }

@@ -9,6 +9,10 @@ import {
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { buildProgressShotDrafts } from "@/lib/dailyPlan/progressShots";
+import {
+  getSplitShotAllocationSaveError,
+  getSplitShootingOrderSaveError
+} from "@/lib/dailyPlan/shootingOrder";
 import { buildDailyPlanDuplicateDraft } from "@/lib/dailyPlan/duplicate";
 import {
   createGatheringPointId,
@@ -835,6 +839,10 @@ function uniqueReferenceIds(values: unknown[]) {
 
 /** 새 일촬표를 만들거나 기존 일촬표를 저장합니다. */
 export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise<SaveDailyPlanResult> {
+  const submittedPrintMeta = decodeDailyPlanMemo(input.plan.memo);
+  const splitConsistencyError = getSplitShootingOrderSaveError(submittedPrintMeta.timetableScenes)
+    || getSplitShotAllocationSaveError(submittedPrintMeta.timetableScenes, input.shots);
+  if (splitConsistencyError) throw new Error(splitConsistencyError);
   const normalizedShots = normalizeDailyPlanShotDrafts(input.shots);
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(input.projectId)}/daily-plans`, {
