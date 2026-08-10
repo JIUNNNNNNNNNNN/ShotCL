@@ -82,6 +82,7 @@ export type DailyPlanTimetableSceneSourceSnapshot = {
   /** 예전 metadata에 없던 값은 decode 시 빈 문자열로 정규화합니다. */
   mainLocation: string;
   subLocation: string;
+  dayNight: string;
   sceneContent: string;
   characters: string;
   totalCuts: number | null;
@@ -485,6 +486,7 @@ function normalizeDailyPlanTimetableSceneSourceSnapshot(
     sceneNumber: normalizeMetaText(value.sceneNumber),
     mainLocation: normalizeMetaText(value.mainLocation),
     subLocation: normalizeMetaText(value.subLocation),
+    dayNight: normalizeMetaText(value.dayNight),
     sceneContent: normalizeMetaText(value.sceneContent),
     characters: normalizeMetaText(value.characters),
     totalCuts: normalizeSceneCutCount(value.totalCuts)

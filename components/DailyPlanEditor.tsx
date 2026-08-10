@@ -51,6 +51,11 @@ import {
   resolveAllocatedCutNumbers
 } from "@/lib/dailyPlan/cutAllocation";
 import {
+  DAILY_PLAN_DAY_NIGHT_OPTIONS,
+  normalizeDailyPlanDayNight,
+  resolveTimetableDayNightFromScene
+} from "@/lib/dailyPlan/dayNight";
+import {
   getDailyPlanLocationAddress as getLocationAddress,
   getDailyPlanManualAddress,
   getDailyPlanSearchAddress,
@@ -305,7 +310,7 @@ type OpenMeteoResponse = {
   code?: string;
 };
 
-const dayNightOptions = ["D", "N"];
+const dayNightOptions = DAILY_PLAN_DAY_NIGHT_OPTIONS;
 const inputClass =
   "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/20 [&::-webkit-date-and-time-value]:text-center";
 
@@ -1011,6 +1016,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           description: "",
           mainLocation: "",
           subLocation: "",
+          dayNight: "",
           subject: "",
           cutCount: "",
           cuts: []
@@ -2200,7 +2206,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           />
                         </div>
                       </td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDailyPlanDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
                         <span className={timetableFieldLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
                         <SceneSourceSelector
@@ -4478,7 +4484,7 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTime
     end: scene.endTime || "",
     runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
     location: formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation),
-    dayNight: normalizeDayNight(scene.dayNight),
+    dayNight: normalizeDailyPlanDayNight(scene.dayNight),
     sceneNumber: formatSceneNumber(scene.sceneNumber),
     totalCut: getSceneTotalCutForPreview(scene),
     cast: getValidSceneCastValue(scene.subject, data.meta.starring),
@@ -4536,13 +4542,6 @@ function formatSceneNumber(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return /^s#/i.test(trimmed) ? trimmed : `S#${trimmed}`;
-}
-
-function normalizeDayNight(value: string) {
-  const normalized = String(value ?? "").trim().toUpperCase();
-  if (normalized === "D" || normalized === "DAY" || normalized === "데이") return "D";
-  if (normalized === "N" || normalized === "NIGHT" || normalized === "나잇") return "N";
-  return "";
 }
 
 function getCastMemberValue(person: Pick<CallSheetPerson, "name" | "role">) {
@@ -5020,6 +5019,7 @@ function createSceneSourceSnapshot(item: ProjectSceneItem): DailyPlanTimetableSc
     sceneNumber: item.sceneNo,
     mainLocation: item.mainLocation,
     subLocation: item.subLocation,
+    dayNight: resolveTimetableDayNightFromScene(item),
     sceneContent: item.sceneContent,
     characters: normalizeSceneCharacters(item.characters),
     totalCuts: item.cutCount
@@ -5070,6 +5070,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     description: sourceSnapshot.sceneContent,
     mainLocation: sourceSnapshot.mainLocation,
     subLocation: sourceSnapshot.subLocation,
+    dayNight: sourceSnapshot.dayNight,
     subject: sourceSnapshot.characters,
     cuts: []
   };
@@ -6037,7 +6038,7 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         mainLocation: scene.mainLocation,
         subLocation: scene.subLocation,
         location: locations.find((location) => location.id === scene.locationId) ?? locations.find((location) => location.name === scene.locationName) ?? null,
-        dayNight: normalizeDayNight(scene.dayNight),
+        dayNight: normalizeDailyPlanDayNight(scene.dayNight),
         storyDay: scene.storyDay,
         shootingOrder: formatShootingOrderForDisplay(scene.shootingOrder, scene.cutCount),
         notes: scene.notes || cuts[0]?.memo || "",
