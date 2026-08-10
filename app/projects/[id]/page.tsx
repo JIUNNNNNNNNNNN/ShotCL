@@ -957,35 +957,16 @@ export default function ProjectDetailPage() {
     setMediaPicker({ shot, type });
   }, []);
 
-  const handleArchivePreview = useCallback((
-    asset: ProgressArchiveMediaAsset,
-    assets: ProgressArchiveMediaAsset[]
-  ) => {
-    const images = assets.map((item) => ({
-      url: item.publicUrl,
-      title: item.title || (item.mediaType === "storyboard" ? "콘티" : "부감도")
-    }));
-    const index = Math.max(0, assets.findIndex((item) => item.id === asset.id));
-    setPreview({
-      url: asset.publicUrl,
-      title: asset.title || (asset.mediaType === "storyboard" ? "콘티" : "부감도"),
-      images,
-      index
-    });
-  }, []);
-
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
       onOpen={setEditingShot}
       onOpenMedia={handleOpenMedia}
-      onImagePreview={handleImagePreview}
       archiveMedia={archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
-      onArchivePreview={handleArchivePreview}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
     />
-  ), [archiveMediaByShotId, handleArchivePreview, handleImagePreview, handleOpenMedia, handleStatusChange, progressOnly]);
+  ), [archiveMediaByShotId, handleOpenMedia, handleStatusChange, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;

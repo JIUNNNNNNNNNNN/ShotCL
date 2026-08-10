@@ -662,6 +662,30 @@ button {
   to { opacity: 1; }
 }
 
+@keyframes progress-gallery-next {
+  from {
+    opacity: 0.45;
+    transform: translateX(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes progress-gallery-previous {
+  from {
+    opacity: 0.45;
+    transform: translateX(-18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @keyframes ui-presence-enter {
   from {
     grid-template-rows: 0fr;
@@ -677,6 +701,14 @@ button {
 }
 
 @layer components {
+  .progress-media-gallery-image[data-direction="next"] {
+    animation: progress-gallery-next 200ms var(--ease-out-native);
+  }
+
+  .progress-media-gallery-image[data-direction="previous"] {
+    animation: progress-gallery-previous 200ms var(--ease-out-native);
+  }
+
   .ui-motion-surface {
     animation: ui-card-enter var(--motion-base) var(--ease-out-native);
   }
@@ -3577,6 +3609,10 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .progress-media-gallery-image {
+    animation: none !important;
+  }
+
   .app-theme :where(
     .ui-motion-surface,
     .ui-motion-menu,

@@ -2,6 +2,11 @@ import { getShotDiagramKey } from "@/lib/data/shotDiagrams";
 import type { DailyPlanTimetableSceneMeta } from "@/lib/dailyPlan/printMeta";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
+import {
+  mergeProgressMediaWithLinkedFallbacks,
+  progressMediaIdentityKey,
+  safeProgressThumbnailUrl
+} from "@/lib/progress/mediaGallery";
 import type {
   ArchiveMediaAssetType,
   OverheadDiagramArchiveItem,
@@ -67,9 +72,17 @@ export function buildProgressArchiveMediaByShotId({
   const sceneIdByNumber = buildUniqueSceneIdByNumber(timetableScenes);
   const stableAssets = new Map<string, ProgressArchiveMediaAsset[]>();
   const legacyAssets = new Map<string, ProgressArchiveMediaAsset[]>();
+  const assetsByCategoryAndUrl = new Map<string, ProgressArchiveMediaAsset[]>();
 
   assets.forEach((asset) => {
-    if (asset.sceneId) appendMedia(stableAssets, mediaLookupKey(asset.sceneId, asset.cutNumber), asset);
+    appendMedia(
+      assetsByCategoryAndUrl,
+      progressMediaIdentityKey(asset.mediaType, asset.publicUrl),
+      asset
+    );
+    if (asset.sceneId && asset.cutNumber > 0) {
+      appendMedia(stableAssets, mediaLookupKey(asset.sceneId, asset.cutNumber), asset);
+    }
 
     const hasDailyPlanScope = Boolean(asset.dailyPlanId && asset.dailyPlanId === dailyPlanId);
     const hasEpisodeScope = Boolean(
@@ -77,7 +90,12 @@ export function buildProgressArchiveMediaByShotId({
       && episodeNumber !== null
       && asset.episodeNumber === episodeNumber
     );
-    if (!asset.sceneId && asset.sceneNumber && (hasDailyPlanScope || hasEpisodeScope)) {
+    if (
+      asset.cutNumber > 0
+      && !asset.sceneId
+      && asset.sceneNumber
+      && (hasDailyPlanScope || hasEpisodeScope)
+    ) {
       appendMedia(legacyAssets, mediaLookupKey(asset.sceneNumber, asset.cutNumber), asset);
     }
   });
@@ -86,19 +104,36 @@ export function buildProgressArchiveMediaByShotId({
   shots.forEach((shot) => {
     const cutNumber = positiveInteger(shot.cutNumber);
     const sceneNumber = normalizeSceneNumber(shot.sceneNumber);
-    if (cutNumber === null || !sceneNumber) return;
-
-    const sourceSceneId = sceneIdByNumber.get(sceneNumber) ?? null;
-    const stableMatch = sourceSceneId
-      ? stableAssets.get(mediaLookupKey(sourceSceneId, cutNumber))
-      : undefined;
-    const legacyMatch = legacyAssets.get(mediaLookupKey(sceneNumber, cutNumber));
-    const matched = stableMatch?.length && legacyMatch?.length
-      ? [...stableMatch, ...legacyMatch]
-      : stableMatch?.length
-        ? stableMatch
-        : legacyMatch;
-    if (matched?.length) result.set(shot.id, matched);
+    let matchedByScene: ProgressArchiveMediaAsset[] = [];
+    if (cutNumber !== null && sceneNumber) {
+      const sourceSceneId = sceneIdByNumber.get(sceneNumber) ?? null;
+      const stableMatch = sourceSceneId
+        ? stableAssets.get(mediaLookupKey(sourceSceneId, cutNumber))
+        : undefined;
+      const legacyMatch = legacyAssets.get(mediaLookupKey(sceneNumber, cutNumber));
+      matchedByScene = stableMatch?.length && legacyMatch?.length
+        ? [...stableMatch, ...legacyMatch]
+        : stableMatch?.length
+          ? stableMatch
+          : legacyMatch ?? [];
+    }
+    const explicitlyLinked = [
+      ...(shot.storyboardImageUrl
+        ? assetsByCategoryAndUrl.get(
+            progressMediaIdentityKey("storyboard", shot.storyboardImageUrl)
+          ) ?? []
+        : []),
+      ...(shot.overheadImageUrl
+        ? assetsByCategoryAndUrl.get(
+            progressMediaIdentityKey("overhead", shot.overheadImageUrl)
+          ) ?? []
+        : [])
+    ];
+    const matched = mergeProgressMediaWithLinkedFallbacks(
+      matchedByScene,
+      explicitlyLinked
+    );
+    if (matched.length) result.set(shot.id, matched);
   });
   return result;
 }
@@ -248,19 +283,19 @@ function normalizeProgressArchiveMediaAsset(
   const cutNumber = positiveInteger(asset.crop.cutNumber ?? asset.cutNo);
   const sceneId = cleanText(asset.crop.sceneId);
   const sceneNumber = normalizeSceneNumber(asset.crop.sceneNumber ?? asset.sceneNo);
-  if (!publicUrl || cutNumber === null || (!sceneId && !sceneNumber)) return [];
+  if (!publicUrl) return [];
 
   return [{
     id: asset.id,
     mediaType: asset.assetType,
     title: cleanText(asset.crop.displayName) || cleanText(asset.crop.title) || asset.filename,
     publicUrl,
-    thumbnailUrl: cleanText(asset.crop.thumbnailUrl) || publicUrl,
+    thumbnailUrl: safeProgressThumbnailUrl(publicUrl, cleanText(asset.crop.thumbnailUrl)),
     dailyPlanId: cleanText(asset.dailyPlanId) || null,
     episodeNumber: positiveInteger(asset.crop.episodeNumber),
     sceneId,
     sceneNumber,
-    cutNumber,
+    cutNumber: cutNumber ?? 0,
     sortOrder: Number.isFinite(asset.sortOrder) ? asset.sortOrder : 0,
     createdAt: asset.createdAt
   }];
