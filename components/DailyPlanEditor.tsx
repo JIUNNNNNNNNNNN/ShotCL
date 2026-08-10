@@ -43,6 +43,14 @@ import {
   isDailyPlanAdditionalScheduleType
 } from "@/lib/dailyPlan/additionalSchedule";
 import {
+  formatCutAllocationLabel,
+  formatCutRanges,
+  getAllCutNumbers,
+  getRemainingCutNumbers,
+  normalizeAllocatedCutNumbers,
+  resolveAllocatedCutNumbers
+} from "@/lib/dailyPlan/cutAllocation";
+import {
   getDailyPlanLocationAddress as getLocationAddress,
   getDailyPlanManualAddress,
   getDailyPlanSearchAddress,
@@ -81,6 +89,10 @@ import {
   resolveEffectiveSceneCutCount,
   sumSceneCutCounts
 } from "@/lib/sceneCutCount";
+import {
+  MAX_DAILY_PLAN_RUNTIME_MINUTES,
+  parseDailyPlanRuntimeMinutesInput
+} from "@/lib/dailyPlan/runtimeMinutes";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanDocument } from "@/components/DailyPlanDocument";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
@@ -139,6 +151,8 @@ type SceneBlockInput = {
   charactersOverride: string | null;
   characterIdsOverride: string[] | null;
   totalCutsOverride: number | null;
+  /** null은 기능 추가 전 legacy 행(전체 컷), 배열은 명시적인 회차별 배정입니다. */
+  selectedCutNumbers: number[] | null;
   sceneNumber: string;
   sceneTitle: string;
   description: string;
@@ -210,6 +224,7 @@ type DailyPlanPreviewScene = {
   costumeMakeup: string;
   sceneMemo: string;
   totalCuts: number | null;
+  cutAllocationLabel: string;
   cuts: DailyPlanPreviewCut[];
 };
 
@@ -309,7 +324,8 @@ const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-0.5
 const staffDepartmentGridClass =
   "daily-plan-staff-department-grid grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
 
-const maxRuntimeMinutes = 1440;
+const maxRuntimeMinutes = MAX_DAILY_PLAN_RUNTIME_MINUTES;
+const runtimeInputMaxLength = String(MAX_DAILY_PLAN_RUNTIME_MINUTES).length;
 const CSS_PIXELS_PER_INCH = 96;
 const MILLIMETERS_PER_INCH = 25.4;
 const DAILY_PLAN_PRINT_PAGE = {
@@ -345,7 +361,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const router = useRouter();
   const documentOrientation = useDailyPlanDocumentOrientation();
   const { role: projectAccessRole } = useProjectAccess();
-  const { upsertDailyPlan } = useProjectWorkspace();
+  const { dailyPlans: projectDailyPlans, upsertDailyPlan } = useProjectWorkspace();
   // 공유 프로젝트 권한은 ProjectAccessGate가 project별로 즉시 갱신하는 role을 기준으로 합니다.
   const canManageTimetable = (projectAccessRole ?? project.accessRole) !== "progress";
   const initialEditorState = useMemo(() => {
@@ -547,6 +563,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sceneLocationAssignments = useMemo(
     () => buildSceneLocationAssignments(locations),
     [locations]
+  );
+  const otherRoundCutAssignments = useMemo(
+    () => buildOtherRoundCutAssignments(projectDailyPlans, dailyPlanId),
+    [dailyPlanId, projectDailyPlans]
   );
   const effectivePrintMeta = useMemo(
     () => deriveDailyPlanHeadcount({
@@ -985,6 +1005,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           charactersOverride: null,
           characterIdsOverride: null,
           totalCutsOverride: null,
+          selectedCutNumbers: [],
           sceneNumber: "",
           sceneTitle: "",
           description: "",
@@ -1055,6 +1076,22 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function updateSceneCutCountOverride(sceneIndex: number, value: string) {
+    const requestedCount = value.trim()
+      ? normalizeSceneCutCount(value)
+      : (() => {
+          const scene = scenes[sceneIndex];
+          const source = sceneListItems.find((item) => item.id === scene?.sourceSceneId);
+          return source?.cutCount ?? scene?.sourceSnapshot?.totalCuts ?? normalizeSceneCutCount(scene?.cutCount);
+        })();
+    const currentSelection = scenes[sceneIndex]?.selectedCutNumbers;
+    const highestSelectedCut = currentSelection && currentSelection.length > 0
+      ? Math.max(...currentSelection)
+      : 0;
+    if (requestedCount !== null && requestedCount !== undefined && highestSelectedCut > requestedCount) {
+      setErrorMessage(`C${highestSelectedCut}까지 배정되어 있어 총 Cut을 ${requestedCount}로 줄일 수 없습니다. 먼저 해당 Cut 배정을 해제해주세요.`);
+      return;
+    }
+    setErrorMessage("");
     setScenes((current) => current.map((scene, index) => {
       if (index !== sceneIndex) return scene;
       const source = sceneListItems.find((item) => item.id === scene.sourceSceneId);
@@ -1068,6 +1105,17 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       if (count == null) return { ...scene, cutCount: value };
       return applyEffectiveCutCount(scene, count, count);
     }));
+  }
+
+  function updateSceneCutSelection(sceneIndex: number, selectedCutNumbers: number[]) {
+    setScenes((current) => current.map((scene, index) => (
+      index === sceneIndex
+        ? {
+            ...scene,
+            selectedCutNumbers: normalizeAllocatedCutNumbers(selectedCutNumbers, scene.cutCount)
+          }
+        : scene
+    )));
   }
 
   async function syncShotBoardFromDailyPlan(savedPlan: DailyPlanDraft | DailyPlan, savedShots: DailyPlanShotDraft[]) {
@@ -2118,6 +2166,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   const scene = row.item;
                   const sceneIndex = row.sourceIndex;
                   const linkedSource = sceneListItems.find((item) => item.id === scene.sourceSceneId) ?? null;
+                  const totalCuts = normalizeSceneCutCount(scene.cutCount) ?? 0;
+                  const selectedCutNumbers = resolveAllocatedCutNumbers(scene.selectedCutNumbers, totalCuts);
+                  const cutAssignments = getCutAssignmentsForSceneRow(
+                    scene,
+                    scenes,
+                    otherRoundCutAssignments,
+                    formatDailyPlanRoundLabel(plan),
+                    totalCuts
+                  );
                   return (
                     <tr
                       key={scene.id}
@@ -2155,15 +2212,26 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           onLegacySceneNumberChange={(value) => updateScene(sceneIndex, { sceneNumber: value })}
                         />
                       </td>
-                      <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-2`}>
+                      <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-4`}>
                         <span className={timetableFieldLabelClass}>Cut</span>
-                        <SceneCutCountField
-                          value={scene.cutCount}
-                          sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
-                          isOverride={scene.totalCutsOverride !== null}
-                          ariaLabel={`촬영 행 ${sceneIndex + 1} 총 컷수`}
-                          onCommit={(value) => updateSceneCutCountOverride(sceneIndex, value)}
-                        />
+                        <div className="grid min-w-0 gap-0.5">
+                          <SceneCutCountField
+                            value={scene.cutCount}
+                            sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
+                            isOverride={scene.totalCutsOverride !== null}
+                            ariaLabel={`촬영 행 ${sceneIndex + 1} 총 컷수`}
+                            onCommit={(value) => updateSceneCutCountOverride(sceneIndex, value)}
+                          />
+                          <SceneCutAllocationSelector
+                            sceneLabel={formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`}
+                            totalCuts={totalCuts}
+                            value={selectedCutNumbers}
+                            isLegacySelection={scene.selectedCutNumbers === null}
+                            assignments={cutAssignments}
+                            disabled={!canManageTimetable || totalCuts === 0}
+                            onChange={(value) => updateSceneCutSelection(sceneIndex, value)}
+                          />
+                        </div>
                       </td>
                       <td className={`${timetableWideCellClass} max-md:order-8 max-md:!col-span-5`}>
                         <TimetableLinkedFieldLabel
@@ -2192,7 +2260,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           onChange={(value) => updateSceneContentOverride(sceneIndex, value)}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-6`}>
+                      <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-4`}>
                         <span className={timetableFieldLabelClass}><span className="md:hidden">순서</span><span className="hidden md:inline">촬영 순서</span></span>
                         <ShootingOrderField
                           value={scene.shootingOrder}
@@ -3032,24 +3100,30 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
   const savedValue = value == null ? "" : String(value);
   const [draftValue, setDraftValue] = useState(savedValue);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const isInvalid = draftValue !== "" && parseDurationMinutes(draftValue) == null;
+  const isFocusedRef = useRef(false);
+  const isInvalid = draftValue !== "" && parseDailyPlanRuntimeMinutesInput(draftValue) == null;
 
-  useEffect(() => setDraftValue(savedValue), [savedValue]);
+  useEffect(() => {
+    // Timetable chaining and background autosave can update this row while the
+    // user is still typing. Keep the focused local draft authoritative so an
+    // intermediate value such as "12" cannot replace the final "120".
+    if (!isFocusedRef.current) setDraftValue(savedValue);
+  }, [savedValue]);
 
   function applyDraft(nextDraft: string) {
-    const sanitized = sanitizeNumericInput(nextDraft, 4);
+    const sanitized = sanitizeNumericInput(nextDraft, runtimeInputMaxLength);
     setDraftValue(sanitized);
     if (!sanitized) {
       if (value != null) onChange(null);
       return;
     }
-    const nextValue = parseDurationMinutes(sanitized);
+    const nextValue = parseDailyPlanRuntimeMinutesInput(sanitized);
     if (nextValue != null && nextValue !== value) onChange(nextValue);
   }
 
   function finishEditing() {
     if (!draftValue) return;
-    const nextValue = parseDurationMinutes(draftValue);
+    const nextValue = parseDailyPlanRuntimeMinutesInput(draftValue);
     if (nextValue == null) setDraftValue(savedValue);
   }
 
@@ -3059,15 +3133,21 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       <div className="relative">
         <input
           ref={inputRef}
-          className={`${compactInputClass} h-auto min-h-[38px] px-7 py-1.5 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
+          className={`${compactInputClass} h-auto min-h-[38px] pl-2 pr-5 py-1.5 tabular-nums leading-[1.35] max-md:pl-1 max-md:pr-4 ${isInvalid ? "!border-field-danger" : ""}`}
           type="text"
           value={draftValue}
           inputMode="numeric"
           pattern="[0-9]*"
-          maxLength={4}
+          maxLength={runtimeInputMaxLength}
           placeholder="--"
+          onFocus={() => {
+            isFocusedRef.current = true;
+          }}
           onChange={(event) => applyDraft(event.currentTarget.value)}
-          onBlur={finishEditing}
+          onBlur={() => {
+            isFocusedRef.current = false;
+            finishEditing();
+          }}
           onKeyDown={(event) => {
             if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1 && !/\d/.test(event.key)) event.preventDefault();
             if (event.key === "Enter") {
@@ -3089,7 +3169,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
           aria-label={`소요시간 ${savedValue || "미입력"}분`}
           title={isInvalid ? `1~${maxRuntimeMinutes}분 사이의 숫자를 입력해주세요.` : undefined}
         />
-        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs font-normal text-field-muted" aria-hidden>M</span>
+        <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center text-xs font-normal text-field-muted" aria-hidden>M</span>
       </div>
     </div>
   );
@@ -3571,6 +3651,161 @@ function SceneCutCountField({
       />
       {invalid ? (
         <span className="text-[9px] font-bold leading-tight text-field-danger">0~{MAX_SCENE_CUT_COUNT}</span>
+      ) : null}
+    </div>
+  );
+}
+
+type SceneCutAssignmentMap = Map<number, string[]>;
+
+function SceneCutAllocationSelector({
+  sceneLabel,
+  totalCuts,
+  value,
+  isLegacySelection,
+  assignments,
+  disabled,
+  onChange
+}: {
+  sceneLabel: string;
+  totalCuts: number;
+  value: number[];
+  isLegacySelection: boolean;
+  assignments: SceneCutAssignmentMap;
+  disabled: boolean;
+  onChange: (value: number[]) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draftValue, setDraftValue] = useState<number[]>(value);
+  const selectorRef = useRef<HTMLDivElement | null>(null);
+  const lastToggledCutRef = useRef<number | null>(null);
+  const allCuts = getAllCutNumbers(totalCuts);
+  const currentSet = new Set(draftValue);
+  const assignedElsewhere = new Set(assignments.keys());
+  const remainingCuts = getRemainingCutNumbers(
+    totalCuts,
+    new Set([...assignedElsewhere, ...draftValue])
+  );
+  const selectableUnassignedCuts = getRemainingCutNumbers(totalCuts, assignedElsewhere);
+
+  useEffect(() => {
+    if (!isOpen) setDraftValue(value);
+  }, [isOpen, value]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (!selectorRef.current?.contains(event.target as Node)) setIsOpen(false);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
+
+  function toggleCut(cutNumber: number, shiftKey: boolean) {
+    const assignedLabels = assignments.get(cutNumber) ?? [];
+    if (assignedLabels.length > 0 && !currentSet.has(cutNumber)) return;
+    setDraftValue((current) => {
+      const next = new Set(current);
+      const last = lastToggledCutRef.current;
+      if (shiftKey && last !== null) {
+        const from = Math.min(last, cutNumber);
+        const to = Math.max(last, cutNumber);
+        const shouldSelect = !next.has(cutNumber);
+        for (let value = from; value <= to; value += 1) {
+          if ((assignments.get(value)?.length ?? 0) > 0 && !next.has(value)) continue;
+          if (shouldSelect) next.add(value);
+          else next.delete(value);
+        }
+      } else if (next.has(cutNumber)) next.delete(cutNumber);
+      else next.add(cutNumber);
+      lastToggledCutRef.current = cutNumber;
+      return [...next].sort((left, right) => left - right);
+    });
+  }
+
+  function finishSelection() {
+    onChange(draftValue);
+    setIsOpen(false);
+  }
+
+  const displayLabel = isLegacySelection
+    ? `전체 컷 · ${value.length}컷`
+    : formatCutAllocationLabel(value);
+
+  return (
+    <div ref={selectorRef} className="relative min-w-0">
+      <button
+        type="button"
+        className="flex min-h-8 w-full min-w-0 items-center justify-center border border-field-border bg-field-input px-1 py-1 text-center text-[10px] font-bold leading-[1.25] text-field-text transition-colors hover:border-field-primary hover:bg-field-hover disabled:cursor-not-allowed disabled:text-field-disabled"
+        onClick={() => {
+          setDraftValue(value);
+          setIsOpen((current) => !current);
+        }}
+        disabled={disabled}
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={`${sceneLabel} 촬영 컷 선택`}
+        title={displayLabel}
+      >
+        <span className="max-h-[2.5em] min-w-0 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+          {displayLabel}
+        </span>
+      </button>
+      {isOpen ? (
+        <>
+          <button type="button" tabIndex={-1} aria-label="컷 선택 취소" className="fixed inset-0 z-40 cursor-default bg-black/55" onClick={() => setIsOpen(false)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${sceneLabel} 촬영 컷 선택`}
+            className="absolute right-0 z-50 mt-1 flex w-[min(22rem,calc(100vw-2rem))] max-h-[min(70dvh,34rem)] flex-col overflow-hidden border border-field-divider bg-field-dialog shadow-dialog max-lg:fixed max-lg:inset-x-2 max-lg:bottom-2 max-lg:mx-auto max-lg:w-auto"
+          >
+            <div className="border-b border-field-border px-3 py-2 text-left">
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-sm text-field-text">{sceneLabel} 촬영 컷</strong>
+                <span className="text-xs font-normal text-field-muted">{draftValue.length}컷 선택</span>
+              </div>
+              <p className="mt-1 text-[11px] font-normal leading-[1.4] text-field-subtle">
+                총 {totalCuts} · 현재 {draftValue.length} · 다른 행/회차 {assignedElsewhere.size} · 미배정 {remainingCuts.length}
+              </p>
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-5 gap-1 overflow-y-auto p-2 sm:grid-cols-6">
+              {allCuts.map((cutNumber) => {
+                const selected = currentSet.has(cutNumber);
+                const assignedLabels = assignments.get(cutNumber) ?? [];
+                const unavailable = assignedLabels.length > 0 && !selected;
+                return (
+                  <button
+                    key={cutNumber}
+                    type="button"
+                    className={`flex min-h-11 min-w-0 flex-col items-center justify-center border px-1 py-1 text-center transition-colors ${selected ? "border-field-primary bg-field-primary text-field-accent-foreground" : unavailable ? "border-field-border bg-field-section text-field-disabled" : "border-field-border bg-field-input text-field-text hover:border-field-primary hover:bg-field-hover"}`}
+                    onClick={(event) => toggleCut(cutNumber, event.shiftKey)}
+                    disabled={unavailable}
+                    aria-pressed={selected}
+                    title={assignedLabels.length > 0 ? `${assignedLabels.join(", ")} 배정` : `C${cutNumber}`}
+                  >
+                    <span className="text-xs font-black">{cutNumber}</span>
+                    {assignedLabels.length > 0 ? <span className="max-w-full truncate text-[8px] font-normal">{assignedLabels[0]}</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-3 gap-1 border-t border-field-border p-2">
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(allCuts.filter((cutNumber) => !assignedElsewhere.has(cutNumber) || currentSet.has(cutNumber)))}>전체 선택</button>
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(selectableUnassignedCuts)}>남은 컷 선택</button>
+              <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue([])}>전체 해제</button>
+              <button type="button" className="col-span-1 min-h-10 border border-field-border bg-field-input px-3 text-xs font-bold text-field-subtle hover:bg-field-hover" onClick={() => setIsOpen(false)}>취소</button>
+              <button type="button" className="col-span-2 min-h-10 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground hover:bg-field-secondary" onClick={finishSelection}>완료</button>
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -4385,7 +4620,10 @@ function replaceSceneCastValue(value: string, previousValue: string, nextValue: 
 }
 
 function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
-  return scene.totalCuts == null ? "" : String(scene.totalCuts);
+  if (scene.totalCuts == null) return "";
+  return scene.cutAllocationLabel
+    ? `${scene.totalCuts}컷 · ${scene.cutAllocationLabel}`
+    : `${scene.totalCuts}컷`;
 }
 
 function PreviewList({ title, children }: { title: string; children: React.ReactNode }) {
@@ -4809,6 +5047,9 @@ function applyEffectiveCutCount(
     ...scene,
     cutCount: count == null ? "" : String(count),
     totalCutsOverride: override,
+    selectedCutNumbers: scene.selectedCutNumbers === null
+      ? null
+      : normalizeAllocatedCutNumbers(scene.selectedCutNumbers, count),
     cuts: ensureSceneCutCapacity(scene.cuts, count ?? 0)
   };
 }
@@ -4823,6 +5064,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     charactersOverride: null,
     characterIdsOverride: null,
     totalCutsOverride: null,
+    selectedCutNumbers: [],
     sceneNumber: source.sceneNo,
     sceneTitle: "",
     description: sourceSnapshot.sceneContent,
@@ -4883,6 +5125,9 @@ function serializeTimetableScenes(
       if (scene.totalCutsOverride !== null) {
         metadata.totalCutsOverride = scene.totalCutsOverride;
       }
+      if (scene.selectedCutNumbers !== null) {
+        metadata.selectedCutNumbers = normalizeAllocatedCutNumbers(scene.selectedCutNumbers, scene.cutCount);
+      }
       return metadata;
     });
 }
@@ -4922,6 +5167,9 @@ function restoreTimetableScenes(
         : null,
       totalCutsOverride: Object.prototype.hasOwnProperty.call(entry, "totalCutsOverride")
         ? entry.totalCutsOverride ?? 0
+        : null,
+      selectedCutNumbers: Object.prototype.hasOwnProperty.call(entry, "selectedCutNumbers")
+        ? normalizeAllocatedCutNumbers(entry.selectedCutNumbers, totalCuts)
         : null,
       sceneNumber: source?.sceneNo ?? snapshot.sceneNumber,
       sceneTitle: snapshot.sceneTitle,
@@ -4983,6 +5231,7 @@ function shotsToScenes(
         charactersOverride: null,
         characterIdsOverride: null,
         totalCutsOverride: null,
+        selectedCutNumbers: null,
         sceneNumber: shot.sceneNumber ?? "",
         sceneTitle: shot.sceneTitle ?? "",
         description: shot.description ?? "",
@@ -5029,15 +5278,87 @@ function normalizeLegacySceneNumber(value: unknown) {
   return String(value ?? "").normalize("NFKC").trim().replace(/^S#?\s*/i, "").toLocaleLowerCase("ko-KR");
 }
 
+function getSceneCutAllocationKey(sourceSceneId: string | null, sceneNumber: string) {
+  const stableId = sourceSceneId?.trim();
+  return stableId ? `scene-id:${stableId}` : `scene-number:${normalizeLegacySceneNumber(sceneNumber)}`;
+}
+
+function formatDailyPlanRoundLabel(plan: Pick<DailyPlanDraft, "episode" | "title">) {
+  const episode = plan.episode.trim();
+  if (episode) return /회차$/.test(episode) ? episode : `${episode}회차`;
+  return plan.title.trim() || "현재 회차";
+}
+
+function appendCutAssignment(
+  target: Map<string, SceneCutAssignmentMap>,
+  sceneKey: string,
+  cutNumbers: Iterable<number>,
+  label: string
+) {
+  if (!sceneKey || sceneKey.endsWith(":")) return;
+  const sceneAssignments = target.get(sceneKey) ?? new Map<number, string[]>();
+  for (const cutNumber of cutNumbers) {
+    const labels = sceneAssignments.get(cutNumber) ?? [];
+    if (!labels.includes(label)) sceneAssignments.set(cutNumber, [...labels, label]);
+  }
+  target.set(sceneKey, sceneAssignments);
+}
+
+function buildOtherRoundCutAssignments(plans: DailyPlan[], currentDailyPlanId: string | null) {
+  const assignments = new Map<string, SceneCutAssignmentMap>();
+  plans.forEach((plan) => {
+    if (plan.id === currentDailyPlanId) return;
+    const label = formatDailyPlanRoundLabel(plan);
+    const meta = decodeDailyPlanMemo(plan.memo);
+    meta.timetableScenes.forEach((scene) => {
+      const totalCuts = scene.rowSnapshot.totalCuts ?? scene.sourceSnapshot?.totalCuts ?? null;
+      const selectedCutNumbers = Object.prototype.hasOwnProperty.call(scene, "selectedCutNumbers")
+        ? normalizeAllocatedCutNumbers(scene.selectedCutNumbers, totalCuts)
+        : getAllCutNumbers(totalCuts);
+      appendCutAssignment(
+        assignments,
+        getSceneCutAllocationKey(scene.sourceSceneId, scene.rowSnapshot.sceneNumber || scene.sourceSnapshot?.sceneNumber || ""),
+        selectedCutNumbers,
+        label
+      );
+    });
+  });
+  return assignments;
+}
+
+function getCutAssignmentsForSceneRow(
+  currentScene: SceneBlockInput,
+  currentScenes: SceneBlockInput[],
+  otherRoundAssignments: Map<string, SceneCutAssignmentMap>,
+  currentRoundLabel: string,
+  totalCuts: number
+) {
+  const sceneKey = getSceneCutAllocationKey(currentScene.sourceSceneId, currentScene.sceneNumber);
+  const assignments = new Map<number, string[]>(
+    [...(otherRoundAssignments.get(sceneKey) ?? new Map<number, string[]>())]
+      .map(([cutNumber, labels]) => [cutNumber, [...labels]])
+  );
+  currentScenes.forEach((scene) => {
+    if (scene.id === currentScene.id) return;
+    if (getSceneCutAllocationKey(scene.sourceSceneId, scene.sceneNumber) !== sceneKey) return;
+    resolveAllocatedCutNumbers(scene.selectedCutNumbers, normalizeSceneCutCount(scene.cutCount) ?? totalCuts)
+      .forEach((cutNumber) => {
+        const labels = assignments.get(cutNumber) ?? [];
+        if (!labels.includes(currentRoundLabel)) assignments.set(cutNumber, [...labels, currentRoundLabel]);
+      });
+  });
+  return assignments;
+}
+
 function scenesToShotDrafts(scenes: SceneBlockInput[], locations: DailyPlanLocation[]): DailyPlanShotDraft[] {
   let orderIndex = 0;
 
   return scenes
     .filter((scene) => isMeaningfulTimetableScene(scene) && scene.sceneNumber.trim() && parseCutCount(scene.cutCount) > 0)
-    .flatMap((scene) => Array.from({ length: parseCutCount(scene.cutCount) }, (_, cutIndex) => {
+    .flatMap((scene) => resolveAllocatedCutNumbers(scene.selectedCutNumbers, parseCutCount(scene.cutCount)).map((cutNumberValue) => {
       orderIndex += 1;
-      const cutNumber = String(cutIndex + 1);
-      const cut = scene.cuts[cutIndex];
+      const cutNumber = String(cutNumberValue);
+      const cut = scene.cuts[cutNumberValue - 1];
       const mainLocationKey = scene.mainLocation.trim() ? createSceneLocationKey(scene.mainLocation) : "";
       const linkedLocation = mainLocationKey
         ? locations.find((location) => (
@@ -5074,6 +5395,7 @@ function createBlankScene(): SceneBlockInput {
     charactersOverride: null,
     characterIdsOverride: null,
     totalCutsOverride: null,
+    selectedCutNumbers: [],
     sceneNumber: "",
     sceneTitle: "",
     description: "",
@@ -5139,6 +5461,8 @@ function cloneScene(scene: SceneBlockInput, fallbackSceneNumber: number): SceneB
   return {
     ...scene,
     id: makeLocalId("scene"),
+    // 동일 씬이 같은 회차에 여러 행으로 나뉘어질 때 기존 배정을 묵시적으로 중복하지 않습니다.
+    selectedCutNumbers: [],
     sceneNumber: scene.sourceSceneId
       ? scene.sceneNumber
       : getNextCutNumber(scene.sceneNumber, fallbackSceneNumber),
@@ -5688,14 +6012,16 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         fallbackCut: scene.cutCount
       });
       const effectiveTotalCuts = normalizedTotalCuts ?? 0;
-      const cuts = scene.cuts.slice(0, effectiveTotalCuts).map((cut, cutIndex) => {
-        const cutNumber = cut.cutNumber.trim() || String(cutIndex + 1);
+      const allocatedCutNumbers = resolveAllocatedCutNumbers(scene.selectedCutNumbers, effectiveTotalCuts);
+      const cuts = allocatedCutNumbers.map((cutNumberValue) => {
+        const cut = scene.cuts[cutNumberValue - 1];
+        const cutNumber = cut?.cutNumber.trim() || String(cutNumberValue);
         return {
-          id: cut.id,
+          id: cut?.id ?? `${scene.id}:cut:${cutNumberValue}`,
           cutNumber,
           displayNumber: `${sceneNumber}-${cutNumber}`,
-          description: cut.description,
-          memo: cut.memo
+          description: cut?.description ?? "",
+          memo: cut?.memo ?? ""
         };
       });
       return {
@@ -5719,7 +6045,10 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
         sceneMemo: scene.sceneMemo,
-        totalCuts: normalizedTotalCuts,
+        totalCuts: allocatedCutNumbers.length,
+        cutAllocationLabel: allocatedCutNumbers.length > 0
+          ? `C${formatCutRanges(allocatedCutNumbers)}`
+          : "컷 미지정",
         cuts
       };
     }),
@@ -5860,12 +6189,6 @@ function createDailyPlanEditorFingerprint(
   scenes: SceneBlockInput[]
 ) {
   return JSON.stringify({ plan, printMeta, locations, mealTimes, scenes });
-}
-
-function parseDurationMinutes(value: string) {
-  if (!/^\d{1,4}$/.test(value)) return null;
-  const minutes = Number(value);
-  return Number.isInteger(minutes) && minutes >= 0 && minutes <= maxRuntimeMinutes ? minutes : null;
 }
 
 function loadDaumPostcodeScript() {

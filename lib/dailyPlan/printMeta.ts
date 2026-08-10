@@ -133,6 +133,8 @@ export type DailyPlanTimetableSceneMeta = {
   rowId: string;
   sourceSceneId: string | null;
   sourceSnapshot: DailyPlanTimetableSceneSourceSnapshot | null;
+  /** 없으면 기능 추가 전의 legacy 행으로 보고 해당 씬의 전체 컷을 배정합니다. */
+  selectedCutNumbers?: number[];
   sceneContentOverride?: string;
   charactersOverride?: string;
   /** 등장인물 selector에서 문자열 대신 사용하는 안정적인 CallSheetPerson id입니다. */
@@ -455,6 +457,21 @@ function normalizeDailyPlanTimetableScene(
   if (Object.prototype.hasOwnProperty.call(value, "totalCutsOverride")) {
     const totalCutsOverride = normalizeSceneCutCount(value.totalCutsOverride);
     if (totalCutsOverride !== null) normalized.totalCutsOverride = totalCutsOverride;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "selectedCutNumbers")
+    && Array.isArray(value.selectedCutNumbers)
+  ) {
+    const totalCuts = rowSnapshot.totalCuts;
+    normalized.selectedCutNumbers = Array.from(new Set(
+      value.selectedCutNumbers
+        .map((cutNumber) => typeof cutNumber === "number" ? cutNumber : Number(String(cutNumber).trim()))
+        .filter((cutNumber) => (
+          Number.isInteger(cutNumber)
+          && cutNumber >= 1
+          && (totalCuts == null || cutNumber <= totalCuts)
+        ))
+    )).sort((left, right) => left - right);
   }
 
   return normalized;

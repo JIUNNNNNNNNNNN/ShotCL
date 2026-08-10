@@ -19,8 +19,11 @@ export function buildProgressShotDrafts(
 
   let orderIndex = 0;
   return [...groupedShots.entries()].flatMap(([sceneNumber, sceneShots]) =>
-    sceneShots.map((shot, index) => {
-      const cutNumber = String(index + 1);
+    sceneShots.map((shot) => {
+      // Split allocation can intentionally contain non-contiguous cuts such as
+      // C1, C3, C5. Preserve the canonical daily-plan cut number so progress
+      // identity and existing OK/OMIT status never shift to another cut.
+      const cutNumber = String(shot.cutNumber).trim();
       const location = findDailyPlanLocation(plan.shootingLocations ?? [], shot);
       const locationAddress = formatDailyPlanLocationAddress(location);
       const locationMapUrl = location?.inputMode === "manual" ? "" : location?.naverMapUrl ?? "";

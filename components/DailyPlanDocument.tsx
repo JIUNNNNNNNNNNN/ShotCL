@@ -705,7 +705,8 @@ function getTimetableCompactClass(key: string) {
 }
 
 function isTimetableShortValue(key: string) {
-  return ["start", "end", "runtime", "dayNight", "sceneNumber", "totalCut"].includes(key);
+  // Cut 셀은 회차별 subset range를 함께 표시하므로 2줄 wrapping을 허용합니다.
+  return ["start", "end", "runtime", "dayNight", "sceneNumber"].includes(key);
 }
 
 function isTimetableTimeValue(key: string) {
