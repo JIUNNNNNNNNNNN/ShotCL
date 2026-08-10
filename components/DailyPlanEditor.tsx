@@ -43,8 +43,7 @@ import {
   isDailyPlanAdditionalScheduleType
 } from "@/lib/dailyPlan/additionalSchedule";
 import {
-  formatCutAllocationLabel,
-  formatCutRanges,
+  formatTimetableCutDisplay,
   getAllCutNumbers,
   getRemainingCutNumbers,
   normalizeAllocatedCutNumbers,
@@ -229,8 +228,15 @@ type DailyPlanPreviewScene = {
   costumeMakeup: string;
   sceneMemo: string;
   totalCuts: number | null;
-  cutAllocationLabel: string;
+  scheduledCutCount: number;
+  cutDisplay: string;
   cuts: DailyPlanPreviewCut[];
+};
+
+type TimetableSceneContextMenuState = {
+  rowKey: string;
+  clientX: number;
+  clientY: number;
 };
 
 type DailyPlanPreviewData = {
@@ -465,6 +471,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [activePrintAction, setActivePrintAction] = useState<DailyPlanPrintAction | null>(null);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
   const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
+  const [timetableSceneContextMenu, setTimetableSceneContextMenu] = useState<TimetableSceneContextMenuState | null>(null);
+  const [openCutSelectorSceneId, setOpenCutSelectorSceneId] = useState<string | null>(null);
+  const [pendingDisableMultiRoundSceneId, setPendingDisableMultiRoundSceneId] = useState<string | null>(null);
   const [activeDragSource, setActiveDragSource] = useState<"timetable" | "actor" | null>(null);
   const [gatheringPhotoPreview, setGatheringPhotoPreview] = useState<{
     images: Array<{ url: string; title: string }>;
@@ -484,6 +493,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     "daily-plan-overlay",
     pendingTimetableDeleteKey !== null
       || pendingActorDeleteId !== null
+      || timetableSceneContextMenu !== null
+      || openCutSelectorSceneId !== null
+      || pendingDisableMultiRoundSceneId !== null
       || openLocationMenuId !== null
       || openLocationPickerId !== null
       || gatheringPhotoPreview !== null
@@ -514,6 +526,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => timetableRows.map(getEditorTimetableRowKey),
     [timetableRows]
   );
+  const openTimetableSceneContextMenu = useCallback((rowKey: string, clientX: number, clientY: number) => {
+    if (!canManageTimetable) return;
+    const row = timetableRows.find((candidate) => getEditorTimetableRowKey(candidate) === rowKey);
+    if (
+      row?.type !== "scene"
+      || !(row.item.sourceSceneId || row.item.sceneNumber.trim())
+      || (normalizeSceneCutCount(row.item.cutCount) ?? 0) <= 0
+    ) return;
+    setTimetableSceneContextMenu({ rowKey, clientX, clientY });
+  }, [canManageTimetable, timetableRows]);
   const actorRowKeys = useMemo(
     () => printMeta.starring.map((person) => getActorRowKey(person.id)),
     [printMeta.starring]
@@ -524,6 +546,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       || isSaving
       || pendingTimetableDeleteKey !== null
       || pendingActorDeleteId !== null
+      || timetableSceneContextMenu !== null
+      || openCutSelectorSceneId !== null
+      || pendingDisableMultiRoundSceneId !== null
       || activeDragSource === "actor",
     trashRef: editorTrashRef,
     onReorder: ({ orderedRowKeys }) => {
@@ -535,8 +560,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     onDragStart: () => {
       setActiveDragSource("timetable");
     },
-    onDragEnd: () => {
+    onDragEnd: (result) => {
       setActiveDragSource((current) => current === "timetable" ? null : current);
+      if (result.outcome === "selected" && result.pointerType !== "mouse") {
+        openTimetableSceneContextMenu(result.rowKey, result.clientX, result.clientY);
+      }
     }
   });
   const actorInteraction = useDailyPlanTimetableInteraction({
@@ -545,6 +573,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       || isSaving
       || pendingTimetableDeleteKey !== null
       || pendingActorDeleteId !== null
+      || timetableSceneContextMenu !== null
+      || openCutSelectorSceneId !== null
+      || pendingDisableMultiRoundSceneId !== null
       || activeDragSource === "timetable",
     trashRef: editorTrashRef,
     onReorder: ({ orderedRowKeys }) => {
@@ -1010,7 +1041,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           charactersOverride: null,
           characterIdsOverride: null,
           totalCutsOverride: null,
-          selectedCutNumbers: [],
+          selectedCutNumbers: null,
           sceneNumber: "",
           sceneTitle: "",
           description: "",
@@ -1108,6 +1139,49 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           }
         : scene
     )));
+  }
+
+  function enableMultiRoundShooting(rowKey: string) {
+    const sceneId = getSceneIdFromTimetableRowKey(rowKey);
+    if (!sceneId) return;
+    setScenes((current) => current.map((scene) => (
+      scene.id === sceneId
+        && (scene.sourceSceneId || scene.sceneNumber.trim())
+        && (normalizeSceneCutCount(scene.cutCount) ?? 0) > 0
+        ? { ...scene, selectedCutNumbers: scene.selectedCutNumbers ?? [] }
+        : scene
+    )));
+    setTimetableSceneContextMenu(null);
+    setOpenCutSelectorSceneId(sceneId);
+  }
+
+  function editMultiRoundShooting(rowKey: string) {
+    const sceneId = getSceneIdFromTimetableRowKey(rowKey);
+    if (!sceneId) return;
+    setTimetableSceneContextMenu(null);
+    setOpenCutSelectorSceneId(sceneId);
+  }
+
+  function requestDisableMultiRoundShooting(rowKey: string) {
+    const sceneId = getSceneIdFromTimetableRowKey(rowKey);
+    if (!sceneId) return;
+    const scene = scenes.find((item) => item.id === sceneId);
+    setTimetableSceneContextMenu(null);
+    if (!scene || scene.selectedCutNumbers === null) return;
+    if (scene.selectedCutNumbers.length > 0) {
+      setPendingDisableMultiRoundSceneId(sceneId);
+      return;
+    }
+    disableMultiRoundShooting(sceneId);
+  }
+
+  function disableMultiRoundShooting(sceneId: string) {
+    setScenes((current) => current.map((scene) => (
+      scene.id === sceneId ? { ...scene, selectedCutNumbers: null } : scene
+    )));
+    setOpenCutSelectorSceneId((current) => current === sceneId ? null : current);
+    setPendingDisableMultiRoundSceneId(null);
+    timetableInteraction.clearSelection();
   }
 
   async function syncShotBoardFromDailyPlan(savedPlan: DailyPlanDraft | DailyPlan, savedShots: DailyPlanShotDraft[]) {
@@ -1561,6 +1635,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       && !isPrinting
       && pendingTimetableDeleteKey === null
       && pendingActorDeleteId === null
+      && timetableSceneContextMenu === null
+      && openCutSelectorSceneId === null
+      && pendingDisableMultiRoundSceneId === null
       && activeDragSource === null
     ),
     delayMs: 1_100,
@@ -1771,6 +1848,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       ? getActorCardLabel(printMeta.starring, activeCardInteraction.ghost.rowKey)
       : getTimetableRowLabel(timetableRows, activeCardInteraction.ghost.rowKey)
     : "";
+  const contextMenuScene = timetableSceneContextMenu
+    ? timetableRows.find((row): row is Extract<EditorTimetableRow, { type: "scene" }> => (
+        row.type === "scene" && getEditorTimetableRowKey(row) === timetableSceneContextMenu.rowKey
+      ))?.item ?? null
+    : null;
+  const pendingDisableMultiRoundScene = pendingDisableMultiRoundSceneId
+    ? scenes.find((scene) => scene.id === pendingDisableMultiRoundSceneId) ?? null
+    : null;
 
   return (
     <div className="print-daily-plan">
@@ -2178,7 +2263,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       style={{ touchAction: "pan-x pan-y", WebkitTouchCallout: "none" }}
                       onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
                       onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
-                      onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
+                      onContextMenu={(event) => {
+                        timetableInteraction.onRowContextMenu(rowKey, event);
+                        event.preventDefault();
+                        openTimetableSceneContextMenu(rowKey, event.clientX, event.clientY);
+                      }}
                     >
                       <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
@@ -2207,7 +2296,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       </td>
                       <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-4`}>
                         <span className={timetableFieldLabelClass}>Cut</span>
-                        <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)] gap-0.5">
+                        {scene.selectedCutNumbers === null ? (
                           <SceneCutCountField
                             value={scene.cutCount}
                             sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
@@ -2215,16 +2304,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                             ariaLabel={`촬영 행 ${sceneIndex + 1} 총 컷수`}
                             onCommit={(value) => updateSceneCutCountOverride(sceneIndex, value)}
                           />
+                        ) : (
                           <SceneCutAllocationSelector
                             sceneLabel={formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`}
                             totalCuts={totalCuts}
                             value={selectedCutNumbers}
-                            isLegacySelection={scene.selectedCutNumbers === null}
                             assignments={cutAssignments}
                             disabled={!canManageTimetable || totalCuts === 0}
+                            isOpen={openCutSelectorSceneId === scene.id}
+                            onOpenChange={(open) => setOpenCutSelectorSceneId(open ? scene.id : null)}
                             onChange={(value) => updateSceneCutSelection(sceneIndex, value)}
                           />
-                        </div>
+                        )}
                       </td>
                       <td className={`${timetableWideCellClass} max-md:order-8 max-md:!col-span-5`}>
                         <span className={timetableFieldLabelClass}>등장인물</span>
@@ -2492,6 +2583,52 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
             </div>
           ) : null}
           <ArchiveDeleteDropZone ref={editorTrashRef} isActive={activeCardInteraction.isOverTrash} />
+        </div>,
+        document.body
+      ) : null}
+      {typeof document !== "undefined" && timetableSceneContextMenu && contextMenuScene ? createPortal(
+        <TimetableSceneActionMenu
+          position={timetableSceneContextMenu}
+          isMultiRound={contextMenuScene.selectedCutNumbers !== null}
+          onEnable={() => enableMultiRoundShooting(timetableSceneContextMenu.rowKey)}
+          onEdit={() => editMultiRoundShooting(timetableSceneContextMenu.rowKey)}
+          onDisable={() => requestDisableMultiRoundShooting(timetableSceneContextMenu.rowKey)}
+          onClose={() => {
+            setTimetableSceneContextMenu(null);
+            timetableInteraction.clearSelection();
+          }}
+        />,
+        document.body
+      ) : null}
+      {typeof document !== "undefined" && pendingDisableMultiRoundSceneId ? createPortal(
+        <div className="no-print fixed inset-0 z-[160] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center" role="presentation">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="multi-round-disable-title"
+            className="w-full max-w-sm rounded-[var(--radius-card)] border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
+          >
+            <h2 id="multi-round-disable-title" className="text-base font-black text-field-text">
+              다회차 촬영 해제
+            </h2>
+            <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
+              {formatSceneNumber(pendingDisableMultiRoundScene?.sceneNumber ?? "") || "선택한 Scene"}의 컷 분할 배정을 해제하고 전체 컷 촬영으로 돌아갈까요?
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setPendingDisableMultiRoundSceneId(null)}
+              >
+                취소
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => disableMultiRoundShooting(pendingDisableMultiRoundSceneId)}
+              >
+                해제
+              </Button>
+            </div>
+          </div>
         </div>,
         document.body
       ) : null}
@@ -3655,24 +3792,125 @@ function SceneCutCountField({
 
 type SceneCutAssignmentMap = Map<number, string[]>;
 
+function TimetableSceneActionMenu({
+  position,
+  isMultiRound,
+  onEnable,
+  onEdit,
+  onDisable,
+  onClose
+}: {
+  position: { clientX: number; clientY: number };
+  isMultiRound: boolean;
+  onEnable: () => void;
+  onEdit: () => void;
+  onDisable: () => void;
+  onClose: () => void;
+}) {
+  const firstActionRef = useRef<HTMLButtonElement | null>(null);
+  const menuWidth = Math.min(224, Math.max(180, window.innerWidth - 24));
+  const menuHeight = isMultiRound ? 100 : 52;
+  const left = Math.max(12, Math.min(position.clientX, window.innerWidth - menuWidth - 12));
+  const top = Math.max(12, Math.min(position.clientY, window.innerHeight - menuHeight - 12));
+
+  useLayoutEffect(() => {
+    firstActionRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    function handleViewportChange() {
+      onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [onClose]);
+
+  return (
+    <>
+      <div
+        className="no-print fixed inset-0 z-[158] bg-transparent"
+        role="presentation"
+        onPointerDown={onClose}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onClose();
+        }}
+      />
+      <div
+        role="menu"
+        aria-label="촬영 행 기능"
+        className="no-print ui-motion-menu fixed z-[159] grid gap-1 rounded-[var(--radius-menu)] border border-field-divider bg-field-elevated p-1.5 text-left text-field-text shadow-floating"
+        style={{ left, top, width: menuWidth }}
+        onPointerDown={(event) => event.stopPropagation()}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        {isMultiRound ? (
+          <>
+            <button
+              ref={firstActionRef}
+              type="button"
+              role="menuitem"
+              className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+              onClick={onEdit}
+            >
+              다회차 촬영 편집
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold text-field-danger transition-colors hover:bg-field-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger"
+              onClick={onDisable}
+            >
+              다회차 촬영 해제
+            </button>
+          </>
+        ) : (
+          <button
+            ref={firstActionRef}
+            type="button"
+            role="menuitem"
+            className="min-h-11 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold transition-colors hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            onClick={onEnable}
+          >
+            다회차 촬영
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
 function SceneCutAllocationSelector({
   sceneLabel,
   totalCuts,
   value,
-  isLegacySelection,
   assignments,
   disabled,
+  isOpen,
+  onOpenChange,
   onChange
 }: {
   sceneLabel: string;
   totalCuts: number;
   value: number[];
-  isLegacySelection: boolean;
   assignments: SceneCutAssignmentMap;
   disabled: boolean;
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
   onChange: (value: number[]) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
   const [draftValue, setDraftValue] = useState<number[]>(value);
   const selectorRef = useRef<HTMLDivElement | null>(null);
   const lastToggledCutRef = useRef<number | null>(null);
@@ -3692,10 +3930,10 @@ function SceneCutAllocationSelector({
   useEffect(() => {
     if (!isOpen) return;
     function closeOnOutsidePointer(event: PointerEvent) {
-      if (!selectorRef.current?.contains(event.target as Node)) setIsOpen(false);
+      if (!selectorRef.current?.contains(event.target as Node)) onOpenChange(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
+      if (event.key === "Escape") onOpenChange(false);
     }
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
@@ -3703,7 +3941,7 @@ function SceneCutAllocationSelector({
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [isOpen]);
+  }, [isOpen, onOpenChange]);
 
   function toggleCut(cutNumber: number, shiftKey: boolean) {
     const assignedLabels = assignments.get(cutNumber) ?? [];
@@ -3729,27 +3967,25 @@ function SceneCutAllocationSelector({
 
   function finishSelection() {
     onChange(draftValue);
-    setIsOpen(false);
+    onOpenChange(false);
   }
 
-  const displayLabel = isLegacySelection
-    ? `전체 컷 · ${value.length}컷`
-    : formatCutAllocationLabel(value);
+  const displayLabel = formatTimetableCutDisplay(value, totalCuts);
 
   return (
     <div ref={selectorRef} className="relative min-w-0">
       <button
         type="button"
-        className={`${timetableControlClass} flex w-full min-w-0 items-center justify-center overflow-hidden border border-field-border bg-field-input px-1 py-1 text-center text-[9px] font-bold leading-[1.2] text-field-text transition-colors hover:border-field-primary hover:bg-field-hover disabled:cursor-not-allowed disabled:text-field-disabled`}
+        className={`${timetableControlClass} flex w-full min-w-0 items-center justify-center overflow-hidden border border-field-border bg-field-input px-1 py-1 text-center text-[13px] font-normal leading-[1.35] text-field-text transition-colors hover:border-field-primary hover:bg-field-hover disabled:cursor-not-allowed disabled:text-field-disabled`}
         onClick={() => {
           setDraftValue(value);
-          setIsOpen((current) => !current);
+          onOpenChange(!isOpen);
         }}
         disabled={disabled}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-label={`${sceneLabel} 촬영 컷 선택`}
-        title={displayLabel}
+        title={`${sceneLabel} 선택 ${value.length} / 전체 ${totalCuts}`}
       >
         <span className="block min-w-0 max-w-full truncate whitespace-nowrap">
           {displayLabel}
@@ -3757,7 +3993,7 @@ function SceneCutAllocationSelector({
       </button>
       {isOpen ? (
         <>
-          <button type="button" tabIndex={-1} aria-label="컷 선택 취소" className="fixed inset-0 z-40 cursor-default bg-black/55" onClick={() => setIsOpen(false)} />
+          <button type="button" tabIndex={-1} aria-label="컷 선택 취소" className="fixed inset-0 z-40 cursor-default bg-black/55" onClick={() => onOpenChange(false)} />
           <div
             role="dialog"
             aria-modal="true"
@@ -3798,7 +4034,7 @@ function SceneCutAllocationSelector({
               <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(allCuts.filter((cutNumber) => !assignedElsewhere.has(cutNumber) || currentSet.has(cutNumber)))}>전체 선택</button>
               <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue(selectableUnassignedCuts)}>남은 컷 선택</button>
               <button type="button" className="min-h-10 border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover" onClick={() => setDraftValue([])}>전체 해제</button>
-              <button type="button" className="col-span-1 min-h-10 border border-field-border bg-field-input px-3 text-xs font-bold text-field-subtle hover:bg-field-hover" onClick={() => setIsOpen(false)}>취소</button>
+              <button type="button" className="col-span-1 min-h-10 border border-field-border bg-field-input px-3 text-xs font-bold text-field-subtle hover:bg-field-hover" onClick={() => onOpenChange(false)}>취소</button>
               <button type="button" className="col-span-2 min-h-10 bg-field-primary px-3 text-xs font-bold text-field-accent-foreground hover:bg-field-secondary" onClick={finishSelection}>완료</button>
             </div>
           </div>
@@ -4585,10 +4821,7 @@ function replaceSceneCastValue(value: string, previousValue: string, nextValue: 
 }
 
 function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
-  if (scene.totalCuts == null) return "";
-  return scene.cutAllocationLabel
-    ? `${scene.totalCuts}컷 · ${scene.cutAllocationLabel}`
-    : `${scene.totalCuts}컷`;
+  return scene.cutDisplay;
 }
 
 function PreviewList({ title, children }: { title: string; children: React.ReactNode }) {
@@ -5030,7 +5263,7 @@ function applySelectedSceneSource(scene: SceneBlockInput, source: ProjectSceneIt
     charactersOverride: null,
     characterIdsOverride: null,
     totalCutsOverride: null,
-    selectedCutNumbers: [],
+    selectedCutNumbers: null,
     sceneNumber: source.sceneNo,
     sceneTitle: "",
     description: sourceSnapshot.sceneContent,
@@ -5362,7 +5595,7 @@ function createBlankScene(): SceneBlockInput {
     charactersOverride: null,
     characterIdsOverride: null,
     totalCutsOverride: null,
-    selectedCutNumbers: [],
+    selectedCutNumbers: null,
     sceneNumber: "",
     sceneTitle: "",
     description: "",
@@ -5428,8 +5661,8 @@ function cloneScene(scene: SceneBlockInput, fallbackSceneNumber: number): SceneB
   return {
     ...scene,
     id: makeLocalId("scene"),
-    // 동일 씬이 같은 회차에 여러 행으로 나뉘어질 때 기존 배정을 묵시적으로 중복하지 않습니다.
-    selectedCutNumbers: [],
+    // 다회차 행은 컷 중복 없이 빈 배정으로 복제하고, 일반 행은 일반 상태를 유지합니다.
+    selectedCutNumbers: scene.selectedCutNumbers === null ? null : [],
     sceneNumber: scene.sourceSceneId
       ? scene.sceneNumber
       : getNextCutNumber(scene.sceneNumber, fallbackSceneNumber),
@@ -5597,6 +5830,10 @@ function createTimetableMutationSnapshot(
 
 function getEditorTimetableRowKey(row: EditorTimetableRow) {
   return `${row.type}:${row.item.id}`;
+}
+
+function getSceneIdFromTimetableRowKey(rowKey: string) {
+  return rowKey.startsWith("scene:") ? rowKey.slice("scene:".length) : "";
 }
 
 function getTimetableRowLabel(rows: EditorTimetableRow[], rowKey: string) {
@@ -6012,16 +6249,15 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
         props: scene.props,
         costumeMakeup: scene.costumeMakeup,
         sceneMemo: scene.sceneMemo,
-        totalCuts: allocatedCutNumbers.length,
-        cutAllocationLabel: allocatedCutNumbers.length > 0
-          ? `C${formatCutRanges(allocatedCutNumbers)}`
-          : "컷 미지정",
+        totalCuts: normalizedTotalCuts,
+        scheduledCutCount: allocatedCutNumbers.length,
+        cutDisplay: formatTimetableCutDisplay(scene.selectedCutNumbers, normalizedTotalCuts),
         cuts
       };
     }),
     getDailyPlanPreviewSceneValues
   );
-  const totalCutCount = sumSceneCutCounts(previewScenes.map((scene) => scene.totalCuts));
+  const totalCutCount = sumSceneCutCounts(previewScenes.map((scene) => scene.scheduledCutCount));
 
   return {
     plan: {
@@ -6056,7 +6292,7 @@ function getDailyPlanPreviewSceneValues(scene: DailyPlanPreviewScene) {
     scene.subLocation,
     scene.dayNight,
     scene.sceneNumber,
-    scene.totalCuts,
+    scene.cutDisplay,
     scene.description,
     scene.subject,
     scene.shootingOrder,

@@ -51,6 +51,9 @@ export type DailyPlanTimetableReorder = {
 export type DailyPlanTimetableDragEnd = {
   rowKey: string;
   outcome: "selected" | "reordered" | "trash" | "cancelled" | "unchanged";
+  clientX: number;
+  clientY: number;
+  pointerType: string;
 };
 
 export type UseDailyPlanTimetableInteractionOptions = {
@@ -434,7 +437,13 @@ export function useDailyPlanTimetableInteraction({
       setSelectedRowKey(null);
       setState(emptyState);
     }
-    optionsRef.current.onDragEnd?.({ rowKey: drag.rowKey, outcome });
+    optionsRef.current.onDragEnd?.({
+      rowKey: drag.rowKey,
+      outcome,
+      clientX: drag.latestX,
+      clientY: drag.latestY,
+      pointerType: drag.pointerType
+    });
     finishingRef.current = false;
   }, [cancelScheduledPublish, restoreDraggedRow, setSelectedRowKey, stopAutoScroll, suppressNextClick]);
 

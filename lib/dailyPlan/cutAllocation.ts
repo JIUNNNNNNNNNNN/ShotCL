@@ -54,6 +54,23 @@ export function formatCutAllocationLabel(value: Iterable<number>, emptyLabel = "
   return ranges ? `C${ranges} · ${numbers.length}컷` : emptyLabel;
 }
 
+/**
+ * TIME TABLE의 좁은 Cut 셀에 표시할 한 줄 요약입니다.
+ *
+ * `null`은 일반 촬영(전체 컷), 배열은 사용자가 명시적으로 켠 다회차 촬영을
+ * 뜻합니다. 배열 길이로 모드를 추론하지 않아 전체 컷을 직접 선택한 N/N도
+ * 다회차 상태로 유지합니다.
+ */
+export function formatTimetableCutDisplay(
+  selectedCutNumbers: number[] | null,
+  totalCuts: unknown
+): string {
+  const total = normalizeTotalCuts(totalCuts);
+  if (total == null) return "";
+  if (selectedCutNumbers === null) return String(total);
+  return `${normalizeAllocatedCutNumbers(selectedCutNumbers, total).length}/${total}`;
+}
+
 function normalizeTotalCuts(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const normalized = typeof value === "number" ? value : Number(String(value).trim());

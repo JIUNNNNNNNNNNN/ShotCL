@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   formatCutAllocationLabel,
   formatCutRanges,
+  formatTimetableCutDisplay,
   getRemainingCutNumbers,
   normalizeAllocatedCutNumbers,
   resolveAllocatedCutNumbers
@@ -31,4 +32,18 @@ test("normalization removes duplicates and out-of-range values", () => {
 test("legacy null selection means every cut while explicit empty stays empty", () => {
   assert.deepEqual(resolveAllocatedCutNumbers(null, 4), [1, 2, 3, 4]);
   assert.deepEqual(resolveAllocatedCutNumbers([], 4), []);
+});
+
+test("formats general and explicit multi-round timetable cut values", () => {
+  assert.equal(formatTimetableCutDisplay(null, 2), "2");
+  assert.equal(formatTimetableCutDisplay(null, 29), "29");
+  assert.equal(formatTimetableCutDisplay([], 29), "0/29");
+  assert.equal(formatTimetableCutDisplay([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 29), "10/29");
+  assert.equal(formatTimetableCutDisplay([1, 2, 3, 5, 6, 7, 8, 11, 12, 23], 23), "10/23");
+  assert.equal(formatTimetableCutDisplay([4, 9, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22], 23), "13/23");
+});
+
+test("multi-round display normalizes duplicate and invalid cut numbers", () => {
+  assert.equal(formatTimetableCutDisplay([1, 1, 2, 0, 30], 29), "2/29");
+  assert.equal(formatTimetableCutDisplay([1, 2], ""), "");
 });
