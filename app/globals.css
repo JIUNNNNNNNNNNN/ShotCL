@@ -3115,9 +3115,47 @@ button {
   }
 }
 
-@container project-workspace (max-width: 899px) {
+.daily-plan-timetable-row--event {
+  height: 52px;
+}
+
+.daily-plan-timetable-row--scene {
+  height: 58px;
+}
+
+.daily-plan-timetable-control {
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+}
+
+.daily-plan-timetable-linked-reset {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  max-height: 42px;
+}
+
+@container project-workspace (max-width: 639px) {
+  .daily-plan-timetable-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .daily-plan-timetable-table {
+    min-width: 760px;
+  }
+}
+
+@media (max-width: 639px) {
+  .daily-plan-timetable-scroll {
+    overflow-x: visible;
+  }
+
   .daily-plan-timetable-table {
     display: block;
+    min-width: 0;
   }
 
   .daily-plan-timetable-table > colgroup,
@@ -3127,17 +3165,22 @@ button {
 
   .daily-plan-timetable-body {
     display: grid;
-    gap: 12px;
+    gap: 6px;
   }
 
   .daily-plan-timetable-row {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    padding: 12px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
     border: 1px solid var(--ui-border-default);
     border-radius: var(--ui-radius-card);
     background: var(--ui-surface-2);
+  }
+
+  .daily-plan-timetable-row--event,
+  .daily-plan-timetable-row--scene {
+    height: auto;
   }
 
   .daily-plan-timetable-cell {
@@ -3157,6 +3200,23 @@ button {
   .daily-plan-timetable-row :where(button, input, select) {
     min-height: 44px;
   }
+
+  .daily-plan-timetable-control {
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+  }
+
+  .daily-plan-timetable-linked-reset {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+  }
+}
+
+@container project-workspace (max-width: 899px) {
 
   .daily-plan-staff-department-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

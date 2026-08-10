@@ -318,13 +318,13 @@ const compactInputClass =
   "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] font-normal text-field-text outline-none placeholder:text-center placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/20 [&::-webkit-date-and-time-value]:text-center";
 
 const centeredSelectClass = `${compactInputClass} daily-plan-dropdown-no-indicator appearance-none [text-align-last:center]`;
-const timetableInputClass = `${compactInputClass} max-w-full text-center`;
-const timetableCellClass = "daily-plan-timetable-cell min-w-0 border border-field-border p-1 max-lg:border-0 max-lg:p-0";
-const timetableWideCellClass = `${timetableCellClass} daily-plan-timetable-cell--wide max-lg:col-span-2`;
+const timetableControlClass = "daily-plan-timetable-control";
+const timetableInputClass = `${compactInputClass} ${timetableControlClass} max-w-full text-center`;
+const timetableCellClass = "daily-plan-timetable-cell relative min-w-0 border border-field-border p-0.5";
+const timetableWideCellClass = `${timetableCellClass} daily-plan-timetable-cell--wide`;
 const timetableTextCellClass = `${timetableWideCellClass} overflow-hidden`;
 const timetableFieldLabelBaseClass = "daily-plan-timetable-mobile-label mb-1 min-h-6 select-none items-center justify-center break-words text-center text-[11px] font-black leading-4 text-field-subtle [overflow-wrap:anywhere] max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
-const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden max-lg:flex`;
-const mobileTimetableLabelClass = "daily-plan-timetable-mobile-label mb-1 hidden break-words text-[11px] font-black text-field-subtle [overflow-wrap:anywhere] max-lg:block max-md:mb-0 max-md:text-[10px] max-md:leading-[1.3]";
+const timetableFieldLabelClass = `${timetableFieldLabelBaseClass} hidden`;
 const mobileTimetableRowClass = "max-md:grid-cols-12 max-md:gap-0.5 max-md:p-0.5 max-md:[&_button]:h-auto max-md:[&_button]:min-h-[44px] max-md:[&_button]:px-1 max-md:[&_button]:py-1 max-md:[&_button]:text-[10px] max-md:[&_button]:leading-[1.35] max-md:[&_input]:h-auto max-md:[&_input]:min-h-[44px] max-md:[&_input]:px-1 max-md:[&_input]:py-1 max-md:[&_input]:text-[10px] max-md:[&_input]:leading-[1.35] max-md:[&_select]:h-auto max-md:[&_select]:min-h-[44px] max-md:[&_select]:px-1 max-md:[&_select]:py-1 max-md:[&_select]:text-[10px] max-md:[&_select]:leading-[1.35]";
 const staffDepartmentGridClass =
   "daily-plan-staff-department-grid grid w-full min-w-0 max-w-full grid-cols-[minmax(0,1.1fr)_minmax(0,0.72fr)_minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(0,1.35fr)] items-center gap-0.5 sm:gap-1 md:gap-2";
@@ -1065,20 +1065,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           }
         : scene
     )));
-  }
-
-  function resetSceneCharactersOverride(sceneIndex: number) {
-    setScenes((current) => current.map((scene, index) => {
-      if (index !== sceneIndex) return scene;
-      const source = sceneListItems.find((item) => item.id === scene.sourceSceneId);
-      if (!source) return scene;
-      return {
-        ...scene,
-        subject: normalizeSceneCharacters(source.characters),
-        charactersOverride: null,
-        characterIdsOverride: null
-      };
-    }));
   }
 
   function updateSceneCutCountOverride(sceneIndex: number, value: string) {
@@ -2109,12 +2095,12 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         <section className="field-section mt-3 p-1.5 md:mt-5 md:p-5">
           <h2 className="text-lg font-black text-field-text">TIME TABLE 입력</h2>
 
-          <div className="mt-1.5 w-full md:mt-5">
-            <table className="daily-plan-timetable-table w-full table-fixed border-collapse text-xs max-lg:block">
-              <colgroup className="max-lg:hidden">
+          <div className="daily-plan-timetable-scroll mt-1.5 w-full md:mt-5">
+            <table className="daily-plan-timetable-table w-full table-fixed border-collapse text-xs">
+              <colgroup>
                 {[8, 9, 11, 6, 8, 8, 14, 15, 11, 10].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
               </colgroup>
-              <thead className="daily-plan-timetable-head max-lg:hidden">
+              <thead className="daily-plan-timetable-head">
                 <tr className="bg-field-panel text-field-subtle">
                   {["시작시간", "소요시간", "장소", "D/N", "SCENE", "Cut", "등장인물", "씬별 내용", "촬영 순서", "비고"].map((header) => (
                     <th key={header} className="daily-plan-timetable-head-cell border border-field-border px-2 py-2 text-center font-black">
@@ -2123,7 +2109,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                   ))}
                 </tr>
               </thead>
-              <tbody className="daily-plan-timetable-body max-lg:grid max-lg:gap-3 max-md:gap-1">
+              <tbody className="daily-plan-timetable-body">
                 {timetableRows.map((row) => {
                   const rowKey = getEditorTimetableRowKey(row);
                   const isSelected = timetableInteraction.selectedRowKey === rowKey;
@@ -2135,26 +2121,26 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <tr
                         key={meal.id}
                         ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
-                        className={`daily-plan-timetable-row bg-field-soft align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-[var(--radius-card)] max-lg:border max-lg:border-field-border max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                        className={`daily-plan-timetable-row daily-plan-timetable-row--event bg-field-soft align-middle ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                         data-selected={isSelected ? "true" : undefined}
                         data-dragging={isDragging ? "true" : undefined}
-                        style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
+                        style={{ touchAction: "pan-x pan-y", WebkitTouchCallout: "none" }}
                         onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
                         onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
                         onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
                       >
-                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} /></td>
+                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                           <span className={timetableFieldLabelClass}>장소</span>
-                          <select className={centeredSelectClass} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
+                          <select className={`${centeredSelectClass} ${timetableControlClass}`} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
                             <option value="">빈칸</option>
                             {locations.filter(isMeaningfulDailyPlanLocationCard).map((location, locationIndex) => (
                               <option key={location.id} value={location.id}>{getDailyPlanLocationOptionLabel(location, locationIndex)}</option>
                             ))}
                           </select>
                         </td>
-                        <td colSpan={7} className={`${timetableTextCellClass} max-lg:col-span-2 max-md:order-5 max-md:!col-span-12`}>
+                        <td colSpan={7} className={`${timetableTextCellClass} max-md:order-5 max-md:!col-span-12`}>
                           <div className="min-w-0">
                             <span className={timetableFieldLabelClass}>메모</span>
                             <MemoPopoverField
@@ -2162,6 +2148,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                               placeholder="메모"
                               ariaLabel={`기타 일정 ${mealIndex + 1} 메모 수정`}
                               onChange={(value) => updateMealTime(mealIndex, { memo: value })}
+                              triggerClassName={timetableControlClass}
                             />
                           </div>
                         </td>
@@ -2185,15 +2172,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                     <tr
                       key={scene.id}
                       ref={timetableInteraction.registerRow(rowKey) as React.Ref<HTMLTableRowElement>}
-                      className={`daily-plan-timetable-row align-middle max-lg:grid max-lg:grid-cols-2 max-lg:gap-2 max-lg:rounded-[var(--radius-card)] max-lg:border max-lg:border-field-border max-lg:bg-field-panel max-lg:p-3 ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
+                      className={`daily-plan-timetable-row daily-plan-timetable-row--scene align-middle ${mobileTimetableRowClass} ${isDragging ? "opacity-35" : ""}`}
                       data-selected={isSelected ? "true" : undefined}
                       data-dragging={isDragging ? "true" : undefined}
-                      style={{ touchAction: "pan-y", WebkitTouchCallout: "none" }}
+                      style={{ touchAction: "pan-x pan-y", WebkitTouchCallout: "none" }}
                       onPointerDownCapture={(event) => timetableInteraction.onRowPointerDownCapture(rowKey, event)}
                       onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
                       onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
                     >
-                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} /></td>
+                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                         <span className={timetableFieldLabelClass}>장소</span>
@@ -2206,7 +2193,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           />
                         </div>
                       </td>
-                      <td className={`${timetableCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={centeredSelectClass} value={normalizeDailyPlanDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
+                      <td className={`${timetableCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>D/N</span><select aria-label={`촬영 행 ${sceneIndex + 1} D/N`} className={`${centeredSelectClass} ${timetableControlClass}`} value={normalizeDailyPlanDayNight(scene.dayNight)} onChange={(event) => updateScene(sceneIndex, { dayNight: event.target.value })}><option value="">빈칸</option>{dayNightOptions.map((option) => <option key={option} value={option}>{option}</option>)}</select></td>
                       <td className={`${timetableCellClass} max-md:order-5 max-md:col-span-4`}>
                         <span className={timetableFieldLabelClass}><span className="md:hidden">씬</span><span className="hidden md:inline">SCENE</span></span>
                         <SceneSourceSelector
@@ -2220,7 +2207,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       </td>
                       <td className={`${timetableCellClass} max-md:order-6 max-md:col-span-4`}>
                         <span className={timetableFieldLabelClass}>Cut</span>
-                        <div className="grid min-w-0 gap-0.5">
+                        <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,1fr)] gap-0.5">
                           <SceneCutCountField
                             value={scene.cutCount}
                             sourceValue={linkedSource?.cutCount ?? scene.sourceSnapshot?.totalCuts ?? null}
@@ -2240,11 +2227,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         </div>
                       </td>
                       <td className={`${timetableWideCellClass} max-md:order-8 max-md:!col-span-5`}>
-                        <TimetableLinkedFieldLabel
-                          label="등장인물"
-                          canReset={scene.charactersOverride !== null && Boolean(linkedSource)}
-                          onReset={() => resetSceneCharactersOverride(sceneIndex)}
-                        />
+                        <span className={timetableFieldLabelClass}>등장인물</span>
                         <SceneCastSelector
                           people={printMeta.starring}
                           value={scene.subject}
@@ -2254,17 +2237,27 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         />
                       </td>
                       <td className={`${timetableTextCellClass} max-md:order-9 max-md:!col-span-7`}>
-                        <TimetableLinkedFieldLabel
-                          label="씬별 내용"
-                          canReset={scene.sceneContentOverride !== null && Boolean(linkedSource)}
-                          onReset={() => resetSceneContentOverride(sceneIndex)}
-                        />
-                        <MemoPopoverField
-                          value={scene.description}
-                          placeholder="씬별 내용"
-                          ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 씬별 내용 수정`}
-                          onChange={(value) => updateSceneContentOverride(sceneIndex, value)}
-                        />
+                        <div className="relative min-w-0">
+                          <span className={timetableFieldLabelClass}>씬별 내용</span>
+                          <MemoPopoverField
+                            value={scene.description}
+                            placeholder="씬별 내용"
+                            ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 씬별 내용 수정`}
+                            onChange={(value) => updateSceneContentOverride(sceneIndex, value)}
+                            triggerClassName={`${timetableControlClass} ${scene.sceneContentOverride !== null && linkedSource ? "pr-12" : ""}`}
+                          />
+                          {scene.sceneContentOverride !== null && linkedSource ? (
+                            <button
+                              type="button"
+                              className="daily-plan-timetable-linked-reset absolute bottom-0 right-0 z-10 inline-flex items-center justify-center border border-field-border bg-field-input text-field-muted transition-colors hover:bg-field-hover hover:text-field-text"
+                              onClick={() => resetSceneContentOverride(sceneIndex)}
+                              aria-label="씬별 내용 씬리스트 원본값 사용"
+                              title="씬리스트 원본값 사용"
+                            >
+                              <RotateCcw className="h-3 w-3" aria-hidden />
+                            </button>
+                          ) : null}
+                        </div>
                       </td>
                       <td className={`${timetableTextCellClass} max-md:order-7 max-md:!col-span-4`}>
                         <span className={timetableFieldLabelClass}><span className="md:hidden">순서</span><span className="hidden md:inline">촬영 순서</span></span>
@@ -2275,7 +2268,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                           ariaLabel={`촬영 행 ${sceneIndex + 1} 촬영 순서`}
                         />
                       </td>
-                      <td className={`${timetableTextCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>비고</span><MemoPopoverField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} /></td>
+                      <td className={`${timetableTextCellClass} max-md:hidden`}><span className={timetableFieldLabelClass}>비고</span><MemoPopoverField value={scene.notes} placeholder="비고" ariaLabel={`${formatSceneNumber(scene.sceneNumber) || `촬영 행 ${sceneIndex + 1}`} 비고 수정`} onChange={(value) => updateTimetableNotes(sceneIndex, value)} triggerClassName={timetableControlClass} /></td>
                     </tr>
                   );
                 })}
@@ -3139,7 +3132,7 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
       <div className="relative">
         <input
           ref={inputRef}
-          className={`${compactInputClass} h-auto min-h-[38px] pl-2 pr-5 py-1.5 tabular-nums leading-[1.35] max-md:pl-1 max-md:pr-4 ${isInvalid ? "!border-field-danger" : ""}`}
+          className={`${compactInputClass} ${timetableControlClass} pl-2 pr-5 py-1.5 tabular-nums leading-[1.35] max-md:pl-1 max-md:pr-4 ${isInvalid ? "!border-field-danger" : ""}`}
           type="text"
           value={draftValue}
           inputMode="numeric"
@@ -3362,7 +3355,7 @@ function ShootingOrderField({
       <button
         ref={triggerRef}
         type="button"
-        className={`flex min-h-[38px] w-full min-w-0 items-center justify-center border bg-field-input px-2.5 py-1.5 text-center text-sm font-normal leading-[1.35] transition-colors ${
+        className={`${timetableControlClass} flex w-full min-w-0 items-center justify-center overflow-hidden border bg-field-input px-2.5 py-1.5 text-center text-sm font-normal leading-[1.35] transition-colors ${
           savedValidation.error
             ? "border-field-danger text-field-danger ring-1 ring-field-danger/20"
             : displayValue
@@ -3382,16 +3375,14 @@ function ShootingOrderField({
         aria-label={ariaLabel}
         aria-invalid={Boolean(savedValidation.error)}
         aria-expanded={isOpen}
-        title={isInputDisabled ? "총 컷수를 먼저 입력해주세요." : displayValue || "촬영 순서 입력"}
+        title={isInputDisabled ? "총 컷수를 먼저 입력해주세요." : savedValidation.error || displayValue || "촬영 순서 입력"}
       >
-        <span className="block min-w-0 max-w-full overflow-x-auto whitespace-nowrap text-center">
+        <span className="block min-w-0 max-w-full truncate whitespace-nowrap text-center">
           {displayValue || "촬영 순서 입력"}
         </span>
       </button>
       {savedValidation.error ? (
-        <span className="mt-0.5 block text-[9px] font-bold leading-[1.3] text-field-danger" aria-live="polite">
-          {savedValidation.error}
-        </span>
+        <span className="sr-only" aria-live="polite">{savedValidation.error}</span>
       ) : null}
       {isOpen && typeof document !== "undefined" ? createPortal(
         <div
@@ -3565,7 +3556,7 @@ function SceneSourceSelector({
   if (items.length === 0 && !value) {
     return (
       <DraftInput
-        className={compactInputClass}
+        className={`${compactInputClass} ${timetableControlClass}`}
         value={legacySceneNumber}
         onCommit={onLegacySceneNumberChange}
         placeholder="씬 선택"
@@ -3576,7 +3567,7 @@ function SceneSourceSelector({
 
   return (
     <select
-      className={centeredSelectClass}
+      className={`${centeredSelectClass} ${timetableControlClass}`}
       value={selectedValue}
       onChange={(event) => {
         if (event.currentTarget.value === "__legacy_scene__") return;
@@ -3638,12 +3629,12 @@ function SceneCutCountField({
     <div className="grid min-w-0 gap-0.5">
       <input
         aria-label={ariaLabel}
-        className={`${compactInputClass} ${invalid ? "!border-field-danger" : ""}`}
+        className={`${compactInputClass} ${timetableControlClass} px-1 py-1 leading-[1.35] ${invalid ? "!border-field-danger" : ""}`}
         type="text"
         inputMode="numeric"
         pattern="[0-9]*"
         value={draftValue}
-        title={isOverride ? "이 일촬표의 수동 Cut 값입니다. 비우면 씬리스트 값으로 돌아갑니다." : sourceValue == null ? undefined : `씬리스트 Cut ${sourceValue}`}
+        title={invalid ? `0~${MAX_SCENE_CUT_COUNT} 사이의 숫자를 입력해주세요.` : isOverride ? "이 일촬표의 수동 Cut 값입니다. 비우면 씬리스트 값으로 돌아갑니다." : sourceValue == null ? undefined : `씬리스트 Cut ${sourceValue}`}
         onChange={(event) => updateDraft(event.currentTarget.value)}
         onBlur={finishDraft}
         onKeyDown={(event) => {
@@ -3656,7 +3647,7 @@ function SceneCutCountField({
         aria-invalid={invalid}
       />
       {invalid ? (
-        <span className="text-[9px] font-bold leading-tight text-field-danger">0~{MAX_SCENE_CUT_COUNT}</span>
+        <span className="sr-only" aria-live="polite">0~{MAX_SCENE_CUT_COUNT} 사이의 숫자를 입력해주세요.</span>
       ) : null}
     </div>
   );
@@ -3749,7 +3740,7 @@ function SceneCutAllocationSelector({
     <div ref={selectorRef} className="relative min-w-0">
       <button
         type="button"
-        className="flex min-h-8 w-full min-w-0 items-center justify-center border border-field-border bg-field-input px-1 py-1 text-center text-[10px] font-bold leading-[1.25] text-field-text transition-colors hover:border-field-primary hover:bg-field-hover disabled:cursor-not-allowed disabled:text-field-disabled"
+        className={`${timetableControlClass} flex w-full min-w-0 items-center justify-center overflow-hidden border border-field-border bg-field-input px-1 py-1 text-center text-[9px] font-bold leading-[1.2] text-field-text transition-colors hover:border-field-primary hover:bg-field-hover disabled:cursor-not-allowed disabled:text-field-disabled`}
         onClick={() => {
           setDraftValue(value);
           setIsOpen((current) => !current);
@@ -3760,7 +3751,7 @@ function SceneCutAllocationSelector({
         aria-label={`${sceneLabel} 촬영 컷 선택`}
         title={displayLabel}
       >
-        <span className="max-h-[2.5em] min-w-0 overflow-hidden break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+        <span className="block min-w-0 max-w-full truncate whitespace-nowrap">
           {displayLabel}
         </span>
       </button>
@@ -3771,7 +3762,7 @@ function SceneCutAllocationSelector({
             role="dialog"
             aria-modal="true"
             aria-label={`${sceneLabel} 촬영 컷 선택`}
-            className="absolute right-0 z-50 mt-1 flex w-[min(22rem,calc(100vw-2rem))] max-h-[min(70dvh,34rem)] flex-col overflow-hidden border border-field-divider bg-field-dialog shadow-dialog max-lg:fixed max-lg:inset-x-2 max-lg:bottom-2 max-lg:mx-auto max-lg:w-auto"
+            className="absolute right-0 z-50 mt-1 flex w-[min(22rem,calc(100vw-2rem))] max-h-[min(70dvh,34rem)] flex-col overflow-hidden border border-field-divider bg-field-dialog shadow-dialog max-xl:fixed max-xl:inset-x-2 max-xl:bottom-2 max-xl:mx-auto max-xl:w-auto"
           >
             <div className="border-b border-field-border px-3 py-2 text-left">
               <div className="flex items-center justify-between gap-2">
@@ -3814,33 +3805,6 @@ function SceneCutAllocationSelector({
         </>
       ) : null}
     </div>
-  );
-}
-
-function TimetableLinkedFieldLabel({
-  label,
-  canReset,
-  onReset
-}: {
-  label: string;
-  canReset: boolean;
-  onReset: () => void;
-}) {
-  return (
-    <span className={`${timetableFieldLabelBaseClass} flex lg:mb-0 lg:min-h-0 lg:justify-end`}>
-      <span className="lg:hidden">{label}</span>
-      {canReset ? (
-        <button
-          type="button"
-          className="ml-1 inline-flex min-h-6 min-w-6 items-center justify-center border border-field-border bg-field-input text-field-muted transition-colors hover:bg-field-hover hover:text-field-text"
-          onClick={onReset}
-          aria-label={`${label} 씬리스트 원본값 사용`}
-          title="씬리스트 원본값 사용"
-        >
-          <RotateCcw className="h-3 w-3" aria-hidden />
-        </button>
-      ) : null}
-    </span>
   );
 }
 
@@ -3924,7 +3888,7 @@ function SceneCastSelector({
     <div ref={selectorRef} className="relative">
       <button
         type="button"
-        className="flex min-h-[38px] w-full items-center justify-center border border-field-border bg-field-input px-2 py-1.5 text-center text-[12px] font-normal leading-[1.4] text-field-text transition-colors hover:bg-field-hover"
+        className={`${timetableControlClass} flex w-full min-w-0 items-center justify-center overflow-hidden border border-field-border bg-field-input px-2 py-1.5 text-center text-[12px] font-normal leading-[1.4] text-field-text transition-colors hover:bg-field-hover`}
         onClick={() => {
           if (isOpen) cancelSelection();
           else openSelector();
@@ -3932,9 +3896,9 @@ function SceneCastSelector({
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-label={ariaLabel}
-        title={ariaLabel}
+        title={selectedValues.join(", ") || ariaLabel}
       >
-        <span className="break-words [overflow-wrap:anywhere]">{selectedValues.join(", ") || "배역 선택"}</span>
+        <span className="block min-w-0 max-w-full truncate whitespace-nowrap">{selectedValues.join(", ") || "배역 선택"}</span>
       </button>
       {isOpen ? (
         <>
@@ -3943,7 +3907,7 @@ function SceneCastSelector({
             role="dialog"
             aria-modal="true"
             aria-label={ariaLabel}
-            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden border border-field-divider bg-field-dialog text-center shadow-dialog max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:mt-0 max-lg:max-h-[min(70dvh,32rem)] max-lg:px-[max(0.75rem,env(safe-area-inset-left))] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-lg:pt-2"
+            className="absolute left-0 z-30 mt-1 flex max-h-72 min-w-64 flex-col overflow-hidden border border-field-divider bg-field-dialog text-center shadow-dialog max-xl:fixed max-xl:inset-x-0 max-xl:bottom-0 max-xl:mt-0 max-xl:max-h-[min(70dvh,32rem)] max-xl:px-[max(0.75rem,env(safe-area-inset-left))] max-xl:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-xl:pt-2"
           >
             <div className="flex items-center justify-between border-b border-field-border px-3 py-2">
               <strong className="text-sm text-field-text">등장인물 선택</strong>
@@ -3998,7 +3962,8 @@ function TimeWheelPicker({
   onChange,
   compact = false,
   inline = false,
-  showLabel = true
+  showLabel = true,
+  controlClassName = ""
 }: {
   label: string;
   value: string;
@@ -4006,6 +3971,7 @@ function TimeWheelPicker({
   compact?: boolean;
   inline?: boolean;
   showLabel?: boolean;
+  controlClassName?: string;
 }) {
   const savedDigits = formatTimeToHHMM(value);
   const [draftValue, setDraftValue] = useState(savedDigits);
@@ -4040,7 +4006,7 @@ function TimeWheelPicker({
       {showLabel ? <span className={compact ? "text-xs font-black text-field-subtle" : "text-sm font-black text-field-subtle"}>{label}</span> : null}
       <input
         ref={inputRef}
-        className={`${compactInputClass} h-auto min-h-[38px] py-1.5 leading-[1.35] ${isInvalid ? "!border-field-danger" : ""}`}
+        className={`${compactInputClass} h-auto min-h-[38px] py-1.5 leading-[1.35] ${controlClassName} ${isInvalid ? "!border-field-danger" : ""}`}
         type="text"
         value={isFocused ? draftValue : formatTimeDisplay(value)}
         inputMode="numeric"

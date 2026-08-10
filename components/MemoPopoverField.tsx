@@ -9,13 +9,14 @@ type MemoPopoverFieldProps = {
   placeholder: string;
   ariaLabel: string;
   onChange: (value: string) => void;
+  triggerClassName?: string;
 };
 
-const triggerClassName =
+const triggerBaseClassName =
   "min-h-[38px] w-full min-w-0 border border-field-border bg-field-input px-2 py-1.5 text-center text-[13px] text-field-text outline-none transition-colors hover:border-field-primary hover:bg-field-hover focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표 내용 카드와 스텝 특이사항이 함께 쓰는 작은 live-update 편집 카드입니다. */
-export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: MemoPopoverFieldProps) {
+export function MemoPopoverField({ value, placeholder, ariaLabel, onChange, triggerClassName = "" }: MemoPopoverFieldProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [draftValue, setDraftValue] = useState(value);
   const [position, setPosition] = useState({ left: 12, top: 12, width: 300 });
@@ -91,7 +92,7 @@ export function MemoPopoverField({ value, placeholder, ariaLabel, onChange }: Me
       <button
         ref={triggerRef}
         type="button"
-        className={`${triggerClassName} block max-w-full overflow-hidden whitespace-nowrap text-center`}
+        className={`${triggerBaseClassName} block max-w-full overflow-hidden whitespace-nowrap text-center ${triggerClassName}`}
         onClick={() => {
           setDraftValue(value);
           draftValueRef.current = value;
