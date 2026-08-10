@@ -9,6 +9,7 @@ import {
   getInteractionGuideVariant
 } from "../lib/contextualInteractionGuides.ts";
 import {
+  CONTEXTUAL_GUIDES,
   canUseGuidePermission,
   getGuideIdsForPage
 } from "../lib/contextualGuides.ts";
@@ -128,6 +129,82 @@ test("interaction steps use feature-specific availability anchors", () => {
   assert.equal(INTERACTION_GUIDES["archive.interaction-asset-info"].anchor, "archive.asset");
   assert.equal(INTERACTION_GUIDES["archive.interaction-touch-selection"].anchor, "archive.asset");
   assert.equal(INTERACTION_GUIDES["archive.interaction-asset-delete"].anchor, "archive.asset");
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-person-add"].anchor,
+    "archive.diagram-person-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-person-move"].anchor,
+    "archive.diagram-canvas"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-camera-move"].anchor,
+    "archive.diagram-canvas"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-rotate"].anchor,
+    "archive.diagram-canvas"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-room"].anchor,
+    "archive.diagram-room-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-path"].anchor,
+    "archive.diagram-path-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-undo"].anchor,
+    "archive.diagram-history"
+  );
+});
+
+test("diagram first-use and manual tour share the exact visible editor anchor contract", () => {
+  const firstUse = CONTEXTUAL_GUIDES["archive.diagram-editor-first-use"];
+  assert.equal(firstUse.type, "anchor");
+  assert.equal(firstUse.persistentAnchor, "archive.diagram-canvas");
+  assert.equal(firstUse.compactAnchor, "archive.diagram-canvas");
+  assert.equal(firstUse.permission, "manage");
+
+  const diagramIds = getInteractionGuideIdsForPage("archive")
+    .filter((id) => id.includes("interaction-diagram-"));
+  assert.equal(diagramIds.length, 7);
+  assert.ok(diagramIds.every((id) => INTERACTION_GUIDES[id].permission === "manage"));
+  assert.ok(diagramIds.every((id) => (
+    INTERACTION_GUIDES[id].compactAnchor ?? INTERACTION_GUIDES[id].anchor
+  ) === "archive.diagram-canvas"));
+
+  // Desktop keeps the precise visible tool/handle anchors while compact mode
+  // uses the always-visible canvas instead of an off-screen toolbar item.
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-person-add"].anchor,
+    "archive.diagram-person-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-room"].anchor,
+    "archive.diagram-room-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-path"].anchor,
+    "archive.diagram-path-tool"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-undo"].anchor,
+    "archive.diagram-history"
+  );
+});
+
+test("diagram movement help matches the one-click destination workflow", () => {
+  const movement = INTERACTION_GUIDES["archive.interaction-diagram-path"];
+  const fine = getInteractionGuideVariant(movement, "fine");
+  const coarse = getInteractionGuideVariant(movement, "coarse");
+
+  assert.equal(fine?.demo, "tap");
+  assert.equal(coarse?.demo, "tap");
+  assert.match(fine?.description ?? "", /도착점을 클릭/u);
+  assert.match(coarse?.description ?? "", /도착점을 탭/u);
+  assert.doesNotMatch(fine?.description ?? "", /끌|드래그|그립니다/u);
+  assert.doesNotMatch(coarse?.description ?? "", /끌|드래그|그립니다/u);
 });
 
 test("permission filtering uses the canonical exact key-staff rule", () => {
@@ -179,8 +256,8 @@ test("platform-specific page tours omit unsupported shortcuts", () => {
     inputMode: "coarse",
     role: "admin"
   });
-  assert.equal(archiveFine.length, 5);
-  assert.equal(archiveCoarse.length, 3);
+  assert.equal(archiveFine.length, 12);
+  assert.equal(archiveCoarse.length, 10);
   assert.ok(archiveCoarse.every((guide) => !["shift-range", "modifier-toggle", "right-click"]
     .includes(guide.variant.demo)));
 });
@@ -196,6 +273,10 @@ test("gesture variants retain the audited long-press thresholds and safe delete 
   assert.equal(duration("scene-list.interaction-scene-reorder", "coarse"), 480);
   assert.equal(duration("scene-list.interaction-actor-note", "coarse"), 540);
   assert.equal(duration("archive.interaction-touch-selection", "coarse"), 550);
+  assert.equal(duration("archive.interaction-diagram-person-move", "fine"), 200);
+  assert.equal(duration("archive.interaction-diagram-person-move", "coarse"), 350);
+  assert.equal(duration("archive.interaction-diagram-camera-move", "fine"), 200);
+  assert.equal(duration("archive.interaction-diagram-camera-move", "coarse"), 350);
 
   const archiveDelete = getInteractionGuideVariant(
     INTERACTION_GUIDES["archive.interaction-asset-delete"],

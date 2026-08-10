@@ -41,7 +41,14 @@ export type ContextualInteractionGuideId =
   | "archive.interaction-shift-range"
   | "archive.interaction-additive-selection"
   | "archive.interaction-asset-reorder"
-  | "archive.interaction-asset-delete";
+  | "archive.interaction-asset-delete"
+  | "archive.interaction-diagram-person-add"
+  | "archive.interaction-diagram-person-move"
+  | "archive.interaction-diagram-camera-move"
+  | "archive.interaction-diagram-rotate"
+  | "archive.interaction-diagram-room"
+  | "archive.interaction-diagram-path"
+  | "archive.interaction-diagram-undo";
 
 export type ContextualInteractionGuideVariant = {
   title: string;
@@ -109,7 +116,14 @@ const ARCHIVE_INTERACTION_GUIDES = [
   "archive.interaction-shift-range",
   "archive.interaction-additive-selection",
   "archive.interaction-asset-reorder",
-  "archive.interaction-asset-delete"
+  "archive.interaction-asset-delete",
+  "archive.interaction-diagram-person-add",
+  "archive.interaction-diagram-person-move",
+  "archive.interaction-diagram-camera-move",
+  "archive.interaction-diagram-rotate",
+  "archive.interaction-diagram-room",
+  "archive.interaction-diagram-path",
+  "archive.interaction-diagram-undo"
 ] as const satisfies readonly ContextualInteractionGuideId[];
 
 export const INTERACTION_GUIDES: Record<
@@ -604,6 +618,164 @@ export const INTERACTION_GUIDES: Record<
         description: "자료를 약 0.55초 동안 누른 뒤 화면 아래 휴지통에 끌어놓으면 삭제 확인이 열립니다.",
         demo: "drag-trash",
         durationMs: 550
+      }
+    }
+  },
+  "archive.interaction-diagram-person-add": {
+    id: "archive.interaction-diagram-person-add",
+    page: "archive",
+    anchor: "archive.diagram-person-tool",
+    compactAnchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 60,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "인물 만들기",
+        description: "인물 도구를 누르면 작은 top-view 인물이 추가되고 바로 선택됩니다.",
+        demo: "tap"
+      },
+      coarse: {
+        title: "인물 만들기",
+        description: "인물 도구를 누르면 작은 top-view 인물이 추가되고 바로 선택됩니다.",
+        demo: "tap"
+      }
+    }
+  },
+  "archive.interaction-diagram-person-move": {
+    id: "archive.interaction-diagram-person-move",
+    page: "archive",
+    anchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "top",
+    priority: 70,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "인물 이동",
+        description: "인물을 약 0.2초 동안 누른 뒤 끌면 인물만 이동합니다.",
+        demo: "long-press",
+        durationMs: 200
+      },
+      coarse: {
+        title: "인물 이동",
+        description: "인물을 약 0.35초 동안 길게 누른 뒤 끌면 인물만 이동합니다.",
+        demo: "long-press",
+        durationMs: 350
+      }
+    }
+  },
+  "archive.interaction-diagram-camera-move": {
+    id: "archive.interaction-diagram-camera-move",
+    page: "archive",
+    anchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "top",
+    priority: 80,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "카메라 이동",
+        description: "카메라를 약 0.2초 동안 누른 뒤 끌면 카메라만 이동합니다.",
+        demo: "long-press",
+        durationMs: 200
+      },
+      coarse: {
+        title: "카메라 이동",
+        description: "카메라를 약 0.35초 동안 길게 누른 뒤 끌면 카메라만 이동합니다.",
+        demo: "long-press",
+        durationMs: 350
+      }
+    }
+  },
+  "archive.interaction-diagram-rotate": {
+    id: "archive.interaction-diagram-rotate",
+    page: "archive",
+    anchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "top",
+    priority: 90,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "방향 회전",
+        description: "선택한 인물이나 카메라의 회전 핸들을 끌어 방향만 조정합니다.",
+        demo: "drag"
+      },
+      coarse: {
+        title: "방향 회전",
+        description: "선택한 인물이나 카메라의 회전 핸들을 끌어 방향만 조정합니다.",
+        demo: "drag"
+      }
+    }
+  },
+  "archive.interaction-diagram-room": {
+    id: "archive.interaction-diagram-room",
+    page: "archive",
+    anchor: "archive.diagram-room-tool",
+    compactAnchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 100,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "공간 만들기",
+        description: "공간 도구로 점을 이어 벽을 만들고, 시작점에 연결하면 닫힌 공간이 됩니다.",
+        detail: "Enter로 닫고, 더블클릭이나 Escape로 열린 벽을 끝낼 수 있습니다.",
+        demo: "tap"
+      },
+      coarse: {
+        title: "공간 만들기",
+        description: "공간 도구로 점을 이어 벽을 만들고, 시작점에 연결하면 닫힌 공간이 됩니다.",
+        detail: "완료 동작으로 닫힌 공간을 만들거나 열린 벽으로 끝낼 수 있습니다.",
+        demo: "tap"
+      }
+    }
+  },
+  "archive.interaction-diagram-path": {
+    id: "archive.interaction-diagram-path",
+    page: "archive",
+    anchor: "archive.diagram-path-tool",
+    compactAnchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 110,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "동선 만들기",
+        description: "인물이나 카메라를 선택하고 동선 도구를 누른 뒤, 캔버스의 도착점을 클릭하면 이동 방향이 표시됩니다.",
+        demo: "tap"
+      },
+      coarse: {
+        title: "동선 만들기",
+        description: "인물이나 카메라를 선택하고 동선 도구를 누른 뒤, 캔버스의 도착점을 탭하면 이동 방향이 표시됩니다.",
+        demo: "tap"
+      }
+    }
+  },
+  "archive.interaction-diagram-undo": {
+    id: "archive.interaction-diagram-undo",
+    page: "archive",
+    anchor: "archive.diagram-history",
+    compactAnchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 120,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "실행 취소",
+        description: "실행 취소 버튼이나 ⌘Z / Ctrl+Z로 마지막 편집을 되돌릴 수 있습니다.",
+        demo: "tap",
+        modifierLabel: "⌘Z / Ctrl+Z"
+      },
+      coarse: {
+        title: "실행 취소",
+        description: "실행 취소 버튼으로 마지막 편집을 되돌리고, 다시 실행으로 복구할 수 있습니다.",
+        demo: "tap"
       }
     }
   }

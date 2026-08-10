@@ -116,6 +116,21 @@ export type ProjectInput = {
   description: string;
 };
 
+export type ShotOverheadPoint = {
+  x: number;
+  y: number;
+};
+
+export type ShotOverheadPersonColor =
+  | "red"
+  | "blue"
+  | "yellow"
+  | "cyan"
+  | "magenta"
+  | "lime"
+  | "orange"
+  | "gray";
+
 export type ShotOverheadPerson = {
   id: string;
   x: number;
@@ -123,6 +138,7 @@ export type ShotOverheadPerson = {
   scale: number;
   rotation: number;
   label: string;
+  color: ShotOverheadPersonColor;
 };
 
 export type ShotOverheadCamera = {
@@ -131,6 +147,7 @@ export type ShotOverheadCamera = {
   y: number;
   rotation: number;
   label: string;
+  showFov: boolean;
 };
 
 export type ShotOverheadLine = {
@@ -142,7 +159,7 @@ export type ShotOverheadLine = {
   color: "black" | "red";
 };
 
-export type ShotOverheadShape = {
+export type ShotOverheadRectShape = {
   id: string;
   type: "rect";
   x: number;
@@ -151,6 +168,24 @@ export type ShotOverheadShape = {
   height: number;
   rotation: number;
   label: string;
+};
+
+/** closed=false는 열린 벽선, closed=true는 닫힌 비정형 공간을 나타냅니다. */
+export type ShotOverheadPolylineShape = {
+  id: string;
+  type: "polyline";
+  points: ShotOverheadPoint[];
+  closed: boolean;
+  label: string;
+};
+
+export type ShotOverheadShape = ShotOverheadRectShape | ShotOverheadPolylineShape;
+
+export type ShotOverheadMovementPath = {
+  id: string;
+  sourceType: "person" | "camera";
+  sourceId: string;
+  points: ShotOverheadPoint[];
 };
 
 export type ShotOverheadDiagram = {
@@ -163,6 +198,7 @@ export type ShotOverheadDiagram = {
   cameras: ShotOverheadCamera[];
   lines: ShotOverheadLine[];
   shapes: ShotOverheadShape[];
+  movementPaths: ShotOverheadMovementPath[];
 };
 
 export type Shot = {

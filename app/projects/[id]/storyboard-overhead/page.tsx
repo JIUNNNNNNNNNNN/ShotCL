@@ -102,6 +102,7 @@ import {
 } from "@/lib/data/projectReferenceAssets";
 import { parseSceneCutFromAssetName } from "@/lib/archiveAssetMetadata";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
+import { useShotOverheadEditorViewport } from "@/hooks/useShotOverheadEditorViewport";
 import {
   finderSelectionUpdate,
   retainVisibleSelection,
@@ -172,6 +173,7 @@ type PendingDeleteAsset = {
 
 type DiagramDraft = {
   item: OverheadDiagramArchiveItem | null;
+  editorViewportEnabled: boolean;
   title: string;
   memo: string;
   sceneNo: string;
@@ -355,6 +357,7 @@ export default function ProjectStoryboardOverheadPage() {
   const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
+  const supportsDiagramEditing = useShotOverheadEditorViewport();
   const [projectName, setProjectName] = useState("");
   const [activeType, setActiveType] = useState<ArchiveViewType>("overhead");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
@@ -410,14 +413,17 @@ export default function ProjectStoryboardOverheadPage() {
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
   const { completeGuide, registerAnchor, requestGuide } = useContextualGuide();
-  const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>("archive.upload");
-  const selectionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>("archive.selection");
+  const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
+    diagramDraft ? null : "archive.upload"
+  );
+  const selectionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+    diagramDraft ? null : "archive.selection"
+  );
   const folderUploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
-    supportsDirectoryPicker ? "archive.folder-upload" : null
+    !diagramDraft && supportsDirectoryPicker ? "archive.folder-upload" : null
   );
   const guideOverlayOpen = Boolean(
     pendingImport
-    || diagramDraft
     || editingAsset
     || renamingAsset
     || preview
@@ -431,7 +437,14 @@ export default function ProjectStoryboardOverheadPage() {
       projectId
       && !isLoading
       && loadedArchiveProjectId === projectId
+      && !diagramDraft
     )
+  );
+  useAutoContextualGuide(
+    "archive.diagram-editor-first-use",
+    Boolean(diagramDraft && !diagramDraft.item?.legacy && diagramDraft.editorViewportEnabled && canEdit),
+    480,
+    "feature"
   );
   const archiveActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
     key: "archive",
@@ -1054,6 +1067,7 @@ export default function ProjectStoryboardOverheadPage() {
   const archiveInteractionGuideAssetId = useMemo(() => {
     if (
       !canEdit
+      || diagramDraft
       || selectionMode
       || selectedKeys.size > 0
       || isSaving
@@ -1064,6 +1078,7 @@ export default function ProjectStoryboardOverheadPage() {
   }, [
     archiveReorderGuideAssetId,
     canEdit,
+    diagramDraft,
     firstVisibleArchiveAssetId,
     isSaving,
     pendingConfirm,
@@ -1075,6 +1090,7 @@ export default function ProjectStoryboardOverheadPage() {
     archiveInteractionGuideAssetId ? "archive.asset" : null
   );
   const archiveMultiSelectGuideAssetId = canEdit
+    && !diagramDraft
     && visibleSelectionKeys.length >= 2
     && !isSaving
     && !pendingConfirm
@@ -1085,7 +1101,7 @@ export default function ProjectStoryboardOverheadPage() {
     archiveMultiSelectGuideAssetId ? "archive.asset-multi-select" : null
   );
   const archiveReorderGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
-    archiveReorderGuideAssetId ? "archive.asset-reorder" : null
+    archiveReorderGuideAssetId && !diagramDraft ? "archive.asset-reorder" : null
   );
   const archiveInteractionGuideRefsByAssetId = useMemo(() => {
     const refs = new Map<string, Array<(element: HTMLButtonElement | null) => void>>();
@@ -2899,7 +2915,7 @@ export default function ProjectStoryboardOverheadPage() {
     const selectedDiagram = diagramArchives.find((item) => (
       !item.legacy && selectedKeys.has(archiveSelectionKey("diagram", item.id))
     ));
-    if (selectedDiagram) {
+    if (selectedDiagram && supportsDiagramEditing) {
       clearSelection();
       openDiagram(selectedDiagram, true);
     }
@@ -2980,8 +2996,10 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   function openNewDiagram() {
+    if (!canEdit || !supportsDiagramEditing) return;
     setDiagramDraft({
       item: null,
+      editorViewportEnabled: true,
       title: "새 부감도",
       memo: "",
       sceneNo: "",
@@ -2991,9 +3009,10 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   function openDiagram(item: OverheadDiagramArchiveItem, edit: boolean) {
-    if (edit && item.legacy) return;
+    if (edit && (item.legacy || !canEdit || !supportsDiagramEditing)) return;
     setDiagramDraft({
       item,
+      editorViewportEnabled: supportsDiagramEditing,
       title: item.title,
       memo: item.memo,
       sceneNo: item.sceneNo,
@@ -3003,7 +3022,7 @@ export default function ProjectStoryboardOverheadPage() {
   }
 
   async function saveDiagram(diagram: ShotOverheadDiagram) {
-    if (!diagramDraft || !projectId) return;
+    if (!diagramDraft || !diagramDraft.editorViewportEnabled || !canEdit || !projectId) return;
     setIsSaving(true);
     try {
       const saved = await saveOverheadDiagramArchive(projectId, diagram, {
@@ -4220,11 +4239,16 @@ export default function ProjectStoryboardOverheadPage() {
             </label>
             {canEdit ? (
               <div className="flex flex-wrap justify-end gap-2">
-                {activeType !== "storyboard" ? (
+                {activeType !== "storyboard" && supportsDiagramEditing ? (
                   <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                     <MapIcon className="h-4 w-4" aria-hidden />
                     직접 만들기
                   </button>
+                ) : null}
+                {activeType !== "storyboard" && !supportsDiagramEditing ? (
+                  <span className="self-center text-[11px] text-field-muted">
+                    직접 제작·편집은 태블릿 또는 웹에서 지원됩니다.
+                  </span>
                 ) : null}
                 {selectedArchiveType ? (
                   <>
@@ -4370,7 +4394,7 @@ export default function ProjectStoryboardOverheadPage() {
                   크롭
                 </button>
               ) : null}
-              {selectedCount === 1 ? (
+              {selectedCount === 1 && (singleSelectedReferenceAsset || supportsDiagramEditing) ? (
                 <button type="button" onClick={editSingleSelectedItem} className="inline-flex min-h-9 items-center gap-1 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                   <Info className="h-3.5 w-3.5" aria-hidden />
                   {singleSelectedReferenceAsset ? "정보 수정" : "정보"}
@@ -4795,12 +4819,22 @@ export default function ProjectStoryboardOverheadPage() {
         />
       ) : null}
       {diagramDraft ? (
-        <>
-          {!diagramDraft.item?.legacy && canEdit ? (
-            <DiagramMetadataBar value={diagramDraft} onChange={setDiagramDraft} />
-          ) : null}
-          <ShotOverheadEditor shot={diagramDraft.shot} readOnly={Boolean(diagramDraft.item?.legacy) || !canEdit} isSaving={isSaving} onClose={() => setDiagramDraft(null)} onSave={saveDiagram} />
-        </>
+        <ShotOverheadEditor
+          shot={diagramDraft.shot}
+          metadata={{
+            title: diagramDraft.title,
+            sceneNo: diagramDraft.sceneNo,
+            cutNo: diagramDraft.cutNo,
+            memo: diagramDraft.memo
+          }}
+          readOnly={Boolean(diagramDraft.item?.legacy) || !diagramDraft.editorViewportEnabled || !canEdit}
+          isSaving={isSaving}
+          onMetadataChange={(metadata) => {
+            setDiagramDraft((current) => current ? { ...current, ...metadata } : current);
+          }}
+          onClose={() => setDiagramDraft(null)}
+          onSave={saveDiagram}
+        />
       ) : null}
       {editingAsset ? (
         <MetadataPopover
@@ -5174,17 +5208,6 @@ function AssetRenameEditor({
         <button type="button" onClick={onSave} className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground transition hover:border-field-secondary hover:bg-field-secondary">{isSaving ? "저장 중" : "저장"}</button>
       </div>
     </section>
-  );
-}
-
-function DiagramMetadataBar({ value, onChange }: { value: DiagramDraft; onChange: (value: DiagramDraft) => void }) {
-  return (
-    <div className="fixed left-1/2 top-[max(0.5rem,env(safe-area-inset-top))] z-[90] flex w-[min(92vw,44rem)] -translate-x-1/2 flex-wrap gap-1 border border-field-divider bg-field-floating p-2 shadow-floating">
-      <input value={value.title} onChange={(event) => onChange({ ...value, title: event.target.value })} className="min-h-9 min-w-0 flex-[2] border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="부감도 제목" />
-      <input value={value.sceneNo} onChange={(event) => onChange({ ...value, sceneNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="씬" />
-      <input value={value.cutNo} onChange={(event) => onChange({ ...value, cutNo: event.target.value })} className="min-h-9 w-16 border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="컷" />
-      <input value={value.memo} onChange={(event) => onChange({ ...value, memo: event.target.value })} className="min-h-9 min-w-0 flex-[3] border border-field-divider bg-field-input px-2 text-xs text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30" placeholder="메모" />
-    </div>
   );
 }
 

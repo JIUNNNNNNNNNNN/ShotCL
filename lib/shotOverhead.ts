@@ -2,12 +2,36 @@ import type {
   ShotOverheadCamera,
   ShotOverheadDiagram,
   ShotOverheadLine,
+  ShotOverheadMovementPath,
   ShotOverheadPerson,
+  ShotOverheadPersonColor,
+  ShotOverheadPoint,
   ShotOverheadShape
 } from "@/lib/types";
 
 export const OVERHEAD_CANVAS_WIDTH = 1200;
 export const OVERHEAD_CANVAS_HEIGHT = 800;
+export const SHOT_OVERHEAD_PERSON_COLORS = [
+  "blue",
+  "red",
+  "yellow",
+  "cyan",
+  "magenta",
+  "lime",
+  "orange",
+  "gray"
+] as const satisfies readonly ShotOverheadPersonColor[];
+
+export const SHOT_OVERHEAD_PERSON_COLOR_HEX: Record<ShotOverheadPersonColor, string> = {
+  red: "#ef4444",
+  blue: "#3b82f6",
+  yellow: "#facc15",
+  cyan: "#22d3ee",
+  magenta: "#d946ef",
+  lime: "#a3e635",
+  orange: "#fb923c",
+  gray: "#d1d5db"
+};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -31,6 +55,21 @@ function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
+function normalizePersonColor(value: unknown, index: number): ShotOverheadPersonColor {
+  return SHOT_OVERHEAD_PERSON_COLORS.includes(value as ShotOverheadPersonColor)
+    ? value as ShotOverheadPersonColor
+    : SHOT_OVERHEAD_PERSON_COLORS[index % SHOT_OVERHEAD_PERSON_COLORS.length];
+}
+
+function normalizePoint(value: unknown): ShotOverheadPoint | null {
+  if (!isRecord(value) || !isFiniteNumber(value.x) || !isFiniteNumber(value.y)) return null;
+  return { x: value.x, y: value.y };
+}
+
+function normalizePoints(value: unknown) {
+  return normalizeArray(value, (item) => normalizePoint(item));
+}
+
 function normalizePerson(value: unknown, index: number): ShotOverheadPerson | null {
   if (!isRecord(value)) return null;
   return {
@@ -39,7 +78,8 @@ function normalizePerson(value: unknown, index: number): ShotOverheadPerson | nu
     y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
     scale: Math.min(3, Math.max(0.5, finiteNumber(value.scale, 1))),
     rotation: normalizedRotation(value.rotation),
-    label: text(value.label)
+    label: text(value.label),
+    color: normalizePersonColor(value.color, index)
   };
 }
 
@@ -50,7 +90,8 @@ function normalizeCamera(value: unknown, index: number): ShotOverheadCamera | nu
     x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
     y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
     rotation: normalizedRotation(value.rotation),
-    label: text(value.label)
+    label: text(value.label),
+    showFov: value.showFov === true
   };
 }
 
@@ -73,16 +114,46 @@ function normalizeLine(value: unknown, index: number): ShotOverheadLine | null {
 }
 
 function normalizeShape(value: unknown, index: number): ShotOverheadShape | null {
-  if (!isRecord(value) || value.type !== "rect") return null;
+  if (!isRecord(value)) return null;
+  if (value.type === "rect") {
+    return {
+      id: text(value.id, `shape-${index + 1}`),
+      type: "rect",
+      x: finiteNumber(value.x, 100),
+      y: finiteNumber(value.y, 100),
+      width: Math.max(80, finiteNumber(value.width, 240)),
+      height: Math.max(60, finiteNumber(value.height, 160)),
+      rotation: normalizedRotation(value.rotation),
+      label: text(value.label)
+    };
+  }
+  if (value.type !== "polyline" && value.type !== "polygon") return null;
+  const points = normalizePoints(value.points);
+  if (points.length < 2) return null;
   return {
     id: text(value.id, `shape-${index + 1}`),
-    type: "rect",
-    x: finiteNumber(value.x, 100),
-    y: finiteNumber(value.y, 100),
-    width: Math.max(80, finiteNumber(value.width, 240)),
-    height: Math.max(60, finiteNumber(value.height, 160)),
-    rotation: normalizedRotation(value.rotation),
+    type: "polyline",
+    points,
+    closed: (value.type === "polygon" || value.closed === true) && points.length >= 3,
     label: text(value.label)
+  };
+}
+
+function normalizeMovementPath(value: unknown, index: number): ShotOverheadMovementPath | null {
+  if (!isRecord(value)) return null;
+  const sourceType = value.sourceType === "person"
+    ? "person"
+    : value.sourceType === "camera"
+      ? "camera"
+      : null;
+  const sourceId = text(value.sourceId).trim();
+  const points = normalizePoints(value.points);
+  if (!sourceType || !sourceId || points.length < 2) return null;
+  return {
+    id: text(value.id, `movement-${index + 1}`),
+    sourceType,
+    sourceId,
+    points
   };
 }
 
@@ -102,7 +173,8 @@ export function createEmptyShotOverheadDiagram(): ShotOverheadDiagram {
     people: [],
     cameras: [],
     lines: [],
-    shapes: []
+    shapes: [],
+    movementPaths: []
   };
 }
 
@@ -120,11 +192,23 @@ export function normalizeShotOverheadDiagram(value: unknown): ShotOverheadDiagra
     people: normalizeArray(value.people, normalizePerson),
     cameras: normalizeArray(value.cameras, normalizeCamera),
     lines: normalizeArray(value.lines, normalizeLine),
-    shapes: normalizeArray(value.shapes, normalizeShape)
+    shapes: normalizeArray(value.shapes, normalizeShape),
+    movementPaths: normalizeArray(value.movementPaths, normalizeMovementPath)
   };
+}
+
+/** nested point 배열까지 새 객체로 정규화해 history snapshot 간 참조 공유를 막습니다. */
+export function cloneShotOverheadDiagram(
+  diagram: ShotOverheadDiagram | null | undefined
+): ShotOverheadDiagram {
+  return normalizeShotOverheadDiagram(diagram) ?? createEmptyShotOverheadDiagram();
 }
 
 export function hasShotOverheadContent(diagram: ShotOverheadDiagram | null | undefined) {
   if (!diagram) return false;
-  return diagram.people.length + diagram.cameras.length + diagram.lines.length + diagram.shapes.length > 0;
+  return diagram.people.length
+    + diagram.cameras.length
+    + diagram.lines.length
+    + diagram.shapes.length
+    + (diagram.movementPaths?.length ?? 0) > 0;
 }

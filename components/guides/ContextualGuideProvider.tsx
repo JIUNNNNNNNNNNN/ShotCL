@@ -311,7 +311,7 @@ export function ContextualGuideProvider({
     if (!persistenceReady) return false;
     if (source !== "replay" && completedRef.current.has(getGuideStorageToken(id))) return false;
     if (source === "auto" && routeInteractionRef.current) return false;
-    if (blockersRef.current.size > 0 || hasVisibleInteractiveOverlay()) return false;
+    if (blockersRef.current.size > 0) return false;
 
     let anchorKey: ContextualGuideAnchorKey | undefined;
     let anchor: HTMLElement | undefined;
@@ -325,6 +325,11 @@ export function ContextualGuideProvider({
         : getVisibleGuideAnchor(registeredAnchors) ?? undefined;
       if (!anchor) return false;
     }
+
+    // Product overlays still block guides by default. A guide anchored inside
+    // an explicitly opted-in editor overlay may ignore only that same overlay;
+    // nested menus or any other dialog remain blockers.
+    if (hasVisibleInteractiveOverlay({ allowedAnchor: anchor })) return false;
 
     const current = activeGuideRef.current;
     if (current?.id === id) return true;
@@ -371,8 +376,7 @@ export function ContextualGuideProvider({
     const onlyTransientShellDrawerBlocks = allowTransientShellDrawer
       && blockersRef.current.size === 1
       && blockersRef.current.has("project-shell-drawer");
-    if ((!onlyTransientShellDrawerBlocks && blockersRef.current.size > 0)
-      || hasVisibleInteractiveOverlay({ ignoreProjectShellDrawer: allowTransientShellDrawer })) {
+    if (!onlyTransientShellDrawerBlocks && blockersRef.current.size > 0) {
       return [];
     }
     const pointerMode = getInteractionGuideInputMode(
@@ -389,7 +393,11 @@ export function ContextualGuideProvider({
       const anchor = allowTransientShellDrawer
         ? getPotentialInteractionGuideAnchor(anchorsRef.current.get(anchorKey))
         : getVisibleGuideAnchor(anchorsRef.current.get(anchorKey));
-      return anchor ? [{ definition, variant, anchor }] : [];
+      if (!anchor || hasVisibleInteractiveOverlay({
+        ignoreProjectShellDrawer: allowTransientShellDrawer,
+        allowedAnchor: anchor
+      })) return [];
+      return [{ definition, variant, anchor }];
     });
   }, [page, persistenceReady, persistentShell, readinessVersion, role]);
 
@@ -445,7 +453,9 @@ export function ContextualGuideProvider({
     if (!interactionSession) return undefined;
     const closeIfProductOverlayOpened = () => {
       window.setTimeout(() => {
-        if (hasVisibleInteractiveOverlay()) setInteractionSession(null);
+        if (hasVisibleInteractiveOverlay({ allowedAnchor: activeInteractionStep?.anchor })) {
+          setInteractionSession(null);
+        }
       }, 0);
     };
     document.addEventListener("click", closeIfProductOverlayOpened, true);
@@ -458,7 +468,7 @@ export function ContextualGuideProvider({
       document.removeEventListener("keydown", closeIfProductOverlayOpened, true);
       document.removeEventListener("pointerup", closeIfProductOverlayOpened, true);
     };
-  }, [interactionSession]);
+  }, [activeInteractionStep?.anchor, interactionSession]);
 
   const contextValue = useMemo<GuideContextValue>(() => ({
     role,
@@ -547,17 +557,22 @@ export function useContextualGuideAnchor<T extends HTMLElement = HTMLElement>(
   }, [key, registerAnchor]);
 }
 
-export function useAutoContextualGuide(id: ContextualGuideId, enabled = true, delayMs = 420) {
+export function useAutoContextualGuide(
+  id: ContextualGuideId,
+  enabled = true,
+  delayMs = 420,
+  source: ContextualGuideRequestSource = "auto"
+) {
   const { readinessVersion, requestGuide } = useContextualGuide();
   const shownRef = useRef(false);
 
   useEffect(() => {
     if (!enabled || shownRef.current) return undefined;
     const timer = window.setTimeout(() => {
-      if (requestGuide(id, "auto")) shownRef.current = true;
+      if (requestGuide(id, source)) shownRef.current = true;
     }, delayMs);
     return () => window.clearTimeout(timer);
-  }, [delayMs, enabled, id, readinessVersion, requestGuide]);
+  }, [delayMs, enabled, id, readinessVersion, requestGuide, source]);
 }
 
 export function useContextualGuideBlocker(key: string, blocked: boolean) {
@@ -1309,15 +1324,19 @@ function hasVisibleGuideAnchorGeometry(element: HTMLElement) {
 }
 
 function hasVisibleInteractiveOverlay({
-  ignoreProjectShellDrawer = false
+  ignoreProjectShellDrawer = false,
+  allowedAnchor
 }: {
   ignoreProjectShellDrawer?: boolean;
+  allowedAnchor?: HTMLElement;
 } = {}) {
+  const allowedOverlay = allowedAnchor?.closest<HTMLElement>("[data-contextual-guide-overlay]") ?? null;
   const overlays = document.querySelectorAll<HTMLElement>(
     '[role="dialog"], [role="alertdialog"], [role="menu"], [data-memo-popover], [data-weather-region-popover], [data-shooting-order-popover]'
   );
   return Array.from(overlays).some((element) => {
     if (element.hasAttribute("data-contextual-guide") || element.closest(".contextual-guide-help")) return false;
+    if (element === allowedOverlay) return false;
     if (ignoreProjectShellDrawer && element.classList.contains("project-shell__navigation-drawer")) return false;
     if (element.closest('[inert], [aria-hidden="true"]')) return false;
     const rect = element.getBoundingClientRect();

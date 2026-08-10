@@ -45,7 +45,8 @@ export type ContextualGuideId =
   | "archive.upload"
   | "archive.selection.desktop"
   | "archive.selection.mobile"
-  | "archive.folder-upload";
+  | "archive.folder-upload"
+  | "archive.diagram-editor-first-use";
 
 export type ContextualGuideAnchorKey =
   | "main.action-new"
@@ -88,7 +89,13 @@ export type ContextualGuideAnchorKey =
   | "archive.asset-reorder"
   | "archive.asset-multi-select"
   | "archive.selection"
-  | "archive.folder-upload";
+  | "archive.folder-upload"
+  | "archive.diagram-canvas"
+  | "archive.diagram-person-tool"
+  | "archive.diagram-camera-tool"
+  | "archive.diagram-room-tool"
+  | "archive.diagram-path-tool"
+  | "archive.diagram-history";
 
 export type ContextualGuidePlacement = "auto" | "left" | "right" | "top" | "bottom";
 export type ContextualGuidePermission = "any" | "manage" | "admin";
@@ -568,6 +575,21 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     preferredPlacement: "bottom",
     permission: "manage",
     replayLabel: "폴더 업로드"
+  },
+  "archive.diagram-editor-first-use": {
+    id: "archive.diagram-editor-first-use",
+    version: 1,
+    page: "archive",
+    type: "anchor",
+    trigger: "feature",
+    priority: 120,
+    title: "부감도 요소 이동",
+    description: "요소를 선택한 뒤 길게 누르고 끌면 위치를 옮길 수 있습니다.",
+    persistentAnchor: "archive.diagram-canvas",
+    compactAnchor: "archive.diagram-canvas",
+    preferredPlacement: "top",
+    permission: "manage",
+    replayLabel: "부감도 편집기"
   }
 };
 
@@ -590,7 +612,8 @@ const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
     "archive.upload",
     "archive.selection.desktop",
     "archive.selection.mobile",
-    "archive.folder-upload"
+    "archive.folder-upload",
+    "archive.diagram-editor-first-use"
   ]
 };
 
