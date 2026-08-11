@@ -72,6 +72,17 @@ test("fine/coarse capability chooses only real variants", () => {
   assert.equal(getInteractionGuideVariant(progressMedia, "fine")?.demo, "tap");
   assert.equal(getInteractionGuideVariant(progressMedia, "coarse")?.demo, "swipe");
   assert.equal(progressMedia.anchor, "progress.media-gallery");
+
+  const gatheringPhoto = INTERACTION_GUIDES["progress.interaction-gathering-photo"];
+  assert.equal(gatheringPhoto.anchor, "progress.gathering-photo-add");
+  assert.equal(gatheringPhoto.compactAnchor, undefined);
+  assert.deepEqual(gatheringPhoto.standaloneContextAnchors, ["progress.gathering-photo-context"]);
+  assert.equal(gatheringPhoto.permission, "manage");
+  assert.equal(getInteractionGuideVariant(gatheringPhoto, "fine"), null);
+  assert.equal(
+    getInteractionGuideVariant(gatheringPhoto, "coarse")?.description,
+    "사진 추가에서 바로 촬영하거나 앨범의 사진을 선택할 수 있습니다."
+  );
 });
 
 test("daily-plan wording stays within the audited feature semantics", () => {
@@ -294,6 +305,14 @@ test("permission filtering uses the canonical exact key-staff rule", () => {
     inputMode: "fine",
     role: "admin"
   }).length, 2);
+  assert.equal(getInteractionGuideStepsForPage("progress", {
+    inputMode: "coarse",
+    role: "progress"
+  }).length, 1);
+  assert.equal(getInteractionGuideStepsForPage("progress", {
+    inputMode: "coarse",
+    role: "admin"
+  }).length, 3);
 });
 
 test("platform-specific page tours omit unsupported shortcuts", () => {

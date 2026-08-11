@@ -13,6 +13,11 @@ import {
   X
 } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
+import {
+  GatheringPhotoSourceChooser,
+  type GatheringPhotoSourceChooserHandle
+} from "@/components/GatheringPhotoSourceChooser";
+import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import { Button } from "@/components/ui/Button";
 import { MotionPresence } from "@/components/ui/MotionPresence";
 import { useAutosave } from "@/hooks/useAutosave";
@@ -122,7 +127,7 @@ export function DailyPlanGatheringLocations({
   const [pendingPhotos, setPendingPhotos] = useState<InlinePendingPhoto[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
   const [uploadError, setUploadError] = useState("");
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const photoSourceChooserRef = useRef<GatheringPhotoSourceChooserHandle | null>(null);
   const uploadLockRef = useRef(false);
   const uploadGenerationRef = useRef(0);
   const mountedRef = useRef(true);
@@ -138,6 +143,10 @@ export function DailyPlanGatheringLocations({
     canEdit && place?.persistedId && place.photos.length > 0 && hasPersistentProject
   );
   const isUploadBusy = pendingPhotos.some((photo) => photo.status !== "failed");
+  const isPhotoSourceDisabled = !canAddPhotos || isUploadBusy || isEditingAddress || isEditingPhotos;
+  const gatheringPhotoContextRef = useContextualGuideAnchor<HTMLElement>(
+    isPhotoSourceDisabled ? null : "progress.gathering-photo-context"
+  );
   const addressAutosave = useAutosave<string>({
     value: addressDraft,
     enabled: Boolean(canEdit && isEditingAddress && place && !isComposingAddress),
@@ -178,7 +187,7 @@ export function DailyPlanGatheringLocations({
   const isSavingAddress = addressAutosave.isPending;
   const actionControls = useMemo<GatheringLocationActions>(() => ({
     visible: Boolean(canEdit && place),
-    addPhotos: () => photoInputRef.current?.click(),
+    addPhotos: () => photoSourceChooserRef.current?.open(),
     managePhotos: () => {
       if (uploadLockRef.current || isEditingAddress) return;
       setMessage("");
@@ -203,7 +212,7 @@ export function DailyPlanGatheringLocations({
       rememberDialogTrigger();
       setIsEditingAddress(true);
     },
-    addPhotosDisabled: !canAddPhotos || isUploadBusy || isEditingAddress || isEditingPhotos,
+    addPhotosDisabled: isPhotoSourceDisabled,
     addPhotosPending: isUploadBusy,
     managePhotosDisabled: !canManagePhotos || isUploadBusy || isEditingAddress,
     editAddressDisabled: !canEdit || !place || isUploadBusy || isEditingPhotos,
@@ -216,6 +225,7 @@ export function DailyPlanGatheringLocations({
     isEditingPhotos,
     isSavingAddress,
     isUploadBusy,
+    isPhotoSourceDisabled,
     place,
     plan.updatedAt,
     addressAutosave.markSaved
@@ -505,7 +515,14 @@ export function DailyPlanGatheringLocations({
   async function handlePhotoFiles(files: File[]) {
     // Address autosave is an independent background mutation. Do not make a
     // slow address request block the existing immediate photo upload action.
-    if (!place || files.length === 0 || uploadLockRef.current || isEditingAddress) return;
+    if (
+      !canAddPhotos
+      || !place
+      || files.length === 0
+      || uploadLockRef.current
+      || isEditingAddress
+      || isEditingPhotos
+    ) return;
     setMessage("");
     setUploadError("");
     if (!isValidDatabaseProjectId(projectId)) {
@@ -569,7 +586,7 @@ export function DailyPlanGatheringLocations({
   }
 
   async function retryPendingPhoto(photo: InlinePendingPhoto) {
-    if (!place || uploadLockRef.current || isEditingAddress) return;
+    if (!canAddPhotos || !place || uploadLockRef.current || isEditingAddress || isEditingPhotos) return;
     const generation = uploadGenerationRef.current + 1;
     uploadGenerationRef.current = generation;
     uploadLockRef.current = true;
@@ -594,6 +611,7 @@ export function DailyPlanGatheringLocations({
 
   return (
     <section
+      ref={gatheringPhotoContextRef}
       className={cn(
         "mb-3 rounded-[var(--radius-card)] border border-field-border bg-field-section",
         styles.card
@@ -617,7 +635,7 @@ export function DailyPlanGatheringLocations({
           pendingPhotos={pendingPhotos}
           uploadProgress={uploadProgress}
           uploadError={uploadError}
-          onRetryPhoto={(photo) => void retryPendingPhoto(photo)}
+          onRetryPhoto={canAddPhotos ? (photo) => void retryPendingPhoto(photo) : undefined}
           onDismissPhoto={(photo) => releasePendingPhotos(
             [photo.id],
             plan.id,
@@ -627,21 +645,13 @@ export function DailyPlanGatheringLocations({
         />
       )}
 
-      {canAddPhotos ? (
-        <input
-          ref={photoInputRef}
-          type="file"
-          multiple
-          accept="image/*"
-          className="sr-only"
-          disabled={isUploadBusy}
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void handlePhotoFiles(files);
-          }}
-        />
-      ) : null}
+      <GatheringPhotoSourceChooser
+        ref={photoSourceChooserRef}
+        resetKey={plan.id}
+        disabled={isPhotoSourceDisabled}
+        allowMultipleAlbum
+        onFilesSelected={handlePhotoFiles}
+      />
 
       <MotionPresence show={Boolean(canEdit && isEditingAddress && place)} className="fixed inset-0 z-[70] !block">
         {place ? (
@@ -700,7 +710,7 @@ function GatheringPlaceRow({
   pendingPhotos: InlinePendingPhoto[];
   uploadProgress: string;
   uploadError: string;
-  onRetryPhoto: (photo: InlinePendingPhoto) => void;
+  onRetryPhoto?: (photo: InlinePendingPhoto) => void;
   onDismissPhoto: (photo: InlinePendingPhoto) => void;
   onPreview: (photos: GatheringPhotoPreview[], index: number) => void;
 }) {
@@ -758,9 +768,11 @@ function GatheringPlaceRow({
               <p className="min-w-0 flex-1 break-words text-[11px] text-field-danger [overflow-wrap:anywhere]" title={failedPhoto.error}>
                 {failedPhoto.originalFilename || "사진"} 업로드 실패
               </p>
-              <Button variant="secondary" className="!min-h-8 shrink-0 px-2 py-1 text-[11px]" onClick={() => onRetryPhoto(failedPhoto)}>
-                다시 시도
-              </Button>
+              {onRetryPhoto ? (
+                <Button variant="secondary" className="!min-h-8 shrink-0 px-2 py-1 text-[11px]" onClick={() => onRetryPhoto(failedPhoto)}>
+                  다시 시도
+                </Button>
+              ) : null}
               <Button variant="danger" className="!min-h-8 !w-8 shrink-0 p-1" onClick={() => onDismissPhoto(failedPhoto)} aria-label={`${failedPhoto.originalFilename || "위치 사진"} 실패 항목 제거`}>
                 <X className="h-3.5 w-3.5" aria-hidden />
               </Button>

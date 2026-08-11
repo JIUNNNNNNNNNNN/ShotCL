@@ -72,6 +72,8 @@ export type ContextualGuideAnchorKey =
   | "progress.cut-list"
   | "progress.shot-card"
   | "progress.media-gallery"
+  | "progress.gathering-photo-add"
+  | "progress.gathering-photo-context"
   | "progress.status-controls"
   | "scene-list.desktop"
   | "scene-list.mobile"

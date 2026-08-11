@@ -194,6 +194,8 @@ function PageActionItem({
     ? "daily-plan.pdf-actions"
     : action.id.startsWith("scenario")
       ? "scenario.actions"
+      : action.id === "progressGatheringPhotoAdd" && !action.disabled
+        ? "progress.gathering-photo-add"
       : null;
   const guideId = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf"
     ? "daily-plan.pdf"

@@ -36,6 +36,7 @@ export type ContextualInteractionGuideId =
   | "daily-plan.interaction-row-reorder"
   | "daily-plan.interaction-actor-reorder-trash"
   | "progress.interaction-media-gallery"
+  | "progress.interaction-gathering-photo"
   | "progress.interaction-shot-reorder"
   | "scene-list.interaction-merge-range"
   | "scene-list.interaction-merge-menu"
@@ -112,6 +113,7 @@ const DAILY_PLAN_INTERACTION_GUIDES = [
 
 const PROGRESS_INTERACTION_GUIDES = [
   "progress.interaction-media-gallery",
+  "progress.interaction-gathering-photo",
   "progress.interaction-shot-reorder"
 ] as const satisfies readonly ContextualInteractionGuideId[];
 
@@ -357,6 +359,23 @@ export const INTERACTION_GUIDES: Record<
         description: "대표 이미지를 눌러 크게 연 뒤 좌우로 밀어 다음 이미지를 확인할 수 있습니다.",
         demo: "swipe",
         direction: "left"
+      }
+    }
+  },
+  "progress.interaction-gathering-photo": {
+    id: "progress.interaction-gathering-photo",
+    page: "progress",
+    anchor: "progress.gathering-photo-add",
+    standaloneContextAnchors: ["progress.gathering-photo-context"],
+    permission: "manage",
+    preferredPlacement: "left",
+    priority: 15,
+    manualOnly: true,
+    variants: {
+      coarse: {
+        title: "집합장소 사진",
+        description: "사진 추가에서 바로 촬영하거나 앨범의 사진을 선택할 수 있습니다.",
+        demo: "tap"
       }
     }
   },

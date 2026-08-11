@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
@@ -336,6 +336,10 @@ export default function ProjectDetailPage() {
     () => dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null,
     [dailyPlanId, dailyPlans]
   );
+  const selectedPlanRef = useRef<DailyPlan | null>(selectedPlan);
+  useLayoutEffect(() => {
+    selectedPlanRef.current = selectedPlan;
+  }, [selectedPlan]);
   const dailyPlansRef = useRef(dailyPlans);
   dailyPlansRef.current = dailyPlans;
   const commitDailyPlanPatch = useCallback((
@@ -352,13 +356,14 @@ export default function ProjectDetailPage() {
     upsertDailyPlan(next);
   }, [upsertDailyPlan]);
   const selectedDailyPlanId = selectedPlan?.id ?? "";
+  const hasCurrentProject = Boolean(project && project.id === projectId);
 
   const refresh = useCallback(async () => {
     if (!projectId || isWorkspaceLoading) return;
     const requestedEntryKey = progressEntryKey;
 
     try {
-      if (!project) {
+      if (!hasCurrentProject) {
         shotsRef.current = [];
         setShots([]);
         archiveAssetsRef.current = [];
@@ -417,14 +422,17 @@ export default function ProjectDetailPage() {
         }
       }
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      const currentSelectedPlan = selectedPlanRef.current?.id === selectedDailyPlanId
+        ? selectedPlanRef.current
+        : null;
       archiveAssetsRef.current = archiveAssets;
-      setArchiveMediaByShotId(selectedPlan
+      setArchiveMediaByShotId(currentSelectedPlan
         ? buildProgressArchiveMediaByShotId({
             shots: shotsWithDiagrams,
             assets: archiveAssets,
-            timetableScenes: decodeDailyPlanMemo(selectedPlan.memo).timetableScenes,
-            dailyPlanId: selectedPlan.id,
-            episodeNumber: parseEpisodeNumber(selectedPlan.episode)
+            timetableScenes: decodeDailyPlanMemo(currentSelectedPlan.memo).timetableScenes,
+            dailyPlanId: currentSelectedPlan.id,
+            episodeNumber: parseEpisodeNumber(currentSelectedPlan.episode)
           })
         : new Map());
       setMediaLinksByShotId(nextMediaLinksByShotId);
@@ -451,12 +459,11 @@ export default function ProjectDetailPage() {
     }
   }, [
     commitSessionBuckets,
+    hasCurrentProject,
     isGuest,
     isWorkspaceLoading,
     progressEntryKey,
-    project,
     projectId,
-    selectedPlan,
     selectedDailyPlanId,
     workspaceError
   ]);
@@ -487,16 +494,19 @@ export default function ProjectDetailPage() {
 
   const nextOrderIndex = shots.length + 1;
   const rebuildArchiveMedia = useCallback((nextShots: Shot[]) => {
-    setArchiveMediaByShotId(selectedPlan
+    const currentSelectedPlan = selectedPlanRef.current?.id === selectedDailyPlanId
+      ? selectedPlanRef.current
+      : null;
+    setArchiveMediaByShotId(currentSelectedPlan
       ? buildProgressArchiveMediaByShotId({
           shots: nextShots,
           assets: archiveAssetsRef.current,
-          timetableScenes: decodeDailyPlanMemo(selectedPlan.memo).timetableScenes,
-          dailyPlanId: selectedPlan.id,
-          episodeNumber: parseEpisodeNumber(selectedPlan.episode)
+          timetableScenes: decodeDailyPlanMemo(currentSelectedPlan.memo).timetableScenes,
+          dailyPlanId: currentSelectedPlan.id,
+          episodeNumber: parseEpisodeNumber(currentSelectedPlan.episode)
         })
       : new Map());
-  }, [selectedPlan]);
+  }, [selectedDailyPlanId]);
 
   const refreshSelectedShots = useCallback(async () => {
     if (!projectId || !selectedDailyPlanId) return;
@@ -768,9 +778,9 @@ export default function ProjectDetailPage() {
   const handleDailyPlanMetadataChange = useCallback((
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
   ) => {
-    if (!selectedPlan) return;
-    commitDailyPlanPatch(selectedPlan.id, patch);
-  }, [commitDailyPlanPatch, selectedPlan]);
+    if (!selectedDailyPlanId) return;
+    commitDailyPlanPatch(selectedDailyPlanId, patch);
+  }, [commitDailyPlanPatch, selectedDailyPlanId]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
     if (!canEditProgressStatus) return;

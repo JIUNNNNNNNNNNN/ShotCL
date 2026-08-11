@@ -874,10 +874,8 @@ async function mapWithConcurrency<T, R>(
 }
 
 function safeUploadError(error: unknown) {
-  const source = safeError(error);
-  return source.message && source.message !== "Unknown error"
-    ? `사진 업로드에 실패했습니다. (${source.message.slice(0, 240)})`
-    : "사진 업로드에 실패했습니다.";
+  console.error("[gathering-photos:storage-upload]", safeError(error));
+  return "사진을 올리지 못했습니다. 다시 시도해 주세요.";
 }
 
 function gatheringPhotoError(error: unknown, fallbackMessage: string) {
@@ -886,17 +884,11 @@ function gatheringPhotoError(error: unknown, fallbackMessage: string) {
   }
   const source = safeError(error);
   console.error("[gathering-photos]", source);
-  const safeDetail = source.message && source.message !== "Unknown error"
-    ? source.message.slice(0, 500)
-    : "";
   return NextResponse.json(
     {
       error: source.status === 409
         ? source.message
-        : safeDetail
-          ? `${fallbackMessage} (${safeDetail})`
-          : fallbackMessage,
-      detail: safeDetail,
+        : fallbackMessage,
       ...(source.status === 409 && source.latestUpdatedAt
         ? { memo: source.latestMemo, updatedAt: source.latestUpdatedAt }
         : {})
