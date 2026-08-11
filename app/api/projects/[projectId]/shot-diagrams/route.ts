@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import {
   canAdministerProject,
@@ -8,9 +8,26 @@ import {
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
+import {
+  areShotOverheadSpaceSnapshotsEqual,
+  extractShotOverheadSpaceSnapshot,
+  normalizeShotOverheadSpacePreset,
+  resolveShotOverheadSpaceLocation,
+  SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID,
+  SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND,
+  SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX,
+  type ShotOverheadSpaceLocation,
+  type ShotOverheadSpacePreset
+} from "@/lib/shotOverheadSpacePresets";
 import type { ShotMediaLink } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
+type SpacePresetMutationBody = {
+  sceneId?: unknown;
+  data?: unknown;
+  presetId?: unknown;
+  expectedUpdatedAt?: unknown;
+};
 
 const DIAGRAM_TYPE = "overhead";
 const ARCHIVE_DAILY_PLAN_ID = "__project_archive__";
@@ -19,6 +36,7 @@ const LINK_REF_PREFIX = "media-link:";
 const ARCHIVE_DATA_KIND = "overhead_archive";
 const LINK_DATA_KIND = "media_link";
 const SELECT_COLUMNS = "id,project_id,daily_plan_id,shot_ref,diagram_type,data,created_at,updated_at";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -39,7 +57,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
       if (error) throw error;
       return NextResponse.json({
         ok: true,
-        archives: (data ?? []).flatMap(mapArchiveRow)
+        archives: (data ?? []).flatMap(mapArchiveRow),
+        spacePresets: (data ?? []).flatMap(mapSpacePresetRow)
       });
     }
 
@@ -47,6 +66,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const shotRef = normalizeKeyPart(request.nextUrl.searchParams.get("shotRef"));
     if (!dailyPlanId) {
       return NextResponse.json({ error: "회차 식별값이 필요합니다." }, { status: 400 });
+    }
+    // Presets are project templates, never a daily-plan diagram collection.
+    // They are exposed only through the access-checked archive workspace shape.
+    if (dailyPlanId === SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID) {
+      return NextResponse.json({ error: "회차 식별값이 올바르지 않습니다." }, { status: 400 });
     }
 
     const supabase = requireProjectAccessDb();
@@ -116,26 +140,48 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       archiveId?: unknown;
       title?: unknown;
       memo?: unknown;
+      sceneId?: unknown;
       sceneNo?: unknown;
       cutNo?: unknown;
+      presetId?: unknown;
+      expectedUpdatedAt?: unknown;
       mediaType?: unknown;
       assetId?: unknown;
       source?: unknown;
     };
     const operation = normalizeKeyPart(body.operation);
+    if (operation === "save_space_preset") {
+      return saveSpacePreset(projectId, body);
+    }
     if (operation === "save_archive") {
       const archiveId = toArchiveRef(normalizeKeyPart(body.archiveId) || randomUUID());
       const diagram = normalizeShotOverheadDiagram(body.data);
       if (!diagram) return NextResponse.json({ error: "부감도 데이터 형식이 올바르지 않습니다." }, { status: 400 });
+      const sceneId = normalizeOptionalUuid(body.sceneId);
+      if (normalizeKeyPart(body.sceneId) && !sceneId) {
+        return NextResponse.json({ error: "씬 식별값이 올바르지 않습니다." }, { status: 400 });
+      }
+      const supabase = requireProjectAccessDb();
+      let sceneNo = normalizeShortText(body.sceneNo, 100);
+      if (sceneId) {
+        const scene = await loadProjectSceneRow(supabase, projectId, sceneId);
+        if (!scene) {
+          return NextResponse.json(
+            { error: "선택한 씬을 찾을 수 없습니다.", code: "SHOT_DIAGRAM_SCENE_NOT_FOUND" },
+            { status: 404 }
+          );
+        }
+        sceneNo = normalizeShortText(scene.scene_no, 100);
+      }
       const archiveData = {
         kind: ARCHIVE_DATA_KIND,
         title: normalizeShortText(body.title, 240) || "부감도",
         memo: normalizeShortText(body.memo, 1_000),
-        sceneNo: normalizeShortText(body.sceneNo, 100),
+        sceneId,
+        sceneNo,
         cutNo: normalizeShortText(body.cutNo, 100),
         diagram
       };
-      const supabase = requireProjectAccessDb();
       const { data, error } = await supabase
         .from("shot_diagrams")
         .upsert(
@@ -163,6 +209,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       const source = body.source === "diagram" ? "diagram" : "reference";
       if (!dailyPlanId || !shotRef || !mediaType) {
         return NextResponse.json({ error: "회차, 컷, 자료 종류가 필요합니다." }, { status: 400 });
+      }
+      if (dailyPlanId === SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID) {
+        return NextResponse.json({ error: "회차 식별값이 올바르지 않습니다." }, { status: 400 });
       }
       const linkRef = toMediaLinkRef(mediaType, shotRef);
       const supabase = requireProjectAccessDb();
@@ -233,6 +282,12 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     if (!dailyPlanId || !shotRef) {
       return NextResponse.json({ error: "회차와 컷 식별값이 필요합니다." }, { status: 400 });
     }
+    if (
+      dailyPlanId === SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID
+      || shotRef.startsWith(SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX)
+    ) {
+      return NextResponse.json({ error: "회차 또는 컷 식별값이 올바르지 않습니다." }, { status: 400 });
+    }
     if (!diagram) return NextResponse.json({ error: "부감도 데이터 형식이 올바르지 않습니다." }, { status: 400 });
 
     const supabase = requireProjectAccessDb();
@@ -270,8 +325,16 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const role = await getDiagramAccessRole(request, projectId);
     if (role !== "admin") return NextResponse.json({ error: "부감도 삭제는 Key staff만 할 수 있습니다." }, { status: 403 });
     const body = request.headers.get("content-type")?.includes("application/json")
-      ? await request.json().catch(() => ({})) as { archiveIds?: unknown }
+      ? await request.json().catch(() => ({})) as {
+          operation?: unknown;
+          archiveIds?: unknown;
+          presetId?: unknown;
+          expectedUpdatedAt?: unknown;
+        }
       : {};
+    if (normalizeKeyPart(body.operation) === "delete_space_preset") {
+      return deleteSpacePreset(projectId, body);
+    }
     const requestedArchiveIds = Array.isArray(body.archiveIds)
       ? body.archiveIds
       : request.nextUrl.searchParams.getAll("archiveId");
@@ -327,6 +390,215 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   }
 }
 
+async function saveSpacePreset(
+  projectId: string,
+  body: SpacePresetMutationBody
+) {
+  const sceneId = normalizeOptionalUuid(body.sceneId);
+  if (!sceneId) {
+    return NextResponse.json(
+      { error: "공간 프리셋을 저장할 씬을 선택해주세요.", code: "SPACE_PRESET_SCENE_REQUIRED" },
+      { status: 400 }
+    );
+  }
+  const diagram = normalizeShotOverheadDiagram(body.data);
+  const snapshot = diagram ? extractShotOverheadSpaceSnapshot(diagram) : null;
+  if (!snapshot) {
+    return NextResponse.json(
+      { error: "저장할 공간이 없습니다.", code: "SPACE_PRESET_EMPTY" },
+      { status: 400 }
+    );
+  }
+  const expected = normalizeExpectedUpdatedAt(body.expectedUpdatedAt);
+  if (!expected.ok) {
+    return NextResponse.json({ error: expected.error }, { status: 400 });
+  }
+
+  const supabase = requireProjectAccessDb();
+  const sceneLocation = await resolveProjectSceneSpaceLocation(
+    supabase,
+    projectId,
+    sceneId
+  );
+  if (sceneLocation instanceof NextResponse) return sceneLocation;
+
+  const presetRef = toSpacePresetRef(sceneLocation.key);
+  const presetData = {
+    kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND,
+    version: 1,
+    location: sceneLocation,
+    snapshot
+  };
+  if (expected.value === null) {
+    const { data, error } = await supabase
+      .from("shot_diagrams")
+      .insert({
+        project_id: projectId,
+        daily_plan_id: SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID,
+        shot_ref: presetRef,
+        diagram_type: DIAGRAM_TYPE,
+        data: presetData
+      })
+      .select(SELECT_COLUMNS)
+      .single();
+    if (!error) {
+      return NextResponse.json({
+        ok: true,
+        status: "created",
+        spacePreset: mapSpacePresetRow(data)[0]
+      });
+    }
+    if (!isDatabaseErrorCode(error, "23505")) throw error;
+
+    // A response can be lost after the insert commits. Repeating the same
+    // create is an idempotent success, while a different snapshot is a conflict.
+    const existing = await loadSpacePresetRow(supabase, projectId, presetRef);
+    if (
+      existing
+      && existing.location.key === sceneLocation.key
+      && areShotOverheadSpaceSnapshotsEqual(existing.snapshot, snapshot)
+    ) {
+      return NextResponse.json({ ok: true, status: "unchanged", spacePreset: existing });
+    }
+    return spacePresetConflictResponse();
+  }
+
+  const { data, error } = await supabase
+    .from("shot_diagrams")
+    .update({ data: presetData })
+    .eq("project_id", projectId)
+    .eq("daily_plan_id", SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID)
+    .eq("shot_ref", presetRef)
+    .eq("diagram_type", DIAGRAM_TYPE)
+    .contains("data", { kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND })
+    .eq("updated_at", expected.value)
+    .select(SELECT_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  const updated = data ? mapSpacePresetRow(data)[0] : null;
+  if (updated) {
+    return NextResponse.json({ ok: true, status: "updated", spacePreset: updated });
+  }
+
+  // The first update may have committed even if its response was lost. Only
+  // the exact same canonical snapshot may turn a stale CAS retry into success.
+  const existing = await loadSpacePresetRow(supabase, projectId, presetRef);
+  if (
+    existing
+    && existing.location.key === sceneLocation.key
+    && areShotOverheadSpaceSnapshotsEqual(existing.snapshot, snapshot)
+  ) {
+    return NextResponse.json({ ok: true, status: "unchanged", spacePreset: existing });
+  }
+  return spacePresetConflictResponse();
+}
+
+async function deleteSpacePreset(
+  projectId: string,
+  body: SpacePresetMutationBody
+) {
+  const presetId = normalizeSpacePresetId(body.presetId);
+  if (!presetId) {
+    return NextResponse.json(
+      { error: "공간 프리셋 식별값이 올바르지 않습니다." },
+      { status: 400 }
+    );
+  }
+  const expected = normalizeExpectedUpdatedAt(body.expectedUpdatedAt);
+  if (!expected.ok || expected.value === null) {
+    return NextResponse.json(
+      { error: expected.ok ? "공간 프리셋 삭제 기준값이 필요합니다." : expected.error },
+      { status: 400 }
+    );
+  }
+  const supabase = requireProjectAccessDb();
+  const query = supabase
+    .from("shot_diagrams")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("daily_plan_id", SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID)
+    .eq("shot_ref", presetId)
+    .eq("diagram_type", DIAGRAM_TYPE)
+    .contains("data", { kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND })
+    .eq("updated_at", expected.value);
+  const { data, error } = await query.select(SELECT_COLUMNS).maybeSingle();
+  if (error) throw error;
+  if (data) {
+    return NextResponse.json({ ok: true, status: "deleted", presetId });
+  }
+  const existing = await loadSpacePresetRow(supabase, projectId, presetId);
+  if (existing) return spacePresetConflictResponse();
+  return NextResponse.json({ ok: true, status: "unchanged", presetId });
+}
+
+async function resolveProjectSceneSpaceLocation(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  sceneId: string
+): Promise<ShotOverheadSpaceLocation | NextResponse> {
+  const data = await loadProjectSceneRow(supabase, projectId, sceneId);
+  if (!data) {
+    return NextResponse.json(
+      { error: "선택한 씬을 찾을 수 없습니다.", code: "SPACE_PRESET_SCENE_NOT_FOUND" },
+      { status: 404 }
+    );
+  }
+  const location = resolveShotOverheadSpaceLocation({
+    mainLocation: data.main_location,
+    subLocation: data.sub_location
+  });
+  if (!location) {
+    return NextResponse.json(
+      { error: "씬리스트에 소장소를 먼저 입력해주세요.", code: "SPACE_PRESET_SUB_LOCATION_REQUIRED" },
+      { status: 400 }
+    );
+  }
+  return location;
+}
+
+async function loadProjectSceneRow(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  sceneId: string
+) {
+  const { data, error } = await supabase
+    .from("project_scene_items")
+    .select("scene_no,main_location,sub_location")
+    .eq("project_id", projectId)
+    .eq("id", sceneId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+async function loadSpacePresetRow(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  presetRef: string
+) {
+  const { data, error } = await supabase
+    .from("shot_diagrams")
+    .select(SELECT_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("daily_plan_id", SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID)
+    .eq("shot_ref", presetRef)
+    .eq("diagram_type", DIAGRAM_TYPE)
+    .contains("data", { kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND })
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapSpacePresetRow(data)[0] ?? null : null;
+}
+
+function spacePresetConflictResponse() {
+  return NextResponse.json(
+    {
+      error: "다른 사용자가 공간 프리셋을 변경했습니다. 최신 상태를 불러온 뒤 다시 시도해주세요.",
+      code: "SPACE_PRESET_CONFLICT"
+    },
+    { status: 409 }
+  );
+}
+
 async function getValidatedProjectId(context: RouteContext) {
   const { projectId: routeProjectId } = await context.params;
   const projectId = normalizeProjectId(routeProjectId);
@@ -347,9 +619,57 @@ function normalizeShortText(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function normalizeOptionalUuid(value: unknown) {
+  const normalized = normalizeKeyPart(value).toLocaleLowerCase();
+  return UUID_PATTERN.test(normalized) ? normalized : null;
+}
+
+function normalizeSpacePresetId(value: unknown) {
+  const normalized = normalizeKeyPart(value);
+  const digest = normalized.slice(SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX.length);
+  return normalized.startsWith(SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX)
+    && /^[0-9a-f]{64}$/i.test(digest)
+    ? normalized.toLocaleLowerCase()
+    : "";
+}
+
+function toSpacePresetRef(locationKey: string) {
+  const digest = createHash("sha256").update(locationKey, "utf8").digest("hex");
+  return `${SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX}${digest}`;
+}
+
+function normalizeExpectedUpdatedAt(value: unknown):
+  | { ok: true; value: string | null }
+  | { ok: false; error: string } {
+  if (value === null || value === undefined || value === "") {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false, error: "공간 프리셋 수정 기준값이 올바르지 않습니다." };
+  }
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 100 || Number.isNaN(Date.parse(normalized))) {
+    return { ok: false, error: "공간 프리셋 수정 기준값이 올바르지 않습니다." };
+  }
+  return { ok: true, value: normalized };
+}
+
+function isDatabaseErrorCode(error: unknown, code: string) {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && String((error as { code?: unknown }).code ?? "") === code
+  );
+}
+
 function mapArchiveRow(row: Record<string, unknown>) {
   const source = row.data && typeof row.data === "object" ? row.data as Record<string, unknown> : {};
-  if (source.kind === LINK_DATA_KIND) return [];
+  if (
+    source.kind === LINK_DATA_KIND
+    || source.kind === SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND
+    || row.daily_plan_id === SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID
+    || String(row.shot_ref ?? "").startsWith(SHOT_OVERHEAD_SPACE_PRESET_REF_PREFIX)
+  ) return [];
   const archive = source.kind === ARCHIVE_DATA_KIND
     && row.daily_plan_id === ARCHIVE_DAILY_PLAN_ID
     && String(row.shot_ref ?? "").startsWith(ARCHIVE_REF_PREFIX);
@@ -361,6 +681,7 @@ function mapArchiveRow(row: Record<string, unknown>) {
     projectId: String(row.project_id ?? ""),
     title: legacy ? "기존 컷 부감도" : normalizeShortText(source.title, 240) || "부감도",
     memo: normalizeShortText(source.memo, 1_000),
+    sceneId: archive ? normalizeOptionalUuid(source.sceneId) : null,
     sceneNo: normalizeShortText(source.sceneNo, 100),
     cutNo: normalizeShortText(source.cutNo, 100),
     diagram,
@@ -370,6 +691,29 @@ function mapArchiveRow(row: Record<string, unknown>) {
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
   }];
+}
+
+function mapSpacePresetRow(row: Record<string, unknown>): ShotOverheadSpacePreset[] {
+  const source = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+    ? row.data as Record<string, unknown>
+    : {};
+  if (
+    source.kind !== SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND
+    || source.version !== 1
+    || row.daily_plan_id !== SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID
+    || !normalizeSpacePresetId(row.shot_ref)
+  ) return [];
+  const preset = normalizeShotOverheadSpacePreset({
+    id: row.shot_ref,
+    projectId: row.project_id,
+    location: source.location,
+    snapshot: source.snapshot,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  });
+  return preset && preset.id === toSpacePresetRef(preset.location.key)
+    ? [preset]
+    : [];
 }
 
 async function resolveMediaLinks(

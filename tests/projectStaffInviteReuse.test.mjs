@@ -186,6 +186,18 @@ test("reused project-capability links keep guest access read-only and enter the 
   assert.equal(isGuestProjectApiRequestAllowed({ ...baseRequest, method: "PATCH" }), false);
   assert.equal(isGuestProjectApiRequestAllowed({
     method: "GET",
+    pathname: "/api/projects/project-a/shot-diagrams",
+    projectId: "project-a",
+    searchParams: new URLSearchParams({ dailyPlanId: "__project_space_presets__" })
+  }), false);
+  assert.equal(isGuestProjectApiRequestAllowed({
+    method: "GET",
+    pathname: "/api/projects/project-a/shot-diagrams",
+    projectId: "project-a",
+    searchParams: new URLSearchParams({ archive: "1" })
+  }), false);
+  assert.equal(isGuestProjectApiRequestAllowed({
+    method: "GET",
     pathname: "/api/projects/project-b/daily-plans",
     projectId: "project-a",
     searchParams: new URLSearchParams()

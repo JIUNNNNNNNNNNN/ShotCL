@@ -385,6 +385,8 @@ export type OverheadDiagramArchiveItem = {
   projectId: string;
   title: string;
   memo: string;
+  /** Stable project_scene_items.id for newly classified diagrams. */
+  sceneId: string | null;
   sceneNo: string;
   cutNo: string;
   diagram: ShotOverheadDiagram;

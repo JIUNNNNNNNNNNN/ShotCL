@@ -265,7 +265,7 @@ test("diagram object help keeps direct drag separate from context-menu movement"
 
   assert.equal(moveFine?.demo, "object-drag");
   assert.equal(moveCoarse?.demo, "object-drag");
-  assert.match(moveFine?.description ?? "", /인물·카메라 본체를 끌어.*공간은 벽 선을 끌어.*이동/u);
+  assert.match(moveFine?.description ?? "", /카메라와 인물은 아이콘의 어느 부분을 끌어도 위치를 옮길 수 있습니다\..*공간은 벽 선을 끌어.*이동/u);
   assert.match(moveCoarse?.detail ?? "", /공간 안쪽은 이동 대상이 아니므로.*인물과 카메라를 바로 선택/u);
   assert.match(moveFine?.detail ?? "", /무빙 경로를 만들지 않습니다/u);
   assert.doesNotMatch(`${moveFine?.description ?? ""} ${moveCoarse?.description ?? ""}`, /0\.3초|0\.38초|길게.*무빙/u);
@@ -299,10 +299,27 @@ test("diagram help describes direct manipulation without a bottom inspector depe
   );
 
   const rotate = INTERACTION_GUIDES["archive.interaction-diagram-rotate"];
+  const move = INTERACTION_GUIDES["archive.interaction-diagram-person-move"];
   const room = INTERACTION_GUIDES["archive.interaction-diagram-room"];
   const curve = INTERACTION_GUIDES["archive.interaction-diagram-curve"];
+  assert.match(
+    getInteractionGuideVariant(move, "fine")?.description ?? "",
+    /카메라와 인물은 아이콘의 어느 부분을 끌어도 위치를 옮길 수 있습니다\./u
+  );
+  assert.match(
+    getInteractionGuideVariant(move, "coarse")?.description ?? "",
+    /카메라와 인물은 아이콘의 어느 부분을 끌어도 위치를 옮길 수 있습니다\./u
+  );
   assert.match(getInteractionGuideVariant(rotate, "fine")?.description ?? "", /인물.*컨트롤 포인트.*카메라.*화각 선.*방향/u);
+  assert.match(
+    getInteractionGuideVariant(rotate, "fine")?.detail ?? "",
+    /카메라 몸체는 위치 이동, 화각 선은 방향 조절에 사용합니다\./u
+  );
   assert.match(getInteractionGuideVariant(room, "coarse")?.detail ?? "", /모서리 컨트롤 포인트.*형태/u);
+  assert.match(
+    getInteractionGuideVariant(room, "fine")?.detail ?? "",
+    /같은 공간을 반복해서 그릴 필요가 없습니다\. 씬리스트의 소장소를 기준으로 공간을 프리셋으로 저장하면 같은 장소의 새 부감도에 공간이 자동 적용됩니다\./u
+  );
   assert.match(getInteractionGuideVariant(curve, "fine")?.description ?? "", /컨트롤 포인트.*경로 형태/u);
 });
 

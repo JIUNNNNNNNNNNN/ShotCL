@@ -114,10 +114,17 @@ import { getProjectSceneList } from "@/lib/data/sceneList";
 import { auditQuery } from "@/lib/queryAudit";
 import {
   deleteOverheadDiagramArchives,
-  listOverheadDiagramArchive,
-  saveOverheadDiagramArchive
+  deleteShotOverheadSpacePreset,
+  loadOverheadArchiveWorkspace,
+  saveOverheadDiagramArchive,
+  saveShotOverheadSpacePreset
 } from "@/lib/data/shotMediaArchive";
 import { createEmptyShotOverheadDiagram } from "@/lib/shotOverhead";
+import {
+  applyShotOverheadSpaceSnapshot,
+  resolveShotOverheadSpaceLocation,
+  type ShotOverheadSpacePreset
+} from "@/lib/shotOverheadSpacePresets";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import type {
   OverheadDiagramArchiveItem,
@@ -177,9 +184,15 @@ type DiagramDraft = {
   archiveId: string | null;
   title: string;
   memo: string;
+  sceneId: string;
   sceneNo: string;
   cutNo: string;
   shot: Shot;
+};
+
+type NewDiagramSetup = {
+  sceneId: string;
+  cutNo: string;
 };
 
 type MetadataDraft = {
@@ -365,6 +378,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [storyboards, setStoryboards] = useState<ProjectReferenceAsset[]>([]);
   const [sceneItems, setSceneItems] = useState<ProjectSceneItem[]>([]);
   const [diagramArchives, setDiagramArchives] = useState<OverheadDiagramArchiveItem[]>([]);
+  const [spacePresets, setSpacePresets] = useState<ShotOverheadSpacePreset[]>([]);
   const [query, setQuery] = useState("");
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<Set<ArchiveSelectionKey>>(new Set());
@@ -373,6 +387,7 @@ export default function ProjectStoryboardOverheadPage() {
   const [importSaveReport, setImportSaveReport] = useState<ArchiveImportSaveReport | null>(null);
   const [importProgress, setImportProgress] = useState<ArchiveImportProgressState | null>(null);
   const [diagramDraft, setDiagramDraft] = useState<DiagramDraft | null>(null);
+  const [newDiagramSetup, setNewDiagramSetup] = useState<NewDiagramSetup | null>(null);
   const [editingAsset, setEditingAsset] = useState<ProjectReferenceAsset | null>(null);
   const [metadataAnchor, setMetadataAnchor] = useState<MetadataAnchor | null>(null);
   const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>({
@@ -424,7 +439,8 @@ export default function ProjectStoryboardOverheadPage() {
     !diagramDraft && !pendingImport && supportsDirectoryPicker ? "archive.folder-upload" : null
   );
   const guideOverlayOpen = Boolean(
-    editingAsset
+    newDiagramSetup
+    || editingAsset
     || renamingAsset
     || preview
     || pendingConfirm
@@ -438,6 +454,7 @@ export default function ProjectStoryboardOverheadPage() {
       && !isLoading
       && loadedArchiveProjectId === projectId
       && !diagramDraft
+      && !newDiagramSetup
     )
   );
   useAutoContextualGuide(
@@ -517,6 +534,7 @@ export default function ProjectStoryboardOverheadPage() {
   const deleteDropZoneRef = useRef<HTMLDivElement | null>(null);
   const pendingDeleteAssetRef = useRef<PendingDeleteAsset | null>(null);
   const deleteInspectionInFlightRef = useRef(false);
+  const newDiagramButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const metadataFingerprint = editingAsset
     ? createArchiveMetadataFingerprint(editingAsset.id, metadataDraft)
@@ -626,8 +644,13 @@ export default function ProjectStoryboardOverheadPage() {
     const requestedProjectId = projectId;
     setLoadedArchiveProjectId("");
     setIsLoading(true);
+    setOverheads([]);
+    setStoryboards([]);
+    setSceneItems([]);
+    setDiagramArchives([]);
+    setSpacePresets([]);
     try {
-      const [project, archiveAssets, diagrams, sceneResult] = await Promise.all([
+      const [project, archiveAssets, workspace, sceneResult] = await Promise.all([
         auditQuery(
           "archive.loadProject",
           "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
@@ -639,9 +662,9 @@ export default function ProjectStoryboardOverheadPage() {
           () => listProjectReferenceAssetsByTypes(projectId, ["overhead", "storyboard"])
         ),
         auditQuery(
-          "archive.loadOverheadDiagrams",
+          "archive.loadOverheadWorkspace",
           "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
-          () => listOverheadDiagramArchive(projectId)
+          () => loadOverheadArchiveWorkspace(projectId)
         ),
         auditQuery(
           "archive.loadSceneList",
@@ -661,7 +684,8 @@ export default function ProjectStoryboardOverheadPage() {
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
       replaceCommittedArchivePlacements([...overheadAssets, ...storyboardAssets]);
-      setDiagramArchives(diagrams);
+      setDiagramArchives(workspace.archives);
+      setSpacePresets(workspace.spacePresets);
       setSceneItems(sceneResult.value);
       setErrorMessage(sceneResult.error);
       setLoadedArchiveProjectId(requestedProjectId);
@@ -710,6 +734,8 @@ export default function ProjectStoryboardOverheadPage() {
     selectionPointerRef.current = null;
     setSelectionMode(false);
     setEditingAsset(null);
+    setDiagramDraft(null);
+    setNewDiagramSetup(null);
     setMetadataAnchor(null);
     setSavedMetadataFingerprint("");
     setFailedMetadataFingerprint("");
@@ -721,6 +747,8 @@ export default function ProjectStoryboardOverheadPage() {
     metadataSceneRevealKeysRef.current = new Set();
     collapsedSceneKeysRef.current = new Set();
     setCollapsedSceneKeys(new Set());
+    setSpacePresets([]);
+    setStatusMessage("");
   }, [projectId]);
 
   useEffect(() => {
@@ -3006,16 +3034,59 @@ export default function ProjectStoryboardOverheadPage() {
 
   function openNewDiagram() {
     if (!canEdit || !supportsDiagramEditing) return;
+    if (sceneItems.length > 0) {
+      setNewDiagramSetup({ sceneId: "", cutNo: "" });
+      return;
+    }
+    createNewDiagramDraft(null, "");
+  }
+
+  function closeNewDiagramSetup() {
+    setNewDiagramSetup(null);
+    window.requestAnimationFrame(() => newDiagramButtonRef.current?.focus({ preventScroll: true }));
+  }
+
+  function confirmNewDiagramSetup() {
+    if (!newDiagramSetup) return;
+    const scene = newDiagramSetup.sceneId
+      ? sceneItems.find((item) => item.id === newDiagramSetup.sceneId) ?? null
+      : null;
+    if (newDiagramSetup.sceneId && !scene) {
+      setErrorMessage("선택한 씬을 찾을 수 없습니다. 씬을 다시 선택해주세요.");
+      return;
+    }
+    createNewDiagramDraft(scene, newDiagramSetup.cutNo);
+    setNewDiagramSetup(null);
+  }
+
+  function createNewDiagramDraft(scene: ProjectSceneItem | null, cutNo: string) {
     const archiveId = createArchiveUuid();
+    const emptyDiagram = createEmptyShotOverheadDiagram();
+    const location = scene ? resolveShotOverheadSpaceLocation(scene) : null;
+    const preset = location
+      ? spacePresets.find((item) => item.location.key === location.key) ?? null
+      : null;
+    const initialDiagram = preset
+      ? applyShotOverheadSpaceSnapshot(emptyDiagram, preset.snapshot, { replace: true })
+      : emptyDiagram;
+    const sceneId = scene?.id ?? "";
+    const sceneNo = scene?.sceneNo ?? "";
     setDiagramDraft({
       item: null,
       archiveId,
       title: "새 부감도",
       memo: "",
-      sceneNo: "",
-      cutNo: "",
-      shot: createArchiveShot(projectId, null, `archive-draft:${archiveId}`)
+      sceneId,
+      sceneNo,
+      cutNo,
+      shot: createArchiveShot(
+        projectId,
+        null,
+        `archive-draft:${archiveId}`,
+        { diagram: initialDiagram, sceneNo, cutNo }
+      )
     });
+    setStatusMessage(preset ? `${preset.location.displayName} 공간 프리셋 적용됨` : "");
   }
 
   function openDiagram(item: OverheadDiagramArchiveItem, edit: boolean) {
@@ -3025,6 +3096,7 @@ export default function ProjectStoryboardOverheadPage() {
       archiveId: item.legacy ? null : item.id,
       title: item.title,
       memo: item.memo,
+      sceneId: item.sceneId ?? "",
       sceneNo: item.sceneNo,
       cutNo: item.cutNo,
       shot: createArchiveShot(projectId, item)
@@ -3048,6 +3120,7 @@ export default function ProjectStoryboardOverheadPage() {
         id: draft.archiveId ?? undefined,
         title: metadata.title,
         memo: metadata.memo,
+        sceneId: metadata.sceneId || null,
         sceneNo: metadata.sceneNo,
         cutNo: metadata.cutNo
       });
@@ -3056,11 +3129,67 @@ export default function ProjectStoryboardOverheadPage() {
       setDiagramDraft((current) => current?.shot.id === draft.shot.id
         ? {
             ...current,
-            item: saved
+            item: saved,
+            sceneId: saved.sceneId ?? current.sceneId
           }
         : current);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "부감도를 저장하지 못했습니다.");
+      throw error;
+    }
+  }
+
+  async function saveDiagramSpacePreset(
+    sceneId: string,
+    diagram: ShotOverheadDiagram,
+    expectedUpdatedAt: string | null
+  ) {
+    if (!canEdit || !projectId) {
+      throw new Error("공간 프리셋을 저장할 권한을 확인할 수 없습니다.");
+    }
+    const operationProjectId = projectId;
+    try {
+      const saved = await saveShotOverheadSpacePreset(operationProjectId, {
+        sceneId,
+        diagram,
+        expectedUpdatedAt
+      });
+      if (activeProjectIdRef.current === operationProjectId) {
+        setSpacePresets((current) => [
+          saved,
+          ...current.filter((item) => (
+            item.id !== saved.id && item.location.key !== saved.location.key
+          ))
+        ]);
+        setErrorMessage("");
+      }
+      return saved;
+    } catch (error) {
+      if (activeProjectIdRef.current === operationProjectId) {
+        setErrorMessage(error instanceof Error ? error.message : "공간 프리셋을 저장하지 못했습니다.");
+      }
+      throw error;
+    }
+  }
+
+  async function deleteDiagramSpacePreset(preset: ShotOverheadSpacePreset) {
+    if (!canEdit || !projectId) {
+      throw new Error("공간 프리셋을 삭제할 권한을 확인할 수 없습니다.");
+    }
+    const operationProjectId = projectId;
+    try {
+      await deleteShotOverheadSpacePreset(operationProjectId, {
+        presetId: preset.id,
+        expectedUpdatedAt: preset.updatedAt || null
+      });
+      if (activeProjectIdRef.current === operationProjectId) {
+        setSpacePresets((current) => current.filter((item) => item.id !== preset.id));
+        setErrorMessage("");
+      }
+    } catch (error) {
+      if (activeProjectIdRef.current === operationProjectId) {
+        setErrorMessage(error instanceof Error ? error.message : "공간 프리셋을 삭제하지 못했습니다.");
+      }
       throw error;
     }
   }
@@ -4264,7 +4393,7 @@ export default function ProjectStoryboardOverheadPage() {
             {canEdit ? (
               <div className="flex flex-wrap justify-end gap-2">
                 {activeType !== "storyboard" && supportsDiagramEditing ? (
-                  <button type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
+                  <button ref={newDiagramButtonRef} type="button" onClick={openNewDiagram} className="inline-flex min-h-10 items-center gap-1.5 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-text transition-colors hover:border-field-subtle hover:bg-field-hover">
                     <MapIcon className="h-4 w-4" aria-hidden />
                     직접 만들기
                   </button>
@@ -4842,15 +4971,28 @@ export default function ProjectStoryboardOverheadPage() {
           onSave={saveImport}
         />
       ) : null}
+      {newDiagramSetup ? (
+        <NewDiagramSetupDialog
+          value={newDiagramSetup}
+          scenes={sceneItems}
+          spacePresets={spacePresets}
+          onChange={setNewDiagramSetup}
+          onClose={closeNewDiagramSetup}
+          onConfirm={confirmNewDiagramSetup}
+        />
+      ) : null}
       {diagramDraft ? (
         <ShotOverheadEditor
           shot={diagramDraft.shot}
           metadata={{
             title: diagramDraft.title,
+            sceneId: diagramDraft.sceneId,
             sceneNo: diagramDraft.sceneNo,
             cutNo: diagramDraft.cutNo,
             memo: diagramDraft.memo
           }}
+          scenes={sceneItems}
+          spacePresets={spacePresets}
           readOnly={Boolean(diagramDraft.item?.legacy) || !supportsDiagramEditing || !canEdit}
           canPersist={!diagramDraft.item?.legacy && canEdit}
           isPersisted={Boolean(diagramDraft.item && !diagramDraft.item.legacy)}
@@ -4858,6 +5000,8 @@ export default function ProjectStoryboardOverheadPage() {
           onMetadataChange={(metadata) => {
             setDiagramDraft((current) => current ? { ...current, ...metadata } : current);
           }}
+          onSaveSpacePreset={saveDiagramSpacePreset}
+          onDeleteSpacePreset={deleteDiagramSpacePreset}
           onClose={() => setDiagramDraft(null)}
           onSave={(diagram, metadata) => saveDiagram(diagram, metadata, diagramDraft)}
         />
@@ -5009,6 +5153,134 @@ function CompactConfirm({
         {isSaving ? "처리 중" : "삭제"}
       </button>
     </section>
+  );
+}
+
+function NewDiagramSetupDialog({
+  value,
+  scenes,
+  spacePresets,
+  onChange,
+  onClose,
+  onConfirm
+}: {
+  value: NewDiagramSetup;
+  scenes: ProjectSceneItem[];
+  spacePresets: ShotOverheadSpacePreset[];
+  onChange: (value: NewDiagramSetup) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLFormElement | null>(null);
+  const selectedScene = scenes.find((scene) => scene.id === value.sceneId) ?? null;
+  const maxCut = selectedScene?.cutCount ?? 0;
+  const location = selectedScene ? resolveShotOverheadSpaceLocation(selectedScene) : null;
+  const matchingPreset = location
+    ? spacePresets.find((preset) => preset.location.key === location.key) ?? null
+    : null;
+  const spaceStatus = !selectedScene
+    ? "씬을 미지정하면 빈 부감도로 시작합니다."
+    : !location
+      ? "씬리스트에 소장소가 없어 빈 부감도로 시작합니다."
+      : matchingPreset
+        ? `${location.displayName} 공간 프리셋이 새 부감도에 자동 적용됩니다.`
+        : `${location.displayName}에 저장된 공간 프리셋이 없어 빈 부감도로 시작합니다.`;
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[145] grid place-items-center bg-field-overlay/75 p-3"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-diagram-setup-title"
+        aria-describedby="new-diagram-space-status"
+        className="grid max-h-[min(82dvh,30rem)] w-full max-w-sm gap-3 overflow-y-auto border border-field-divider bg-field-elevated p-4 shadow-dialog"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onConfirm();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+            return;
+          }
+          if (event.key !== "Tab") return;
+          const controls = Array.from(
+            dialogRef.current?.querySelectorAll<HTMLElement>(
+              'button:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
+            ) ?? []
+          );
+          if (controls.length === 0) return;
+          const first = controls[0];
+          const last = controls[controls.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="new-diagram-setup-title" className="font-display text-base font-bold text-field-text">새 부감도 만들기</h2>
+            <p className="mt-1 text-xs leading-5 text-field-muted">씬과 컷을 선택하면 같은 소장소의 공간을 재사용할 수 있습니다.</p>
+          </div>
+          <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center border border-field-divider bg-field-panel text-field-text hover:bg-field-hover" aria-label="새 부감도 설정 닫기">
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+        <label className="grid gap-1 text-xs font-bold text-field-muted">
+          씬
+          <select
+            autoFocus
+            value={value.sceneId}
+            onChange={(event) => onChange({ sceneId: event.target.value, cutNo: "" })}
+            className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30"
+          >
+            <option value="">미지정</option>
+            {scenes.map((scene) => {
+              const place = [scene.mainLocation.trim(), scene.subLocation.trim()].filter(Boolean).join(" / ");
+              return <option key={scene.id} value={scene.id}>S#{scene.sceneNo}{place ? ` · ${place}` : ""}</option>;
+            })}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-bold text-field-muted">
+          컷
+          <select
+            disabled={!selectedScene || maxCut < 1}
+            value={value.cutNo}
+            onChange={(event) => onChange({ ...value, cutNo: event.target.value })}
+            className="min-h-10 border border-field-divider bg-field-input px-3 text-sm text-field-text outline-none focus:border-field-primary focus:ring-2 focus:ring-field-primary/30 disabled:text-field-disabled"
+          >
+            <option value="">미지정</option>
+            {Array.from({ length: maxCut }, (_, index) => index + 1).map((cutNumber) => (
+              <option key={cutNumber} value={String(cutNumber)}>C#{cutNumber}</option>
+            ))}
+          </select>
+        </label>
+        {selectedScene && maxCut < 1 ? (
+          <p className="text-[11px] font-semibold text-field-muted">씬리스트에 총 컷수를 입력하면 컷을 선택할 수 있습니다.</p>
+        ) : null}
+        <p id="new-diagram-space-status" role="status" className="border border-field-border bg-field-panel px-3 py-2 text-xs leading-5 text-field-subtle">
+          {spaceStatus}
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onClose} className="min-h-10 border border-field-divider bg-field-panel px-3 text-sm font-bold text-field-muted hover:bg-field-hover">취소</button>
+          <button type="submit" className="min-h-10 border border-field-primary bg-field-primary px-3 text-sm font-bold text-field-accent-foreground hover:bg-field-secondary">부감도 만들기</button>
+        </div>
+      </form>
+    </div>,
+    document.body
   );
 }
 
@@ -5240,7 +5512,12 @@ function AssetRenameEditor({
 function createArchiveShot(
   projectId: string,
   item: OverheadDiagramArchiveItem | null,
-  draftId = item?.id || `archive-${Date.now()}`
+  draftId = item?.id || `archive-${Date.now()}`,
+  initial?: {
+    diagram: ShotOverheadDiagram;
+    sceneNo: string;
+    cutNo: string;
+  }
 ): Shot {
   const now = new Date().toISOString();
   return {
@@ -5248,8 +5525,8 @@ function createArchiveShot(
     projectId,
     dailyPlanId: null,
     analysisRunId: null,
-    sceneNumber: item?.sceneNo || "",
-    cutNumber: item?.cutNo || "",
+    sceneNumber: item?.sceneNo || initial?.sceneNo || "",
+    cutNumber: item?.cutNo || initial?.cutNo || "",
     title: item?.title || "새 부감도",
     description: item?.memo || "",
     location: "",
@@ -5259,7 +5536,7 @@ function createArchiveShot(
     status: "pending",
     storyboardImageUrl: null,
     overheadImageUrl: null,
-    overheadDiagram: item?.diagram || createEmptyShotOverheadDiagram(),
+    overheadDiagram: item?.diagram || initial?.diagram || createEmptyShotOverheadDiagram(),
     sourceFileId: null,
     sourcePage: null,
     sourceRow: null,
@@ -5307,8 +5584,20 @@ function groupArchiveItemsByScene(
 
   const uniqueDiagrams = new Map(diagrams.map((diagram) => [diagram.id, diagram]));
   for (const diagram of uniqueDiagrams.values()) {
-    // 직접 만든 기존 부감도에는 stable sceneId가 없으므로 sceneNo로 관계를 추측하지 않습니다.
-    unassigned.items.push(toArchiveDiagramGroupItem(diagram));
+    // Legacy diagrams stay unassigned; never guess a relationship from sceneNo.
+    const rawSceneId = diagram.sceneId?.trim() || null;
+    const scene = rawSceneId ? sceneById.get(rawSceneId) ?? null : null;
+    const group = rawSceneId && scene
+      ? groupsBySceneId.get(rawSceneId) ?? {
+          key: archiveSceneCollapseKey(rawSceneId),
+          label: `S#${scene.sceneNo}`,
+          sceneId: rawSceneId,
+          scene,
+          items: []
+        }
+      : unassigned;
+    if (rawSceneId && scene && !groupsBySceneId.has(rawSceneId)) groupsBySceneId.set(rawSceneId, group);
+    group.items.push(toArchiveDiagramGroupItem(diagram, scene));
   }
 
   const groups = [...groupsBySceneId.values()].sort((left, right) => {
@@ -5768,14 +6057,17 @@ function toArchiveAssetGroupItem(
   };
 }
 
-function toArchiveDiagramGroupItem(diagram: OverheadDiagramArchiveItem): ArchiveGroupItem {
+function toArchiveDiagramGroupItem(
+  diagram: OverheadDiagramArchiveItem,
+  scene: ProjectSceneItem | null
+): ArchiveGroupItem {
   const cutLabel = diagram.cutNo.trim();
   return {
     kind: "diagram",
     id: diagram.id,
     diagram,
     cutLabel,
-    cutSortValue: validArchiveCutNumber(cutLabel, null),
+    cutSortValue: validArchiveCutNumber(cutLabel, scene),
     sortOrder: Number.MAX_SAFE_INTEGER,
     createdAt: diagram.createdAt
   };

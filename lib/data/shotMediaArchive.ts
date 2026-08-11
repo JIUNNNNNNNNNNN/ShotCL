@@ -3,6 +3,10 @@ import type { DailyPlanTimetableSceneMeta } from "@/lib/dailyPlan/printMeta";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
 import {
+  normalizeShotOverheadSpacePreset,
+  type ShotOverheadSpacePreset
+} from "@/lib/shotOverheadSpacePresets";
+import {
   mergeProgressMediaWithLinkedFallbacks,
   progressMediaIdentityKey,
   safeProgressThumbnailUrl
@@ -18,6 +22,23 @@ import type {
 } from "@/lib/types";
 
 type ApiError = { error?: string; detail?: string };
+
+export type OverheadArchiveWorkspace = {
+  archives: OverheadDiagramArchiveItem[];
+  spacePresets: ShotOverheadSpacePreset[];
+};
+
+export type SaveShotOverheadSpacePresetInput = {
+  sceneId: string;
+  diagram: ShotOverheadDiagram;
+  /** null creates; the loaded revision string performs a CAS replacement. */
+  expectedUpdatedAt: string | null;
+};
+
+export type DeleteShotOverheadSpacePresetInput = {
+  presetId: string;
+  expectedUpdatedAt: string | null;
+};
 
 /** 진행표가 자동으로 연결해 보여주는 아카이브 이미지 한 건입니다. */
 export type ProgressArchiveMediaAsset = {
@@ -141,19 +162,39 @@ export function buildProgressArchiveMediaByShotId({
   return result;
 }
 
-export async function listOverheadDiagramArchive(projectId: string): Promise<OverheadDiagramArchiveItem[]> {
+/** One archive request returns both diagrams and project-level space presets. */
+export async function loadOverheadArchiveWorkspace(
+  projectId: string
+): Promise<OverheadArchiveWorkspace> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams?archive=1`,
     { cache: "no-store" }
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError & {
     archives?: OverheadDiagramArchiveItem[];
+    spacePresets?: unknown[];
   };
   if (!response.ok) throw new Error(payload.error || "직접 만든 부감도를 불러오지 못했습니다.");
-  return (payload.archives ?? []).flatMap((item) => {
+  const archives = (payload.archives ?? []).flatMap((item) => {
     const diagram = normalizeShotOverheadDiagram(item.diagram);
-    return diagram ? [{ ...item, diagram }] : [];
+    return diagram ? [{
+      ...item,
+      sceneId: normalizeArchiveSceneId(item.sceneId),
+      diagram
+    }] : [];
   });
+  const spacePresets = (payload.spacePresets ?? []).flatMap((item) => {
+    const preset = normalizeShotOverheadSpacePreset(item);
+    return preset ? [preset] : [];
+  });
+  return { archives, spacePresets };
+}
+
+/** Backwards-compatible archive-only wrapper. */
+export async function listOverheadDiagramArchive(
+  projectId: string
+): Promise<OverheadDiagramArchiveItem[]> {
+  return (await loadOverheadArchiveWorkspace(projectId)).archives;
 }
 
 export async function saveOverheadDiagramArchive(
@@ -163,6 +204,7 @@ export async function saveOverheadDiagramArchive(
     id?: string;
     title?: string;
     memo?: string;
+    sceneId?: string | null;
     sceneNo?: string;
     cutNo?: string;
   } = {}
@@ -175,6 +217,7 @@ export async function saveOverheadDiagramArchive(
       archiveId: metadata.id,
       title: metadata.title,
       memo: metadata.memo,
+      sceneId: metadata.sceneId,
       sceneNo: metadata.sceneNo,
       cutNo: metadata.cutNo,
       data: diagram
@@ -186,7 +229,59 @@ export async function saveOverheadDiagramArchive(
   if (!response.ok || !payload.archive) {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "부감도를 아카이브에 저장하지 못했습니다.");
   }
-  return payload.archive;
+  return {
+    ...payload.archive,
+    sceneId: normalizeArchiveSceneId(payload.archive.sceneId)
+  };
+}
+
+export async function saveShotOverheadSpacePreset(
+  projectId: string,
+  input: SaveShotOverheadSpacePresetInput
+): Promise<ShotOverheadSpacePreset> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "save_space_preset",
+      sceneId: input.sceneId,
+      data: input.diagram,
+      expectedUpdatedAt: input.expectedUpdatedAt
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    spacePreset?: unknown;
+  };
+  const preset = normalizeShotOverheadSpacePreset(payload.spacePreset);
+  if (!response.ok || !preset) {
+    throw new Error(
+      [payload.error, payload.detail].filter(Boolean).join(" · ")
+      || "공간 프리셋을 저장하지 못했습니다."
+    );
+  }
+  return preset;
+}
+
+export async function deleteShotOverheadSpacePreset(
+  projectId: string,
+  input: DeleteShotOverheadSpacePresetInput
+) {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "delete_space_preset",
+        presetId: input.presetId,
+        expectedUpdatedAt: input.expectedUpdatedAt
+      })
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as ApiError;
+  if (!response.ok) {
+    throw new Error(payload.error || "공간 프리셋을 삭제하지 못했습니다.");
+  }
 }
 
 export async function deleteOverheadDiagramArchive(projectId: string, archiveId: string) {
@@ -347,4 +442,12 @@ function positiveInteger(value: unknown): number | null {
 
 function cleanText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeArchiveSceneId(value: unknown) {
+  const normalized = cleanText(value).toLocaleLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    .test(normalized)
+    ? normalized
+    : null;
 }

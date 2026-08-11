@@ -62,8 +62,15 @@ import {
   undoShotOverheadHistory,
   type ShotOverheadHistory
 } from "@/lib/shotOverheadHistory";
+import {
+  applyShotOverheadSpaceSnapshot,
+  hasShotOverheadSpace,
+  resolveShotOverheadSpaceLocation,
+  type ShotOverheadSpacePreset
+} from "@/lib/shotOverheadSpacePresets";
 import { cn } from "@/lib/utils";
 import type {
+  ProjectSceneItem,
   Shot,
   ShotOverheadCameraPan,
   ShotOverheadDiagram,
@@ -74,6 +81,7 @@ import type {
 
 export type ShotOverheadEditorMetadata = {
   title: string;
+  sceneId: string;
   sceneNo: string;
   cutNo: string;
   memo: string;
@@ -86,12 +94,20 @@ type ShotOverheadEditorProps = {
   canPersist?: boolean;
   isPersisted?: boolean;
   isSaving?: boolean;
+  scenes?: ProjectSceneItem[];
+  spacePresets?: ShotOverheadSpacePreset[];
   onMetadataChange: (metadata: ShotOverheadEditorMetadata) => void;
   onClose: () => void;
   onSave: (
     diagram: ShotOverheadDiagram,
     metadata: ShotOverheadEditorMetadata
   ) => Promise<void> | void;
+  onSaveSpacePreset?: (
+    sceneId: string,
+    diagram: ShotOverheadDiagram,
+    expectedUpdatedAt: string | null
+  ) => Promise<ShotOverheadSpacePreset>;
+  onDeleteSpacePreset?: (preset: ShotOverheadSpacePreset) => Promise<void>;
 };
 
 type Tool = "select" | "line" | "room";
@@ -529,6 +545,55 @@ function PointerHitCircle({
   );
 }
 
+function PointerBodyHitTarget({
+  kind,
+  cx,
+  cy,
+  x,
+  y,
+  width,
+  height,
+  transform,
+  onPointerDown
+}: {
+  kind: "person" | "camera";
+  cx: number;
+  cy: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  transform: string;
+  onPointerDown: (event: React.PointerEvent<SVGElement>) => void;
+}) {
+  return (
+    <>
+      <PointerHitCircle
+        cx={cx}
+        cy={cy}
+        className="cursor-move"
+        onPointerDown={onPointerDown}
+      />
+      <rect
+        data-shot-overhead-body-hit={kind}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        transform={transform}
+        fill="transparent"
+        stroke="transparent"
+        strokeWidth="8"
+        vectorEffect="non-scaling-stroke"
+        pointerEvents="all"
+        className="cursor-move"
+        style={{ touchAction: "none" }}
+        onPointerDown={onPointerDown}
+      />
+    </>
+  );
+}
+
 export function ShotOverheadEditor({
   shot,
   metadata,
@@ -536,13 +601,20 @@ export function ShotOverheadEditor({
   canPersist,
   isPersisted = true,
   isSaving = false,
+  scenes = [],
+  spacePresets = [],
   onMetadataChange,
   onClose,
-  onSave
+  onSave,
+  onSaveSpacePreset,
+  onDeleteSpacePreset
 }: ShotOverheadEditorProps) {
   const initialDiagram = useMemo(() => cloneShotOverheadDiagram(shot.overheadDiagram ?? createEmptyShotOverheadDiagram()), [shot.id, shot.overheadDiagram]);
+  // Capture sceneId only when this shot identity opens. Controlled metadata
+  // changes must not reset the editor history while the user is editing.
   const initialMetadata = useMemo<ShotOverheadEditorMetadata>(() => ({
     title: shot.title,
+    sceneId: metadata.sceneId,
     sceneNo: shot.sceneNumber,
     cutNo: shot.cutNumber,
     memo: shot.description
@@ -574,6 +646,11 @@ export function ShotOverheadEditor({
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<ObjectContextMenu | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [spacePresetAction, setSpacePresetAction] = useState<"save" | "delete" | null>(null);
+  const [spacePresetNotice, setSpacePresetNotice] = useState<{
+    kind: "status" | "error";
+    text: string;
+  } | null>(null);
   const persistedRef = useRef(isPersisted);
   const persistedShotIdRef = useRef(shot.id);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -593,6 +670,14 @@ export function ShotOverheadEditor({
   const historyGuideRef = useContextualGuideAnchor<HTMLDivElement>(readOnly ? null : "archive.diagram-history");
 
   const diagram = history.current;
+  const selectedScene = scenes.find((scene) => scene.id === metadata.sceneId) ?? null;
+  const currentSpaceLocation = selectedScene
+    ? resolveShotOverheadSpaceLocation(selectedScene)
+    : null;
+  const currentSpacePreset = currentSpaceLocation
+    ? spacePresets.find((preset) => preset.location.key === currentSpaceLocation.key) ?? null
+    : null;
+  const spacePresetBusy = spacePresetAction !== null;
   const canvasWidth = diagram.canvas.width;
   const canvasHeight = diagram.canvas.height;
   const gridWorldSize = getShotOverheadGridWorldSize(viewportScale);
@@ -857,8 +942,13 @@ export function ShotOverheadEditor({
     setCameraPanDraft(null);
     setContextMenu(null);
     setIsFinalizing(false);
+    setSpacePresetNotice(null);
     setPan({ x: 0, y: 0 });
   }, [initialDiagram, initialSavedFingerprint, shot.id]);
+
+  useEffect(() => {
+    setSpacePresetNotice(null);
+  }, [metadata.sceneId]);
 
   useEffect(() => {
     const body = document.body;
@@ -2027,6 +2117,94 @@ export function ShotOverheadEditor({
     });
   }
 
+  function applyCurrentSpacePreset() {
+    if (readOnly || controlsLocked || spacePresetBusy || !currentSpacePreset) return;
+    if (
+      hasShotOverheadSpace(diagram)
+      && !window.confirm("현재 공간을 프리셋으로 교체할까요? 인물, 카메라, 선과 무빙은 유지됩니다.")
+    ) {
+      return;
+    }
+    commitDiagram((current) => applyShotOverheadSpaceSnapshot(
+      current,
+      currentSpacePreset.snapshot,
+      { replace: true }
+    ));
+    setSelected(null);
+    setContextMenu(null);
+    setSpacePresetNotice({ kind: "status", text: "공간 프리셋을 적용했습니다." });
+  }
+
+  async function saveCurrentSpacePreset() {
+    if (
+      readOnly
+      || controlsLocked
+      || spacePresetBusy
+      || !selectedScene
+      || !currentSpaceLocation
+      || !hasShotOverheadSpace(diagram)
+      || !onSaveSpacePreset
+    ) {
+      return;
+    }
+    const presetAtRequest = currentSpacePreset;
+    setSpacePresetAction("save");
+    setSpacePresetNotice(null);
+    try {
+      await onSaveSpacePreset(
+        selectedScene.id,
+        cloneShotOverheadDiagram(diagram),
+        presetAtRequest?.updatedAt ?? null
+      );
+      if (!mountedRef.current) return;
+      setSpacePresetNotice({
+        kind: "status",
+        text: presetAtRequest
+          ? "공간 프리셋을 업데이트했습니다."
+          : "공간 프리셋을 저장했습니다."
+      });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setSpacePresetNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "공간 프리셋을 저장하지 못했습니다."
+      });
+    } finally {
+      if (mountedRef.current) setSpacePresetAction(null);
+    }
+  }
+
+  async function deleteCurrentSpacePreset() {
+    if (
+      readOnly
+      || controlsLocked
+      || spacePresetBusy
+      || !currentSpacePreset
+      || !onDeleteSpacePreset
+    ) {
+      return;
+    }
+    if (!window.confirm(`공간 · ${currentSpacePreset.location.displayName} 프리셋을 삭제할까요?`)) {
+      return;
+    }
+    const presetAtRequest = currentSpacePreset;
+    setSpacePresetAction("delete");
+    setSpacePresetNotice(null);
+    try {
+      await onDeleteSpacePreset(presetAtRequest);
+      if (!mountedRef.current) return;
+      setSpacePresetNotice({ kind: "status", text: "공간 프리셋을 삭제했습니다." });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setSpacePresetNotice({
+        kind: "error",
+        text: error instanceof Error ? error.message : "공간 프리셋을 삭제하지 못했습니다."
+      });
+    } finally {
+      if (mountedRef.current) setSpacePresetAction(null);
+    }
+  }
+
   async function persistAndClose() {
     if (!persistenceEnabled || isSaving || isFinalizing || gestureRef.current) return;
     setIsFinalizing(true);
@@ -2114,7 +2292,17 @@ export function ShotOverheadEditor({
 
         <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-field-border bg-field-section p-1.5 sm:grid-cols-[minmax(180px,2fr)_84px_84px_minmax(220px,3fr)] sm:px-3">
           <MetadataInput label="제목" value={metadata.title} placeholder="부감도 제목" readOnly={controlsLocked} onChange={(title) => onMetadataChange({ ...metadata, title })} />
-          <MetadataInput label="씬" value={metadata.sceneNo} placeholder="씬" readOnly={controlsLocked} onChange={(sceneNo) => onMetadataChange({ ...metadata, sceneNo })} />
+          <MetadataSceneSelect
+            scenes={scenes}
+            value={selectedScene?.id ?? ""}
+            legacySceneNo={metadata.sceneNo}
+            readOnly={controlsLocked || spacePresetBusy}
+            onChange={(scene) => onMetadataChange({
+              ...metadata,
+              sceneId: scene.id,
+              sceneNo: scene.sceneNo
+            })}
+          />
           <MetadataInput label="컷" value={metadata.cutNo} placeholder="컷" readOnly={controlsLocked} onChange={(cutNo) => onMetadataChange({ ...metadata, cutNo })} />
           <MetadataInput label="메모" value={metadata.memo} placeholder="메모" readOnly={controlsLocked} onChange={(memo) => onMetadataChange({ ...metadata, memo })} />
         </div>
@@ -2154,6 +2342,72 @@ export function ShotOverheadEditor({
               <ToolButton disabled={!canRedoShotOverheadHistory(history)} onClick={redo} icon={<Redo2 />} label="다시 실행" />
             </div>
             <ToolButton disabled={!selected} onClick={removeSelected} icon={<Trash2 />} label="삭제" danger />
+            <span className="mx-0.5 h-7 w-px shrink-0 bg-field-divider" />
+            <div
+              data-shot-overhead-space-preset-tools
+              role="group"
+              aria-label="공간 프리셋"
+              className="flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-control)] border border-field-border bg-field-section px-2"
+            >
+              {currentSpaceLocation ? (
+                <>
+                  <span className="text-[11px] font-bold text-field-text">공간 · {currentSpaceLocation.displayName}</span>
+                  {currentSpacePreset ? <span className="text-[10px] font-semibold text-field-primary">프리셋 있음</span> : null}
+                  {currentSpacePreset ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={applyCurrentSpacePreset}
+                        disabled={controlsLocked || spacePresetBusy}
+                        className="h-7 rounded-[var(--radius-control)] border border-field-primary bg-field-input px-2 text-[11px] font-bold text-field-primary hover:bg-field-hover disabled:opacity-40"
+                      >
+                        프리셋 적용
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveCurrentSpacePreset()}
+                        disabled={controlsLocked || spacePresetBusy || !hasShotOverheadSpace(diagram) || !onSaveSpacePreset}
+                        className="h-7 rounded-[var(--radius-control)] border border-field-border bg-field-input px-2 text-[11px] font-bold text-field-text hover:bg-field-hover disabled:opacity-40"
+                      >
+                        {spacePresetAction === "save" ? "업데이트 중" : "현재 공간으로 업데이트"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteCurrentSpacePreset()}
+                        disabled={controlsLocked || spacePresetBusy || !onDeleteSpacePreset}
+                        className="h-7 rounded-[var(--radius-control)] border border-field-danger/60 bg-field-input px-2 text-[11px] font-bold text-field-danger hover:bg-field-hover disabled:opacity-40"
+                      >
+                        {spacePresetAction === "delete" ? "삭제 중" : "프리셋 삭제"}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void saveCurrentSpacePreset()}
+                      disabled={controlsLocked || spacePresetBusy || !hasShotOverheadSpace(diagram) || !onSaveSpacePreset}
+                      className="h-7 rounded-[var(--radius-control)] border border-field-primary bg-field-input px-2 text-[11px] font-bold text-field-primary hover:bg-field-hover disabled:opacity-40"
+                    >
+                      {spacePresetAction === "save" ? "저장 중" : "공간 프리셋 저장"}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span className="text-[11px] font-semibold text-field-muted">
+                  {selectedScene ? "씬리스트에 소장소가 없습니다." : "씬을 선택하세요."}
+                </span>
+              )}
+              {spacePresetNotice ? (
+                <span
+                  role={spacePresetNotice.kind === "error" ? "alert" : "status"}
+                  className={cn(
+                    "max-w-[240px] truncate text-[10px] font-semibold",
+                    spacePresetNotice.kind === "error" ? "text-field-danger" : "text-field-muted"
+                  )}
+                >
+                  {spacePresetNotice.text}
+                </span>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -2485,7 +2739,17 @@ export function ShotOverheadEditor({
                     <g key={person.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${person.label || "인물"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "person", id: person.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "person", id: person.id })}>
                       {isSelected ? <circle cx={person.x} cy={person.y} r={22 * person.scale} fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
                       {creationMode?.kind === "movement" && creationMode.sourceType === "person" && creationMode.sourceId === person.id ? <circle cx={person.x} cy={person.y} r={27 * person.scale} fill="none" stroke="var(--field-primary)" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
-                      <PointerHitCircle cx={person.x} cy={person.y} onPointerDown={(event) => beginPendingMove(event, { kind: "person", id: person.id })} />
+                      <PointerBodyHitTarget
+                        kind="person"
+                        cx={person.x}
+                        cy={person.y}
+                        x={-14}
+                        y={-14}
+                        width={35}
+                        height={28}
+                        transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`}
+                        onPointerDown={(event) => beginPendingMove(event, { kind: "person", id: person.id })}
+                      />
                       <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`} pointerEvents="none">
                         <circle r={PERSON_RADIUS} fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke="var(--field-paper)" strokeWidth="2.5" />
                         <path d="M 10 -4 L 21 0 L 10 4 Z" fill="var(--field-text)" />
@@ -2501,7 +2765,17 @@ export function ShotOverheadEditor({
                     <g key={camera.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${camera.label || "카메라"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "camera", id: camera.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "camera", id: camera.id })}>
                       {isSelected ? <circle cx={camera.x} cy={camera.y} r="25" fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
                       {((creationMode?.kind === "movement" && creationMode.sourceType === "camera" && creationMode.sourceId === camera.id) || (creationMode?.kind === "camera-pan" && creationMode.cameraId === camera.id)) ? <circle cx={camera.x} cy={camera.y} r="31" fill="none" stroke="var(--field-primary)" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
-                      <PointerHitCircle cx={camera.x} cy={camera.y} onPointerDown={(event) => beginPendingMove(event, { kind: "camera", id: camera.id })} />
+                      <PointerBodyHitTarget
+                        kind="camera"
+                        cx={camera.x}
+                        cy={camera.y}
+                        x={-15}
+                        y={-14}
+                        width={41}
+                        height={28}
+                        transform={`translate(${camera.x} ${camera.y}) rotate(${camera.rotation})`}
+                        onPointerDown={(event) => beginPendingMove(event, { kind: "camera", id: camera.id })}
+                      />
                       <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none">
                         <rect x={camera.x - 15} y={camera.y - 11} width="27" height="22" rx="2" fill="var(--field-text)" />
                         <path d={`M ${camera.x + 10} ${camera.y - 8} L ${camera.x + 26} ${camera.y - 14} L ${camera.x + 26} ${camera.y + 14} L ${camera.x + 10} ${camera.y + 8} Z`} fill="var(--field-text)" />
@@ -2735,6 +3009,45 @@ export function ShotOverheadEditor({
 
 function ArrowMarker({ id, color }: { id: string; color: string }) {
   return <marker id={id} markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L7,3 z" fill={color} /></marker>;
+}
+
+function MetadataSceneSelect({
+  scenes,
+  value,
+  legacySceneNo,
+  readOnly,
+  onChange
+}: {
+  scenes: ProjectSceneItem[];
+  value: string;
+  legacySceneNo: string;
+  readOnly: boolean;
+  onChange: (scene: ProjectSceneItem) => void;
+}) {
+  return (
+    <label className="min-w-0">
+      <span className="sr-only">씬</span>
+      <select
+        value={value}
+        disabled={readOnly}
+        onChange={(event) => {
+          const scene = scenes.find((item) => item.id === event.target.value);
+          if (scene) onChange(scene);
+        }}
+        className="h-9 w-full min-w-0 rounded-[var(--radius-control)] border border-field-border bg-field-input px-2 text-xs text-field-text outline-none focus:border-field-primary focus:ring-1 focus:ring-field-primary/30 disabled:text-field-muted"
+        aria-label="씬"
+      >
+        <option value="" disabled>
+          {legacySceneNo ? `기존 S#${legacySceneNo} · 씬 선택` : "씬 선택"}
+        </option>
+        {scenes.map((scene) => (
+          <option key={scene.id} value={scene.id}>
+            {`S#${scene.sceneNo || "-"} · ${scene.subLocation.trim() || scene.mainLocation.trim() || "소장소 없음"}`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function MetadataInput({ label, value, placeholder, readOnly, onChange }: { label: string; value: string; placeholder: string; readOnly: boolean; onChange: (value: string) => void }) {

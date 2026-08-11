@@ -7,6 +7,7 @@ export type GuestProjectApiRequest = {
 
 const LEGACY_PROJECT_ID_PATTERN = /^project_([0-9a-f-]{36})$/i;
 const PROJECT_ARCHIVE_DAILY_PLAN_ID = "__project_archive__";
+const PROJECT_SPACE_PRESETS_DAILY_PLAN_ID = "__project_space_presets__";
 
 function normalizeGuestProjectId(value: string) {
   const trimmed = String(value ?? "").trim();
@@ -51,6 +52,7 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
     const dailyPlanId = input.searchParams.get("dailyPlanId")?.trim() ?? "";
     return Boolean(dailyPlanId)
       && dailyPlanId !== PROJECT_ARCHIVE_DAILY_PLAN_ID
+      && dailyPlanId !== PROJECT_SPACE_PRESETS_DAILY_PLAN_ID
       && input.searchParams.get("archive") !== "1";
   }
 
