@@ -90,6 +90,8 @@ export type ContextualGuideAnchorKey =
   | "archive.asset-multi-select"
   | "archive.selection"
   | "archive.folder-upload"
+  | "archive.crop-ratio"
+  | "archive.crop-scene-cut"
   | "archive.diagram-canvas"
   | "archive.diagram-person-tool"
   | "archive.diagram-camera-tool"

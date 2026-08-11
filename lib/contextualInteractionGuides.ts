@@ -14,8 +14,11 @@ export type ContextualInteractionType =
   | "drag-trash"
   | "swipe"
   | "shift-range"
-  | "modifier-toggle"
   | "range-drag"
+  | "context-scene-cut"
+  | "filename-archive"
+  | "crop-ratio"
+  | "crop-scene-cut"
   | "tap";
 
 export type ContextualInteractionGuideId =
@@ -36,10 +39,13 @@ export type ContextualInteractionGuideId =
   | "scene-list.interaction-actor-note"
   | "staff.interaction-member-reorder"
   | "staff.interaction-member-delete"
+  | "archive.interaction-upload"
+  | "archive.interaction-filename-classification"
   | "archive.interaction-asset-info"
+  | "archive.interaction-crop-ratio"
+  | "archive.interaction-crop-scene-cut"
   | "archive.interaction-touch-selection"
   | "archive.interaction-shift-range"
-  | "archive.interaction-additive-selection"
   | "archive.interaction-asset-reorder"
   | "archive.interaction-asset-delete"
   | "archive.interaction-diagram-person-add"
@@ -67,6 +73,11 @@ export type ContextualInteractionGuideDefinition = {
   anchor: ContextualGuideAnchorKey;
   /** Compact App Shell에서 실제 기능을 여는 대표 target이 다를 때 사용합니다. */
   compactAnchor?: ContextualGuideAnchorKey;
+  /**
+   * 실제 target이 아직 열리지 않은 수동 workflow step을 현재 화면에만
+   * standalone으로 남겨 두는 context target입니다.
+   */
+  standaloneContextAnchors?: readonly ContextualGuideAnchorKey[];
   permission: ContextualGuidePermission;
   preferredPlacement: ContextualGuidePlacement;
   priority: number;
@@ -111,10 +122,13 @@ const STAFF_INTERACTION_GUIDES = [
 ] as const satisfies readonly ContextualInteractionGuideId[];
 
 const ARCHIVE_INTERACTION_GUIDES = [
+  "archive.interaction-upload",
+  "archive.interaction-filename-classification",
   "archive.interaction-asset-info",
+  "archive.interaction-crop-ratio",
+  "archive.interaction-crop-scene-cut",
   "archive.interaction-touch-selection",
   "archive.interaction-shift-range",
-  "archive.interaction-additive-selection",
   "archive.interaction-asset-reorder",
   "archive.interaction-asset-delete",
   "archive.interaction-diagram-person-add",
@@ -510,19 +524,117 @@ export const INTERACTION_GUIDES: Record<
       }
     }
   },
+  "archive.interaction-upload": {
+    id: "archive.interaction-upload",
+    page: "archive",
+    anchor: "archive.upload",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 10,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "자료 올리기",
+        description: "이미지, PDF 또는 폴더를 선택해 부감도와 콘티 자료를 가져올 수 있습니다.",
+        demo: "tap"
+      },
+      coarse: {
+        title: "자료 올리기",
+        description: "이미지, PDF 또는 폴더를 선택해 부감도와 콘티 자료를 가져올 수 있습니다.",
+        demo: "tap"
+      }
+    }
+  },
+  "archive.interaction-filename-classification": {
+    id: "archive.interaction-filename-classification",
+    page: "archive",
+    anchor: "archive.upload",
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 20,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "파일명 자동 분류",
+        description: "부감도 파일명이 S12C3.jpg처럼 씬과 컷을 포함하면 업로드할 때 S12/C3 자료로 자동 분류됩니다.",
+        detail: "Scene12Cut3, 씬12컷3, S12(3), 폴더의 S12/C3도 읽습니다. 씬리스트의 씬과 유효한 컷 번호가 일치해야 완전히 연결되며, 미분류 자료는 정보 수정에서 지정하세요.",
+        demo: "filename-archive"
+      },
+      coarse: {
+        title: "파일명 자동 분류",
+        description: "부감도 파일명이 S12C3.jpg처럼 씬과 컷을 포함하면 업로드할 때 S12/C3 자료로 자동 분류됩니다.",
+        detail: "Scene12Cut3, 씬12컷3, S12(3), 폴더의 S12/C3도 읽습니다. 씬리스트의 씬과 유효한 컷 번호가 일치해야 완전히 연결되며, 미분류 자료는 정보 수정에서 지정하세요.",
+        demo: "filename-archive"
+      }
+    }
+  },
   "archive.interaction-asset-info": {
     id: "archive.interaction-asset-info",
     page: "archive",
     anchor: "archive.asset",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 10,
+    priority: 30,
     manualOnly: true,
     variants: {
       fine: {
-        title: "씬 · 컷 정보 수정",
-        description: "자료를 우클릭하면 씬과 컷 정보를 수정하는 창을 열 수 있습니다.",
-        demo: "right-click"
+        title: "씬 · 컷 지정",
+        description: "자료를 우클릭하면 정보 수정 창이 바로 열립니다. 창의 씬과 컷 필드에서 보관 위치를 바꿀 수 있습니다.",
+        demo: "context-scene-cut"
+      },
+      coarse: {
+        title: "씬 · 컷 지정",
+        description: "자료를 약 0.55초 동안 길게 눌러 선택 모드로 전환한 뒤, 한 장만 선택하고 화면 아래 정보 수정을 눌러 씬과 컷을 바꿀 수 있습니다.",
+        demo: "context-scene-cut",
+        durationMs: 550
+      }
+    }
+  },
+  "archive.interaction-crop-ratio": {
+    id: "archive.interaction-crop-ratio",
+    page: "archive",
+    anchor: "archive.crop-ratio",
+    standaloneContextAnchors: ["archive.upload"],
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 40,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "콘티 비율 맞추기",
+        description: "콘티 PDF나 이미지를 올린 뒤 첫 그림칸을 직접 드래그하고 기준 비율로 적용하면 같은 격자의 후보를 만들 수 있습니다.",
+        detail: "그림칸을 자동 판독하는 단계가 아니라, 사용자가 첫 칸의 범위를 정해 나머지 후보에 적용하는 방식입니다.",
+        demo: "crop-ratio"
+      },
+      coarse: {
+        title: "콘티 비율 맞추기",
+        description: "콘티 PDF나 이미지를 올린 뒤 첫 그림칸의 범위를 손가락으로 지정하고 기준 비율로 적용하면 같은 격자의 후보를 만들 수 있습니다.",
+        detail: "그림칸을 자동 판독하는 단계가 아니라, 사용자가 첫 칸의 범위를 정해 나머지 후보에 적용하는 방식입니다.",
+        demo: "crop-ratio"
+      }
+    }
+  },
+  "archive.interaction-crop-scene-cut": {
+    id: "archive.interaction-crop-scene-cut",
+    page: "archive",
+    anchor: "archive.crop-scene-cut",
+    standaloneContextAnchors: ["archive.upload", "archive.crop-ratio"],
+    permission: "manage",
+    preferredPlacement: "bottom",
+    priority: 50,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "씬 · 컷 입력",
+        description: "각 후보의 왼쪽 위 씬과 오른쪽 위 컷을 지정한 뒤 추출 확정을 누르면 해당 씬 · 컷 자료로 보관됩니다.",
+        detail: "이전 · 다음 화살표는 크롭 후보가 아니라 원본 PDF 또는 이미지 페이지를 이동합니다.",
+        demo: "crop-scene-cut"
+      },
+      coarse: {
+        title: "씬 · 컷 입력",
+        description: "각 후보의 왼쪽 위 씬과 오른쪽 위 컷을 지정한 뒤 추출 확정을 누르면 해당 씬 · 컷 자료로 보관됩니다.",
+        detail: "이전 · 다음 화살표는 크롭 후보가 아니라 원본 PDF 또는 이미지 페이지를 이동합니다.",
+        demo: "crop-scene-cut"
       }
     }
   },
@@ -532,7 +644,7 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.asset",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 20,
+    priority: 60,
     manualOnly: true,
     variants: {
       coarse: {
@@ -549,31 +661,14 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.asset-multi-select",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 20,
+    priority: 60,
     manualOnly: true,
     variants: {
       fine: {
-        title: "연속 범위 선택",
-        description: "선택 모드에서 Shift를 누른 채 자료를 클릭하면 연속 범위를 선택할 수 있습니다.",
+        title: "여러 장 선택",
+        description: "선택 모드에서 Shift+클릭하면 연속 범위를 선택하고, macOS는 ⌘+클릭, Windows는 Ctrl+클릭으로 떨어진 자료를 추가하거나 해제할 수 있습니다.",
         demo: "shift-range",
-        modifierLabel: "Shift"
-      }
-    }
-  },
-  "archive.interaction-additive-selection": {
-    id: "archive.interaction-additive-selection",
-    page: "archive",
-    anchor: "archive.asset-multi-select",
-    permission: "manage",
-    preferredPlacement: "top",
-    priority: 30,
-    manualOnly: true,
-    variants: {
-      fine: {
-        title: "개별 자료 추가 선택",
-        description: "선택 모드에서 ⌘ 또는 Ctrl을 누른 채 클릭하면 떨어진 자료를 개별적으로 추가하거나 해제할 수 있습니다.",
-        demo: "modifier-toggle",
-        modifierLabel: "⌘ / Ctrl"
+        modifierLabel: "Shift · ⌘ / Ctrl"
       }
     }
   },
@@ -583,7 +678,7 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.asset-reorder",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 40,
+    priority: 70,
     manualOnly: true,
     variants: {
       fine: {
@@ -605,7 +700,7 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.asset",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 50,
+    priority: 80,
     manualOnly: true,
     variants: {
       fine: {

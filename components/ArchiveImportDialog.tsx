@@ -18,6 +18,10 @@ import {
   type StoryboardGridCell,
   type StoryboardGridOrigin
 } from "@/lib/client/archiveMedia";
+import {
+  ContextualGuideHelpButton,
+  useContextualGuideAnchor
+} from "@/components/guides/ContextualGuideProvider";
 import type { ProjectReferenceAssetType, ProjectSceneItem } from "@/lib/types";
 
 export type ArchiveImportResult = {
@@ -392,16 +396,19 @@ export function ArchiveImportDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
+    <div data-contextual-guide-overlay className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-busy={isProgressBlocking} aria-label={`${assetType === "overhead" ? "부감도" : "콘티"} 가져오기`}>
       <section className="relative flex max-h-[96dvh] w-full max-w-7xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
         <header className="flex items-center justify-between border-b border-field-border px-4 py-3">
           <div className="min-w-0 flex-1">
             <h2 className="font-display break-words text-lg font-black text-field-text [overflow-wrap:anywhere]">{assetType === "overhead" ? "부감도" : "콘티"} 가져오기</h2>
             <p className="truncate text-xs text-field-subtle">{sourceLabel} · {pages.length}페이지/이미지</p>
           </div>
-          <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center border border-field-border bg-field-input text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25 disabled:bg-field-disabled disabled:text-field-panel" aria-label="가져오기 닫기">
-            <X className="h-5 w-5" aria-hidden />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {assetType === "storyboard" ? <ContextualGuideHelpButton interactionOnly /> : null}
+            <button type="button" onClick={requestClose} disabled={isInteractionLocked} className="grid h-10 w-10 place-items-center border border-field-border bg-field-input text-field-muted transition-colors hover:border-field-divider hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary/25 disabled:bg-field-disabled disabled:text-field-panel" aria-label="가져오기 닫기">
+              <X className="h-5 w-5" aria-hidden />
+            </button>
+          </div>
         </header>
 
         {assetType === "storyboard" ? (
@@ -833,6 +840,7 @@ function StoryboardCropWorkflow({
   hasInvalidCropMetadata: boolean;
   onConfirmExtraction: () => void;
 }) {
+  const cropRatioGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>("archive.crop-ratio");
   const metadataInputRefsByCropId = useRef(new Map<string, StoryboardCropMetadataInputRefs>());
   const focusedMetadataInputRef = useRef<{
     cropId: string;
@@ -845,6 +853,13 @@ function StoryboardCropWorkflow({
   const activeCandidates = activePage
     ? candidates.filter((candidate) => candidate.page.id === activePage.id)
     : [];
+  const selectedCandidateId = editingCandidate && activePage && editingCandidate.page.id === activePage.id
+    ? editingCandidate.id
+    : null;
+  const metadataGuideCandidateId = selectedCandidateId ?? activeCandidates[0]?.id ?? null;
+  const cropSceneCutGuideAnchorRef = useContextualGuideAnchor<HTMLDivElement>(
+    metadataGuideCandidateId ? "archive.crop-scene-cut" : null
+  );
   const candidateNumbers = new Map(
     [...candidates]
       .sort(compareStoryboardCandidates)
@@ -946,34 +961,38 @@ function StoryboardCropWorkflow({
       </div>
 
       {activePage ? (
-        <StoryboardCropCanvas
-          key={activePage.id}
-          page={activePage}
-          referenceCrop={referenceCrop}
-          referenceSelected={referenceSelected}
-          cropTemplate={cropTemplate}
-          pageOrigin={pageOrigin}
-          candidates={activeCandidates}
-          candidateNumbers={candidateNumbers}
-          candidateMetadataById={candidateMetadataById}
-          cropMetadataErrorsById={cropMetadataErrorsById}
-          scenes={scenes}
-          selectedCandidateId={editingCandidate?.page.id === activePage.id ? editingCandidate.id : null}
-          disabled={isEditorLocked}
-          metadataEditDisabled={metadataEditDisabled}
-          metadataLockedCandidateIds={metadataLockedCandidateIds}
-          onReferenceCropChange={onReferenceCropChange}
-          onReferenceSelectionComplete={onReferenceSelectionComplete}
-          onConfirmTemplate={onConfirmTemplate}
-          onPlace={(x, y) => onAddCandidate(activePage, x, y)}
-          onSelectRange={(selection) => onAddCandidates(activePage, selection)}
-          onSelect={changeActiveCrop}
-          onCandidateChange={onCandidateChange}
-          onCandidateMetadataChange={onCandidateMetadataChange}
-          onMetadataInputRef={registerMetadataInput}
-          onMetadataInputFocus={markMetadataInputFocused}
-          onMetadataInputBlur={markMetadataInputBlurred}
-        />
+        <div ref={cropRatioGuideAnchorRef} className="min-w-0">
+          <StoryboardCropCanvas
+            key={activePage.id}
+            page={activePage}
+            referenceCrop={referenceCrop}
+            referenceSelected={referenceSelected}
+            cropTemplate={cropTemplate}
+            pageOrigin={pageOrigin}
+            candidates={activeCandidates}
+            candidateNumbers={candidateNumbers}
+            candidateMetadataById={candidateMetadataById}
+            cropMetadataErrorsById={cropMetadataErrorsById}
+            scenes={scenes}
+            selectedCandidateId={selectedCandidateId}
+            metadataGuideCandidateId={metadataGuideCandidateId}
+            metadataGuideAnchorRef={cropSceneCutGuideAnchorRef}
+            disabled={isEditorLocked}
+            metadataEditDisabled={metadataEditDisabled}
+            metadataLockedCandidateIds={metadataLockedCandidateIds}
+            onReferenceCropChange={onReferenceCropChange}
+            onReferenceSelectionComplete={onReferenceSelectionComplete}
+            onConfirmTemplate={onConfirmTemplate}
+            onPlace={(x, y) => onAddCandidate(activePage, x, y)}
+            onSelectRange={(selection) => onAddCandidates(activePage, selection)}
+            onSelect={changeActiveCrop}
+            onCandidateChange={onCandidateChange}
+            onCandidateMetadataChange={onCandidateMetadataChange}
+            onMetadataInputRef={registerMetadataInput}
+            onMetadataInputFocus={markMetadataInputFocused}
+            onMetadataInputBlur={markMetadataInputBlurred}
+          />
+        </div>
       ) : referencePage ? (
         <p className="p-6 text-center text-sm text-field-muted">페이지를 표시할 수 없습니다.</p>
       ) : null}
@@ -1114,6 +1133,8 @@ function StoryboardCropCanvas({
   cropMetadataErrorsById,
   scenes,
   selectedCandidateId,
+  metadataGuideCandidateId,
+  metadataGuideAnchorRef,
   disabled,
   metadataEditDisabled,
   metadataLockedCandidateIds,
@@ -1140,6 +1161,8 @@ function StoryboardCropCanvas({
   cropMetadataErrorsById: Record<string, string>;
   scenes: ProjectSceneItem[];
   selectedCandidateId: string | null;
+  metadataGuideCandidateId: string | null;
+  metadataGuideAnchorRef: (element: HTMLDivElement | null) => void;
   disabled: boolean;
   metadataEditDisabled: boolean;
   metadataLockedCandidateIds: Set<string>;
@@ -1539,6 +1562,7 @@ function StoryboardCropCanvas({
           aria-label={`crop 후보 ${candidateNumber} 수정${metadataError ? `, ${cropMetadataErrorMessage(metadataError)}` : ""}`}
         >
           <div
+            ref={candidate.id === metadataGuideCandidateId ? metadataGuideAnchorRef : undefined}
             className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-1 p-1"
             onPointerDown={(event) => {
               if ((event.target as HTMLElement).closest("input, select")) event.stopPropagation();

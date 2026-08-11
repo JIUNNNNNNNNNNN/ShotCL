@@ -9,19 +9,6 @@ export type InteractionDemoProps = {
   modifierLabel?: string;
   direction?: "left" | "right";
   className?: string;
-  ariaLabel?: string;
-};
-
-const demoLabels: Record<ContextualInteractionType, string> = {
-  "right-click": "우클릭 동작 예시",
-  "long-press": "길게 누르기 동작 예시",
-  drag: "길게 누른 뒤 끌어 이동하는 동작 예시",
-  "drag-trash": "길게 누른 뒤 휴지통으로 끄는 동작 예시",
-  swipe: "좌우로 미는 동작 예시",
-  "shift-range": "Shift를 누른 범위 선택 동작 예시",
-  "modifier-toggle": "Command 또는 Control을 누른 추가 선택 동작 예시",
-  "range-drag": "누른 뒤 끌어 범위를 선택하는 동작 예시",
-  tap: "항목을 눌러 여는 동작 예시"
 };
 
 /**
@@ -34,8 +21,7 @@ export function InteractionDemo({
   durationMs,
   modifierLabel,
   direction = "left",
-  className = "",
-  ariaLabel
+  className = ""
 }: InteractionDemoProps) {
   const interactionType = type ?? demo ?? "tap";
 
@@ -45,8 +31,7 @@ export function InteractionDemo({
       data-type={interactionType}
       data-direction={direction}
       data-duration-ms={durationMs ?? undefined}
-      role="img"
-      aria-label={ariaLabel ?? demoLabels[interactionType]}
+      aria-hidden="true"
     >
       <div className="interaction-demo__surface" aria-hidden="true">
         {renderDemo(interactionType, modifierLabel, direction, durationMs)}
@@ -115,14 +100,6 @@ function renderDemo(
           <MousePointer />
         </>
       );
-    case "modifier-toggle":
-      return (
-        <>
-          <SelectionItems selected={[0, 2, 4]} />
-          <span className="interaction-demo__key">{modifierLabel ?? "⌘ / Ctrl"}</span>
-          <MousePointer />
-        </>
-      );
     case "range-drag":
       return (
         <>
@@ -131,6 +108,14 @@ function renderDemo(
           <Finger withRing={Boolean(durationMs)} />
         </>
       );
+    case "context-scene-cut":
+      return <ArchiveInfoDemo longPress={typeof durationMs === "number"} />;
+    case "filename-archive":
+      return <FilenameArchiveDemo />;
+    case "crop-ratio":
+      return <CropRatioDemo />;
+    case "crop-scene-cut":
+      return <CropSceneCutDemo />;
     case "tap":
       return (
         <>
@@ -140,6 +125,76 @@ function renderDemo(
         </>
       );
   }
+}
+
+function ArchiveInfoDemo({ longPress }: { longPress: boolean }) {
+  return (
+    <>
+      <SampleItem className="interaction-demo__selection" />
+      {longPress ? <Finger withRing /> : <MousePointer rightClick />}
+      {longPress ? (
+        <span className="interaction-demo__info-action">정보 수정</span>
+      ) : null}
+      <span className="interaction-demo__editor">
+        <span className="interaction-demo__editor-title">정보 수정</span>
+        <span className="interaction-demo__editor-field">
+          <span>씬</span>
+          <strong>S12</strong>
+        </span>
+        <span className="interaction-demo__editor-field">
+          <span>컷</span>
+          <strong>C3</strong>
+        </span>
+      </span>
+    </>
+  );
+}
+
+function FilenameArchiveDemo() {
+  return (
+    <>
+      <span className="interaction-demo__file">S12C3.jpg</span>
+      <span className="interaction-demo__archive-arrow">→</span>
+      <span className="interaction-demo__archive-destination">
+        <strong>S12</strong>
+        <span>/</span>
+        <strong>C3</strong>
+      </span>
+    </>
+  );
+}
+
+function CropRatioDemo() {
+  return (
+    <>
+      <span className="interaction-demo__crop-sheet">
+        <span className="interaction-demo__crop-frame" />
+        <span className="interaction-demo__crop-grid">
+          {Array.from({ length: 4 }, (_, index) => <span key={index} />)}
+        </span>
+      </span>
+      <Finger />
+      <span className="interaction-demo__crop-action">기준 비율로 적용</span>
+    </>
+  );
+}
+
+function CropSceneCutDemo() {
+  return (
+    <>
+      <span className="interaction-demo__crop-candidate">
+        <strong className="interaction-demo__crop-scene">씬 12</strong>
+        <strong className="interaction-demo__crop-cut">컷 3</strong>
+        <span className="interaction-demo__crop-picture" />
+      </span>
+      <span className="interaction-demo__extract-action">추출 확정</span>
+      <span className="interaction-demo__archived-card">
+        <span />
+        <strong>S12</strong>
+        <strong>C3</strong>
+      </span>
+    </>
+  );
 }
 
 function SampleItem({ className = "" }: { className?: string }) {

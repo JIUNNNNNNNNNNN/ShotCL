@@ -414,17 +414,16 @@ export default function ProjectStoryboardOverheadPage() {
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
   const { completeGuide, registerAnchor, requestGuide } = useContextualGuide();
   const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
-    diagramDraft ? null : "archive.upload"
+    diagramDraft || pendingImport ? null : "archive.upload"
   );
   const selectionGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
-    diagramDraft ? null : "archive.selection"
+    diagramDraft || pendingImport ? null : "archive.selection"
   );
   const folderUploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
-    !diagramDraft && supportsDirectoryPicker ? "archive.folder-upload" : null
+    !diagramDraft && !pendingImport && supportsDirectoryPicker ? "archive.folder-upload" : null
   );
   const guideOverlayOpen = Boolean(
-    pendingImport
-    || editingAsset
+    editingAsset
     || renamingAsset
     || preview
     || pendingConfirm
@@ -1024,6 +1023,7 @@ export default function ProjectStoryboardOverheadPage() {
   const archiveReorderGuideAssetId = useMemo(() => {
     if (
       !canEdit
+      || pendingImport
       || query.trim()
       || selectionMode
       || selectedKeys.size > 0
@@ -1058,6 +1058,7 @@ export default function ProjectStoryboardOverheadPage() {
     collapsedSceneKeys,
     completeArchiveOrderByGroupKey,
     isSaving,
+    pendingImport,
     pendingConfirm,
     pendingDeleteAsset,
     query,
@@ -1068,6 +1069,7 @@ export default function ProjectStoryboardOverheadPage() {
     if (
       !canEdit
       || diagramDraft
+      || pendingImport
       || selectionMode
       || selectedKeys.size > 0
       || isSaving
@@ -1081,6 +1083,7 @@ export default function ProjectStoryboardOverheadPage() {
     diagramDraft,
     firstVisibleArchiveAssetId,
     isSaving,
+    pendingImport,
     pendingConfirm,
     pendingDeleteAsset,
     selectedKeys.size,
@@ -1091,6 +1094,7 @@ export default function ProjectStoryboardOverheadPage() {
   );
   const archiveMultiSelectGuideAssetId = canEdit
     && !diagramDraft
+    && !pendingImport
     && visibleSelectionKeys.length >= 2
     && !isSaving
     && !pendingConfirm
@@ -1101,7 +1105,7 @@ export default function ProjectStoryboardOverheadPage() {
     archiveMultiSelectGuideAssetId ? "archive.asset-multi-select" : null
   );
   const archiveReorderGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
-    archiveReorderGuideAssetId && !diagramDraft ? "archive.asset-reorder" : null
+    archiveReorderGuideAssetId && !diagramDraft && !pendingImport ? "archive.asset-reorder" : null
   );
   const archiveInteractionGuideRefsByAssetId = useMemo(() => {
     const refs = new Map<string, Array<(element: HTMLButtonElement | null) => void>>();
@@ -1921,6 +1925,10 @@ export default function ProjectStoryboardOverheadPage() {
 
   function beginImport(nextImport: PendingImport) {
     if (importProcessingRef.current) return;
+    cancelArchivePointerSession();
+    cancelActiveReorderDrag();
+    exitReorderMode();
+    clearSelection();
     if (pendingImport) releaseArchivePages(pendingImport.pages);
     savedImportResultIdsRef.current = new Set();
     importResultAssetIdsRef.current = new Map();

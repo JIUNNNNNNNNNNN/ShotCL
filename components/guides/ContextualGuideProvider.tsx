@@ -66,11 +66,15 @@ type ActiveGuide = {
 type ResolvedInteractionGuide = {
   definition: ContextualInteractionGuideDefinition;
   variant: ContextualInteractionGuideVariant;
-  anchor: HTMLElement;
+  /** The real product target. Null means the step is a scoped standalone explanation. */
+  anchor: HTMLElement | null;
+  /** Keeps a standalone step tied to the currently visible Archive workflow. */
+  scopeAnchor: HTMLElement;
 };
 
 type ActiveInteractionSession = InteractionGuideSession<ResolvedInteractionGuide> & {
   pointerMode: InteractionGuideInputMode;
+  returnFocus: HTMLElement | null;
 };
 
 type GuideContextValue = {
@@ -91,7 +95,7 @@ type GuideContextValue = {
   getReplayGuides: () => ContextualGuideDefinition[];
   activeInteractionGuideId: ContextualInteractionGuideId | null;
   getInteractionGuideCount: () => number;
-  startInteractionGuide: () => boolean;
+  startInteractionGuide: (returnFocus?: HTMLElement | null) => boolean;
   closeInteractionGuide: () => void;
 };
 
@@ -393,11 +397,17 @@ export function ContextualGuideProvider({
       const anchor = allowTransientShellDrawer
         ? getPotentialInteractionGuideAnchor(anchorsRef.current.get(anchorKey))
         : getVisibleGuideAnchor(anchorsRef.current.get(anchorKey));
-      if (!anchor || hasVisibleInteractiveOverlay({
+      const scopeAnchor = anchor ?? definition.standaloneContextAnchors?.flatMap((key) => {
+        const scoped = allowTransientShellDrawer
+          ? getPotentialInteractionGuideAnchor(anchorsRef.current.get(key))
+          : getVisibleGuideAnchor(anchorsRef.current.get(key));
+        return scoped ? [scoped] : [];
+      })[0] ?? null;
+      if (!scopeAnchor || hasVisibleInteractiveOverlay({
         ignoreProjectShellDrawer: allowTransientShellDrawer,
-        allowedAnchor: anchor
+        allowedAnchor: anchor ?? scopeAnchor
       })) return [];
-      return [{ definition, variant, anchor }];
+      return [{ definition, variant, anchor, scopeAnchor }];
     });
   }, [page, persistenceReady, persistentShell, readinessVersion, role]);
 
@@ -410,7 +420,7 @@ export function ContextualGuideProvider({
     setInteractionSession(null);
   }, []);
 
-  const startInteractionGuide = useCallback(() => {
+  const startInteractionGuide = useCallback((returnFocus: HTMLElement | null = null) => {
     const steps = resolveInteractionGuides();
     if (steps.length === 0) return false;
     const pointerMode = getInteractionGuideInputMode(
@@ -419,7 +429,7 @@ export function ContextualGuideProvider({
     // 상세 동작 가이드는 기존 first-use completion과 완전히 분리된 수동 세션입니다.
     dismissActiveGuide();
     const session = startInteractionGuideSession(steps);
-    setInteractionSession(session ? { ...session, pointerMode } : null);
+    setInteractionSession(session ? { ...session, pointerMode, returnFocus } : null);
     return true;
   }, [dismissActiveGuide, resolveInteractionGuides]);
 
@@ -436,7 +446,10 @@ export function ContextualGuideProvider({
       if (!current) return null;
       const next = skipUnavailableInteractionGuideSteps(
         current,
-        (step) => isVisibleGuideAnchor(step.anchor)
+        (step) => (
+          isVisibleGuideAnchor(step.scopeAnchor)
+          && (!step.anchor || isVisibleGuideAnchor(step.anchor))
+        )
       );
       return next ? { ...current, index: next.index } : null;
     });
@@ -445,7 +458,13 @@ export function ContextualGuideProvider({
   const activeInteractionStep = interactionSession?.steps[interactionSession.index] ?? null;
 
   useEffect(() => {
-    if (!activeInteractionStep || isVisibleGuideAnchor(activeInteractionStep.anchor)) return;
+    if (
+      !activeInteractionStep
+      || (
+        isVisibleGuideAnchor(activeInteractionStep.scopeAnchor)
+        && (!activeInteractionStep.anchor || isVisibleGuideAnchor(activeInteractionStep.anchor))
+      )
+    ) return;
     skipUnavailableInteractionGuide();
   }, [activeInteractionStep, readinessVersion, skipUnavailableInteractionGuide]);
 
@@ -453,7 +472,9 @@ export function ContextualGuideProvider({
     if (!interactionSession) return undefined;
     const closeIfProductOverlayOpened = () => {
       window.setTimeout(() => {
-        if (hasVisibleInteractiveOverlay({ allowedAnchor: activeInteractionStep?.anchor })) {
+        if (hasVisibleInteractiveOverlay({
+          allowedAnchor: activeInteractionStep?.anchor ?? activeInteractionStep?.scopeAnchor
+        })) {
           setInteractionSession(null);
         }
       }, 0);
@@ -526,12 +547,13 @@ export function ContextualGuideProvider({
           index={interactionSession.index}
           count={interactionSession.steps.length}
           pointerMode={interactionSession.pointerMode}
+          returnFocus={interactionSession.returnFocus}
           onPrevious={() => moveInteractionGuide(-1)}
           onNext={() => moveInteractionGuide(1)}
           onClose={closeInteractionGuide}
           onUnavailable={skipUnavailableInteractionGuide}
         />,
-        document.body
+        activeInteractionStep.scopeAnchor.closest("[data-contextual-guide-overlay]") ?? document.body
       ) : null}
     </ContextualGuideContext.Provider>
   );
@@ -585,10 +607,12 @@ export function useContextualGuideBlocker(key: string, blocked: boolean) {
 
 export function ContextualGuideHelpButton({
   onBeforeReplay,
-  onReplayGuide
+  onReplayGuide,
+  interactionOnly = false
 }: {
   onBeforeReplay?: () => void;
   onReplayGuide?: (id: ContextualGuideId) => boolean;
+  interactionOnly?: boolean;
 } = {}) {
   const {
     getReplayGuides,
@@ -599,8 +623,12 @@ export function ContextualGuideHelpButton({
   } = useContextualGuide();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const replayTimerRef = useRef<number | null>(null);
-  const guides = useMemo(() => getReplayGuides(), [getReplayGuides, readinessVersion]);
+  const guides = useMemo(
+    () => interactionOnly ? [] : getReplayGuides(),
+    [getReplayGuides, interactionOnly, readinessVersion]
+  );
   // Accordion/collapsible content can become visible without remounting its
   // registered anchor. Re-evaluate on every Help render (including opening the
   // menu) so the manual step count always reflects what is visible right now.
@@ -631,6 +659,7 @@ export function ContextualGuideHelpButton({
   return (
     <div ref={containerRef} className="contextual-guide-help no-print" data-contextual-guide>
       <button
+        ref={triggerRef}
         type="button"
         className="contextual-guide-help__trigger"
         aria-label="도움말"
@@ -677,12 +706,13 @@ export function ContextualGuideHelpButton({
                 role="menuitem"
                 className="contextual-guide-help__interaction"
                 onClick={() => {
+                  const returnFocus = triggerRef.current;
                   setOpen(false);
                   if (replayTimerRef.current !== null) window.clearTimeout(replayTimerRef.current);
                   onBeforeReplay?.();
                   replayTimerRef.current = window.setTimeout(() => {
                     replayTimerRef.current = null;
-                    startInteractionGuide();
+                    startInteractionGuide(returnFocus);
                   }, onBeforeReplay ? 220 : 0);
                 }}
               >
@@ -702,6 +732,7 @@ function ContextualInteractionGuideCoach({
   index,
   count,
   pointerMode,
+  returnFocus,
   onPrevious,
   onNext,
   onClose,
@@ -711,6 +742,7 @@ function ContextualInteractionGuideCoach({
   index: number;
   count: number;
   pointerMode: InteractionGuideInputMode;
+  returnFocus: HTMLElement | null;
   onPrevious: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -737,15 +769,18 @@ function ContextualInteractionGuideCoach({
   }, []);
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
     const frame = window.requestAnimationFrame(() => coachRef.current?.focus({ preventScroll: true }));
     return () => {
       window.cancelAnimationFrame(frame);
-      previouslyFocused?.focus({ preventScroll: true });
+      if (
+        returnFocus
+        && isVisibleGuideAnchor(returnFocus)
+        && !hasVisibleInteractiveOverlay({ allowedAnchor: returnFocus })
+      ) {
+        returnFocus.focus({ preventScroll: true });
+      }
     };
-  }, []);
+  }, [returnFocus]);
 
   useLayoutEffect(() => {
     let frame = 0;
@@ -754,15 +789,20 @@ function ContextualInteractionGuideCoach({
       frame = window.requestAnimationFrame(() => {
         const coach = coachRef.current;
         if (!coach) return;
-        if (!isVisibleGuideAnchor(step.anchor)) {
+        if (
+          !isVisibleGuideAnchor(step.scopeAnchor)
+          || (step.anchor && !isVisibleGuideAnchor(step.anchor))
+        ) {
           onUnavailable();
           return;
         }
-        const nextPosition = calculateAnchorGuidePosition(
-          step.anchor,
-          coach,
-          step.definition.preferredPlacement ?? "auto"
-        );
+        const nextPosition = step.anchor
+          ? calculateAnchorGuidePosition(
+              step.anchor,
+              coach,
+              step.definition.preferredPlacement ?? "auto"
+            )
+          : calculateStandaloneInteractionGuidePosition(coach, step.scopeAnchor);
         setPosition((current) => isSameGuidePosition(current, nextPosition) ? current : nextPosition);
       });
     };
@@ -771,7 +811,7 @@ function ContextualInteractionGuideCoach({
       ? null
       : new ResizeObserver(updatePosition);
     if (coachRef.current) resizeObserver?.observe(coachRef.current);
-    resizeObserver?.observe(step.anchor);
+    resizeObserver?.observe(step.anchor ?? step.scopeAnchor);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     window.visualViewport?.addEventListener("resize", updatePosition);
@@ -784,10 +824,11 @@ function ContextualInteractionGuideCoach({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [onUnavailable, step.anchor, step.definition.preferredPlacement]);
+  }, [onUnavailable, step.anchor, step.definition.preferredPlacement, step.scopeAnchor]);
 
   useEffect(() => {
     const anchor = step.anchor;
+    if (!anchor) return undefined;
     const previousDescription = anchor.getAttribute("aria-describedby");
     const descriptionIds = new Set(previousDescription?.split(/\s+/u).filter(Boolean) ?? []);
     descriptionIds.add(descriptionId);
@@ -810,7 +851,7 @@ function ContextualInteractionGuideCoach({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [requestClose]);
 
-  const presentation = position?.presentation ?? "anchor";
+  const presentation = position?.presentation ?? (step.anchor ? "anchor" : "page");
   const style = position && presentation !== "bottom-coach" ? {
     left: `${position.left}px`,
     top: `${position.top}px`,
@@ -1089,6 +1130,46 @@ function calculatePageGuidePosition(coach: HTMLElement): GuidePosition {
   };
 }
 
+function calculateStandaloneInteractionGuidePosition(
+  coach: HTMLElement,
+  scopeAnchor: HTMLElement
+): GuidePosition {
+  const viewport = getVisualViewportBounds();
+  if (viewport.width <= 480) return { presentation: "bottom-coach" };
+
+  const overlayRect = scopeAnchor
+    .closest<HTMLElement>("[data-contextual-guide-overlay]")
+    ?.getBoundingClientRect();
+  if (!overlayRect) return calculatePageGuidePosition(coach);
+
+  const overlayBounds = intersectBounds(viewport, {
+    left: overlayRect.left,
+    top: overlayRect.top,
+    right: overlayRect.right,
+    bottom: overlayRect.bottom,
+    width: overlayRect.width,
+    height: overlayRect.height
+  });
+  const bounds = overlayBounds.width > 0 && overlayBounds.height > 0
+    ? overlayBounds
+    : viewport;
+  const coachRect = coach.getBoundingClientRect();
+  const edge = 12;
+  return {
+    presentation: "page",
+    left: clamp(
+      bounds.left + (bounds.width - coachRect.width) / 2,
+      bounds.left + edge,
+      bounds.right - coachRect.width - edge
+    ),
+    top: clamp(
+      bounds.top + Math.max(0, bounds.height - coachRect.height) * 0.42,
+      bounds.top + edge,
+      bounds.bottom - coachRect.height - edge
+    )
+  };
+}
+
 function calculateAnchorGuidePosition(
   anchor: HTMLElement,
   coach: HTMLElement,
@@ -1320,7 +1401,29 @@ function hasVisibleGuideAnchorGeometry(element: HTMLElement) {
   const top = viewport?.offsetTop ?? 0;
   const right = left + (viewport?.width ?? window.innerWidth);
   const bottom = top + (viewport?.height ?? window.innerHeight);
-  return rect.right > left && rect.left < right && rect.bottom > top && rect.top < bottom;
+  let visibleLeft = Math.max(rect.left, left);
+  let visibleTop = Math.max(rect.top, top);
+  let visibleRight = Math.min(rect.right, right);
+  let visibleBottom = Math.min(rect.bottom, bottom);
+
+  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const ancestorStyle = window.getComputedStyle(ancestor);
+    const clipsX = /(auto|clip|hidden|scroll)/u.test(ancestorStyle.overflowX);
+    const clipsY = /(auto|clip|hidden|scroll)/u.test(ancestorStyle.overflowY);
+    if (!clipsX && !clipsY) continue;
+    const ancestorRect = ancestor.getBoundingClientRect();
+    if (clipsX) {
+      visibleLeft = Math.max(visibleLeft, ancestorRect.left);
+      visibleRight = Math.min(visibleRight, ancestorRect.right);
+    }
+    if (clipsY) {
+      visibleTop = Math.max(visibleTop, ancestorRect.top);
+      visibleBottom = Math.min(visibleBottom, ancestorRect.bottom);
+    }
+    if (visibleRight <= visibleLeft || visibleBottom <= visibleTop) return false;
+  }
+
+  return visibleRight > visibleLeft && visibleBottom > visibleTop;
 }
 
 function hasVisibleInteractiveOverlay({

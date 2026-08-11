@@ -1016,7 +1016,7 @@ export function ShotOverheadEditor({
             <p className="truncate text-xs font-medium text-[#8f969d]">S#{metadata.sceneNo || "-"} / C#{metadata.cutNo || "-"}</p>
             <h2 className="truncate text-base font-bold text-white">{readOnly ? "부감도 보기" : "부감도 편집"} · {metadata.title || "새 부감도"}</h2>
           </div>
-          {!readOnly ? <ContextualGuideHelpButton /> : null}
+          {!readOnly ? <ContextualGuideHelpButton interactionOnly /> : null}
           <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-md border border-[#3d4246] bg-[#202326] text-[#c9ced3] transition hover:bg-[#2a2e31] hover:text-white" aria-label="편집기 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>

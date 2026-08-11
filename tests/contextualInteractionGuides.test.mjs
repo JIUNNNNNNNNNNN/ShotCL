@@ -58,8 +58,9 @@ test("fine/coarse capability chooses only real variants", () => {
   assert.equal(getInteractionGuideVariant(sceneDelete, "coarse"), null);
 
   const archiveInfo = INTERACTION_GUIDES["archive.interaction-asset-info"];
-  assert.equal(getInteractionGuideVariant(archiveInfo, "fine")?.demo, "right-click");
-  assert.equal(getInteractionGuideVariant(archiveInfo, "coarse"), null);
+  assert.equal(getInteractionGuideVariant(archiveInfo, "fine")?.demo, "context-scene-cut");
+  assert.equal(getInteractionGuideVariant(archiveInfo, "coarse")?.demo, "context-scene-cut");
+  assert.equal(getInteractionGuideVariant(archiveInfo, "coarse")?.durationMs, 550);
 
   const progressMedia = INTERACTION_GUIDES["progress.interaction-media-gallery"];
   assert.equal(getInteractionGuideVariant(progressMedia, "fine")?.demo, "tap");
@@ -113,10 +114,6 @@ test("interaction steps use feature-specific availability anchors", () => {
     "archive.asset-multi-select"
   );
   assert.equal(
-    INTERACTION_GUIDES["archive.interaction-additive-selection"].anchor,
-    "archive.asset-multi-select"
-  );
-  assert.equal(
     INTERACTION_GUIDES["archive.interaction-asset-reorder"].anchor,
     "archive.asset-reorder"
   );
@@ -127,6 +124,16 @@ test("interaction steps use feature-specific availability anchors", () => {
   assert.equal(INTERACTION_GUIDES["scene-list.interaction-scene-delete"].anchor, "scene-list.scene-number");
   assert.equal(INTERACTION_GUIDES["staff.interaction-member-delete"].anchor, "staff.member-row");
   assert.equal(INTERACTION_GUIDES["archive.interaction-asset-info"].anchor, "archive.asset");
+  assert.equal(INTERACTION_GUIDES["archive.interaction-upload"].anchor, "archive.upload");
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-filename-classification"].anchor,
+    "archive.upload"
+  );
+  assert.equal(INTERACTION_GUIDES["archive.interaction-crop-ratio"].anchor, "archive.crop-ratio");
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-crop-scene-cut"].anchor,
+    "archive.crop-scene-cut"
+  );
   assert.equal(INTERACTION_GUIDES["archive.interaction-touch-selection"].anchor, "archive.asset");
   assert.equal(INTERACTION_GUIDES["archive.interaction-asset-delete"].anchor, "archive.asset");
   assert.equal(
@@ -256,10 +263,127 @@ test("platform-specific page tours omit unsupported shortcuts", () => {
     inputMode: "coarse",
     role: "admin"
   });
-  assert.equal(archiveFine.length, 12);
-  assert.equal(archiveCoarse.length, 10);
-  assert.ok(archiveCoarse.every((guide) => !["shift-range", "modifier-toggle", "right-click"]
+  const workflowFine = archiveFine.filter((guide) => !guide.id.includes("interaction-diagram-"));
+  const workflowCoarse = archiveCoarse.filter((guide) => !guide.id.includes("interaction-diagram-"));
+  assert.equal(workflowFine.length, 8);
+  assert.equal(workflowCoarse.length, 8);
+  assert.ok(archiveCoarse.every((guide) => !["shift-range", "right-click"]
     .includes(guide.variant.demo)));
+  assert.ok(workflowCoarse.every((guide) => !guide.variant.description.includes("우클릭")));
+});
+
+test("Archive workflow keeps eight audited steps in platform-specific order", () => {
+  const workflowIds = (inputMode) => getInteractionGuideStepsForPage("archive", {
+    inputMode,
+    role: "admin"
+  }).filter((guide) => !guide.id.includes("interaction-diagram-")).map((guide) => guide.id);
+
+  assert.deepEqual(workflowIds("fine"), [
+    "archive.interaction-upload",
+    "archive.interaction-filename-classification",
+    "archive.interaction-asset-info",
+    "archive.interaction-crop-ratio",
+    "archive.interaction-crop-scene-cut",
+    "archive.interaction-shift-range",
+    "archive.interaction-asset-reorder",
+    "archive.interaction-asset-delete"
+  ]);
+  assert.deepEqual(workflowIds("coarse"), [
+    "archive.interaction-upload",
+    "archive.interaction-filename-classification",
+    "archive.interaction-asset-info",
+    "archive.interaction-crop-ratio",
+    "archive.interaction-crop-scene-cut",
+    "archive.interaction-touch-selection",
+    "archive.interaction-asset-reorder",
+    "archive.interaction-asset-delete"
+  ]);
+  assert.ok(workflowIds("fine").every((id) => INTERACTION_GUIDES[id].permission === "manage"));
+  assert.ok(workflowIds("coarse").every((id) => INTERACTION_GUIDES[id].permission === "manage"));
+  assert.equal(getInteractionGuideStepsForPage("archive", {
+    inputMode: "fine",
+    role: "progress"
+  }).length, 0);
+  assert.equal(getInteractionGuideStepsForPage("archive", {
+    inputMode: "coarse",
+    role: null
+  }).length, 0);
+  assert.equal(Object.hasOwn(INTERACTION_GUIDES, "archive.interaction-additive-selection"), false);
+});
+
+test("Archive standalone crop steps stay scoped to the visible import workflow", () => {
+  const ratio = INTERACTION_GUIDES["archive.interaction-crop-ratio"];
+  const sceneCut = INTERACTION_GUIDES["archive.interaction-crop-scene-cut"];
+
+  assert.deepEqual(ratio.standaloneContextAnchors, ["archive.upload"]);
+  assert.deepEqual(sceneCut.standaloneContextAnchors, ["archive.upload", "archive.crop-ratio"]);
+  assert.equal(ratio.anchor, "archive.crop-ratio");
+  assert.equal(sceneCut.anchor, "archive.crop-scene-cut");
+
+  for (const definition of [ratio, sceneCut]) {
+    assert.equal(getInteractionGuideVariant(definition, "fine")?.demo, definition === ratio
+      ? "crop-ratio"
+      : "crop-scene-cut");
+    assert.equal(getInteractionGuideVariant(definition, "coarse")?.demo, definition === ratio
+      ? "crop-ratio"
+      : "crop-scene-cut");
+  }
+});
+
+test("Archive help text matches filename, edit, crop, selection, and delete behavior", () => {
+  const filename = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-filename-classification"],
+    "fine"
+  );
+  assert.equal(filename?.demo, "filename-archive");
+  assert.equal(filename?.title, "파일명 자동 분류");
+  assert.match(filename?.description ?? "", /S12C3\.jpg.*S12\/C3/u);
+  assert.match(filename?.detail ?? "", /Scene12Cut3|씬12컷3/u);
+  assert.match(filename?.detail ?? "", /씬리스트.*유효한 컷/u);
+  assert.match(filename?.detail ?? "", /미분류.*정보 수정/u);
+
+  const infoFine = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-asset-info"],
+    "fine"
+  );
+  const infoCoarse = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-asset-info"],
+    "coarse"
+  );
+  assert.equal(infoFine?.title, "씬 · 컷 지정");
+  assert.equal(infoCoarse?.title, "씬 · 컷 지정");
+  assert.match(infoFine?.description ?? "", /우클릭.*정보 수정 창.*씬과 컷/u);
+  assert.doesNotMatch(infoFine?.description ?? "", /메뉴/u);
+  assert.match(infoCoarse?.description ?? "", /길게.*선택 모드.*한 장.*정보 수정/u);
+
+  const cropRatio = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-crop-ratio"],
+    "fine"
+  );
+  const cropSceneCut = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-crop-scene-cut"],
+    "fine"
+  );
+  assert.equal(cropRatio?.title, "콘티 비율 맞추기");
+  assert.equal(cropSceneCut?.title, "씬 · 컷 입력");
+  assert.match(cropRatio?.description ?? "", /첫 그림칸.*직접 드래그.*기준 비율/u);
+  assert.match(cropRatio?.detail ?? "", /자동 판독.*아니/u);
+  assert.match(cropSceneCut?.description ?? "", /왼쪽 위 씬.*오른쪽 위 컷.*추출 확정/u);
+  assert.match(cropSceneCut?.detail ?? "", /화살표.*원본.*페이지/u);
+
+  const fineSelection = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-shift-range"],
+    "fine"
+  );
+  assert.match(fineSelection?.description ?? "", /Shift\+클릭.*⌘\+클릭.*Ctrl\+클릭/u);
+  assert.equal(fineSelection?.modifierLabel, "Shift · ⌘ / Ctrl");
+
+  const archiveDelete = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-asset-delete"],
+    "coarse"
+  );
+  assert.match(archiveDelete?.description ?? "", /삭제 확인/u);
+  assert.doesNotMatch(archiveDelete?.description ?? "", /바로 삭제|즉시 삭제/u);
 });
 
 test("gesture variants retain the audited long-press thresholds and safe delete wording", () => {
