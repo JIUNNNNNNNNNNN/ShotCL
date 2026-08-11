@@ -3,9 +3,56 @@ import test from "node:test";
 import {
   cloneShotOverheadDiagram,
   createEmptyShotOverheadDiagram,
+  getShotOverheadFovRays,
+  getShotOverheadGridWorldSize,
   hasShotOverheadContent,
-  normalizeShotOverheadDiagram
+  LEGACY_OVERHEAD_CANVAS_HEIGHT,
+  LEGACY_OVERHEAD_CANVAS_WIDTH,
+  normalizeShotOverheadDiagram,
+  OVERHEAD_GRID_SIZE
 } from "../lib/shotOverhead.ts";
+
+test("new diagrams use compact dimensions while missing legacy canvas keeps the old fallback", () => {
+  const empty = createEmptyShotOverheadDiagram();
+  assert.deepEqual(empty.canvas, { width: 960, height: 640 });
+  assert.equal(OVERHEAD_GRID_SIZE, 24);
+  assert.equal(getShotOverheadGridWorldSize(1), 24);
+  assert.equal(getShotOverheadGridWorldSize(0.625) * 0.625, 24);
+  assert.equal(getShotOverheadGridWorldSize(1.25) * 1.25, 24);
+
+  const missingCanvas = normalizeShotOverheadDiagram({
+    version: 1,
+    people: [],
+    cameras: [],
+    lines: [],
+    shapes: []
+  });
+  assert.ok(missingCanvas);
+  assert.deepEqual(missingCanvas.canvas, {
+    width: LEGACY_OVERHEAD_CANVAS_WIDTH,
+    height: LEGACY_OVERHEAD_CANVAS_HEIGHT
+  });
+
+  const explicitLegacyCanvas = normalizeShotOverheadDiagram({
+    version: 1,
+    canvas: { width: 1200, height: 800 }
+  });
+  assert.ok(explicitLegacyCanvas);
+  assert.deepEqual(explicitLegacyCanvas.canvas, { width: 1200, height: 800 });
+});
+
+test("camera FOV geometry is two open local rays and does not depend on rotation", () => {
+  const unrotated = getShotOverheadFovRays({ x: 300, y: 200, rotation: 0 });
+  const rotated = getShotOverheadFovRays({ x: 300, y: 200, rotation: 225 });
+
+  assert.deepEqual(unrotated, [
+    { start: { x: 310, y: 200 }, end: { x: 415, y: 152 } },
+    { start: { x: 310, y: 200 }, end: { x: 415, y: 248 } }
+  ]);
+  assert.equal(unrotated.length, 2);
+  assert.deepEqual(rotated, unrotated);
+  assert.notDeepEqual(unrotated[0].end, unrotated[1].end);
+});
 
 test("legacy v1 diagrams keep their geometry and receive additive safe defaults", () => {
   const normalized = normalizeShotOverheadDiagram({

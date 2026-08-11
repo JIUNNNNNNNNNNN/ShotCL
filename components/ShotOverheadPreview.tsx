@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import {
+  getShotOverheadFovRays,
   SHOT_OVERHEAD_PERSON_COLORS,
   SHOT_OVERHEAD_PERSON_COLOR_HEX
 } from "@/lib/shotOverhead";
@@ -142,17 +143,26 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
         );
       })}
 
-      {diagram.cameras.filter((camera) => camera.showFov).map((camera) => (
-        <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
-          <path
-            d={`M ${camera.x + 10} ${camera.y} L ${camera.x + 115} ${camera.y - 48} L ${camera.x + 115} ${camera.y + 48} Z`}
-            fill="rgba(107, 114, 128, 0.07)"
-            stroke="rgba(75, 85, 99, 0.36)"
-            strokeWidth="1.5"
-            strokeLinejoin="round"
-          />
-        </g>
-      ))}
+      {diagram.cameras.filter((camera) => camera.showFov).map((camera) => {
+        const rays = getShotOverheadFovRays(camera);
+        return (
+          <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
+            {rays.map((ray, index) => (
+              <line
+                key={index}
+                x1={ray.start.x}
+                y1={ray.start.y}
+                x2={ray.end.x}
+                y2={ray.end.y}
+                stroke="rgba(75, 85, 99, 0.36)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </g>
+        );
+      })}
 
       {diagram.people.map((person) => {
         const fill = SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color];

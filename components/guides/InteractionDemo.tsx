@@ -116,6 +116,8 @@ function renderDemo(
       return <CropRatioDemo />;
     case "crop-scene-cut":
       return <CropSceneCutDemo />;
+    case "actor-movement":
+      return <ActorMovementDemo durationMs={durationMs} />;
     case "tap":
       return (
         <>
@@ -125,6 +127,39 @@ function renderDemo(
         </>
       );
   }
+}
+
+function ActorMovementDemo({ durationMs }: { durationMs?: number }) {
+  return (
+    <span className="interaction-demo__actor-stage">
+      <span className="interaction-demo__actor-marker">
+        <span className="interaction-demo__actor-head" />
+        <span className="interaction-demo__actor-body" />
+      </span>
+      <svg
+        className="interaction-demo__actor-route"
+        viewBox="0 0 150 42"
+        preserveAspectRatio="none"
+        focusable="false"
+      >
+        <path
+          className="interaction-demo__actor-route-line"
+          d="M 5 28 C 48 28, 83 8, 137 12"
+          pathLength="1"
+        />
+        <path
+          className="interaction-demo__actor-route-head"
+          d="M 127 5 L 141 12 L 128 20"
+        />
+      </svg>
+      <span className="interaction-demo__actor-destination" />
+      <span className="interaction-demo__actor-legend">
+        <span>짧게 끌기 · 위치</span>
+        <strong>길게 누른 뒤 끌기 · 무빙</strong>
+      </span>
+      <Finger withRing={Boolean(durationMs)} />
+    </span>
+  );
 }
 
 function ArchiveInfoDemo({ longPress }: { longPress: boolean }) {

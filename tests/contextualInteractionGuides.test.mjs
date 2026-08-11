@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   INTERACTION_GUIDES,
@@ -15,6 +16,11 @@ import {
 } from "../lib/contextualGuides.ts";
 
 const definitions = Object.values(INTERACTION_GUIDES);
+const interactionDemoSource = readFileSync(
+  new URL("../components/guides/InteractionDemo.tsx", import.meta.url),
+  "utf8"
+);
+const globalCssSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("interaction registry is manual-only, unique, and outside automatic page guides", () => {
   const ids = definitions.map((definition) => definition.id);
@@ -214,6 +220,33 @@ test("diagram movement help matches the one-click destination workflow", () => {
   assert.doesNotMatch(coarse?.description ?? "", /끌|드래그|그립니다/u);
 });
 
+test("diagram person help separates repositioning from a held movement path", () => {
+  const person = INTERACTION_GUIDES["archive.interaction-diagram-person-move"];
+  const fine = getInteractionGuideVariant(person, "fine");
+  const coarse = getInteractionGuideVariant(person, "coarse");
+
+  assert.equal(fine?.demo, "actor-movement");
+  assert.equal(coarse?.demo, "actor-movement");
+  assert.match(fine?.description ?? "", /짧게 끌면 위치/u);
+  assert.match(fine?.description ?? "", /0\.3초.*누른 뒤 끌면.*무빙 경로/u);
+  assert.match(coarse?.description ?? "", /0\.38초.*길게 누른 뒤 끌면.*무빙 경로/u);
+  assert.match(fine?.detail ?? "", /움직이지 않고.*경로를 만들지 않습니다/u);
+  assert.match(coarse?.detail ?? "", /움직이지 않고.*경로를 만들지 않습니다/u);
+  assert.doesNotMatch(`${fine?.description ?? ""} ${coarse?.description ?? ""}`, /인물만 이동/u);
+});
+
+test("diagram person demo renders an actor route with a reduced-motion result", () => {
+  assert.match(interactionDemoSource, /case "actor-movement"/u);
+  assert.match(interactionDemoSource, /interaction-demo__actor-route-line/u);
+  assert.match(interactionDemoSource, /interaction-demo__actor-route-head/u);
+
+  const reducedMotionCss = globalCssSource.slice(
+    globalCssSource.lastIndexOf("@media (prefers-reduced-motion: reduce)")
+  );
+  assert.match(reducedMotionCss, /data-type="actor-movement"[^}]*actor-route/u);
+  assert.match(reducedMotionCss, /actor-route-line[^}]*stroke-dashoffset:\s*0/u);
+});
+
 test("permission filtering uses the canonical exact key-staff rule", () => {
   assert.equal(canUseGuidePermission("manage", "admin"), true);
   assert.equal(canUseGuidePermission("manage", "progress"), false);
@@ -397,10 +430,15 @@ test("gesture variants retain the audited long-press thresholds and safe delete 
   assert.equal(duration("scene-list.interaction-scene-reorder", "coarse"), 480);
   assert.equal(duration("scene-list.interaction-actor-note", "coarse"), 540);
   assert.equal(duration("archive.interaction-touch-selection", "coarse"), 550);
-  assert.equal(duration("archive.interaction-diagram-person-move", "fine"), 200);
-  assert.equal(duration("archive.interaction-diagram-person-move", "coarse"), 350);
+  assert.equal(duration("archive.interaction-diagram-person-move", "fine"), 300);
+  assert.equal(duration("archive.interaction-diagram-person-move", "coarse"), 380);
   assert.equal(duration("archive.interaction-diagram-camera-move", "fine"), 200);
   assert.equal(duration("archive.interaction-diagram-camera-move", "coarse"), 350);
+  const cameraFine = getInteractionGuideVariant(
+    INTERACTION_GUIDES["archive.interaction-diagram-camera-move"],
+    "fine"
+  );
+  assert.match(cameraFine?.description ?? "", /두 열린 선.*촬영 방향.*화각 범위/u);
 
   const archiveDelete = getInteractionGuideVariant(
     INTERACTION_GUIDES["archive.interaction-asset-delete"],

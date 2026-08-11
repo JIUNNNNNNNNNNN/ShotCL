@@ -9,8 +9,16 @@ import type {
   ShotOverheadShape
 } from "@/lib/types";
 
-export const OVERHEAD_CANVAS_WIDTH = 1200;
-export const OVERHEAD_CANVAS_HEIGHT = 800;
+/** New diagrams use a compact canvas while persisted legacy JSON keeps its old fallback. */
+export const OVERHEAD_CANVAS_WIDTH = 960;
+export const OVERHEAD_CANVAS_HEIGHT = 640;
+export const LEGACY_OVERHEAD_CANVAS_WIDTH = 1200;
+export const LEGACY_OVERHEAD_CANVAS_HEIGHT = 800;
+/** Target on-screen grid spacing; editor converts it to world units per viewport. */
+export const OVERHEAD_GRID_SIZE = 24;
+export const SHOT_OVERHEAD_FOV_NEAR_OFFSET = 10;
+export const SHOT_OVERHEAD_FOV_FAR_OFFSET = 115;
+export const SHOT_OVERHEAD_FOV_HALF_WIDTH = 48;
 export const SHOT_OVERHEAD_PERSON_COLORS = [
   "blue",
   "red",
@@ -32,6 +40,49 @@ export const SHOT_OVERHEAD_PERSON_COLOR_HEX: Record<ShotOverheadPersonColor, str
   orange: "#fb923c",
   gray: "#d1d5db"
 };
+
+export type ShotOverheadFovRay = {
+  start: ShotOverheadPoint;
+  end: ShotOverheadPoint;
+};
+
+export function getShotOverheadGridWorldSize(viewportScale: number) {
+  const safeScale = Number.isFinite(viewportScale)
+    ? Math.max(0.01, viewportScale)
+    : 1;
+  return OVERHEAD_GRID_SIZE / safeScale;
+}
+
+/**
+ * Return camera-local FOV rays. Rotation stays a rendering concern so callers
+ * can apply one SVG transform to the rays and camera body without drift.
+ */
+export function getShotOverheadFovRays(
+  camera: Pick<ShotOverheadCamera, "x" | "y" | "rotation">
+): [ShotOverheadFovRay, ShotOverheadFovRay] {
+  return [
+    {
+      start: {
+        x: camera.x + SHOT_OVERHEAD_FOV_NEAR_OFFSET,
+        y: camera.y
+      },
+      end: {
+        x: camera.x + SHOT_OVERHEAD_FOV_FAR_OFFSET,
+        y: camera.y - SHOT_OVERHEAD_FOV_HALF_WIDTH
+      }
+    },
+    {
+      start: {
+        x: camera.x + SHOT_OVERHEAD_FOV_NEAR_OFFSET,
+        y: camera.y
+      },
+      end: {
+        x: camera.x + SHOT_OVERHEAD_FOV_FAR_OFFSET,
+        y: camera.y + SHOT_OVERHEAD_FOV_HALF_WIDTH
+      }
+    }
+  ];
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -74,8 +125,8 @@ function normalizePerson(value: unknown, index: number): ShotOverheadPerson | nu
   if (!isRecord(value)) return null;
   return {
     id: text(value.id, `person-${index + 1}`),
-    x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
-    y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
+    x: finiteNumber(value.x, LEGACY_OVERHEAD_CANVAS_WIDTH / 2),
+    y: finiteNumber(value.y, LEGACY_OVERHEAD_CANVAS_HEIGHT / 2),
     scale: Math.min(3, Math.max(0.5, finiteNumber(value.scale, 1))),
     rotation: normalizedRotation(value.rotation),
     label: text(value.label),
@@ -87,8 +138,8 @@ function normalizeCamera(value: unknown, index: number): ShotOverheadCamera | nu
   if (!isRecord(value)) return null;
   return {
     id: text(value.id, `camera-${index + 1}`),
-    x: finiteNumber(value.x, OVERHEAD_CANVAS_WIDTH / 2),
-    y: finiteNumber(value.y, OVERHEAD_CANVAS_HEIGHT / 2),
+    x: finiteNumber(value.x, LEGACY_OVERHEAD_CANVAS_WIDTH / 2),
+    y: finiteNumber(value.y, LEGACY_OVERHEAD_CANVAS_HEIGHT / 2),
     rotation: normalizedRotation(value.rotation),
     label: text(value.label),
     showFov: value.showFov === true
@@ -186,8 +237,8 @@ export function normalizeShotOverheadDiagram(value: unknown): ShotOverheadDiagra
   return {
     version: 1,
     canvas: {
-      width: Math.max(320, finiteNumber(canvas.width, OVERHEAD_CANVAS_WIDTH)),
-      height: Math.max(240, finiteNumber(canvas.height, OVERHEAD_CANVAS_HEIGHT))
+      width: Math.max(320, finiteNumber(canvas.width, LEGACY_OVERHEAD_CANVAS_WIDTH)),
+      height: Math.max(240, finiteNumber(canvas.height, LEGACY_OVERHEAD_CANVAS_HEIGHT))
     },
     people: normalizeArray(value.people, normalizePerson),
     cameras: normalizeArray(value.cameras, normalizeCamera),

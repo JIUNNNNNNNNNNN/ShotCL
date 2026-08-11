@@ -26,12 +26,22 @@ import {
   X
 } from "lucide-react";
 import { ContextualGuideHelpButton, useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
+import { useAutosave } from "@/hooks/useAutosave";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import {
   createEmptyShotOverheadDiagram,
+  getShotOverheadFovRays,
+  getShotOverheadGridWorldSize,
   SHOT_OVERHEAD_PERSON_COLORS,
   SHOT_OVERHEAD_PERSON_COLOR_HEX
 } from "@/lib/shotOverhead";
+import {
+  createActorMovementPath,
+  getActorMovementEndPoint,
+  getActorMovementHoldDuration,
+  hasMinimumActorMovement,
+  shouldBeginActorReposition
+} from "@/lib/shotOverheadActorGesture";
 import {
   canRedoShotOverheadHistory,
   canUndoShotOverheadHistory,
@@ -65,10 +75,15 @@ type ShotOverheadEditorProps = {
   shot: Shot;
   metadata: ShotOverheadEditorMetadata;
   readOnly?: boolean;
+  canPersist?: boolean;
+  isPersisted?: boolean;
   isSaving?: boolean;
   onMetadataChange: (metadata: ShotOverheadEditorMetadata) => void;
   onClose: () => void;
-  onSave: (diagram: ShotOverheadDiagram) => Promise<void> | void;
+  onSave: (
+    diagram: ShotOverheadDiagram,
+    metadata: ShotOverheadEditorMetadata
+  ) => Promise<void> | void;
 };
 
 type Tool = "select" | "line" | "room" | "path";
@@ -89,6 +104,28 @@ type PendingMoveGesture = {
   startWorld: ShotOverheadPoint;
   before: ShotOverheadDiagram;
   timeoutId: number;
+};
+
+type ActorPendingGesture = {
+  kind: "actor-pending";
+  pointerId: number;
+  pointerType: string;
+  id: string;
+  startClient: ShotOverheadPoint;
+  startWorld: ShotOverheadPoint;
+  actorOrigin: ShotOverheadPoint;
+  before: ShotOverheadDiagram;
+  timeoutId: number;
+};
+
+type ActorMovementGesture = {
+  kind: "actor-movement";
+  pointerId: number;
+  id: string;
+  actorOrigin: ShotOverheadPoint;
+  pointerStartWorld: ShotOverheadPoint;
+  currentWorld: ShotOverheadPoint;
+  before: ShotOverheadDiagram;
 };
 
 type MoveGesture = {
@@ -144,7 +181,7 @@ type PanGesture = {
   startPan: ShotOverheadPoint;
 };
 
-type Gesture = PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | PanGesture;
+type Gesture = ActorPendingGesture | ActorMovementGesture | PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | PanGesture;
 type WithoutGestureRuntime<T> = T extends unknown ? Omit<T, "pointerId" | "before"> : never;
 type ImmediateGestureInput = WithoutGestureRuntime<RotateGesture | ScaleGesture | RectResizeGesture | PointGesture>;
 
@@ -276,15 +313,11 @@ function isInteractiveControlTarget(target: EventTarget | null) {
   return Boolean(target.closest("button, a[href], input, textarea, select, [role='button'], [contenteditable='true']"));
 }
 
-function diagramsEqual(first: ShotOverheadDiagram, second: ShotOverheadDiagram) {
-  return JSON.stringify(first) === JSON.stringify(second);
-}
-
-function metadataEqual(first: ShotOverheadEditorMetadata, second: ShotOverheadEditorMetadata) {
-  return first.title === second.title
-    && first.sceneNo === second.sceneNo
-    && first.cutNo === second.cutNo
-    && first.memo === second.memo;
+function editorDraftFingerprint(
+  diagram: ShotOverheadDiagram,
+  metadata: ShotOverheadEditorMetadata
+) {
+  return JSON.stringify({ diagram, metadata });
 }
 
 function moveSelection(
@@ -368,8 +401,8 @@ function RotationHandle({
 }) {
   return (
     <g>
-      <line x1={pivot.x} y1={pivot.y} x2={handle.x} y2={handle.y} stroke="#cfff37" strokeWidth="2" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />
-      <circle cx={handle.x} cy={handle.y} r="7" fill="#cfff37" stroke="#111315" strokeWidth="3" pointerEvents="none" />
+      <line x1={pivot.x} y1={pivot.y} x2={handle.x} y2={handle.y} stroke="var(--field-accent)" strokeWidth="2" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      <circle cx={handle.x} cy={handle.y} r="7" fill="var(--field-accent)" stroke="var(--field-paper)" strokeWidth="3" pointerEvents="none" />
       <PointerHitCircle
         cx={handle.x}
         cy={handle.y}
@@ -417,6 +450,8 @@ export function ShotOverheadEditor({
   shot,
   metadata,
   readOnly = false,
+  canPersist,
+  isPersisted = true,
   isSaving = false,
   onMetadataChange,
   onClose,
@@ -438,6 +473,14 @@ export function ShotOverheadEditor({
   const [pan, setPan] = useState<ShotOverheadPoint>({ x: 0, y: 0 });
   const [viewportScale, setViewportScale] = useState(1);
   const [gestureActive, setGestureActive] = useState(false);
+  const [actorMovementDraft, setActorMovementDraft] = useState<{
+    sourceId: string;
+    start: ShotOverheadPoint;
+    end: ShotOverheadPoint;
+  } | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const persistedRef = useRef(isPersisted);
+  const persistedShotIdRef = useRef(shot.id);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const worldRef = useRef<SVGGElement | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -456,6 +499,7 @@ export function ShotOverheadEditor({
   const diagram = history.current;
   const canvasWidth = diagram.canvas.width;
   const canvasHeight = diagram.canvas.height;
+  const gridWorldSize = getShotOverheadGridWorldSize(viewportScale);
   const handleInset = (EDITOR_HANDLE_HIT_RADIUS_PX + EDITOR_HANDLE_EDGE_GAP_PX) / viewportScale;
   const handleBounds: HandleBounds = {
     minX: handleInset - pan.x,
@@ -468,7 +512,37 @@ export function ShotOverheadEditor({
   const selectedLine = selected?.kind === "line" ? diagram.lines.find((item) => item.id === selected.id) : null;
   const selectedShape = selected?.kind === "shape" ? diagram.shapes.find((item) => item.id === selected.id) : null;
   const selectedPath = selected?.kind === "path" ? diagram.movementPaths.find((item) => item.id === selected.id) : null;
-  const hasUnsavedChanges = !readOnly && (!diagramsEqual(diagram, initialDiagram) || !metadataEqual(metadata, initialMetadata));
+  const initialSavedFingerprint = useMemo(
+    () => editorDraftFingerprint(initialDiagram, initialMetadata),
+    [initialDiagram, initialMetadata]
+  );
+  const currentDraftFingerprint = editorDraftFingerprint(diagram, metadata);
+  const [lastSavedFingerprint, setLastSavedFingerprint] = useState(initialSavedFingerprint);
+  const persistenceEnabled = canPersist ?? !readOnly;
+  const interactionLocked = readOnly || isSaving || isFinalizing;
+  const controlsLocked = interactionLocked || gestureActive;
+  const autosaveValue = useMemo(
+    () => ({ diagram, metadata }),
+    [diagram, metadata]
+  );
+  const diagramAutosave = useAutosave({
+    value: autosaveValue,
+    enabled: persistenceEnabled && !isSaving && !isFinalizing && !gestureActive,
+    delayMs: 900,
+    scopeKey: `shot-overhead:${shot.projectId}:${shot.id}`,
+    initialSavedFingerprint,
+    fingerprint: (value) => editorDraftFingerprint(value.diagram, value.metadata),
+    save: async (value) => {
+      await onSave(cloneShotOverheadDiagram(value.diagram), { ...value.metadata });
+    },
+    onSaved: (_result, value, saveMeta) => {
+      persistedRef.current = true;
+      if (saveMeta.isLatest) {
+        setLastSavedFingerprint(editorDraftFingerprint(value.diagram, value.metadata));
+      }
+    }
+  });
+  const hasUnsavedChanges = persistenceEnabled && currentDraftFingerprint !== lastSavedFingerprint;
   useUnsavedChangesGuard(hasUnsavedChanges);
 
   useEffect(() => {
@@ -492,40 +566,74 @@ export function ShotOverheadEditor({
   }, []);
 
   const commitDiagram = useCallback((updater: (current: ShotOverheadDiagram) => ShotOverheadDiagram) => {
+    if (interactionLocked || gestureRef.current) return;
     applyHistory((current) => pushShotOverheadHistory(current, updater(cloneShotOverheadDiagram(current.current))));
-  }, [applyHistory]);
+  }, [applyHistory, interactionLocked]);
 
   const replaceDiagram = useCallback((next: ShotOverheadDiagram) => {
     applyHistory((current) => replaceShotOverheadHistoryCurrent(current, next));
   }, [applyHistory]);
 
   const undo = useCallback(() => {
+    if (interactionLocked || gestureRef.current) return;
     applyHistory(undoShotOverheadHistory);
     setSelected(null);
-  }, [applyHistory]);
+  }, [applyHistory, interactionLocked]);
 
   const redo = useCallback(() => {
+    if (interactionLocked || gestureRef.current) return;
     applyHistory(redoShotOverheadHistory);
     setSelected(null);
-  }, [applyHistory]);
+  }, [applyHistory, interactionLocked]);
+
+  useEffect(() => {
+    if (persistedShotIdRef.current !== shot.id) {
+      persistedShotIdRef.current = shot.id;
+      persistedRef.current = isPersisted;
+      return;
+    }
+    if (isPersisted) persistedRef.current = true;
+  }, [isPersisted, shot.id]);
 
   useEffect(() => {
     const next = createShotOverheadHistory(initialDiagram);
     historyRef.current = next;
     setHistoryState(next);
+    setLastSavedFingerprint(initialSavedFingerprint);
     setTool("select");
     setSelected(null);
     setLineStart(null);
     setRoomPoints([]);
+    setActorMovementDraft(null);
+    setIsFinalizing(false);
     setPan({ x: 0, y: 0 });
-  }, [initialDiagram, shot.id]);
+  }, [initialDiagram, initialSavedFingerprint, shot.id]);
+
+  useEffect(() => {
+    const body = document.body;
+    const root = document.documentElement;
+    const projectContent = document.getElementById("project-main-content");
+    const previousBodyOverflow = body.style.overflow;
+    const previousRootOverflow = root.style.overflow;
+    const previousContentOverflow = projectContent?.style.overflowY ?? "";
+    body.style.overflow = "hidden";
+    root.style.overflow = "hidden";
+    if (projectContent) projectContent.style.overflowY = "hidden";
+    return () => {
+      body.style.overflow = previousBodyOverflow;
+      root.style.overflow = previousRootOverflow;
+      if (projectContent) projectContent.style.overflowY = previousContentOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       const gesture = gestureRef.current;
-      if (gesture?.kind === "pending-move") window.clearTimeout(gesture.timeoutId);
+      if (gesture?.kind === "pending-move" || gesture?.kind === "actor-pending") {
+        window.clearTimeout(gesture.timeoutId);
+      }
       gestureRef.current = null;
     };
   }, []);
@@ -570,7 +678,9 @@ export function ShotOverheadEditor({
 
   function clearPendingGesture() {
     const gesture = gestureRef.current;
-    if (gesture?.kind === "pending-move") window.clearTimeout(gesture.timeoutId);
+    if (gesture?.kind === "pending-move" || gesture?.kind === "actor-pending") {
+      window.clearTimeout(gesture.timeoutId);
+    }
   }
 
   function finishGesture(commit = true, pointerId?: number) {
@@ -579,9 +689,12 @@ export function ShotOverheadEditor({
     clearPendingGesture();
     gestureRef.current = null;
     setGestureActive(false);
+    setActorMovementDraft(null);
     if ("before" in gesture) {
       if (commit) {
-        applyHistory((current) => pushShotOverheadHistory(current, current.current, gesture.before));
+        if (gesture.kind !== "actor-movement") {
+          applyHistory((current) => pushShotOverheadHistory(current, current.current, gesture.before));
+        }
       } else {
         replaceDiagram(gesture.before);
       }
@@ -600,6 +713,12 @@ export function ShotOverheadEditor({
     return () => window.removeEventListener("blur", onBlur);
   }, []);
 
+  useEffect(() => {
+    if (interactionLocked && gestureRef.current) {
+      finishGestureRef.current(false);
+    }
+  }, [interactionLocked]);
+
   function isPanChord(event: React.PointerEvent<SVGElement>) {
     return event.button === 1 || (event.button === 0 && spaceHeldRef.current);
   }
@@ -610,7 +729,7 @@ export function ShotOverheadEditor({
   }
 
   function beginPan(event: React.PointerEvent<SVGElement>) {
-    if (readOnly || !event.isPrimary || !isPanChord(event) || hasForeignPointerOwner(event.pointerId)) return false;
+    if (interactionLocked || !event.isPrimary || !isPanChord(event) || hasForeignPointerOwner(event.pointerId)) return false;
     event.preventDefault();
     event.stopPropagation();
     finishGesture(false, event.pointerId);
@@ -631,17 +750,58 @@ export function ShotOverheadEditor({
     event.preventDefault();
     event.stopPropagation();
     setSelected(selection);
-    if (readOnly || tool !== "select") return;
+    if (interactionLocked || tool !== "select") return;
     capturePointer(event.pointerId);
     const pointerType = event.pointerType || "mouse";
+    const before = cloneShotOverheadDiagram(historyRef.current.current);
+    const startWorld = worldPoint(event.clientX, event.clientY);
+    if (selection.kind === "person") {
+      const person = before.people.find((item) => item.id === selection.id);
+      if (!person) {
+        releasePointer(event.pointerId);
+        return;
+      }
+      const pending: ActorPendingGesture = {
+        kind: "actor-pending",
+        pointerId: event.pointerId,
+        pointerType,
+        id: selection.id,
+        startClient: { x: event.clientX, y: event.clientY },
+        startWorld,
+        actorOrigin: { x: person.x, y: person.y },
+        before,
+        timeoutId: 0
+      };
+      pending.timeoutId = window.setTimeout(() => {
+        if (!mountedRef.current || gestureRef.current !== pending) return;
+        gestureRef.current = {
+          kind: "actor-movement",
+          pointerId: pending.pointerId,
+          id: pending.id,
+          actorOrigin: pending.actorOrigin,
+          pointerStartWorld: pending.startWorld,
+          currentWorld: pending.actorOrigin,
+          before: pending.before
+        };
+        setActorMovementDraft({
+          sourceId: pending.id,
+          start: pending.actorOrigin,
+          end: pending.actorOrigin
+        });
+        setGestureActive(true);
+      }, getActorMovementHoldDuration(pointerType));
+      gestureRef.current = pending;
+      setGestureActive(true);
+      return;
+    }
     const pending: PendingMoveGesture = {
       kind: "pending-move",
       pointerId: event.pointerId,
       pointerType,
       selection,
       startClient: { x: event.clientX, y: event.clientY },
-      startWorld: worldPoint(event.clientX, event.clientY),
-      before: cloneShotOverheadDiagram(historyRef.current.current),
+      startWorld,
+      before,
       timeoutId: 0
     };
     pending.timeoutId = window.setTimeout(() => {
@@ -656,11 +816,12 @@ export function ShotOverheadEditor({
       setGestureActive(true);
     }, pointerType === "mouse" ? FINE_HOLD_MS : COARSE_HOLD_MS);
     gestureRef.current = pending;
+    setGestureActive(true);
   }
 
   function beginImmediateGesture(event: React.PointerEvent<SVGElement>, gesture: ImmediateGestureInput) {
     if (beginPan(event)) return;
-    if (readOnly || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
+    if (interactionLocked || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
     event.preventDefault();
     event.stopPropagation();
     capturePointer(event.pointerId);
@@ -673,6 +834,7 @@ export function ShotOverheadEditor({
   }
 
   function addPerson() {
+    if (interactionLocked || gestureRef.current) return;
     const index = diagram.people.length;
     const item = {
       id: createElementId("person"),
@@ -689,6 +851,7 @@ export function ShotOverheadEditor({
   }
 
   function addCamera() {
+    if (interactionLocked || gestureRef.current) return;
     const index = diagram.cameras.length;
     const item = {
       id: createElementId("camera"),
@@ -704,7 +867,7 @@ export function ShotOverheadEditor({
   }
 
   function removeSelected() {
-    if (!selected || readOnly) return;
+    if (!selected || interactionLocked || gestureRef.current) return;
     commitDiagram((current) => {
       if (selected.kind === "person") return {
         ...current,
@@ -724,7 +887,7 @@ export function ShotOverheadEditor({
   }
 
   function chooseTool(nextTool: Tool) {
-    finishGesture(false);
+    if (interactionLocked || gestureRef.current) return;
     setTool(nextTool);
     setLineStart(null);
     setRoomPoints([]);
@@ -732,6 +895,7 @@ export function ShotOverheadEditor({
   }
 
   function finishRoom(closed: boolean) {
+    if (interactionLocked || gestureRef.current) return;
     const points = roomPoints.filter((point, index, all) => index === 0 || pointDistance(point, all[index - 1]) > 3);
     const minimum = closed ? 3 : 2;
     if (points.length < minimum) {
@@ -748,7 +912,7 @@ export function ShotOverheadEditor({
 
   function handleCanvasPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (beginPan(event)) return;
-    if (readOnly || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
+    if (interactionLocked || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
     const point = worldPoint(event.clientX, event.clientY, true);
     if (tool === "line") {
       if (!lineStart) {
@@ -805,11 +969,53 @@ export function ShotOverheadEditor({
   function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.kind === "actor-pending") {
+      if (!shouldBeginActorReposition(
+        gesture.startClient,
+        { x: event.clientX, y: event.clientY },
+        gesture.pointerType
+      )) return;
+      window.clearTimeout(gesture.timeoutId);
+      const moveGesture: MoveGesture = {
+        kind: "move",
+        pointerId: gesture.pointerId,
+        selection: { kind: "person", id: gesture.id },
+        startWorld: gesture.startWorld,
+        before: gesture.before
+      };
+      gestureRef.current = moveGesture;
+      setGestureActive(true);
+      event.preventDefault();
+      const point = worldPoint(event.clientX, event.clientY);
+      replaceDiagram(moveSelection(
+        moveGesture.before,
+        moveGesture.selection,
+        point.x - moveGesture.startWorld.x,
+        point.y - moveGesture.startWorld.y
+      ));
+      return;
+    }
     if (gesture.kind === "pending-move") {
       const tolerance = gesture.pointerType === "mouse" ? FINE_MOVE_TOLERANCE : COARSE_MOVE_TOLERANCE;
       if (Math.hypot(event.clientX - gesture.startClient.x, event.clientY - gesture.startClient.y) > tolerance) {
         finishGesture(false, event.pointerId);
       }
+      return;
+    }
+    if (gesture.kind === "actor-movement") {
+      event.preventDefault();
+      const end = getActorMovementEndPoint(
+        gesture.actorOrigin,
+        gesture.pointerStartWorld,
+        worldPoint(event.clientX, event.clientY, false),
+        { width: canvasWidth, height: canvasHeight }
+      );
+      gesture.currentWorld = end;
+      setActorMovementDraft({
+        sourceId: gesture.id,
+        start: gesture.actorOrigin,
+        end
+      });
       return;
     }
     if (gesture.kind === "pan") {
@@ -887,6 +1093,27 @@ export function ShotOverheadEditor({
   }
 
   function handlePointerEnd(event: React.PointerEvent<SVGSVGElement>) {
+    const gesture = gestureRef.current;
+    if (gesture?.kind === "actor-movement" && gesture.pointerId === event.pointerId) {
+      gestureRef.current = null;
+      setGestureActive(false);
+      setActorMovementDraft(null);
+      if (hasMinimumActorMovement(gesture.actorOrigin, gesture.currentWorld, viewportScale)) {
+        const next = cloneShotOverheadDiagram(gesture.before);
+        next.movementPaths = [
+          ...next.movementPaths,
+          createActorMovementPath(
+            createElementId("movement"),
+            gesture.id,
+            gesture.actorOrigin,
+            gesture.currentWorld
+          )
+        ];
+        applyHistory((current) => pushShotOverheadHistory(current, next, gesture.before));
+      }
+      releasePointer(event.pointerId);
+      return;
+    }
     finishGesture(true, event.pointerId);
   }
 
@@ -899,12 +1126,12 @@ export function ShotOverheadEditor({
     const editable = isEditableTarget(event.target);
     const interactiveControl = isInteractiveControlTarget(event.target);
     const command = event.metaKey || event.ctrlKey;
-    const diagramHistoryCommand = !editable && !readOnly && (
+    const diagramHistoryCommand = !editable && !interactionLocked && (
       (command && event.key.toLowerCase() === "z")
       || (event.ctrlKey && event.key.toLowerCase() === "y")
     );
     const diagramDeleteCommand = !editable
-      && !readOnly
+      && !interactionLocked
       && (event.key === "Delete" || event.key === "Backspace");
 
     // A keyboard mutation must never race an owned pointer. Cancel the live
@@ -916,13 +1143,13 @@ export function ShotOverheadEditor({
       finishGestureRef.current(false);
       return;
     }
-    if (command && event.key.toLowerCase() === "z" && !editable && !readOnly) {
+    if (command && event.key.toLowerCase() === "z" && !editable && !interactionLocked) {
       event.preventDefault();
       if (event.shiftKey) redo();
       else undo();
       return;
     }
-    if (event.ctrlKey && event.key.toLowerCase() === "y" && !editable && !readOnly) {
+    if (event.ctrlKey && event.key.toLowerCase() === "y" && !editable && !interactionLocked) {
       event.preventDefault();
       redo();
       return;
@@ -943,7 +1170,7 @@ export function ShotOverheadEditor({
         setLineStart(null);
         setRoomPoints([]);
       } else if (selected) setSelected(null);
-      else onClose();
+      else void requestClose();
       return;
     }
     if (diagramDeleteCommand && selected) {
@@ -967,10 +1194,12 @@ export function ShotOverheadEditor({
   }, []);
 
   function beginLabelEdit() {
+    if (gestureRef.current) return;
     labelEditStartRef.current = cloneShotOverheadDiagram(historyRef.current.current);
   }
 
   function changeSelectedLabel(value: string) {
+    if (interactionLocked || gestureRef.current) return;
     const current = cloneShotOverheadDiagram(historyRef.current.current);
     if (selected?.kind === "person") current.people = current.people.map((item) => item.id === selected.id ? { ...item, label: value } : item);
     if (selected?.kind === "camera") current.cameras = current.cameras.map((item) => item.id === selected.id ? { ...item, label: value } : item);
@@ -986,10 +1215,44 @@ export function ShotOverheadEditor({
   }
 
   function rotateSelected(delta: number) {
-    if (!selected || (selected.kind !== "person" && selected.kind !== "camera")) return;
+    if (interactionLocked || gestureRef.current || !selected || (selected.kind !== "person" && selected.kind !== "camera")) return;
     commitDiagram((current) => selected.kind === "person"
       ? { ...current, people: current.people.map((item) => item.id === selected.id ? { ...item, rotation: normalizedRotation(item.rotation + delta) } : item) }
       : { ...current, cameras: current.cameras.map((item) => item.id === selected.id ? { ...item, rotation: normalizedRotation(item.rotation + delta) } : item) });
+  }
+
+  async function persistAndClose() {
+    if (!persistenceEnabled || isSaving || isFinalizing || gestureRef.current) return;
+    setIsFinalizing(true);
+    const snapshot = {
+      diagram: cloneShotOverheadDiagram(historyRef.current.current),
+      metadata: { ...metadata }
+    };
+    let saved = await diagramAutosave.saveNow(snapshot);
+    if (saved && !persistedRef.current) {
+      try {
+        await onSave(cloneShotOverheadDiagram(snapshot.diagram), { ...snapshot.metadata });
+        persistedRef.current = true;
+        diagramAutosave.markSaved(snapshot);
+        setLastSavedFingerprint(editorDraftFingerprint(snapshot.diagram, snapshot.metadata));
+      } catch {
+        saved = false;
+      }
+    }
+    if (saved) {
+      onClose();
+      return;
+    }
+    if (mountedRef.current) setIsFinalizing(false);
+  }
+
+  function requestClose() {
+    if (isSaving || isFinalizing || gestureRef.current) return;
+    if (!persistenceEnabled || (!hasUnsavedChanges && !diagramAutosave.isPending)) {
+      onClose();
+      return;
+    }
+    void persistAndClose();
   }
 
   const instruction = tool === "line"
@@ -998,46 +1261,48 @@ export function ShotOverheadEditor({
       ? roomPoints.length === 0 ? "공간의 첫 꼭짓점을 선택하세요." : "점을 이어 벽을 만들고 시작점을 누르면 닫힙니다."
       : tool === "path"
         ? "선택한 인물 또는 카메라가 이동할 도착점을 선택하세요."
-        : selected
-          ? "짧게 누르면 선택, 잠시 누른 뒤 끌면 이동합니다."
+        : selected?.kind === "person"
+          ? "인물은 바로 끌어 위치를 옮기고, 잠시 누른 뒤 끌어 무빙 경로를 만듭니다."
+          : selected
+            ? "짧게 누르면 선택하고, 잠시 누른 뒤 끌면 위치를 옮깁니다."
           : "요소를 선택하거나 도구로 새 부감도를 구성하세요.";
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center bg-black/80 sm:p-3" onPointerDown={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-[100] flex items-stretch justify-center overflow-hidden overscroll-none bg-field-bg/85 sm:p-3" onPointerDown={(event) => event.stopPropagation()}>
       <section
         role="dialog"
         aria-modal="true"
         aria-label="부감도 편집기"
         data-contextual-guide-overlay
-        className="flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden border border-[#363a3d] bg-[#111315] text-[#f3f4f6] shadow-2xl sm:h-[min(96dvh,980px)] sm:max-w-[1500px] sm:rounded-xl"
+        className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden border border-field-divider bg-field-section text-field-text shadow-dialog sm:h-[min(96dvh,980px)] sm:max-w-[1500px] sm:rounded-[var(--radius-dialog)]"
       >
-        <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[#34383b] bg-[#17191b] px-3 sm:px-4">
+        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-field-border bg-field-panel px-3 sm:px-4">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-[#8f969d]">S#{metadata.sceneNo || "-"} / C#{metadata.cutNo || "-"}</p>
-            <h2 className="truncate text-base font-bold text-white">{readOnly ? "부감도 보기" : "부감도 편집"} · {metadata.title || "새 부감도"}</h2>
+            <p className="truncate text-[11px] font-medium text-field-muted">S#{metadata.sceneNo || "-"} / C#{metadata.cutNo || "-"}</p>
+            <h2 className="truncate text-sm font-bold text-field-text sm:text-base">{readOnly ? "부감도 보기" : "부감도 편집"} · {metadata.title || "새 부감도"}</h2>
           </div>
           {!readOnly ? <ContextualGuideHelpButton interactionOnly /> : null}
-          <button type="button" onClick={onClose} className="grid h-11 w-11 place-items-center rounded-md border border-[#3d4246] bg-[#202326] text-[#c9ced3] transition hover:bg-[#2a2e31] hover:text-white" aria-label="편집기 닫기">
+          <button type="button" onClick={requestClose} disabled={isFinalizing || gestureActive} className="grid h-10 w-10 place-items-center rounded-[var(--radius-control)] border border-field-border bg-field-input text-field-subtle transition hover:bg-field-hover hover:text-field-text disabled:opacity-50" aria-label="편집기 닫기">
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
 
-        <div className="grid shrink-0 grid-cols-2 gap-1.5 border-b border-[#34383b] bg-[#151719] p-2 sm:grid-cols-[minmax(180px,2fr)_90px_90px_minmax(220px,3fr)] sm:px-3">
-          <MetadataInput label="제목" value={metadata.title} placeholder="부감도 제목" readOnly={readOnly} onChange={(title) => onMetadataChange({ ...metadata, title })} />
-          <MetadataInput label="씬" value={metadata.sceneNo} placeholder="씬" readOnly={readOnly} onChange={(sceneNo) => onMetadataChange({ ...metadata, sceneNo })} />
-          <MetadataInput label="컷" value={metadata.cutNo} placeholder="컷" readOnly={readOnly} onChange={(cutNo) => onMetadataChange({ ...metadata, cutNo })} />
-          <MetadataInput label="메모" value={metadata.memo} placeholder="메모" readOnly={readOnly} onChange={(memo) => onMetadataChange({ ...metadata, memo })} />
+        <div className="grid shrink-0 grid-cols-2 gap-1 border-b border-field-border bg-field-section p-1.5 sm:grid-cols-[minmax(180px,2fr)_84px_84px_minmax(220px,3fr)] sm:px-3">
+          <MetadataInput label="제목" value={metadata.title} placeholder="부감도 제목" readOnly={controlsLocked} onChange={(title) => onMetadataChange({ ...metadata, title })} />
+          <MetadataInput label="씬" value={metadata.sceneNo} placeholder="씬" readOnly={controlsLocked} onChange={(sceneNo) => onMetadataChange({ ...metadata, sceneNo })} />
+          <MetadataInput label="컷" value={metadata.cutNo} placeholder="컷" readOnly={controlsLocked} onChange={(cutNo) => onMetadataChange({ ...metadata, cutNo })} />
+          <MetadataInput label="메모" value={metadata.memo} placeholder="메모" readOnly={controlsLocked} onChange={(memo) => onMetadataChange({ ...metadata, memo })} />
         </div>
 
         {!readOnly ? (
-          <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[#34383b] bg-[#1a1d1f] px-2 py-2 sm:px-3" aria-label="부감도 도구">
+          <div className={cn("flex shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden border-b border-field-border bg-field-panel px-2 py-1.5 [scrollbar-width:thin] sm:px-3", controlsLocked && "pointer-events-none opacity-60")} aria-label="부감도 도구" aria-busy={controlsLocked}>
             <ToolButton active={tool === "select"} onClick={() => chooseTool("select")} icon={<MousePointer2 />} label="선택" />
             <ToolButton ref={personToolGuideRef} onClick={addPerson} icon={<UserRound />} label="인물" />
             <ToolButton ref={cameraToolGuideRef} onClick={addCamera} icon={<Camera />} label="카메라" />
             <ToolButton active={tool === "line"} onClick={() => chooseTool("line")} icon={<Minus />} label="선" />
             <ToolButton ref={roomToolGuideRef} active={tool === "room"} onClick={() => chooseTool("room")} icon={<Square />} label="공간" />
             <ToolButton ref={pathToolGuideRef} active={tool === "path"} disabled={!selected || (selected.kind !== "person" && selected.kind !== "camera")} onClick={() => chooseTool("path")} icon={<Route />} label="동선" />
-            <span className="mx-0.5 h-7 w-px shrink-0 bg-[#3b3f42]" />
+            <span className="mx-0.5 h-7 w-px shrink-0 bg-field-divider" />
             <div ref={historyGuideRef} className="flex shrink-0 gap-1">
               <ToolButton disabled={!canUndoShotOverheadHistory(history)} onClick={undo} icon={<Undo2 />} label="실행 취소" />
               <ToolButton disabled={!canRedoShotOverheadHistory(history)} onClick={redo} icon={<Redo2 />} label="다시 실행" />
@@ -1046,18 +1311,15 @@ export function ShotOverheadEditor({
           </div>
         ) : null}
 
-        <div className="relative min-h-0 flex-1 overflow-auto bg-[#0d0f10] p-2 sm:p-3">
+        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-field-bg p-1.5 sm:p-2">
           <div
             ref={canvasGuideRef}
-            className={cn(
-              "mx-auto w-full max-w-[1100px] overflow-hidden rounded-md border border-[#34383b] bg-[#171a1c] shadow-[0_20px_70px_rgba(0,0,0,0.45)]",
-              !readOnly && "min-w-[900px]"
-            )}
-            style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
+            className="mx-auto h-full max-h-full w-full max-w-[1100px] overflow-hidden rounded-[var(--radius-card)] border border-field-border bg-field-panel shadow-dialog"
           >
             <svg
               ref={svgRef}
               viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+              preserveAspectRatio="xMidYMid meet"
               className={cn(
                 "block h-full w-full select-none",
                 tool === "line" || tool === "room" || tool === "path" ? "cursor-crosshair" : spaceHeldRef.current ? "cursor-grab" : "cursor-default",
@@ -1076,16 +1338,16 @@ export function ShotOverheadEditor({
               onContextMenu={(event) => event.preventDefault()}
             >
               <defs>
-                <pattern id="shot-overhead-editor-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                  <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#292d30" strokeWidth="1" />
+                <pattern id="shot-overhead-editor-grid" width={gridWorldSize} height={gridWorldSize} patternUnits="userSpaceOnUse">
+                  <path d={`M ${gridWorldSize} 0 L 0 0 0 ${gridWorldSize}`} fill="none" stroke="var(--ui-border-default)" strokeWidth="1" strokeOpacity="0.22" vectorEffect="non-scaling-stroke" />
                 </pattern>
-                <ArrowMarker id="editor-arrow-black" color="#e5e7eb" />
-                <ArrowMarker id="editor-arrow-red" color="#ef6b66" />
-                <ArrowMarker id="editor-arrow-camera" color="#a7afb7" />
+                <ArrowMarker id="editor-arrow-black" color="var(--field-text)" />
+                <ArrowMarker id="editor-arrow-red" color="var(--field-danger)" />
+                <ArrowMarker id="editor-arrow-camera" color="var(--field-muted)" />
                 {SHOT_OVERHEAD_PERSON_COLORS.map((color) => <ArrowMarker key={color} id={`editor-arrow-${color}`} color={SHOT_OVERHEAD_PERSON_COLOR_HEX[color]} />)}
               </defs>
               <g ref={worldRef} transform={`translate(${pan.x} ${pan.y})`}>
-                <rect width={canvasWidth} height={canvasHeight} fill="#171a1c" />
+                <rect width={canvasWidth} height={canvasHeight} fill="var(--field-panel)" />
                 <rect width={canvasWidth} height={canvasHeight} fill="url(#shot-overhead-editor-grid)" />
                 {diagram.shapes.map((shape) => {
                   const isSelected = selected?.kind === "shape" && selected.id === shape.id;
@@ -1094,11 +1356,11 @@ export function ShotOverheadEditor({
                     return (
                       <g key={shape.id}>
                         <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents={shape.closed ? "all" : "stroke"} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} style={{ touchAction: "none" }} />
-                        <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke={isSelected ? "#cfff37" : "#d7dadd"} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
-                        {shape.label && labelPoint ? <text x={labelPoint.x} y={labelPoint.y} textAnchor="middle" fill="#aeb4ba" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
+                        <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                        {shape.label && labelPoint ? <text x={labelPoint.x} y={labelPoint.y} textAnchor="middle" fill="var(--field-muted)" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
                         {isSelected && !readOnly ? shape.points.map((point, index) => (
                           <g key={`${shape.id}-${index}`}>
-                            <circle cx={point.x} cy={point.y} r="6" fill="#cfff37" stroke="#111315" strokeWidth="2" pointerEvents="none" />
+                            <circle cx={point.x} cy={point.y} r="6" fill="var(--field-accent)" stroke="var(--field-paper)" strokeWidth="2" pointerEvents="none" />
                             <PointerHitCircle cx={point.x} cy={point.y} className="cursor-move" onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: "shape-point", id: shape.id, index })} />
                           </g>
                         )) : null}
@@ -1114,14 +1376,14 @@ export function ShotOverheadEditor({
                   return (
                     <g key={shape.id}>
                       <g transform={`rotate(${shape.rotation} ${pivot.x} ${pivot.y})`}>
-                        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="rgba(255,255,255,0.025)" stroke={isSelected ? "#cfff37" : "#d7dadd"} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="rgba(255,255,255,0.025)" stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} vectorEffect="non-scaling-stroke" pointerEvents="none" />
                         <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="transparent" stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="all" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} />
-                        {shape.label ? <text x={shape.x + 12} y={shape.y + 24} fill="#aeb4ba" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
+                        {shape.label ? <text x={shape.x + 12} y={shape.y + 24} fill="var(--field-muted)" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
                       </g>
                       {isSelected && !readOnly ? (
                         <>
                           <RotationHandle pivot={pivot} handle={rotationHandle} label="공간 회전" onPointerDown={(event) => beginRotate(event, { kind: "shape", id: shape.id }, pivot, shape.rotation)} />
-                          <circle cx={resize.x} cy={resize.y} r="7" fill="#171a1c" stroke="#cfff37" strokeWidth="3" pointerEvents="none" />
+                          <circle cx={resize.x} cy={resize.y} r="7" fill="var(--field-panel)" stroke="var(--field-accent)" strokeWidth="3" pointerEvents="none" />
                           <PointerHitCircle cx={resize.x} cy={resize.y} className="cursor-nwse-resize" onPointerDown={(event) => {
                             const anchor = rotatePoint({ x: shape.x, y: shape.y }, pivot, shape.rotation);
                             beginImmediateGesture(event, { kind: "rect-resize", id: shape.id, anchor, rotation: shape.rotation });
@@ -1134,14 +1396,14 @@ export function ShotOverheadEditor({
 
                 {diagram.lines.map((line) => {
                   const isSelected = selected?.kind === "line" && selected.id === line.id;
-                  const color = line.color === "red" ? "#ef6b66" : "#e5e7eb";
+                  const color = line.color === "red" ? "var(--field-danger)" : "var(--field-text)";
                   return (
                     <g key={line.id}>
                       <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "line", id: line.id })} />
-                      <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={isSelected ? "#cfff37" : color} strokeWidth={isSelected ? 3 : 2.2} strokeLinecap="round" vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${line.color})`} pointerEvents="none" />
+                      <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={isSelected ? "var(--field-accent)" : color} strokeWidth={isSelected ? 3 : 2.2} strokeLinecap="round" vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${line.color})`} pointerEvents="none" />
                       {isSelected && !readOnly ? (["start", "end"] as const).map((endpoint) => {
                         const point = endpoint === "start" ? { x: line.x1, y: line.y1 } : { x: line.x2, y: line.y2 };
-                        return <g key={endpoint}><circle cx={point.x} cy={point.y} r="6" fill="#cfff37" pointerEvents="none" /><PointerHitCircle cx={point.x} cy={point.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: endpoint === "start" ? "line-start" : "line-end", id: line.id })} /></g>;
+                        return <g key={endpoint}><circle cx={point.x} cy={point.y} r="6" fill="var(--field-accent)" pointerEvents="none" /><PointerHitCircle cx={point.x} cy={point.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: endpoint === "start" ? "line-start" : "line-end", id: line.id })} /></g>;
                       }) : null}
                     </g>
                   );
@@ -1149,18 +1411,55 @@ export function ShotOverheadEditor({
 
                 {diagram.movementPaths.map((path) => {
                   const person = path.sourceType === "person" ? diagram.people.find((item) => item.id === path.sourceId) : null;
-                  const color = person ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color] : "#a7afb7";
+                  const color = person ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color] : "var(--field-muted)";
                   const isSelected = selected?.kind === "path" && selected.id === path.id;
                   return (
                     <g key={path.id}>
                       <path d={pathFromPoints(path.points)} fill="none" stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "path", id: path.id })} />
-                      <path d={pathFromPoints(path.points)} fill="none" stroke={isSelected ? "#cfff37" : color} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined} vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${person?.color ?? "camera"})`} pointerEvents="none" />
-                      {isSelected && !readOnly ? path.points.map((point, index) => <g key={`${path.id}-${index}`}><circle cx={point.x} cy={point.y} r="6" fill="#cfff37" pointerEvents="none" /><PointerHitCircle cx={point.x} cy={point.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: "path-point", id: path.id, index })} /></g>) : null}
+                      <path d={pathFromPoints(path.points)} fill="none" stroke={isSelected ? "var(--field-accent)" : color} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined} vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${person?.color ?? "camera"})`} pointerEvents="none" />
+                      {isSelected && !readOnly ? path.points.map((point, index) => <g key={`${path.id}-${index}`}><circle cx={point.x} cy={point.y} r="6" fill="var(--field-accent)" pointerEvents="none" /><PointerHitCircle cx={point.x} cy={point.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: "path-point", id: path.id, index })} /></g>) : null}
                     </g>
                   );
                 })}
 
-                {diagram.cameras.filter((camera) => camera.showFov).map((camera) => <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none"><path d={`M ${camera.x + 10} ${camera.y} L ${camera.x + 115} ${camera.y - 48} L ${camera.x + 115} ${camera.y + 48} Z`} fill="rgba(207,255,55,0.035)" stroke="rgba(207,255,55,0.23)" strokeWidth="1.5" /></g>)}
+                {actorMovementDraft ? (() => {
+                  const person = diagram.people.find((item) => item.id === actorMovementDraft.sourceId);
+                  if (!person) return null;
+                  return (
+                    <path
+                      d={pathFromPoints([actorMovementDraft.start, actorMovementDraft.end])}
+                      fill="none"
+                      stroke={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]}
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      vectorEffect="non-scaling-stroke"
+                      markerEnd={`url(#editor-arrow-${person.color})`}
+                      pointerEvents="none"
+                    />
+                  );
+                })() : null}
+
+                {diagram.cameras.filter((camera) => camera.showFov).map((camera) => {
+                  const rays = getShotOverheadFovRays(camera);
+                  return (
+                    <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none">
+                      {rays.map((ray, index) => (
+                        <line
+                          key={index}
+                          x1={ray.start.x}
+                          y1={ray.start.y}
+                          x2={ray.end.x}
+                          y2={ray.end.y}
+                          stroke="var(--field-accent)"
+                          strokeOpacity="0.28"
+                          strokeWidth="1.25"
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      ))}
+                    </g>
+                  );
+                })}
 
                 {diagram.people.map((person) => {
                   const isSelected = selected?.kind === "person" && selected.id === person.id;
@@ -1181,17 +1480,18 @@ export function ShotOverheadEditor({
                   );
                   return (
                     <g key={person.id}>
-                      {isSelected ? <circle cx={person.x} cy={person.y} r={22 * person.scale} fill="none" stroke="#cfff37" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
+                      {isSelected ? <circle cx={person.x} cy={person.y} r={22 * person.scale} fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
+                      {actorMovementDraft?.sourceId === person.id ? <circle cx={person.x} cy={person.y} r={27 * person.scale} fill="none" stroke="var(--field-accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
                       <PointerHitCircle cx={person.x} cy={person.y} onPointerDown={(event) => beginPendingMove(event, { kind: "person", id: person.id })} />
                       <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`} pointerEvents="none">
-                        <circle r={PERSON_RADIUS} fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke="#0b0d0e" strokeWidth="2.5" />
-                        <path d="M 10 -4 L 21 0 L 10 4 Z" fill="#f5f6f7" />
+                        <circle r={PERSON_RADIUS} fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke="var(--field-paper)" strokeWidth="2.5" />
+                        <path d="M 10 -4 L 21 0 L 10 4 Z" fill="var(--field-text)" />
                       </g>
-                      <text x={person.x} y={person.y + 28 * person.scale} textAnchor="middle" fill="#edf0f2" fontSize="16" fontWeight="650" pointerEvents="none">{person.label || "인물"}</text>
+                      <text x={person.x} y={person.y + 28 * person.scale} textAnchor="middle" fill="var(--field-text)" fontSize="16" fontWeight="650" pointerEvents="none">{person.label || "인물"}</text>
                       {isSelected && !readOnly ? (
                         <>
                           <RotationHandle pivot={{ x: person.x, y: person.y }} handle={rotationHandle} label="인물 방향 회전" onPointerDown={(event) => beginRotate(event, { kind: "person", id: person.id }, { x: person.x, y: person.y }, person.rotation)} />
-                          <circle cx={scaleHandle.x} cy={scaleHandle.y} r="6" fill="#171a1c" stroke="#cfff37" strokeWidth="3" pointerEvents="none" />
+                          <circle cx={scaleHandle.x} cy={scaleHandle.y} r="6" fill="var(--field-panel)" stroke="var(--field-accent)" strokeWidth="3" pointerEvents="none" />
                           <PointerHitCircle cx={scaleHandle.x} cy={scaleHandle.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "person-scale", id: person.id, center: { x: person.x, y: person.y }, startDistance: Math.max(1, pointDistance(worldPoint(event.clientX, event.clientY), person)), startScale: person.scale })} />
                         </>
                       ) : null}
@@ -1207,38 +1507,38 @@ export function ShotOverheadEditor({
                   );
                   return (
                     <g key={camera.id}>
-                      {isSelected ? <circle cx={camera.x} cy={camera.y} r="25" fill="none" stroke="#cfff37" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
+                      {isSelected ? <circle cx={camera.x} cy={camera.y} r="25" fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
                       <PointerHitCircle cx={camera.x} cy={camera.y} onPointerDown={(event) => beginPendingMove(event, { kind: "camera", id: camera.id })} />
                       <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none">
-                        <rect x={camera.x - 15} y={camera.y - 11} width="27" height="22" rx="2" fill="#e5e7eb" />
-                        <path d={`M ${camera.x + 10} ${camera.y - 8} L ${camera.x + 26} ${camera.y - 14} L ${camera.x + 26} ${camera.y + 14} L ${camera.x + 10} ${camera.y + 8} Z`} fill="#e5e7eb" />
-                        <circle cx={camera.x - 4} cy={camera.y} r="4" fill="#171a1c" />
+                        <rect x={camera.x - 15} y={camera.y - 11} width="27" height="22" rx="2" fill="var(--field-text)" />
+                        <path d={`M ${camera.x + 10} ${camera.y - 8} L ${camera.x + 26} ${camera.y - 14} L ${camera.x + 26} ${camera.y + 14} L ${camera.x + 10} ${camera.y + 8} Z`} fill="var(--field-text)" />
+                        <circle cx={camera.x - 4} cy={camera.y} r="4" fill="var(--field-panel)" />
                       </g>
-                      <text x={camera.x} y={camera.y + 30} textAnchor="middle" fill="#edf0f2" fontSize="16" fontWeight="650" pointerEvents="none">{camera.label || "CAM"}</text>
+                      <text x={camera.x} y={camera.y + 30} textAnchor="middle" fill="var(--field-text)" fontSize="16" fontWeight="650" pointerEvents="none">{camera.label || "CAM"}</text>
                       {isSelected && !readOnly ? <RotationHandle pivot={{ x: camera.x, y: camera.y }} handle={rotationHandle} label="카메라 방향 회전" onPointerDown={(event) => beginRotate(event, { kind: "camera", id: camera.id }, { x: camera.x, y: camera.y }, camera.rotation)} /> : null}
                     </g>
                   );
                 })}
 
-                {lineStart ? <g pointerEvents="none"><circle cx={lineStart.x} cy={lineStart.y} r="6" fill="#cfff37" /><text x={lineStart.x + 12} y={lineStart.y - 12} fill="#cfff37" fontSize="16">끝점을 선택하세요</text></g> : null}
-                {roomPoints.length > 0 ? <g pointerEvents="none"><path d={pathFromPoints(roomPoints)} fill="none" stroke="#cfff37" strokeWidth="2.5" strokeDasharray="7 5" vectorEffect="non-scaling-stroke" />{roomPoints.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={index === 0 ? 8 : 5} fill="#cfff37" />)}</g> : null}
+                {lineStart ? <g pointerEvents="none"><circle cx={lineStart.x} cy={lineStart.y} r="6" fill="var(--field-accent)" /><text x={lineStart.x + 12} y={lineStart.y - 12} fill="var(--field-accent)" fontSize="16">끝점을 선택하세요</text></g> : null}
+                {roomPoints.length > 0 ? <g pointerEvents="none"><path d={pathFromPoints(roomPoints)} fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="7 5" vectorEffect="non-scaling-stroke" />{roomPoints.map((point, index) => <circle key={index} cx={point.x} cy={point.y} r={index === 0 ? 8 : 5} fill="var(--field-accent)" />)}</g> : null}
               </g>
             </svg>
           </div>
         </div>
 
         {!readOnly ? (
-          <footer className="flex min-h-[64px] shrink-0 items-center gap-2 overflow-x-auto border-t border-[#34383b] bg-[#17191b] px-3 py-2">
-            <p className="min-w-[220px] flex-1 whitespace-nowrap text-xs text-[#9ca3aa]">{instruction}</p>
+          <footer className={cn("flex min-h-14 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-t border-field-border bg-field-panel px-3 py-1.5 [scrollbar-width:thin]", controlsLocked && "pointer-events-none opacity-60")}>
+            <p className="min-w-[220px] flex-1 whitespace-nowrap text-xs text-field-muted">{instruction}</p>
             {(selectedPerson || selectedCamera || selectedShape) ? (
-              <label className="flex shrink-0 items-center gap-2 text-[11px] text-[#a7adb3]">
+              <label className="flex shrink-0 items-center gap-2 text-[11px] text-field-muted">
                 라벨
-                <input value={selectedPerson?.label ?? selectedCamera?.label ?? selectedShape?.label ?? ""} onFocus={beginLabelEdit} onChange={(event) => changeSelectedLabel(event.target.value)} onBlur={finishLabelEdit} className="h-10 w-32 rounded-md border border-[#3d4246] bg-[#202326] px-2 text-sm text-white outline-none focus:border-[#cfff37]" />
+                <input value={selectedPerson?.label ?? selectedCamera?.label ?? selectedShape?.label ?? ""} readOnly={controlsLocked} onFocus={beginLabelEdit} onChange={(event) => changeSelectedLabel(event.target.value)} onBlur={finishLabelEdit} className="h-9 w-32 rounded-[var(--radius-control)] border border-field-border bg-field-input px-2 text-sm text-field-text outline-none focus:border-field-primary focus:ring-1 focus:ring-field-primary/30 read-only:text-field-muted" />
               </label>
             ) : null}
             {selectedPerson ? (
               <div className="flex shrink-0 items-center gap-1" aria-label="인물 색상">
-                {SHOT_OVERHEAD_PERSON_COLORS.map((color) => <button key={color} type="button" aria-label={`${color} 색상`} aria-pressed={selectedPerson.color === color} onClick={() => commitDiagram((current) => ({ ...current, people: current.people.map((item) => item.id === selectedPerson.id ? { ...item, color } : item) }))} className={cn("h-8 w-8 rounded-md border-2", selectedPerson.color === color ? "border-[#cfff37]" : "border-transparent")}><span className="block h-full w-full rounded-sm border border-black/30" style={{ backgroundColor: SHOT_OVERHEAD_PERSON_COLOR_HEX[color] }} /></button>)}
+                {SHOT_OVERHEAD_PERSON_COLORS.map((color) => <button key={color} type="button" aria-label={`${color} 색상`} aria-pressed={selectedPerson.color === color} onClick={() => commitDiagram((current) => ({ ...current, people: current.people.map((item) => item.id === selectedPerson.id ? { ...item, color } : item) }))} className={cn("h-8 w-8 rounded-[var(--radius-control)] border-2", selectedPerson.color === color ? "border-field-primary" : "border-transparent")}><span className="block h-full w-full rounded-sm border border-black/30" style={{ backgroundColor: SHOT_OVERHEAD_PERSON_COLOR_HEX[color] }} /></button>)}
               </div>
             ) : null}
             {(selectedPerson || selectedCamera) ? (
@@ -1249,11 +1549,13 @@ export function ShotOverheadEditor({
             ) : null}
             {selectedCamera ? <SmallAction onClick={() => commitDiagram((current) => ({ ...current, cameras: current.cameras.map((item) => item.id === selectedCamera.id ? { ...item, showFov: !item.showFov } : item) }))} label={selectedCamera.showFov ? "화각 숨기기" : "화각 표시"}>{selectedCamera.showFov ? <EyeOff /> : <Eye />}</SmallAction> : null}
             {selectedLine ? <div className="flex shrink-0 gap-1"><SmallAction active={selectedLine.color === "black"} onClick={() => commitDiagram((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...item, color: "black" } : item) }))} label="검정 선" /><SmallAction active={selectedLine.color === "red"} danger onClick={() => commitDiagram((current) => ({ ...current, lines: current.lines.map((item) => item.id === selectedLine.id ? { ...item, color: "red" } : item) }))} label="빨강 선" /></div> : null}
-            {selectedPath ? <span className="shrink-0 text-xs text-[#a7adb3]">{selectedPath.sourceType === "person" ? "인물" : "카메라"} 동선</span> : null}
-            <button type="button" onClick={() => { commitDiagram(() => createEmptyShotOverheadDiagram()); setSelected(null); setLineStart(null); setRoomPoints([]); setTool("select"); setPan({ x: 0, y: 0 }); }} className="flex h-10 shrink-0 items-center gap-1 rounded-md border border-[#3d4246] bg-[#202326] px-3 text-xs font-semibold text-[#c2c7cc] hover:bg-[#292d30]"><Eraser className="h-4 w-4" /> 초기화</button>
-            <button type="button" onClick={() => onSave(diagram)} disabled={isSaving} className="flex h-10 shrink-0 items-center gap-1.5 rounded-md border border-[#cfff37] bg-[#cfff37] px-4 text-sm font-bold text-[#111315] hover:bg-[#bdf52f] disabled:opacity-50"><Save className="h-4 w-4" /> {isSaving ? "저장 중" : "저장"}</button>
+            {selectedPath ? <span className="shrink-0 text-xs text-field-muted">{selectedPath.sourceType === "person" ? "인물" : "카메라"} 동선</span> : null}
+            {diagramAutosave.status === "saving" ? <span className="shrink-0 text-[11px] text-field-muted">자동 저장 중</span> : null}
+            {diagramAutosave.status === "error" ? <button type="button" onClick={diagramAutosave.retry} className="shrink-0 text-[11px] font-bold text-field-danger">자동 저장 재시도</button> : null}
+            <button type="button" onClick={() => { commitDiagram((current) => ({ ...createEmptyShotOverheadDiagram(), canvas: current.canvas })); setSelected(null); setLineStart(null); setRoomPoints([]); setTool("select"); setPan({ x: 0, y: 0 }); }} disabled={controlsLocked} className="flex h-9 shrink-0 items-center gap-1 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-xs font-semibold text-field-subtle hover:bg-field-hover disabled:opacity-50"><Eraser className="h-4 w-4" /> 초기화</button>
+            <button type="button" onClick={() => void persistAndClose()} disabled={controlsLocked} className="flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] border border-field-primary bg-field-primary px-4 text-sm font-bold text-field-accent-foreground hover:bg-field-secondary disabled:opacity-50"><Save className="h-4 w-4" /> {isFinalizing ? "저장 중" : "저장"}</button>
           </footer>
-        ) : <footer className="shrink-0 border-t border-[#34383b] bg-[#17191b] px-4 py-3 text-center text-xs text-[#9ca3aa]">이 부감도는 읽기 전용입니다.</footer>}
+        ) : <footer className="shrink-0 border-t border-field-border bg-field-panel px-4 py-2 text-center text-xs text-field-muted">{persistenceEnabled ? "화면을 넓히면 다시 편집할 수 있습니다. 기존 변경사항은 안전하게 저장됩니다." : "이 부감도는 읽기 전용입니다."}</footer>}
       </section>
     </div>
   );
@@ -1264,13 +1566,13 @@ function ArrowMarker({ id, color }: { id: string; color: string }) {
 }
 
 function MetadataInput({ label, value, placeholder, readOnly, onChange }: { label: string; value: string; placeholder: string; readOnly: boolean; onChange: (value: string) => void }) {
-  return <label className="min-w-0"><span className="sr-only">{label}</span><input value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} className="h-10 w-full min-w-0 rounded-md border border-[#3b3f42] bg-[#202326] px-3 text-sm text-white outline-none placeholder:text-[#70777e] focus:border-[#cfff37] focus:ring-1 focus:ring-[#cfff37]/40 read-only:text-[#a7adb3]" placeholder={placeholder} /></label>;
+  return <label className="min-w-0"><span className="sr-only">{label}</span><input value={value} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} className="h-9 w-full min-w-0 rounded-[var(--radius-control)] border border-field-border bg-field-input px-2.5 text-sm text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-1 focus:ring-field-primary/30 read-only:text-field-muted" placeholder={placeholder} /></label>;
 }
 
 const ToolButton = function ToolButton({ active = false, disabled = false, danger = false, icon, label, onClick, ref }: { active?: boolean; disabled?: boolean; danger?: boolean; icon: React.ReactElement<{ className?: string }>; label: string; onClick: () => void; ref?: React.Ref<HTMLButtonElement> }) {
-  return <button ref={ref} type="button" onClick={onClick} disabled={disabled} aria-pressed={active} className={cn("flex h-10 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-semibold transition disabled:opacity-35", active ? "border-[#cfff37] bg-[#2b3319] text-[#cfff37]" : danger ? "border-[#5e3434] bg-[#211b1b] text-[#ff7474] hover:bg-[#302020]" : "border-[#3d4246] bg-[#202326] text-[#e4e7ea] hover:border-[#596066] hover:bg-[#292d30]")}>{icon}{label}</button>;
+  return <button ref={ref} type="button" onClick={onClick} disabled={disabled} aria-pressed={active} className={cn("flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] border px-3 text-xs font-semibold transition disabled:opacity-35 [&_svg]:h-4 [&_svg]:w-4", active ? "border-field-primary bg-field-primary/10 text-field-primary" : danger ? "border-field-danger/60 bg-field-input text-field-danger hover:bg-field-hover" : "border-field-border bg-field-input text-field-text hover:border-field-divider hover:bg-field-hover")}>{icon}{label}</button>;
 };
 
 function SmallAction({ children, label, onClick, active = false, danger = false }: { children?: React.ReactNode; label: string; onClick: () => void; active?: boolean; danger?: boolean }) {
-  return <button type="button" onClick={onClick} aria-pressed={active} className={cn("flex h-9 shrink-0 items-center gap-1 rounded-md border px-2.5 text-xs font-semibold [&_svg]:h-4 [&_svg]:w-4", active ? "border-[#cfff37] text-[#cfff37]" : danger ? "border-[#633636] text-[#ff7474]" : "border-[#3d4246] bg-[#202326] text-[#d6dade] hover:bg-[#292d30]")}>{children}{label}</button>;
+  return <button type="button" onClick={onClick} aria-pressed={active} className={cn("flex h-9 shrink-0 items-center gap-1 rounded-[var(--radius-control)] border px-2.5 text-xs font-semibold [&_svg]:h-4 [&_svg]:w-4", active ? "border-field-primary bg-field-primary/10 text-field-primary" : danger ? "border-field-danger/60 text-field-danger" : "border-field-border bg-field-input text-field-text hover:bg-field-hover")}>{children}{label}</button>;
 }

@@ -19,6 +19,7 @@ export type ContextualInteractionType =
   | "filename-archive"
   | "crop-ratio"
   | "crop-scene-cut"
+  | "actor-movement"
   | "tap";
 
 export type ContextualInteractionGuideId =
@@ -748,16 +749,18 @@ export const INTERACTION_GUIDES: Record<
     manualOnly: true,
     variants: {
       fine: {
-        title: "인물 이동",
-        description: "인물을 약 0.2초 동안 누른 뒤 끌면 인물만 이동합니다.",
-        demo: "long-press",
-        durationMs: 200
+        title: "인물 위치 · 무빙",
+        description: "인물을 바로 짧게 끌면 위치가 바뀌고, 약 0.3초 누른 뒤 끌면 배우의 무빙 경로가 생깁니다.",
+        detail: "길게 누른 뒤 움직이지 않고 놓으면 경로를 만들지 않습니다.",
+        demo: "actor-movement",
+        durationMs: 300
       },
       coarse: {
-        title: "인물 이동",
-        description: "인물을 약 0.35초 동안 길게 누른 뒤 끌면 인물만 이동합니다.",
-        demo: "long-press",
-        durationMs: 350
+        title: "인물 위치 · 무빙",
+        description: "인물을 바로 짧게 끌면 위치가 바뀌고, 약 0.38초 길게 누른 뒤 끌면 배우의 무빙 경로가 생깁니다.",
+        detail: "길게 누른 뒤 움직이지 않고 손을 떼면 경로를 만들지 않습니다.",
+        demo: "actor-movement",
+        durationMs: 380
       }
     }
   },
@@ -772,13 +775,13 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "카메라 이동",
-        description: "카메라를 약 0.2초 동안 누른 뒤 끌면 카메라만 이동합니다.",
+        description: "카메라를 약 0.2초 동안 누른 뒤 끌면 카메라만 이동합니다. 카메라의 두 열린 선은 촬영 방향과 화각 범위를 나타냅니다.",
         demo: "long-press",
         durationMs: 200
       },
       coarse: {
         title: "카메라 이동",
-        description: "카메라를 약 0.35초 동안 길게 누른 뒤 끌면 카메라만 이동합니다.",
+        description: "카메라를 약 0.35초 동안 길게 누른 뒤 끌면 카메라만 이동합니다. 카메라의 두 열린 선은 촬영 방향과 화각 범위를 나타냅니다.",
         demo: "long-press",
         durationMs: 350
       }

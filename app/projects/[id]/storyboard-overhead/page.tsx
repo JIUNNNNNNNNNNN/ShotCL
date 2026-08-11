@@ -53,6 +53,7 @@ import {
   type ProjectPageActionMenuRegistration
 } from "@/components/ProjectPageActions";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
+import type { ShotOverheadEditorMetadata } from "@/components/ShotOverheadEditor";
 import { Card } from "@/components/ui/Card";
 import { MotionPresence } from "@/components/ui/MotionPresence";
 import {
@@ -173,7 +174,7 @@ type PendingDeleteAsset = {
 
 type DiagramDraft = {
   item: OverheadDiagramArchiveItem | null;
-  editorViewportEnabled: boolean;
+  archiveId: string | null;
   title: string;
   memo: string;
   sceneNo: string;
@@ -441,7 +442,7 @@ export default function ProjectStoryboardOverheadPage() {
   );
   useAutoContextualGuide(
     "archive.diagram-editor-first-use",
-    Boolean(diagramDraft && !diagramDraft.item?.legacy && diagramDraft.editorViewportEnabled && canEdit),
+    Boolean(diagramDraft && !diagramDraft.item?.legacy && supportsDiagramEditing && canEdit),
     480,
     "feature"
   );
@@ -3005,14 +3006,15 @@ export default function ProjectStoryboardOverheadPage() {
 
   function openNewDiagram() {
     if (!canEdit || !supportsDiagramEditing) return;
+    const archiveId = createArchiveUuid();
     setDiagramDraft({
       item: null,
-      editorViewportEnabled: true,
+      archiveId,
       title: "새 부감도",
       memo: "",
       sceneNo: "",
       cutNo: "",
-      shot: createArchiveShot(projectId, null)
+      shot: createArchiveShot(projectId, null, `archive-draft:${archiveId}`)
     });
   }
 
@@ -3020,7 +3022,7 @@ export default function ProjectStoryboardOverheadPage() {
     if (edit && (item.legacy || !canEdit || !supportsDiagramEditing)) return;
     setDiagramDraft({
       item,
-      editorViewportEnabled: supportsDiagramEditing,
+      archiveId: item.legacy ? null : item.id,
       title: item.title,
       memo: item.memo,
       sceneNo: item.sceneNo,
@@ -3029,23 +3031,37 @@ export default function ProjectStoryboardOverheadPage() {
     });
   }
 
-  async function saveDiagram(diagram: ShotOverheadDiagram) {
-    if (!diagramDraft || !diagramDraft.editorViewportEnabled || !canEdit || !projectId) return;
-    setIsSaving(true);
+  async function saveDiagram(
+    diagram: ShotOverheadDiagram,
+    metadata: ShotOverheadEditorMetadata,
+    draft: DiagramDraft
+  ) {
+    // A viewport change can switch the open editor to read-only while a draft
+    // saved from the previous editable viewport is still queued. Keep that
+    // already-authorized snapshot persistable; server permissions remain the
+    // canonical mutation gate.
+    if (!canEdit || !projectId) {
+      throw new Error("부감도를 저장할 권한을 확인할 수 없습니다.");
+    }
     try {
       const saved = await saveOverheadDiagramArchive(projectId, diagram, {
-        id: diagramDraft.item?.legacy ? undefined : diagramDraft.item?.id,
-        title: diagramDraft.title,
-        memo: diagramDraft.memo,
-        sceneNo: diagramDraft.sceneNo,
-        cutNo: diagramDraft.cutNo
+        id: draft.archiveId ?? undefined,
+        title: metadata.title,
+        memo: metadata.memo,
+        sceneNo: metadata.sceneNo,
+        cutNo: metadata.cutNo
       });
+      setErrorMessage("");
       setDiagramArchives((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
-      setDiagramDraft(null);
+      setDiagramDraft((current) => current?.shot.id === draft.shot.id
+        ? {
+            ...current,
+            item: saved
+          }
+        : current);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "부감도를 저장하지 못했습니다.");
-    } finally {
-      setIsSaving(false);
+      throw error;
     }
   }
 
@@ -4835,13 +4851,15 @@ export default function ProjectStoryboardOverheadPage() {
             cutNo: diagramDraft.cutNo,
             memo: diagramDraft.memo
           }}
-          readOnly={Boolean(diagramDraft.item?.legacy) || !diagramDraft.editorViewportEnabled || !canEdit}
+          readOnly={Boolean(diagramDraft.item?.legacy) || !supportsDiagramEditing || !canEdit}
+          canPersist={!diagramDraft.item?.legacy && canEdit}
+          isPersisted={Boolean(diagramDraft.item && !diagramDraft.item.legacy)}
           isSaving={isSaving}
           onMetadataChange={(metadata) => {
             setDiagramDraft((current) => current ? { ...current, ...metadata } : current);
           }}
           onClose={() => setDiagramDraft(null)}
-          onSave={saveDiagram}
+          onSave={(diagram, metadata) => saveDiagram(diagram, metadata, diagramDraft)}
         />
       ) : null}
       {editingAsset ? (
@@ -5219,10 +5237,14 @@ function AssetRenameEditor({
   );
 }
 
-function createArchiveShot(projectId: string, item: OverheadDiagramArchiveItem | null): Shot {
+function createArchiveShot(
+  projectId: string,
+  item: OverheadDiagramArchiveItem | null,
+  draftId = item?.id || `archive-${Date.now()}`
+): Shot {
   const now = new Date().toISOString();
   return {
-    id: item?.id || `archive-${Date.now()}`,
+    id: draftId,
     projectId,
     dailyPlanId: null,
     analysisRunId: null,

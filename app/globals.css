@@ -3744,7 +3744,9 @@ button {
 }
 
 .interaction-demo[data-duration-ms="220"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-220; }
+.interaction-demo[data-duration-ms="300"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-300; }
 .interaction-demo[data-duration-ms="330"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-330; }
+.interaction-demo[data-duration-ms="380"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-380; }
 .interaction-demo[data-duration-ms="480"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-480; }
 .interaction-demo[data-duration-ms="500"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-500; }
 .interaction-demo[data-duration-ms="520"] { --interaction-demo-press-ring-animation: interaction-demo-press-ring-520; }
@@ -4093,6 +4095,124 @@ button {
   left: 82px;
 }
 
+.interaction-demo__actor-stage {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.interaction-demo__actor-marker {
+  position: absolute;
+  top: 30px;
+  left: 31px;
+  z-index: 2;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--ui-accent-border);
+  border-radius: 50%;
+  background: var(--ui-accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 9%, transparent);
+}
+
+.interaction-demo__actor-head {
+  position: absolute;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ui-accent);
+  border-radius: 50%;
+}
+
+.interaction-demo__actor-body {
+  position: absolute;
+  top: 14px;
+  width: 13px;
+  height: 7px;
+  border: 1px solid var(--ui-accent);
+  border-radius: 7px 7px 3px 3px;
+}
+
+.interaction-demo__actor-route {
+  position: absolute;
+  top: 23px;
+  left: 51px;
+  z-index: 1;
+  width: 150px;
+  height: 42px;
+  overflow: visible;
+  fill: none;
+  opacity: 0;
+  animation: interaction-demo-actor-route var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__actor-route-line,
+.interaction-demo__actor-route-head {
+  vector-effect: non-scaling-stroke;
+  stroke: var(--ui-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.interaction-demo__actor-route-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: interaction-demo-actor-route-draw var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__actor-route-head {
+  opacity: 0;
+  animation: interaction-demo-actor-route-head var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__actor-destination {
+  position: absolute;
+  top: 32px;
+  left: 194px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--ui-accent);
+  border-radius: 50%;
+  background: var(--ui-surface-2);
+  opacity: 0;
+  animation: interaction-demo-actor-destination var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__actor-legend {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-text-muted);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.interaction-demo__actor-legend > span,
+.interaction-demo__actor-legend > strong {
+  border: 1px solid var(--ui-border-default);
+  border-radius: 3px;
+  background: var(--ui-surface-3);
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.interaction-demo__actor-legend > strong {
+  border-color: var(--ui-accent-border);
+  color: var(--ui-accent);
+}
+
+.interaction-demo[data-type="actor-movement"] .interaction-demo__finger {
+  top: 34px;
+  left: 43px;
+  z-index: 4;
+  animation-name: interaction-demo-actor-finger;
+}
+
 .interaction-demo[data-type="context-scene-cut"] .interaction-demo__item {
   top: 23px;
   left: 10px;
@@ -4373,11 +4493,25 @@ button {
   33%, 80% { opacity: 0; transform: scale(1.08); }
 }
 
+@keyframes interaction-demo-press-ring-300 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  32.5% { opacity: 0.8; transform: scale(1); }
+  36.5%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
 @keyframes interaction-demo-press-ring-330 {
   0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
   20% { opacity: 0.8; transform: scale(0.45); }
   33.75% { opacity: 0.8; transform: scale(1); }
   38%, 80% { opacity: 0; transform: scale(1.08); }
+}
+
+@keyframes interaction-demo-press-ring-380 {
+  0%, 19%, 100% { opacity: 0; transform: scale(0.45); }
+  20% { opacity: 0.8; transform: scale(0.45); }
+  35.833% { opacity: 0.8; transform: scale(1); }
+  40%, 80% { opacity: 0; transform: scale(1.08); }
 }
 
 @keyframes interaction-demo-press-ring-480 {
@@ -4519,6 +4653,33 @@ button {
 @keyframes interaction-demo-open {
   0%, 38%, 78%, 100% { opacity: 0; transform: scale(0.85); }
   46%, 68% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes interaction-demo-actor-finger {
+  0%, 12%, 84%, 100% { opacity: 0; transform: translate(0, 8px); }
+  20%, 42% { opacity: 1; transform: translate(0, 0); }
+  66%, 76% { opacity: 1; transform: translate(137px, -12px); }
+  82% { opacity: 0; transform: translate(137px, -6px); }
+}
+
+@keyframes interaction-demo-actor-route {
+  0%, 40%, 88%, 100% { opacity: 0; }
+  48%, 80% { opacity: 1; }
+}
+
+@keyframes interaction-demo-actor-route-draw {
+  0%, 40%, 100% { stroke-dashoffset: 1; }
+  68%, 86% { stroke-dashoffset: 0; }
+}
+
+@keyframes interaction-demo-actor-route-head {
+  0%, 62%, 88%, 100% { opacity: 0; }
+  68%, 82% { opacity: 1; }
+}
+
+@keyframes interaction-demo-actor-destination {
+  0%, 62%, 88%, 100% { opacity: 0; transform: scale(0.7); }
+  68%, 82% { opacity: 1; transform: scale(1); }
 }
 
 @keyframes interaction-demo-info-action {
@@ -4829,6 +4990,21 @@ button {
   .interaction-demo__open-mark {
     opacity: 1;
     transform: scale(1);
+  }
+
+  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route,
+  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route-head,
+  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-destination {
+    opacity: 1;
+  }
+
+  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route-line {
+    stroke-dashoffset: 0;
+  }
+
+  .interaction-demo[data-type="actor-movement"] .interaction-demo__finger {
+    opacity: 0.84;
+    transform: translate(137px, -12px);
   }
 
   .interaction-demo__info-action,
