@@ -115,7 +115,7 @@ export async function uploadDailyPlanGatheringPhoto(
   input: UploadGatheringPhotoInput
 ): Promise<GatheringPhotoMutationResult> {
   requireDatabaseProject(input.projectId);
-  const formData = createGatheringPhotoUploadFormData(input);
+  const formData = createGatheringPhotoUploadFormData(input, { ensureMissingParent: true });
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "POST",
     body: formData
@@ -186,7 +186,10 @@ async function fetchGatheringApi(projectId: string, dailyPlanId: string, init: R
   );
 }
 
-function createGatheringPhotoUploadFormData(input: UploadGatheringPhotoInput) {
+function createGatheringPhotoUploadFormData(
+  input: UploadGatheringPhotoInput,
+  options: { ensureMissingParent?: boolean } = {}
+) {
   const formData = new FormData();
   formData.set("file", input.displayFile);
   formData.set("thumbnail", input.thumbnailFile);
@@ -195,6 +198,9 @@ function createGatheringPhotoUploadFormData(input: UploadGatheringPhotoInput) {
   formData.set("originalFilename", input.originalFilename);
   formData.set("expectedUpdatedAt", input.expectedUpdatedAt);
   if (input.gatheringPointId) formData.set("gatheringPointId", input.gatheringPointId);
+  if (options.ensureMissingParent && !input.gatheringPointId) {
+    formData.set("ensureGatheringPoint", "true");
+  }
   if (input.locationId) formData.set("locationId", input.locationId);
   if (input.locationName) formData.set("locationName", input.locationName);
   if (input.address) formData.set("address", input.address);

@@ -292,11 +292,12 @@ export const GatheringPhotoSourceChooser = forwardRef<
       closeSourceSheet(false);
       return;
     }
-    // Do not restore the drawer trigger after returning from an OS picker.
-    // Clearing/closing first is safe because input.click() remains in this
-    // same trusted button event stack.
-    closeSourceSheet(false);
-    openNativePicker(source);
+    // iOS Safari and embedded WebViews require the native input activation to
+    // stay in the trusted action-button click stack. The inputs live outside
+    // the conditional portal, so trigger first and close the sheet only after
+    // click() has synchronously dispatched. Source selection never restores
+    // the old sheet trigger when the OS picker returns.
+    if (openNativePicker(source)) closeSourceSheet(false);
   }
 
   const sourceSheet = sheetRendered && typeof document !== "undefined" ? createPortal(

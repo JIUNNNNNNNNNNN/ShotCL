@@ -106,17 +106,22 @@
   line-height: 1.3;
 }
 
-.manageableMedia {
-  cursor: default;
+.photoSurface {
   touch-action: pan-y pinch-zoom;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
 
-.manageableMedia img {
+.manageableMedia {
+  cursor: default;
+}
+
+.photoImage {
   pointer-events: none;
   -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 

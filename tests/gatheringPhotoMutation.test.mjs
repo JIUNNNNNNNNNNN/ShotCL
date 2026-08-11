@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { resolveGatheringPhotoReplacement } from "../lib/dailyPlan/gatheringPhotoMutation.ts";
+import {
+  DEFAULT_GATHERING_PHOTO_PARENT_NAME,
+  ensureGatheringPhotoParent,
+  findGatheringPhotoParentId,
+  resolveGatheringPhotoReplacement
+} from "../lib/dailyPlan/gatheringPhotoMutation.ts";
 
 const routeSource = readFileSync(
   new URL("../app/api/projects/[projectId]/daily-plans/[dailyPlanId]/gathering-photos/route.ts", import.meta.url),
@@ -16,6 +21,94 @@ const clientSource = readFileSync(
 function photo(id, sortOrder) {
   return { id, sortOrder, url: `/${id}.jpg` };
 }
+
+function gatheringMeta({ teams = [], gatheringPoints = [] } = {}) {
+  return { teams, gatheringPoints, memoText: "legacy memo" };
+}
+
+test("explicit upload seeds a neutral server parent without mutating the source", () => {
+  const source = gatheringMeta();
+  const result = ensureGatheringPhotoParent(source, {
+    pointId: "gathering_server_seed",
+    locationId: "",
+    locationName: "  ",
+    address: "",
+    departmentIds: []
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.point.id, "gathering_server_seed");
+  assert.equal(result.point.locationName, DEFAULT_GATHERING_PHOTO_PARENT_NAME);
+  assert.deepEqual(result.point.departmentIds, []);
+  assert.deepEqual(result.point.photos, []);
+  assert.deepEqual(source.gatheringPoints, []);
+  assert.equal(result.meta.memoText, "legacy memo");
+});
+
+test("parent ensure preserves legacy points, filters departments, and is idempotent", () => {
+  const legacyPhoto = photo("legacy-photo", 0);
+  const legacyPoint = {
+    id: "gathering_legacy",
+    locationName: "기존 장소",
+    departmentIds: ["team-b"],
+    departmentTimes: [{ departmentId: "team-b", time: "08:00" }],
+    photos: [legacyPhoto]
+  };
+  const source = gatheringMeta({
+    teams: [
+      { id: "team-a", callTime: "07:00" },
+      { id: "team-b", callTime: "08:00", gatheringPointId: legacyPoint.id }
+    ],
+    gatheringPoints: [legacyPoint]
+  });
+  const input = {
+    pointId: "gathering_server_seed",
+    locationId: "location-a",
+    locationName: "새 장소",
+    address: "서울",
+    departmentIds: ["team-a", "unknown-team"]
+  };
+  const result = ensureGatheringPhotoParent(source, input);
+
+  assert.equal(result.meta.gatheringPoints[0], legacyPoint);
+  assert.equal(result.meta.gatheringPoints[0].photos[0], legacyPhoto);
+  assert.deepEqual(result.point.departmentIds, ["team-a"]);
+  assert.deepEqual(result.point.departmentTimes, [{ departmentId: "team-a", time: "07:00" }]);
+  assert.equal(result.meta.teams[0].gatheringPointId, result.point.id);
+  assert.equal(result.meta.teams[1].gatheringPointId, legacyPoint.id);
+
+  const retry = ensureGatheringPhotoParent(result.meta, input);
+  assert.equal(retry.created, false);
+  assert.equal(retry.meta, result.meta);
+  assert.equal(retry.point, result.point);
+});
+
+test("same-photo retry resolves its committed parent and rejects ambiguous legacy IDs", () => {
+  const committed = gatheringMeta({
+    gatheringPoints: [{
+      id: "gathering_server_seed",
+      locationName: DEFAULT_GATHERING_PHOTO_PARENT_NAME,
+      departmentIds: [],
+      departmentTimes: [],
+      photos: [photo("stable-photo-id", 0)]
+    }]
+  });
+  assert.equal(findGatheringPhotoParentId(committed, "stable-photo-id"), "gathering_server_seed");
+
+  const ambiguous = gatheringMeta({
+    gatheringPoints: [
+      ...committed.gatheringPoints,
+      {
+        id: "gathering_legacy_duplicate",
+        locationName: "과거 장소",
+        departmentIds: [],
+        departmentTimes: [],
+        photos: [photo("stable-photo-id", 0)]
+      }
+    ]
+  });
+  assert.equal(findGatheringPhotoParentId(ambiguous, "stable-photo-id"), "");
+});
 
 test("replacement keeps the old index, legacy siblings, and source objects", () => {
   const source = [photo("legacy-a", 0), photo("active", 1), photo("legacy-c", 2)];
@@ -85,10 +178,57 @@ test("POST reports a metadata CAS conflict before stale replacement precondition
   const casIndex = postSource.indexOf("if (expectedUpdatedAt && String(planRow.updated_at ?? \"\") !== expectedUpdatedAt)");
   const missingReplacementIndex = postSource.indexOf("if (replacedPhotoId && !replacedPhoto)");
   const nonemptyAddIndex = postSource.indexOf("if (!replacedPhotoId && point.photos.length > 0)");
+  const uploadIndex = postSource.indexOf("await uploadFile");
 
   assert.ok(idempotentIndex >= 0 && casIndex > idempotentIndex);
   assert.ok(missingReplacementIndex > casIndex);
   assert.ok(nonemptyAddIndex > casIndex);
+  assert.ok(uploadIndex > nonemptyAddIndex);
+});
+
+test("missing-parent creation is explicit POST-only and retry lookup precedes server ID creation", () => {
+  const putStart = routeSource.indexOf("export async function PUT");
+  const postStart = routeSource.indexOf("export async function POST");
+  const deleteStart = routeSource.indexOf("export async function DELETE");
+  const resolverStart = routeSource.indexOf("function resolveOrCreateGatheringPoint");
+  const storageStart = routeSource.indexOf("function storageBasePath");
+  const putSource = routeSource.slice(putStart, postStart);
+  const postSource = routeSource.slice(postStart, deleteStart);
+  const resolverSource = routeSource.slice(resolverStart, storageStart);
+
+  assert.doesNotMatch(putSource, /allowCreate|persistedOnly|requestedPhotoId/u);
+  assert.match(postSource, /const ensureGatheringPoint = ensureGatheringPointValue === "true"/u);
+  assert.match(postSource, /ensureGatheringPoint && \(requestedPointId \|\| replacedPhotoId\)/u);
+  assert.match(
+    postSource,
+    /allowCreate: ensureGatheringPoint && !requestedPointId && !replacedPhotoId/u
+  );
+  assert.match(postSource, /persistedOnly: true/u);
+  assert.ok(postSource.indexOf("getProjectRequestRole") < postSource.indexOf("validateOptimizedPhotoFiles"));
+  assert.ok(postSource.indexOf("validateOptimizedPhotoFiles") < postSource.indexOf("resolveOrCreateGatheringPoint"));
+  assert.ok(resolverSource.indexOf("findGatheringPhotoParentId") < resolverSource.indexOf("createGatheringPointId()"));
+  assert.match(resolverSource, /if \(sourceContainsRetryPhoto && !retryPointId\) return null/u);
+  assert.match(resolverSource, /if \(input\.allowCreate === false\) return null/u);
+  assert.match(resolverSource, /const pointId = createGatheringPointId\(\)/u);
+  assert.doesNotMatch(clientSource, /createGatheringPointId/u);
+});
+
+test("client sends ensure intent only for add with a missing persisted parent", () => {
+  const uploadStart = clientSource.indexOf("export async function uploadDailyPlanGatheringPhoto");
+  const replaceStart = clientSource.indexOf("export async function replaceDailyPlanGatheringPhoto");
+  const deleteStart = clientSource.indexOf("export async function deleteDailyPlanGatheringPhoto");
+  const builderStart = clientSource.indexOf("function createGatheringPhotoUploadFormData");
+  const responseStart = clientSource.indexOf("async function readMutationResponse");
+  const uploadSource = clientSource.slice(uploadStart, replaceStart);
+  const replaceSource = clientSource.slice(replaceStart, deleteStart);
+  const builderSource = clientSource.slice(builderStart, responseStart);
+
+  assert.match(uploadSource, /ensureMissingParent: true/u);
+  assert.doesNotMatch(replaceSource, /ensureMissingParent/u);
+  assert.match(
+    builderSource,
+    /if \(options\.ensureMissingParent && !input\.gatheringPointId\)[\s\S]*formData\.set\("ensureGatheringPoint", "true"\)/u
+  );
 });
 
 test("DELETE commits metadata before best-effort storage cleanup and supports stale retries", () => {
@@ -98,6 +238,10 @@ test("DELETE commits metadata before best-effort storage cleanup and supports st
 
   assert.ok(deleteSource.indexOf("const saved = await saveMemo") < deleteSource.indexOf("[gathering-photos:delete-cleanup]"));
   assert.match(deleteSource, /if \(!photo\) \{[\s\S]*idempotent: true/u);
+  assert.match(
+    deleteSource,
+    /if \(!point && sourcePoint && !sourcePoint\.photos\.some\([\s\S]*idempotent: true/u
+  );
 });
 
 test("client replacement reuses the canonical upload form and sends only replacement intent", () => {

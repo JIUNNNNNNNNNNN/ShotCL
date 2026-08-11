@@ -125,3 +125,13 @@ test("camera and album inputs converge on the existing canonical upload handler"
   assert.doesNotMatch(gatheringLocationsSource, /photoInputRef/u);
   assert.doesNotMatch(gatheringLocationsSource, /router\.refresh|location\.reload/u);
 });
+
+test("source actions synchronously click the stable input before closing the sheet", () => {
+  const chooseStart = chooserSource.indexOf("function chooseSource");
+  const renderStart = chooserSource.indexOf("const sourceSheet", chooseStart);
+  const chooseSource = chooserSource.slice(chooseStart, renderStart);
+  assert.ok(chooseStart > 0 && renderStart > chooseStart);
+  assert.match(chooseSource, /if \(openNativePicker\(source\)\) closeSourceSheet\(false\)/u);
+  assert.ok(chooserSource.indexOf("cameraInputRef") < chooserSource.indexOf("const sourceSheet"));
+  assert.ok(chooserSource.indexOf("albumInputRef") < chooserSource.indexOf("const sourceSheet"));
+});

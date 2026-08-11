@@ -9,7 +9,11 @@ import {
   removeGatheringPhoto,
   reorderGatheringPhotos
 } from "@/lib/dailyPlan/gatheringPoints";
-import { resolveGatheringPhotoReplacement } from "@/lib/dailyPlan/gatheringPhotoMutation";
+import {
+  ensureGatheringPhotoParent,
+  findGatheringPhotoParentId,
+  resolveGatheringPhotoReplacement
+} from "@/lib/dailyPlan/gatheringPhotoMutation";
 import {
   decodeDailyPlanMemo,
   encodeDailyPlanMemo,
@@ -307,6 +311,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const requestedPointId = cleanId(formData.get("gatheringPointId"));
     const requestedPhotoId = cleanId(formData.get("photoId"));
     const replacedPhotoId = cleanId(formData.get("replacedPhotoId"));
+    const ensureGatheringPointValue = formData.get("ensureGatheringPoint");
+    const ensureGatheringPoint = ensureGatheringPointValue === "true";
     const requestedLocationId = cleanReferenceId(formData.get("locationId"));
     const requestedLocationName = normalizeGatheringLocationName(
       cleanText(formData.get("locationName"), 500)
@@ -315,6 +321,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const departmentIds = parseDepartmentIds(formData.get("departmentIds"));
     const expectedUpdatedAt = cleanText(formData.get("expectedUpdatedAt"), 100);
     const originalFilename = cleanText(formData.get("originalFilename"), 500);
+    if (ensureGatheringPointValue !== null && ensureGatheringPointValue !== "true") {
+      return NextResponse.json({ error: "집합장소 생성 요청이 올바르지 않습니다." }, { status: 400 });
+    }
+    if (ensureGatheringPoint && (requestedPointId || replacedPhotoId)) {
+      return NextResponse.json(
+        { error: "집합장소 생성은 기존 사진이 없는 새 업로드에서만 요청할 수 있습니다." },
+        { status: 400 }
+      );
+    }
     if (!(file instanceof File) || !(thumbnail instanceof File)) {
       return NextResponse.json({ error: "저장할 사진과 썸네일이 없습니다." }, { status: 400 });
     }
@@ -328,6 +343,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
 
     const plan = dailyPlanFromRow(planRow);
+    const photoId = requestedPhotoId || randomUUID();
+    if (replacedPhotoId && replacedPhotoId === photoId) {
+      return NextResponse.json({ error: "새 사진 ID는 기존 사진 ID와 달라야 합니다." }, { status: 409 });
+    }
     const sourceMeta = decodeDailyPlanMemo(plan.memo);
     const resolvedPoint = resolveOrCreateGatheringPoint(
       reconcileDailyPlanGatheringPoints(sourceMeta, plan.shootingLocations),
@@ -338,7 +357,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         requestedLocationId,
         requestedLocationName,
         requestedAddress,
-        departmentIds
+        departmentIds,
+        requestedPhotoId: photoId,
+        allowCreate: ensureGatheringPoint && !requestedPointId && !replacedPhotoId,
+        persistedOnly: true
       }
     );
     if (!resolvedPoint) {
@@ -350,10 +372,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "집합장소 사진 연결 ID가 올바르지 않습니다." }, { status: 409 });
     }
 
-    const photoId = requestedPhotoId || randomUUID();
-    if (replacedPhotoId && replacedPhotoId === photoId) {
-      return NextResponse.json({ error: "새 사진 ID는 기존 사진 ID와 달라야 합니다." }, { status: 409 });
-    }
     const existingPhoto = point.photos.find((photo) => photo.id === photoId);
     const replacedPhoto = replacedPhotoId
       ? point.photos.find((photo) => photo.id === replacedPhotoId)
@@ -507,11 +525,21 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const planRow = await loadOwnedPlan(supabase, params.projectId, params.dailyPlanId);
     if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
     const plan = dailyPlanFromRow(planRow);
-    const meta = reconcileDailyPlanGatheringPoints(
-      decodeDailyPlanMemo(plan.memo),
-      plan.shootingLocations
-    );
+    const sourceMeta = decodeDailyPlanMemo(plan.memo);
+    const meta = reconcileDailyPlanGatheringPoints(sourceMeta, plan.shootingLocations);
     const point = meta.gatheringPoints.find((item) => item.id === gatheringPointId);
+    const sourcePoint = sourceMeta.gatheringPoints.find((item) => item.id === gatheringPointId);
+    if (!point && sourcePoint && !sourcePoint.photos.some((item) => item.id === photoId)) {
+      return NextResponse.json({
+        ok: true,
+        memo: plan.memo,
+        updatedAt: String(planRow.updated_at ?? ""),
+        cleanupWarning: "",
+        appliedPhotoIds: [],
+        failedPhotos: [],
+        idempotent: true
+      });
+    }
     const photo = point?.photos.find((item) => item.id === photoId);
     if (!point) return NextResponse.json({ error: "집합장소를 찾을 수 없습니다." }, { status: 404 });
     if (!photo) {
@@ -702,7 +730,7 @@ async function uploadFile(
 }
 
 function resolveGatheringPoint(
-  points: ReturnType<typeof decodeDailyPlanMemo>["gatheringPoints"],
+  points: DailyPlanGatheringPoint[],
   requestedPointId: string,
   departmentIds: string[]
 ) {
@@ -722,26 +750,50 @@ function resolveOrCreateGatheringPoint(
     requestedLocationName: string;
     requestedAddress: string;
     departmentIds: string[];
+    requestedPhotoId?: string;
+    allowCreate?: boolean;
+    persistedOnly?: boolean;
   }
 ): { meta: DailyPlanPrintMeta; point: DailyPlanGatheringPoint } | null {
-  const resolved = resolveGatheringPoint(
-    reconciledMeta.gatheringPoints,
-    input.requestedPointId,
-    input.departmentIds
+  const requestedPhotoId = input.requestedPhotoId ?? "";
+  const sourceContainsRetryPhoto = Boolean(
+    !input.requestedPointId
+    && requestedPhotoId
+    && sourceMeta.gatheringPoints.some((point) => (
+      point.photos.some((photo) => photo.id === requestedPhotoId)
+    ))
   );
-  if (resolved) return { meta: reconciledMeta, point: resolved };
+  const retryPointId = sourceContainsRetryPhoto
+    ? findGatheringPhotoParentId(sourceMeta, requestedPhotoId)
+    : "";
+  if (sourceContainsRetryPhoto && !retryPointId) return null;
 
+  const effectivePointId = input.requestedPointId || retryPointId;
   const location = input.requestedLocationId
     ? plan.shootingLocations.find((item) => item.id === input.requestedLocationId) ?? null
     : null;
   if (input.requestedLocationId && !location) return null;
 
-  // 부서 연결이 없는 과거 일촬표의 빈 point는 reconcile 단계에서 제외됩니다.
-  // 요청한 ID가 현재 daily plan metadata에 실제로 있었던 경우에만 그 stable ID를 복원합니다.
-  const sourcePoint = input.requestedPointId
-    ? sourceMeta.gatheringPoints.find((point) => point.id === input.requestedPointId) ?? null
-    : null;
-  if (input.requestedPointId && !sourcePoint) return null;
+  const resolved = input.persistedOnly && effectivePointId
+    ? reconciledMeta.gatheringPoints.find((point) => point.id === effectivePointId) ?? null
+    : resolveGatheringPoint(reconciledMeta.gatheringPoints, effectivePointId, input.departmentIds);
+  const resolvedIsPersisted = Boolean(
+    resolved && sourceMeta.gatheringPoints.some((point) => point.id === resolved.id)
+  );
+  if (resolved && (!input.persistedOnly || resolvedIsPersisted)) {
+    return { meta: reconciledMeta, point: resolved };
+  }
+
+  // 부서 연결이 없는 과거 일촬표의 point는 reconcile 단계에서 제외될 수 있습니다.
+  // 요청/재시도 ID가 원본 metadata에 실제로 있었던 경우에만 stable ID를 복원합니다.
+  const storedResolution = effectivePointId || !input.persistedOnly
+    ? { point: null, ambiguous: false }
+    : resolveStoredGatheringPoint(sourceMeta.gatheringPoints, input);
+  if (storedResolution.ambiguous) return null;
+  const sourcePoint = effectivePointId
+    ? sourceMeta.gatheringPoints.find((point) => point.id === effectivePointId) ?? null
+    : storedResolution.point;
+  if (effectivePointId && !sourcePoint) return null;
   if (
     sourcePoint?.locationId
     && input.requestedLocationId
@@ -769,38 +821,59 @@ function resolveOrCreateGatheringPoint(
     };
   }
 
-  const teamIds = new Set(reconciledMeta.teams.map((team) => team.id));
+  if (input.allowCreate === false) return null;
+  const baseMeta = input.persistedOnly ? sourceMeta : reconciledMeta;
+  const teamIds = new Set(baseMeta.teams.map((team) => team.id));
   if (input.departmentIds.some((departmentId) => !teamIds.has(departmentId))) return null;
   const locationName = normalizeGatheringLocationName(
     input.requestedLocationName || (location ? getDailyPlanLocationDisplayName(location) : "")
   );
-  if (!locationName) return null;
+  if (!locationName && input.allowCreate !== true) return null;
   const pointId = createGatheringPointId();
-  const point: DailyPlanGatheringPoint = {
-    id: pointId,
+  const ensured = ensureGatheringPhotoParent(baseMeta, {
+    pointId,
+    locationId: input.requestedLocationId,
     locationName,
-    locationId: input.requestedLocationId || undefined,
     address: input.requestedAddress
       || (location ? getDailyPlanLocationAddress(location) : "")
-      || undefined,
-    departmentIds: input.departmentIds,
-    departmentTimes: input.departmentIds.map((departmentId) => ({
-      departmentId,
-      time: reconciledMeta.teams.find((team) => team.id === departmentId)?.callTime ?? ""
-    })),
-    photos: []
-  };
-  const meta = normalizeDailyPlanPrintMeta({
-    ...reconciledMeta,
-    teams: reconciledMeta.teams.map((team) => (
-      input.departmentIds.includes(team.id) ? { ...team, gatheringPointId: pointId } : team
-    )),
-    gatheringPoints: [...reconciledMeta.gatheringPoints, point]
+      || "",
+    departmentIds: input.departmentIds
   });
+  const meta = normalizeDailyPlanPrintMeta(ensured.meta);
   return {
     meta,
-    point: meta.gatheringPoints.find((item) => item.id === pointId) ?? point
+    point: meta.gatheringPoints.find((item) => item.id === pointId) ?? ensured.point
   };
+}
+
+function resolveStoredGatheringPoint(
+  points: DailyPlanGatheringPoint[],
+  input: {
+    requestedLocationId: string;
+    requestedLocationName: string;
+    departmentIds: string[];
+  }
+) {
+  let ambiguous = false;
+  if (input.departmentIds.length > 0) {
+    const departmentMatches = points.filter((point) => (
+      input.departmentIds.some((id) => point.departmentIds.includes(id))
+    ));
+    if (departmentMatches.length === 1) return { point: departmentMatches[0], ambiguous: false };
+    if (departmentMatches.length > 1) ambiguous = true;
+  }
+  if (input.requestedLocationId) {
+    const locationMatches = points.filter((point) => point.locationId === input.requestedLocationId);
+    if (locationMatches.length === 1) return { point: locationMatches[0], ambiguous: false };
+    if (locationMatches.length > 1) ambiguous = true;
+  }
+  const normalizedName = normalizeGatheringLocationName(input.requestedLocationName).toLocaleLowerCase("ko-KR");
+  if (!normalizedName) return { point: null, ambiguous };
+  const nameMatches = points.filter((point) => (
+    normalizeGatheringLocationName(point.locationName).toLocaleLowerCase("ko-KR") === normalizedName
+  ));
+  if (nameMatches.length === 1) return { point: nameMatches[0], ambiguous: false };
+  return { point: null, ambiguous: ambiguous || nameMatches.length > 1 };
 }
 
 function storageBasePath(projectId: string, dailyPlanId: string, pointId: string, photoId: string) {

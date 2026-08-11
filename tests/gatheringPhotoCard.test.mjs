@@ -56,6 +56,29 @@ test("optimistic delete exposes the empty slot and retains a local focus target"
   assert.match(componentSource, /deleteManagedPhoto\(\)[\s\S]*requestAnimationFrame[\s\S]*photoMediaRef\.current\?\.focus/u);
 });
 
+test("editable plans without a gathering record keep the upload skeleton", () => {
+  assert.match(componentSource, /!place && !canEdit/u);
+  assert.match(componentSource, /집합장소 정보가 없습니다\./u);
+  assert.match(componentSource, />시간 미입력<\/span>/u);
+  assert.match(componentSource, />주소 미입력<\/span>/u);
+  assert.doesNotMatch(componentSource, /일촬표에 집합장소가 없습니다\./u);
+  assert.match(componentSource, /const canMutatePhotos = Boolean\(canEdit && hasPersistentProject\)/u);
+  assert.match(componentSource, /gatheringPointId:\s*place\?\.persistedId \?\? null/u);
+  assert.match(componentSource, /locationName:\s*place\?\.locationName \|\| "집합장소"/u);
+  assert.match(componentSource, /meta\.gatheringPoints\.find\(\(item\) => item\.photos\.length > 0\)/u);
+  assert.match(componentSource, /if \(!primaryLocation && !locationName && !point\) return null/u);
+});
+
+test("meeting photo scope blocks the native iOS image callout and drag path", () => {
+  assert.ok(componentSource.match(/styles\.photoSurface/gu)?.length >= 2);
+  assert.ok(componentSource.match(/styles\.photoImage/gu)?.length >= 2);
+  assert.match(componentSource, /draggable=\{false\}/u);
+  assert.match(componentSource, /onDragStart=\{\(event\) => event\.preventDefault\(\)\}/u);
+  assert.match(componentSource, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\);\s*if \(canManagePhoto\)/su);
+  assert.match(componentCss, /\.photoSurface\s*\{[^}]*-webkit-touch-callout:\s*none/su);
+  assert.match(componentCss, /\.photoImage\s*\{[^}]*-webkit-user-drag:\s*none[^}]*-webkit-touch-callout:\s*none/su);
+});
+
 test("meeting card removes preview and filename UI while keeping copy fallback", () => {
   const rowStart = componentSource.indexOf("function GatheringPlaceRow");
   const stripStart = componentSource.indexOf("export function GatheringPhotoStrip");

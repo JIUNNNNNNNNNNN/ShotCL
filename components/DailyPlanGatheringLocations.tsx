@@ -161,14 +161,16 @@ export function DailyPlanGatheringLocations({
   const copyRequestRef = useRef(0);
   const addressExpectedUpdatedAtRef = useRef(plan.updatedAt);
   const callTime = plan.callTime.trim();
-  const hasContent = Boolean(callTime || place);
   const hasPersistentProject = isValidDatabaseProjectId(projectId);
   const storedActivePhoto = selectActiveGatheringPhoto(place?.photos ?? []);
   const activePhoto = shouldHideActiveGatheringPhoto(
     storedActivePhoto?.id,
     optimisticallyDeletedPhotoId
   ) ? null : storedActivePhoto;
-  const canMutatePhotos = Boolean(canEdit && place && hasPersistentProject);
+  // The editable card is also the explicit creation surface for a plan that
+  // does not have a gathering-point record yet. Rendering it is read-only;
+  // the canonical photo POST creates the parent only after a file is picked.
+  const canMutatePhotos = Boolean(canEdit && hasPersistentProject);
   const canAddPhotos = Boolean(canMutatePhotos && !storedActivePhoto);
   const canManagePhotos = Boolean(
     canEdit && place?.persistedId && place.photos.length > 0 && hasPersistentProject
@@ -177,7 +179,7 @@ export function DailyPlanGatheringLocations({
   const isPhotoBusy = isUploadBusy || isDeletingPhoto;
   const isPhotoSourceDisabled = !canMutatePhotos || isPhotoBusy || isEditingAddress || isEditingPhotos;
   const gatheringPhotoContextRef = useContextualGuideAnchor<HTMLElement>(
-    place && !isPhotoBusy && !isEditingAddress && !isEditingPhotos && !isPhotoManagementOpen
+    (place || canMutatePhotos) && !isPhotoBusy && !isEditingAddress && !isEditingPhotos && !isPhotoManagementOpen
       ? "progress.gathering-photo-context"
       : null
   );
@@ -417,7 +419,6 @@ export function DailyPlanGatheringLocations({
     photoIntentRef.current = { mode: "add" };
     if (
       !canMutatePhotos
-      || !place
       || files.length === 0
       || uploadLockRef.current
       || isEditingAddress
@@ -429,7 +430,7 @@ export function DailyPlanGatheringLocations({
       setUploadError("집합장소 사진은 Supabase에 연결된 프로젝트에서만 저장할 수 있습니다.");
       return;
     }
-    const currentActivePhoto = selectActiveGatheringPhoto(place.photos);
+    const currentActivePhoto = selectActiveGatheringPhoto(place?.photos ?? []);
     if (intent.mode === "add" && currentActivePhoto) {
       setUploadError("이미 등록된 사진은 길게 눌러 변경할 수 있습니다.");
       return;
@@ -485,11 +486,11 @@ export function DailyPlanGatheringLocations({
       const input = {
         projectId,
         dailyPlanId: plan.id,
-        gatheringPointId: place.persistedId,
-        locationId: place.locationId,
-        locationName: place.locationName,
-        address: place.address,
-        departmentIds: place.departmentIds,
+        gatheringPointId: place?.persistedId ?? null,
+        locationId: place?.locationId ?? null,
+        locationName: place?.locationName || "집합장소",
+        address: place?.address ?? "",
+        departmentIds: place?.departmentIds ?? [],
         photoId,
         displayFile: optimized.displayFile,
         thumbnailFile: optimized.thumbnailFile,
@@ -690,8 +691,8 @@ export function DailyPlanGatheringLocations({
         </div>
       </div>
 
-      {!hasContent ? (
-        <p className="px-3 py-3 text-xs font-normal leading-5 text-field-muted">일촬표에 집합장소가 없습니다.</p>
+      {!place && !canEdit ? (
+        <p className="px-3 py-3 text-xs font-normal leading-5 text-field-muted">집합장소 정보가 없습니다.</p>
       ) : (
         <GatheringPlaceRow
           callTime={callTime}
@@ -820,7 +821,7 @@ function GatheringPlaceRow({
       <div className={styles.layout}>
         <div className={styles.time} aria-label={callTime ? `집합 시간 ${callTime}` : "집합 시간 미입력"}>
           <Clock3 className={styles.timeIcon} aria-hidden />
-          {callTime ? <time dateTime={callTime}>{callTime}</time> : <span className={styles.missingTime}>집합 시간 미입력</span>}
+          {callTime ? <time dateTime={callTime}>{callTime}</time> : <span className={styles.missingTime}>시간 미입력</span>}
         </div>
 
         <div className={styles.mediaGroup}>
@@ -898,10 +899,12 @@ function GatheringPlaceMedia({
     return (
       <div
         ref={mediaRef as (element: HTMLDivElement | null) => void}
-        className={mediaClassName}
+        className={cn(mediaClassName, styles.photoSurface)}
         data-gathering-photo-action="pending"
         role="img"
         aria-label={`${locationName} 집합장소 사진 업로드 중`}
+        onContextMenu={(event) => event.preventDefault()}
+        onDragStart={(event) => event.preventDefault()}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -910,7 +913,8 @@ function GatheringPlaceMedia({
           width={960}
           height={540}
           draggable={false}
-          className="block h-full w-full object-cover opacity-65"
+          className={cn("block h-full w-full object-cover opacity-65", styles.photoImage)}
+          onDragStart={(event) => event.preventDefault()}
         />
         <span className={styles.pendingOverlay}>
           <LoaderCircle className={styles.spinner} aria-hidden />
@@ -924,7 +928,7 @@ function GatheringPlaceMedia({
     return (
       <div
         ref={mediaRef as (element: HTMLDivElement | null) => void}
-        className={cn(mediaClassName, canManagePhoto && styles.manageableMedia)}
+        className={cn(mediaClassName, styles.photoSurface, canManagePhoto && styles.manageableMedia)}
         data-gathering-photo-action="existing"
         role={canManagePhoto ? "button" : "img"}
         tabIndex={canManagePhoto ? 0 : undefined}
@@ -944,10 +948,10 @@ function GatheringPlaceMedia({
         onPointerCancel={onCancelLongPress}
         onLostPointerCapture={onCancelLongPress}
         onContextMenu={(event) => {
-          if (!canManagePhoto) return;
           event.preventDefault();
-          onOpenPhotoManagement();
+          if (canManagePhoto) onOpenPhotoManagement();
         }}
+        onDragStart={(event) => event.preventDefault()}
         onClick={(event) => {
           // Physical short taps stay inert. Keyboard and assistive-tech
           // activation synthesize a detail=0 click and retain an equivalent
@@ -970,7 +974,8 @@ function GatheringPlaceMedia({
           height={540}
           loading="lazy"
           draggable={false}
-          className="block h-full w-full object-cover"
+          className={cn("block h-full w-full object-cover", styles.photoImage)}
+          onDragStart={(event) => event.preventDefault()}
         />
       </div>
     );
@@ -1529,9 +1534,15 @@ function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace |
   const pointByLocationId = primaryLocation?.id
     ? meta.gatheringPoints.find((point) => point.locationId === primaryLocation.id)
     : null;
-  const point = pointByLocationId ?? null;
+  // Explicit photo upload may create a neutral canonical point for a legacy
+  // plan with no location/team row. Keep that persisted point visible after
+  // the local memo patch instead of falling back to the editable skeleton.
+  const point = pointByLocationId
+    ?? meta.gatheringPoints.find((item) => item.photos.length > 0)
+    ?? meta.gatheringPoints[0]
+    ?? null;
   const locationName = fallbackLocationName || normalizeGatheringLocationName(point?.locationName);
-  if (!primaryLocation && !locationName && !point?.photos.length) return null;
+  if (!primaryLocation && !locationName && !point) return null;
 
   return {
     id: point?.id ?? `primary:${primaryLocation?.id || "legacy"}`,
