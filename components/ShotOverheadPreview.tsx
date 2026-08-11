@@ -2,11 +2,14 @@
 
 import { useId } from "react";
 import {
+  getShotOverheadCameraMovementGhost,
   getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
   getShotOverheadMovementGeometry,
+  getShotOverheadPolylinePath,
   SHOT_OVERHEAD_PERSON_COLORS,
-  SHOT_OVERHEAD_PERSON_COLOR_HEX
+  SHOT_OVERHEAD_PERSON_COLOR_HEX,
+  type ShotOverheadFovRay
 } from "@/lib/shotOverhead";
 import type {
   ShotOverheadDiagram,
@@ -29,9 +32,6 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
   const height = diagram.canvas.height;
   const peopleById = new Map(diagram.people.map((person) => [person.id, person]));
   const camerasById = new Map(diagram.cameras.map((camera) => [camera.id, camera]));
-  const cameraPansByCameraId = new Map(
-    (diagram.cameraPans ?? []).map((pan) => [pan.cameraId, pan])
-  );
 
   return (
     <svg
@@ -59,7 +59,7 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
 
       {diagram.shapes.map((shape) => {
         if (shape.type === "polyline") {
-          const path = pointPath(shape.points, shape.closed);
+          const path = getShotOverheadPolylinePath(shape);
           const labelPoint = averagePoint(shape.points);
           return (
             <g key={shape.id}>
@@ -131,6 +131,9 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
         const person = path.sourceType === "person" ? peopleById.get(path.sourceId) : null;
         const camera = path.sourceType === "camera" ? camerasById.get(path.sourceId) : null;
         const geometry = getShotOverheadMovementGeometry(diagram, path);
+        const cameraGhost = camera
+          ? getShotOverheadCameraMovementGhost(diagram, path)
+          : null;
         if (!geometry || (!person && !camera)) return null;
         const color = person
           ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]
@@ -149,12 +152,13 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
                 <circle cx="0" cy="0" r="14" fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke={OUTPUT_INK} strokeWidth="2.5" />
                 <path d="M 10 -4 L 21 0 L 10 4 Z" fill={OUTPUT_INK} />
               </g>
-            ) : camera ? (
+            ) : camera && cameraGhost ? (
               <GhostCamera
                 camera={camera}
-                x={geometry.end.x}
-                y={geometry.end.y}
-                rotation={cameraPansByCameraId.get(camera.id)?.finalRotation ?? camera.rotation}
+                x={cameraGhost.x}
+                y={cameraGhost.y}
+                rotation={cameraGhost.rotation}
+                fovRays={cameraGhost.fovRays}
               />
             ) : null}
             <path
@@ -285,25 +289,41 @@ function GhostCamera({
   camera,
   x,
   y,
-  rotation
+  rotation,
+  fovRays
 }: {
-  camera: { id: string };
+  camera: { id: string; showFov: boolean };
   x: number;
   y: number;
   rotation: number;
+  fovRays: ShotOverheadFovRay[];
 }) {
   return (
-    <g transform={`rotate(${rotation} ${x} ${y})`} opacity="0.28" aria-hidden="true" data-camera-id={camera.id}>
-      <rect x={x - 15} y={y - 11} width="27" height="22" rx="2" fill={OUTPUT_INK} />
-      <path d={`M ${x + 10} ${y - 8} L ${x + 26} ${y - 14} L ${x + 26} ${y + 14} L ${x + 10} ${y + 8} Z`} fill={OUTPUT_INK} />
-      <circle cx={x - 4} cy={y} r="4" fill={OUTPUT_BACKGROUND} />
+    <g aria-hidden="true" data-camera-id={camera.id}>
+      {camera.showFov && fovRays.length > 0 ? (
+        <g transform={`rotate(${rotation} ${x} ${y})`} opacity="0.34">
+          {fovRays.map((ray, index) => (
+            <line
+              key={index}
+              x1={ray.start.x}
+              y1={ray.start.y}
+              x2={ray.end.x}
+              y2={ray.end.y}
+              stroke={OUTPUT_MUTED}
+              strokeWidth="1.35"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
+        </g>
+      ) : null}
+      <g transform={`rotate(${rotation} ${x} ${y})`} opacity="0.28">
+        <rect x={x - 15} y={y - 11} width="27" height="22" rx="2" fill={OUTPUT_INK} />
+        <path d={`M ${x + 10} ${y - 8} L ${x + 26} ${y - 14} L ${x + 26} ${y + 14} L ${x + 10} ${y + 8} Z`} fill={OUTPUT_INK} />
+        <circle cx={x - 4} cy={y} r="4" fill={OUTPUT_BACKGROUND} />
+      </g>
     </g>
   );
-}
-
-function pointPath(points: ShotOverheadPoint[], closed: boolean) {
-  if (points.length === 0) return "";
-  return `${points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")}${closed ? " Z" : ""}`;
 }
 
 function averagePoint(points: ShotOverheadPoint[]) {

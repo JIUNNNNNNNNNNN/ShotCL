@@ -192,6 +192,11 @@ export type ShotOverheadMovementPath = {
    */
   ownerAnchored?: true;
   points: ShotOverheadPoint[];
+  /**
+   * Camera-only endpoint orientation. This is independent from both the
+   * movement path tangent and a separate camera PAN action.
+   */
+  finalRotation?: number;
 };
 
 export type ShotOverheadCameraPanDirection = "clockwise" | "counterclockwise";

@@ -3,11 +3,14 @@ import test from "node:test";
 import {
   cloneShotOverheadDiagram,
   createEmptyShotOverheadDiagram,
+  getShotOverheadCameraMovementGhost,
   getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
   getShotOverheadGridWorldSize,
+  getShotOverheadMovementFinalRotation,
   getShotOverheadMovementGeometry,
   getShotOverheadMovementPoints,
+  getShotOverheadPolylinePath,
   hasShotOverheadContent,
   LEGACY_OVERHEAD_CANVAS_HEIGHT,
   LEGACY_OVERHEAD_CANVAS_WIDTH,
@@ -321,6 +324,102 @@ test("legacy two-point movement remains a straight owner-linked path", () => {
   assert.ok(geometry);
   assert.equal(geometry.pathData, "M 90 120 L 300 240");
   assert.deepEqual(geometry.end, { x: 300, y: 240 });
+  assert.equal(diagram.movementPaths[0].finalRotation, undefined);
+  assert.equal(getShotOverheadMovementFinalRotation(diagram, diagram.movementPaths[0]), 0);
+});
+
+test("open walls stay open while legacy polygons stay closed in output geometry", () => {
+  const open = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    shapes: [{
+      id: "open-wall",
+      type: "polyline",
+      points: [{ x: 10, y: 20 }, { x: 80, y: 20 }, { x: 80, y: 90 }],
+      closed: false,
+      label: ""
+    }]
+  });
+  const legacyClosed = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    shapes: [{
+      id: "legacy-room",
+      type: "polygon",
+      points: [{ x: 10, y: 20 }, { x: 80, y: 20 }, { x: 80, y: 90 }],
+      label: ""
+    }]
+  });
+  assert.ok(open && legacyClosed);
+  assert.equal(open.shapes[0].type, "polyline");
+  assert.equal(legacyClosed.shapes[0].type, "polyline");
+  assert.equal(getShotOverheadPolylinePath(open.shapes[0]), "M 10 20 L 80 20 L 80 90");
+  assert.equal(getShotOverheadPolylinePath(legacyClosed.shapes[0]), "M 10 20 L 80 20 L 80 90 Z");
+});
+
+test("legacy camera movement fallback stays implicit while explicit orientation survives source changes", () => {
+  const diagram = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    cameras: [{ id: "camera", x: 100, y: 100, rotation: 35, label: "CAM", showFov: true }],
+    movementPaths: [{
+      id: "camera-move",
+      sourceType: "camera",
+      sourceId: "camera",
+      points: [{ x: 100, y: 100 }, { x: 260, y: 100 }]
+    }],
+    cameraPans: [{
+      id: "camera-pan",
+      cameraId: "camera",
+      startRotation: 35,
+      finalRotation: 145,
+      direction: "clockwise"
+    }]
+  });
+  assert.ok(diagram);
+  const path = diagram.movementPaths[0];
+  const geometry = getShotOverheadMovementGeometry(diagram, path);
+  const ghost = getShotOverheadCameraMovementGhost(diagram, path);
+  assert.ok(geometry);
+  assert.ok(ghost);
+  assert.equal(geometry.endTangentAngle, 0);
+  assert.equal(path.finalRotation, undefined);
+  assert.equal(getShotOverheadMovementFinalRotation(diagram, path), 35);
+  assert.equal(diagram.cameraPans[0].finalRotation, 145);
+  assert.deepEqual(ghost, {
+    cameraId: "camera",
+    x: 260,
+    y: 100,
+    rotation: 35,
+    showFov: true,
+    fovRays: [
+      { start: { x: 270, y: 100 }, end: { x: 375, y: 52 } },
+      { start: { x: 270, y: 100 }, end: { x: 375, y: 148 } }
+    ]
+  });
+
+  const implicitAfterSourceRotation = normalizeShotOverheadDiagram({
+    ...diagram,
+    cameras: [{ ...diagram.cameras[0], rotation: 270 }]
+  });
+  assert.ok(implicitAfterSourceRotation);
+  assert.equal(implicitAfterSourceRotation.movementPaths[0].finalRotation, undefined);
+  assert.equal(
+    getShotOverheadMovementFinalRotation(
+      implicitAfterSourceRotation,
+      implicitAfterSourceRotation.movementPaths[0]
+    ),
+    270
+  );
+
+  const edited = normalizeShotOverheadDiagram({
+    ...diagram,
+    cameras: [{ ...diagram.cameras[0], rotation: 270 }],
+    movementPaths: [{ ...path, finalRotation: 405 }]
+  });
+  assert.ok(edited);
+  assert.equal(edited.movementPaths[0].finalRotation, 45);
+  assert.equal(getShotOverheadMovementFinalRotation(edited, edited.movementPaths[0]), 45);
+  assert.equal(getShotOverheadMovementGeometry(edited, edited.movementPaths[0])?.endTangentAngle, 0);
+  assert.equal(edited.cameraPans[0].finalRotation, 145);
+  assert.equal(getShotOverheadCameraMovementGhost(edited, edited.movementPaths[0])?.rotation, 45);
 });
 
 test("camera pan normalization and arc geometry preserve explicit direction", () => {

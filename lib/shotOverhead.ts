@@ -8,6 +8,7 @@ import type {
   ShotOverheadPerson,
   ShotOverheadPersonColor,
   ShotOverheadPoint,
+  ShotOverheadPolylineShape,
   ShotOverheadShape
 } from "@/lib/types";
 
@@ -55,6 +56,15 @@ export type ShotOverheadMovementGeometry = {
   start: ShotOverheadPoint;
   end: ShotOverheadPoint;
   endTangentAngle: number;
+};
+
+export type ShotOverheadCameraMovementGhost = {
+  cameraId: string;
+  x: number;
+  y: number;
+  rotation: number;
+  showFov: boolean;
+  fovRays: ShotOverheadFovRay[];
 };
 
 export type ShotOverheadCameraPanArc = {
@@ -118,6 +128,22 @@ export function getShotOverheadMovementOwner(
 }
 
 /**
+ * Resolve a camera movement endpoint's persisted orientation. Legacy paths
+ * inherit the owner camera direction, never the movement tangent or PAN end.
+ */
+export function getShotOverheadMovementFinalRotation(
+  diagram: Pick<ShotOverheadDiagram, "cameras">,
+  path: Pick<ShotOverheadMovementPath, "sourceType" | "sourceId" | "finalRotation">
+) {
+  if (path.sourceType !== "camera") return null;
+  const camera = diagram.cameras.find((item) => item.id === path.sourceId);
+  if (!camera) return null;
+  return normalizedRotation(
+    isFiniteNumber(path.finalRotation) ? path.finalRotation : camera.rotation
+  );
+}
+
+/**
  * Movement JSON retains its old points array, but point zero is an owner anchor
  * rather than an independently editable world point. Controls and the endpoint
  * stay in world coordinates when the actor/camera is relocated.
@@ -178,6 +204,38 @@ export function getShotOverheadMovementGeometry(
     end,
     endTangentAngle: pointAngle(finalControl, end, points)
   };
+}
+
+/** Pure export/preview geometry for the camera representation at path end. */
+export function getShotOverheadCameraMovementGhost(
+  diagram: Pick<ShotOverheadDiagram, "people" | "cameras">,
+  path: ShotOverheadMovementPath
+): ShotOverheadCameraMovementGhost | null {
+  if (path.sourceType !== "camera") return null;
+  const camera = diagram.cameras.find((item) => item.id === path.sourceId);
+  const geometry = getShotOverheadMovementGeometry(diagram, path);
+  const rotation = getShotOverheadMovementFinalRotation(diagram, path);
+  if (!camera || !geometry || rotation === null) return null;
+  const x = geometry.end.x;
+  const y = geometry.end.y;
+  return {
+    cameraId: camera.id,
+    x,
+    y,
+    rotation,
+    showFov: camera.showFov,
+    fovRays: camera.showFov
+      ? getShotOverheadFovRays({ x, y, rotation })
+      : []
+  };
+}
+
+/** Preserve open walls in clean output; only explicit closed rooms append Z. */
+export function getShotOverheadPolylinePath(
+  shape: Pick<ShotOverheadPolylineShape, "points" | "closed">
+) {
+  if (shape.points.length === 0) return "";
+  return `${shape.points.map((point, index) => `${index === 0 ? "M" : "L"} ${svgPoint(point)}`).join(" ")}${shape.closed ? " Z" : ""}`;
 }
 
 /** Camera-local directed rotation rendered as a small open arc. */
@@ -337,13 +395,17 @@ function normalizeMovementPath(
       : null;
   // An orphan cannot provide a derived start or a meaningful endpoint ghost.
   if (!sourceType || !sourceId || !owner || points.length < 2) return null;
-  return {
+  const normalized: ShotOverheadMovementPath = {
     id: text(value.id, `movement-${index + 1}`),
     sourceType,
     sourceId,
     ownerAnchored: true,
     points: [{ x: owner.x, y: owner.y }, ...points.slice(1)]
   };
+  if (sourceType === "camera" && isFiniteNumber(value.finalRotation)) {
+    normalized.finalRotation = normalizedRotation(value.finalRotation);
+  }
+  return normalized;
 }
 
 function normalizeCameraPan(
