@@ -171,7 +171,12 @@ export function DailyPlanLandscapeDocument({
       data-page-layout={pageLayout}
       className="daily-plan-template daily-plan-document daily-plan-document--landscape text-black"
     >
-      <div className="daily-plan-header-grid grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
+      <section
+        data-daily-plan-pdf-page={pageLayout === "two" ? "primary" : undefined}
+        className="daily-plan-landscape-page daily-plan-landscape-page--primary"
+      >
+        <div data-daily-plan-page-primary-content className="daily-plan-landscape-page-content">
+          <div className="daily-plan-header-grid grid grid-cols-[minmax(0,3fr)_minmax(0,1.08fr)] gap-1">
         <table className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
           <EqualColumns count={12} />
           <tbody>
@@ -220,9 +225,9 @@ export function DailyPlanLandscapeDocument({
         <DailyPlanWeatherTable
           fields={weatherFields}
         />
-      </div>
+          </div>
 
-      <table className={sectionTableClass}>
+          <table className={sectionTableClass}>
         <EqualColumns count={16} />
         <tbody>
           {locations.length > 0 ? locations.map((location, index) => (
@@ -234,9 +239,9 @@ export function DailyPlanLandscapeDocument({
             <tr><td colSpan={16} className={cellClass}>등록된 장소가 없습니다.</td></tr>
           )}
         </tbody>
-      </table>
+          </table>
 
-      <table className={sectionTableClass}>
+          <table className={sectionTableClass}>
         <TimetableColumns />
         <thead>
           <tr>
@@ -270,10 +275,17 @@ export function DailyPlanLandscapeDocument({
             </td>
           </tr>
         </tbody>
-      </table>
+          </table>
+        </div>
+      </section>
 
-      <section data-daily-plan-notes-boundary className="daily-plan-notes-section">
-        <div className="daily-plan-notes-grid mt-1 grid grid-cols-2 gap-1">
+      <section
+        data-daily-plan-notes-boundary
+        data-daily-plan-pdf-page={pageLayout === "two" ? "secondary" : undefined}
+        className="daily-plan-notes-section daily-plan-landscape-page daily-plan-landscape-page--secondary"
+      >
+        <div data-daily-plan-page-secondary-content className="daily-plan-landscape-page-content">
+          <div className="daily-plan-notes-grid mt-1 grid grid-cols-2 gap-1">
           {memoFields.map((field) => (
             <table key={field.key} className={halfTableClass}>
               <tbody>
@@ -282,9 +294,9 @@ export function DailyPlanLandscapeDocument({
               </tbody>
             </table>
           ))}
-        </div>
+          </div>
 
-        <div className="daily-plan-notes-grid mt-1 grid grid-cols-2 gap-1">
+          <div className="daily-plan-notes-grid mt-1 grid grid-cols-2 gap-1">
           <FixedCallSheetTable
             title="Starring"
             emptyMessage="등록된 배우가 없습니다."
@@ -321,6 +333,7 @@ export function DailyPlanLandscapeDocument({
               notes: team.notes
             }))}
           />
+          </div>
         </div>
       </section>
     </article>
@@ -380,7 +393,10 @@ export function DailyPlanPortraitDocument({
       data-page-layout={pageLayout}
       className="daily-plan-template daily-plan-document daily-plan-document--portrait text-black"
     >
-      <section className="daily-plan-portrait-page daily-plan-portrait-page--primary">
+      <section
+        data-daily-plan-pdf-page={pageLayout === "two" ? "primary" : undefined}
+        className="daily-plan-portrait-page daily-plan-portrait-page--primary"
+      >
         <div data-daily-plan-page-primary-content className="daily-plan-portrait-page-content">
           <table data-portrait-table="header" className="daily-plan-section-table w-full table-fixed border-collapse border-2 border-black text-center">
             <EqualColumns count={portraitColumnCount} />
@@ -523,6 +539,7 @@ export function DailyPlanPortraitDocument({
 
       <section
         data-daily-plan-notes-boundary
+        data-daily-plan-pdf-page={pageLayout === "two" ? "secondary" : undefined}
         className="daily-plan-notes-section daily-plan-portrait-page daily-plan-portrait-page--secondary"
       >
         <div data-daily-plan-page-secondary-content className="daily-plan-portrait-page-content">

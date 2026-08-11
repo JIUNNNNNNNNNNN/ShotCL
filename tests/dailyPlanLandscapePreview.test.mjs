@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { resolveDailyPlanPreviewFit } from "../lib/dailyPlan/documentLayout.ts";
+import {
+  getDailyPlanPreviewStackHeight,
+  resolveDailyPlanPreviewFit
+} from "../lib/dailyPlan/documentLayout.ts";
 import {
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
   DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS
@@ -37,17 +40,17 @@ test("landscape timetable keeps 16 canonical leaves and gives Description the do
     Object.entries(columnGroups).map(([key, indices]) => [key, sumGroup(indices)])
   );
   assert.deepEqual(groupWeights, {
-    start: 42,
-    end: 42,
+    start: 40,
+    end: 40,
     runtime: 48,
     location: 72,
     dayNight: 30,
     scene: 38,
     totalCut: 38,
-    description: 228,
+    description: 240,
     actor: 64,
     shootingOrder: 96,
-    notes: 102
+    notes: 94
   });
   assert.equal(groupWeights.start, groupWeights.end);
   assert.equal(
@@ -56,7 +59,7 @@ test("landscape timetable keeps 16 canonical leaves and gives Description the do
   );
 });
 
-test("preview fit uses one scale for width and height and never enlarges A4", () => {
+test("preview fit uses one scale for width and height and fills narrow or wide containers", () => {
   const logicalWidth = 297 * 96 / 25.4;
   const logicalHeight = 210 * 96 / 25.4;
   const halfFit = resolveDailyPlanPreviewFit({
@@ -74,10 +77,21 @@ test("preview fit uses one scale for width and height and never enlarges A4", ()
     logicalWidth,
     logicalHeight
   }), {
-    scale: 1,
-    scaledWidth: logicalWidth,
-    scaledHeight: logicalHeight
+    scale: 2,
+    scaledWidth: logicalWidth * 2,
+    scaledHeight: logicalHeight * 2
   });
+});
+
+test("preview page stacks keep every outer sheet at canonical A4 height", () => {
+  const pageHeight = 210 * 96 / 25.4;
+  const pageGap = 8 * 96 / 25.4;
+  assert.equal(getDailyPlanPreviewStackHeight({ pageHeight, pageCount: 1, pageGap }), pageHeight);
+  assert.equal(
+    getDailyPlanPreviewStackHeight({ pageHeight, pageCount: 2, pageGap }),
+    pageHeight * 2 + pageGap
+  );
+  assert.throws(() => getDailyPlanPreviewStackHeight({ pageHeight, pageCount: 0, pageGap }), RangeError);
 });
 
 test("preview fit rejects invalid geometry instead of producing clipping measurements", () => {
@@ -88,6 +102,23 @@ test("preview fit rejects invalid geometry instead of producing clipping measure
       logicalHeight: 794
     }), RangeError);
   }
+});
+
+test("preview pagination reset runs before paint and cannot overwrite its first measurement", async () => {
+  const editorSource = await readFile(editorPath, "utf8");
+  const resetIndex = editorSource.indexOf(
+    "useLayoutEffect(() => {\n    setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);"
+  );
+  const measurementIndex = editorSource.indexOf(
+    "const container = containerRef.current;",
+    resetIndex
+  );
+  assert.ok(resetIndex >= 0);
+  assert.ok(measurementIndex > resetIndex);
+  assert.doesNotMatch(
+    editorSource,
+    /useEffect\(\(\) => \{\s*setDensity\(DAILY_PLAN_DOCUMENT_DENSITY_STEPS\[0\]\);\s*setPageLayout\("single"\);/u
+  );
 });
 
 test("screen fitting stays isolated from print while landscape and portrait keep their column systems", async () => {
@@ -107,8 +138,10 @@ test("screen fitting stays isolated from print while landscape and portrait keep
   assert.match(scaledPreviewSource, /resolveDailyPlanPreviewFit\(\{/u);
   assert.match(scaledPreviewSource, /transform: `scale\(\$\{measurement\.scale\}\)`/u);
   assert.match(scaledPreviewSource, /width: measurement\.scaledWidth, height: measurement\.scaledHeight/u);
-  assert.match(scaledPreviewSource, /overflow-x-clip/u);
-  assert.doesNotMatch(scaledPreviewSource, /scaleX|scaleY|overflow-x-(?:auto|scroll)/u);
+  assert.match(scaledPreviewSource, /logicalWidth: previewPageWidth/u);
+  assert.match(scaledPreviewSource, /getDailyPlanPreviewStackHeight\(\{/u);
+  assert.doesNotMatch(scaledPreviewSource, /currentDocument\.scrollHeight|currentDocument\.scrollWidth/u);
+  assert.doesNotMatch(scaledPreviewSource, /scaleX|scaleY|overflow-x-(?:auto|scroll|clip)/u);
   assert.doesNotMatch(printSource, /measurement\.scale|resolveDailyPlanPreviewFit|transform: `scale/u);
 
   const landscapeSource = documentSource.slice(

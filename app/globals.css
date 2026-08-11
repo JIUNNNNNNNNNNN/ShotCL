@@ -1915,7 +1915,7 @@ button {
   line-height: var(--daily-plan-line-height);
 }
 
-/* Screen preview and print/PDF remain a square white document, independent of dark app chrome. */
+/* Screen preview and PDF keep canonical A4 page geometry, independent of dark app chrome. */
 .daily-plan-template,
 .daily-plan-template * {
   border-radius: 0 !important;
@@ -1929,6 +1929,70 @@ button {
 
 .daily-plan-document--landscape {
   width: 277mm;
+}
+
+.daily-plan-document--landscape[data-density="compact"] {
+  --daily-plan-font-size: 10px;
+  --daily-plan-line-height: 1.24;
+  --daily-plan-cell-height: 18px;
+  --daily-plan-cell-padding-block: 2px;
+  --daily-plan-cell-padding-inline: 3px;
+  --daily-plan-section-gap: 3px;
+  --daily-plan-title-size: 22px;
+  --daily-plan-title-line-height: 1.08;
+  --daily-plan-subtitle-size: 15px;
+  --daily-plan-subtitle-line-height: 1.15;
+  --daily-plan-stat-size: 16px;
+  --daily-plan-stat-line-height: 1.1;
+  --daily-plan-kicker-size: 8.3px;
+  --daily-plan-kicker-line-height: 1.18;
+  --daily-plan-day-size: 21px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 9px;
+  --daily-plan-staff-line-height: 1.2;
+  --daily-plan-timetable-time-size: 10px;
+  --daily-plan-timetable-compact-size: 8.4px;
+  --daily-plan-memo-height: 70px;
+  --daily-plan-additional-min-height: 24px;
+  --daily-plan-additional-padding-block: 2.5px;
+  --daily-plan-additional-padding-inline: 4px;
+  --daily-plan-weather-label-size: 8.3px;
+  --daily-plan-weather-value-size: 9px;
+  --daily-plan-weather-line-height: 1.18;
+  --daily-plan-weather-padding-block: 1.5px;
+  --daily-plan-weather-padding-inline: 2.5px;
+}
+
+.daily-plan-document--landscape[data-density="dense"] {
+  --daily-plan-font-size: 9px;
+  --daily-plan-line-height: 1.18;
+  --daily-plan-cell-height: 16px;
+  --daily-plan-cell-padding-block: 1px;
+  --daily-plan-cell-padding-inline: 2px;
+  --daily-plan-section-gap: 2px;
+  --daily-plan-title-size: 20px;
+  --daily-plan-title-line-height: 1.06;
+  --daily-plan-subtitle-size: 13px;
+  --daily-plan-subtitle-line-height: 1.1;
+  --daily-plan-stat-size: 14px;
+  --daily-plan-stat-line-height: 1.08;
+  --daily-plan-kicker-size: 7.6px;
+  --daily-plan-kicker-line-height: 1.15;
+  --daily-plan-day-size: 18px;
+  --daily-plan-day-line-height: 1;
+  --daily-plan-staff-size: 8.2px;
+  --daily-plan-staff-line-height: 1.18;
+  --daily-plan-timetable-time-size: 8.7px;
+  --daily-plan-timetable-compact-size: 7.8px;
+  --daily-plan-memo-height: 60px;
+  --daily-plan-additional-min-height: 20px;
+  --daily-plan-additional-padding-block: 1.5px;
+  --daily-plan-additional-padding-inline: 3px;
+  --daily-plan-weather-label-size: 7.8px;
+  --daily-plan-weather-value-size: 8.2px;
+  --daily-plan-weather-line-height: 1.16;
+  --daily-plan-weather-padding-block: 1px;
+  --daily-plan-weather-padding-inline: 2px;
 }
 
 .daily-plan-document--portrait[data-density="normal"] {
@@ -2112,25 +2176,41 @@ button {
 }
 
 @media screen {
-  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] {
+  .daily-plan-preview-sheet[data-preview-layout="two"] {
     background: transparent !important;
     padding: 0 !important;
   }
 
-  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-document--portrait {
+  .daily-plan-document--portrait[data-page-layout="two"] {
     width: 210mm;
     background: transparent;
   }
 
-  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-portrait-page {
+  .daily-plan-document--landscape[data-page-layout="two"] {
+    width: 297mm;
+    background: transparent;
+  }
+
+  .daily-plan-document[data-page-layout="two"] [data-daily-plan-pdf-page] {
     box-sizing: border-box;
-    width: 210mm;
-    min-height: 297mm;
-    padding: 10mm;
     background: #ffffff;
   }
 
-  .daily-plan-preview-sheet[data-orientation="portrait"][data-preview-layout="two"] .daily-plan-portrait-page--secondary {
+  .daily-plan-document--portrait[data-page-layout="two"] [data-daily-plan-pdf-page] {
+    width: 210mm;
+    height: 297mm;
+    min-height: 297mm;
+    padding: 10mm;
+  }
+
+  .daily-plan-document--landscape[data-page-layout="two"] [data-daily-plan-pdf-page] {
+    width: 297mm;
+    height: 210mm;
+    min-height: 210mm;
+    padding: 10mm;
+  }
+
+  .daily-plan-document[data-page-layout="two"] [data-daily-plan-pdf-page="secondary"] {
     margin-top: 8mm;
   }
 }
@@ -2269,17 +2349,42 @@ button {
   display: block;
   position: fixed;
   top: 0;
-  left: -200vw;
-  visibility: hidden;
+  left: -10000px;
+  z-index: -1;
+  visibility: visible;
   pointer-events: none;
 }
 
 .daily-plan-print-staging[data-orientation="portrait"] {
-  width: 190mm;
+  width: 210mm;
 }
 
 .daily-plan-print-staging[data-orientation="landscape"] {
-  width: 277mm;
+  width: 297mm;
+}
+
+.daily-plan-print-layout {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10mm;
+  background: #ffffff;
+}
+
+.daily-plan-print-layout[data-orientation="portrait"] {
+  height: 297mm;
+  min-height: 297mm;
+}
+
+.daily-plan-print-layout[data-orientation="landscape"] {
+  height: 210mm;
+  min-height: 210mm;
+}
+
+.daily-plan-print-layout[data-print-layout="two"] {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
 }
 
 .daily-plan-print-staging .daily-plan-template {

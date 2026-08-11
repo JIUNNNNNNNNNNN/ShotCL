@@ -83,6 +83,8 @@ import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimeta
 import { filterRenderablePreviewRows } from "@/lib/dailyPlan/previewDisplay";
 import {
   DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
+  DAILY_PLAN_PREVIEW_PAGE_GAP_MM,
+  getDailyPlanPreviewStackHeight,
   getNextDailyPlanDocumentDensity,
   resolveDailyPlanPreviewFit,
   type DailyPlanDocumentDensity,
@@ -361,6 +363,8 @@ const maxRuntimeMinutes = MAX_DAILY_PLAN_RUNTIME_MINUTES;
 const runtimeInputMaxLength = String(MAX_DAILY_PLAN_RUNTIME_MINUTES).length;
 const CSS_PIXELS_PER_INCH = 96;
 const MILLIMETERS_PER_INCH = 25.4;
+const DAILY_PLAN_PREVIEW_PAGE_GAP_PX = DAILY_PLAN_PREVIEW_PAGE_GAP_MM
+  * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
 const DAILY_PLAN_PRINT_PAGE = {
   portrait: {
     label: "세로",
@@ -534,8 +538,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
   const sidebarPortraitPrintRequestRef = useRef<() => void>(() => {});
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
-  const printPageStyleRef = useRef<HTMLStyleElement | null>(null);
-  const printCleanupTimeoutRef = useRef<number | null>(null);
   const editorTrashRef = useRef<HTMLDivElement | null>(null);
   const automaticStartRowIdsRef = useRef<Set<string>>(
     // Persisted IDs belonged to the retired continuously-linked behavior.
@@ -1792,38 +1794,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     return buildDailyPlanPreviewData(currentPrintablePlan, scenes, currentMeta);
   }
 
-  const clearPrintPageStyle = useCallback(() => {
-    printPageStyleRef.current?.remove();
-    printPageStyleRef.current = null;
-    delete document.body.dataset.dailyPlanPrintActive;
-  }, []);
-
-  const clearPrintCleanupTimeout = useCallback(() => {
-    if (printCleanupTimeoutRef.current === null) return;
-    window.clearTimeout(printCleanupTimeoutRef.current);
-    printCleanupTimeoutRef.current = null;
-  }, []);
-
   const releasePrintView = useCallback(() => {
-    clearPrintCleanupTimeout();
     setPrintJob(null);
     setPrintLayout("single");
-    clearPrintPageStyle();
     isPrintingRef.current = false;
     setIsPrinting(false);
     setActivePrintAction(null);
-  }, [clearPrintCleanupTimeout, clearPrintPageStyle]);
-
-  const installPrintPageStyle = useCallback((orientation: DailyPlanPdfOrientation) => {
-    clearPrintPageStyle();
-    const style = document.createElement("style");
-    style.dataset.dailyPlanPrintPage = orientation;
-    style.media = "print";
-    style.textContent = `@page { size: A4 ${orientation}; margin: 0; background: #ffffff; }`;
-    document.head.appendChild(style);
-    document.body.dataset.dailyPlanPrintActive = orientation;
-    printPageStyleRef.current = style;
-  }, [clearPrintPageStyle]);
+  }, []);
 
   async function handlePrint(
     action: DailyPlanPrintAction = "automatic",
@@ -1840,19 +1817,17 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       setErrorMessage(timetableValidationMessage);
       return;
     }
-    const currentPreviewData = previewDataSnapshot ?? getCurrentPreviewData();
-    if (currentPreviewData.scenes.length === 0) {
-      setErrorMessage("출력할 씬이 없습니다.");
-      return;
-    }
     setErrorMessage("");
     setMessage("");
     isPrintingRef.current = true;
     setIsPrinting(true);
     setActivePrintAction(action);
     setPrintLayout("single");
-    installPrintPageStyle(orientation);
     try {
+      const currentPreviewData = previewDataSnapshot ?? getCurrentPreviewData();
+      if (currentPreviewData.scenes.length === 0) {
+        throw new Error("NO_PRINTABLE_SCENES");
+      }
       let density: DailyPlanDocumentDensity = DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
       let shouldWaitForDocumentFonts = true;
       let root: HTMLDivElement;
@@ -1864,32 +1839,33 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         const nextRoot = printDocumentRef.current;
         if (!nextRoot) throw new Error("PDF 문서를 준비하지 못했습니다.");
         root = nextRoot;
-
-        if (
-          orientation !== "portrait"
-          || (!hasDailyPlanDocumentOverflow(root) && !hasDailyPlanPortraitPageOverflow(root))
-        ) break;
+        const pageFit = resolveDailyPlanDocumentPageFit(root, orientation);
         const nextDensity = getNextDailyPlanDocumentDensity(density);
-        if (!nextDensity) {
-          throw new Error("세로 PDF의 셀 내용이 출력 범위를 초과합니다. 긴 내용을 줄인 뒤 다시 시도해주세요.");
+        const shouldTryDenser = pageFit.overflows
+          || (orientation === "landscape" && pageFit.layout === "two");
+        if (!shouldTryDenser || !nextDensity) {
+          if (pageFit.overflows) throw new Error("PDF_LAYOUT_OVERFLOW");
+          break;
         }
         density = nextDensity;
       }
 
       const nextLayout = resolveDailyPlanPrintLayout(root, orientation);
       setPrintLayout(nextLayout);
-      await waitForAnimationFrames(2);
-      window.print();
-      setMessage(action === "portrait" ? "세로 PDF 출력 창을 열었습니다." : "PDF 출력 창을 열었습니다.");
-      if (isPrintingRef.current) {
-        clearPrintCleanupTimeout();
-        printCleanupTimeoutRef.current = window.setTimeout(() => {
-          if (isPrintingRef.current) releasePrintView();
-        }, 120_000);
-      }
-    } catch (error) {
+      await waitForDailyPlanPrintDocument(printDocumentRef, false);
+      const exportRoot = printDocumentRef.current;
+      if (!exportRoot) throw new Error("PDF_EXPORT_ROOT_MISSING");
+      const { exportDailyPlanPdf } = await import("@/lib/client/dailyPlanPdf");
+      await exportDailyPlanPdf({
+        root: exportRoot,
+        orientation,
+        filename: buildDailyPlanPdfFilename(currentPreviewData)
+      });
+      setMessage(action === "portrait" ? "세로 PDF를 저장했습니다." : "PDF를 저장했습니다.");
+    } catch {
+      setErrorMessage("PDF를 만들지 못했습니다. 다시 시도해 주세요.");
+    } finally {
       releasePrintView();
-      setErrorMessage(error instanceof Error ? error.message : "PDF 내보내기를 준비하지 못했습니다.");
     }
   }
 
@@ -1900,30 +1876,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   sidebarPortraitPrintRequestRef.current = () => {
     void handlePrint("portrait");
   };
-
-  useEffect(() => {
-    const printMedia = window.matchMedia("print");
-    const handlePrintMediaChange = (event: MediaQueryListEvent) => {
-      if (!event.matches && isPrintingRef.current) releasePrintView();
-    };
-    window.addEventListener("afterprint", releasePrintView);
-    if (typeof printMedia.addEventListener === "function") {
-      printMedia.addEventListener("change", handlePrintMediaChange);
-    } else {
-      printMedia.addListener(handlePrintMediaChange);
-    }
-    return () => {
-      window.removeEventListener("afterprint", releasePrintView);
-      if (typeof printMedia.removeEventListener === "function") {
-        printMedia.removeEventListener("change", handlePrintMediaChange);
-      } else {
-        printMedia.removeListener(handlePrintMediaChange);
-      }
-      clearPrintCleanupTimeout();
-      clearPrintPageStyle();
-      isPrintingRef.current = false;
-    };
-  }, [clearPrintCleanupTimeout, clearPrintPageStyle, releasePrintView]);
 
   const dailyPlanActionMenu = useMemo<ProjectPageActionMenuRegistration>(() => ({
     key: "dailyPlan",
@@ -4534,7 +4486,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
     scaledHeight: previewPageHeight
   }));
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
     setPageLayout("single");
   }, [data, orientation]);
@@ -4553,14 +4505,18 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       if (!currentContainer || !currentDocument) return;
       const availableWidth = currentContainer.getBoundingClientRect().width;
       if (!Number.isFinite(availableWidth) || availableWidth <= 0) return;
-      const nextPageLayout = resolveDailyPlanPreviewPageLayout(currentDocument, orientation);
+      const pageFit = resolveDailyPlanDocumentPageFit(currentDocument, orientation);
+      const nextPageLayout = pageFit.layout;
       setPageLayout((current) => current === nextPageLayout ? current : nextPageLayout);
-      const measuredWidth = Math.max(previewPageWidth, currentDocument.scrollWidth);
-      const measuredHeight = Math.max(previewPageHeight, currentDocument.scrollHeight);
+      const logicalHeight = getDailyPlanPreviewStackHeight({
+        pageHeight: previewPageHeight,
+        pageCount: nextPageLayout === "two" ? 2 : 1,
+        pageGap: DAILY_PLAN_PREVIEW_PAGE_GAP_PX
+      });
       const nextMeasurement = resolveDailyPlanPreviewFit({
         availableWidth,
-        logicalWidth: measuredWidth,
-        logicalHeight: measuredHeight
+        logicalWidth: previewPageWidth,
+        logicalHeight
       });
       setMeasurement((current) => (
         areDailyPlanPreviewMeasurementsEqual(current, nextMeasurement)
@@ -4570,8 +4526,10 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
 
       if (
         allowDensityChange
-        && orientation === "portrait"
-        && (hasDailyPlanDocumentOverflow(currentDocument) || hasDailyPlanPortraitPageOverflow(currentDocument))
+        && (
+          pageFit.overflows
+          || (orientation === "landscape" && nextPageLayout === "two")
+        )
       ) {
         const nextDensity = getNextDailyPlanDocumentDensity(density);
         if (nextDensity) setDensity(nextDensity);
@@ -4646,7 +4604,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       data-density={density}
       data-page-layout={pageLayout}
       data-scale={measurement.scale.toFixed(4)}
-      className="mt-4 w-full min-w-0 max-w-full overflow-x-clip bg-[#e8e8e5]"
+      className="mt-4 w-full min-w-0 max-w-full bg-[#e8e8e5]"
     >
       <div
         className="relative mx-auto max-w-full"
@@ -4659,7 +4617,11 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
           className="daily-plan-preview-sheet absolute left-0 top-0 box-border origin-top-left bg-white p-[10mm]"
           style={{
             width: previewPageWidth,
-            minHeight: previewPageHeight,
+            height: getDailyPlanPreviewStackHeight({
+              pageHeight: previewPageHeight,
+              pageCount: pageLayout === "two" ? 2 : 1,
+              pageGap: DAILY_PLAN_PREVIEW_PAGE_GAP_PX
+            }),
             transform: `scale(${measurement.scale})`
           }}
         >
@@ -4707,6 +4669,7 @@ function PrintDailyPlanView({
       className="print-daily-plan print-only daily-plan-print-staging"
       data-testid="daily-plan-export-staging"
       data-orientation={orientation}
+      aria-hidden="true"
     >
       <div
         ref={rootRef}
@@ -4733,6 +4696,13 @@ function PrintDailyPlanView({
 const PRINT_HEIGHT_SAFETY_PX = 8;
 const DAILY_PLAN_OVERFLOW_TOLERANCE_PX = 1;
 
+function buildDailyPlanPdfFilename(data: DailyPlanPreviewData) {
+  const parts = ["일촬표", data.plan.title, data.plan.shootingDate]
+    .map((part) => part.trim().replace(/[\\/:*?"<>|]+/gu, "-").replace(/\s+/gu, " "))
+    .filter(Boolean);
+  return `${parts.join("_").slice(0, 120) || "일촬표"}.pdf`;
+}
+
 function hasDailyPlanDocumentOverflow(root: HTMLElement) {
   const documentElement = root.matches("[data-testid='daily-plan-document']")
     ? root
@@ -4749,17 +4719,6 @@ function hasDailyPlanDocumentOverflow(root: HTMLElement) {
     cell.scrollWidth > cell.clientWidth + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
     || cell.scrollHeight > cell.clientHeight + DAILY_PLAN_OVERFLOW_TOLERANCE_PX
   ));
-}
-
-function hasDailyPlanPortraitPageOverflow(root: HTMLElement) {
-  const primaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-primary-content]");
-  const secondaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-secondary-content]");
-  if (!primaryContent || !secondaryContent) return false;
-  const printableHeight = DAILY_PLAN_PRINT_PAGE.portrait.printableHeightMm
-    * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
-  const safePrintableHeight = printableHeight - PRINT_HEIGHT_SAFETY_PX;
-  return primaryContent.scrollHeight > safePrintableHeight
-    || secondaryContent.scrollHeight > safePrintableHeight;
 }
 
 async function waitForDailyPlanPrintDocument(
@@ -4797,59 +4756,41 @@ async function waitForDailyPlanPrintDocument(
   await waitForAnimationFrames(2);
 }
 
-function resolveDailyPlanPreviewPageLayout(
-  root: HTMLDivElement,
+function resolveDailyPlanDocumentPageFit(
+  root: HTMLElement,
   orientation: DailyPlanPdfOrientation
-): DailyPlanPageLayout {
-  if (orientation !== "portrait") return "single";
+): { layout: DailyPlanPageLayout; overflows: boolean } {
   const primaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-primary-content]");
   const secondaryContent = root.querySelector<HTMLElement>("[data-daily-plan-page-secondary-content]");
-  if (!primaryContent || !secondaryContent) return "single";
+  if (!primaryContent || !secondaryContent) {
+    return { layout: "single", overflows: true };
+  }
 
-  const printableHeight = DAILY_PLAN_PRINT_PAGE.portrait.printableHeightMm
+  const printableHeight = DAILY_PLAN_PRINT_PAGE[orientation].printableHeightMm
     * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  const safePrintableHeight = printableHeight - PRINT_HEIGHT_SAFETY_PX;
   const combinedContentHeight = primaryContent.scrollHeight + secondaryContent.scrollHeight + PRINT_HEIGHT_SAFETY_PX;
-  return combinedContentHeight <= printableHeight - PRINT_HEIGHT_SAFETY_PX ? "single" : "two";
+  const hasHorizontalOverflow = hasDailyPlanDocumentOverflow(root);
+  if (combinedContentHeight <= safePrintableHeight) {
+    return { layout: "single", overflows: hasHorizontalOverflow };
+  }
+  const pagesFit = primaryContent.scrollHeight <= safePrintableHeight
+    && secondaryContent.scrollHeight <= safePrintableHeight;
+  return {
+    layout: "two",
+    overflows: hasHorizontalOverflow || !pagesFit
+  };
 }
 
 function resolveDailyPlanPrintLayout(
   root: HTMLDivElement,
   orientation: DailyPlanPdfOrientation
 ): DailyPlanPageLayout {
-  const documentElement = root.querySelector<HTMLElement>("[data-testid='daily-plan-document']");
-  const notesSection = root.querySelector<HTMLElement>("[data-daily-plan-notes-boundary]");
-  if (!documentElement || !notesSection) {
-    throw new Error("PDF 페이지 구분 기준을 찾지 못했습니다.");
+  const pageFit = resolveDailyPlanDocumentPageFit(root, orientation);
+  if (pageFit.overflows) {
+    throw new Error(`현재 내용은 A4 ${DAILY_PLAN_PRINT_PAGE[orientation].label} 출력 범위를 초과합니다.`);
   }
-
-  const documentRect = documentElement.getBoundingClientRect();
-  const notesRect = notesSection.getBoundingClientRect();
-  const page = DAILY_PLAN_PRINT_PAGE[orientation];
-  const printableHeight = page.printableHeightMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
-  const printableWidth = page.printableWidthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
-  const safePrintableHeight = printableHeight - PRINT_HEIGHT_SAFETY_PX;
-  const fullHeight = Math.max(documentElement.scrollHeight, documentRect.height);
-  const fullWidth = Math.max(documentElement.scrollWidth, documentRect.width);
-  const firstPageHeight = Math.max(0, notesRect.top - documentRect.top);
-  const secondPageHeight = Math.max(notesSection.scrollHeight, documentRect.bottom - notesRect.top);
-
-  if (fullWidth > printableWidth + 1) {
-    throw new Error(`현재 문서가 A4 ${page.label} 출력 폭을 초과합니다. 셀 내용을 줄인 뒤 다시 시도해주세요.`);
-  }
-
-  if (fullHeight <= safePrintableHeight) return "single";
-  if (
-    firstPageHeight <= safePrintableHeight
-    && secondPageHeight <= safePrintableHeight
-  ) {
-    return "two";
-  }
-
-  throw new Error(`현재 내용은 A4 ${page.label} 2페이지 출력 범위를 초과합니다. Notes 또는 타임테이블 내용을 줄인 뒤 다시 시도해주세요.`);
-}
-
-function getDailyPlanPrintableWidthPixels(orientation: DailyPlanPdfOrientation) {
-  return DAILY_PLAN_PRINT_PAGE[orientation].printableWidthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  return pageFit.layout;
 }
 
 function getDailyPlanPageWidthPixels(orientation: DailyPlanPdfOrientation) {

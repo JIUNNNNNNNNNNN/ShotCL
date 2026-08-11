@@ -9,6 +9,8 @@ export type DailyPlanPreviewFit = {
   scaledHeight: number;
 };
 
+export const DAILY_PLAN_PREVIEW_PAGE_GAP_MM = 8;
+
 /** 한 장 우선, 넘칠 때 Notice 직전에서만 두 장으로 나누는 문서 페이지 구성입니다. */
 export type DailyPlanPageLayout = "single" | "two";
 
@@ -51,12 +53,35 @@ export function resolveDailyPlanPreviewFit({
     throw new RangeError("미리보기 폭과 문서 크기는 0보다 큰 유한한 값이어야 합니다.");
   }
 
-  const scale = Math.min(1, availableWidth / logicalWidth);
+  const scale = availableWidth / logicalWidth;
   return {
     scale,
     scaledWidth: logicalWidth * scale,
     scaledHeight: logicalHeight * scale
   };
+}
+
+/** 고정 비율 A4 page를 여러 장 쌓을 때 필요한 전체 논리 높이입니다. */
+export function getDailyPlanPreviewStackHeight({
+  pageHeight,
+  pageCount,
+  pageGap
+}: {
+  pageHeight: number;
+  pageCount: number;
+  pageGap: number;
+}) {
+  if (
+    !Number.isFinite(pageHeight)
+    || !Number.isInteger(pageCount)
+    || !Number.isFinite(pageGap)
+    || pageHeight <= 0
+    || pageCount <= 0
+    || pageGap < 0
+  ) {
+    throw new RangeError("페이지 높이·개수·간격은 유효한 양수여야 합니다.");
+  }
+  return pageHeight * pageCount + pageGap * Math.max(0, pageCount - 1);
 }
 
 /** 현재 단계보다 한 단계 더 조밀한 문서 밀도를 반환하며, 마지막 단계면 null입니다. */
