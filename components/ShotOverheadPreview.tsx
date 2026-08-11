@@ -2,7 +2,9 @@
 
 import { useId } from "react";
 import {
+  getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
+  getShotOverheadMovementGeometry,
   SHOT_OVERHEAD_PERSON_COLORS,
   SHOT_OVERHEAD_PERSON_COLOR_HEX
 } from "@/lib/shotOverhead";
@@ -26,6 +28,10 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
   const width = diagram.canvas.width;
   const height = diagram.canvas.height;
   const peopleById = new Map(diagram.people.map((person) => [person.id, person]));
+  const camerasById = new Map(diagram.cameras.map((camera) => [camera.id, camera]));
+  const cameraPansByCameraId = new Map(
+    (diagram.cameraPans ?? []).map((pan) => [pan.cameraId, pan])
+  );
 
   return (
     <svg
@@ -40,6 +46,7 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
         <ArrowMarker id={`${markerId}-line-black`} color={OUTPUT_INK} />
         <ArrowMarker id={`${markerId}-line-red`} color="#b93834" />
         <ArrowMarker id={`${markerId}-movement-camera`} color={OUTPUT_MUTED} />
+        <ArrowMarker id={`${markerId}-camera-pan`} color="#8a6828" />
         {SHOT_OVERHEAD_PERSON_COLORS.map((color) => (
           <ArrowMarker
             key={color}
@@ -122,6 +129,9 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
 
       {(diagram.movementPaths ?? []).map((path) => {
         const person = path.sourceType === "person" ? peopleById.get(path.sourceId) : null;
+        const camera = path.sourceType === "camera" ? camerasById.get(path.sourceId) : null;
+        const geometry = getShotOverheadMovementGeometry(diagram, path);
+        if (!geometry || (!person && !camera)) return null;
         const color = person
           ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]
           : OUTPUT_MUTED;
@@ -129,17 +139,64 @@ export function ShotOverheadPreview({ diagram, label }: ShotOverheadPreviewProps
           ? `${markerId}-movement-${person.color}`
           : `${markerId}-movement-camera`;
         return (
-          <path
-            key={path.id}
-            d={pointPath(path.points, false)}
-            fill="none"
-            stroke={color}
-            strokeWidth="2.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined}
-            markerEnd={`url(#${marker})`}
-          />
+          <g key={path.id}>
+            {person ? (
+              <g
+                transform={`translate(${geometry.end.x} ${geometry.end.y}) rotate(${person.rotation}) scale(${person.scale})`}
+                opacity="0.28"
+                aria-hidden="true"
+              >
+                <circle cx="0" cy="0" r="14" fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke={OUTPUT_INK} strokeWidth="2.5" />
+                <path d="M 10 -4 L 21 0 L 10 4 Z" fill={OUTPUT_INK} />
+              </g>
+            ) : camera ? (
+              <GhostCamera
+                camera={camera}
+                x={geometry.end.x}
+                y={geometry.end.y}
+                rotation={cameraPansByCameraId.get(camera.id)?.finalRotation ?? camera.rotation}
+              />
+            ) : null}
+            <path
+              d={geometry.pathData}
+              fill="none"
+              stroke={color}
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined}
+              markerEnd={`url(#${marker})`}
+            />
+          </g>
+        );
+      })}
+
+      {(diagram.cameraPans ?? []).map((pan) => {
+        const camera = camerasById.get(pan.cameraId);
+        const arc = camera ? getShotOverheadCameraPanArc(camera, pan) : null;
+        if (!camera || !arc) return null;
+        return (
+          <g key={pan.id} aria-label={`카메라 패닝 ${Math.round(Math.abs(arc.deltaDegrees))}도`}>
+            <path
+              d={arc.pathData}
+              fill="none"
+              stroke="#8a6828"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              markerEnd={`url(#${markerId}-camera-pan)`}
+            />
+            <text
+              x={arc.labelPoint.x}
+              y={arc.labelPoint.y}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="#725720"
+              fontSize="11"
+              fontWeight="700"
+            >
+              PAN
+            </text>
+          </g>
         );
       })}
 
@@ -221,6 +278,26 @@ function ArrowMarker({ id, color }: { id: string; color: string }) {
     <marker id={id} markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0,0 L0,6 L7,3 z" fill={color} />
     </marker>
+  );
+}
+
+function GhostCamera({
+  camera,
+  x,
+  y,
+  rotation
+}: {
+  camera: { id: string };
+  x: number;
+  y: number;
+  rotation: number;
+}) {
+  return (
+    <g transform={`rotate(${rotation} ${x} ${y})`} opacity="0.28" aria-hidden="true" data-camera-id={camera.id}>
+      <rect x={x - 15} y={y - 11} width="27" height="22" rx="2" fill={OUTPUT_INK} />
+      <path d={`M ${x + 10} ${y - 8} L ${x + 26} ${y - 14} L ${x + 26} ${y + 14} L ${x + 10} ${y + 8} Z`} fill={OUTPUT_INK} />
+      <circle cx={x - 4} cy={y} r="4" fill={OUTPUT_BACKGROUND} />
+    </g>
   );
 }
 

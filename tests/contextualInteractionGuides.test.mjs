@@ -164,7 +164,15 @@ test("interaction steps use feature-specific availability anchors", () => {
   );
   assert.equal(
     INTERACTION_GUIDES["archive.interaction-diagram-path"].anchor,
-    "archive.diagram-path-tool"
+    "archive.diagram-canvas"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-object-menu"].anchor,
+    "archive.diagram-canvas"
+  );
+  assert.equal(
+    INTERACTION_GUIDES["archive.interaction-diagram-curve"].anchor,
+    "archive.diagram-canvas"
   );
   assert.equal(
     INTERACTION_GUIDES["archive.interaction-diagram-undo"].anchor,
@@ -178,10 +186,14 @@ test("diagram first-use and manual tour share the exact visible editor anchor co
   assert.equal(firstUse.persistentAnchor, "archive.diagram-canvas");
   assert.equal(firstUse.compactAnchor, "archive.diagram-canvas");
   assert.equal(firstUse.permission, "manage");
+  assert.equal(firstUse.version, 2);
+  assert.match(firstUse.description, /바로 끌어 위치/u);
+  assert.match(firstUse.description, /우클릭.*길게 눌러 편집 메뉴/u);
+  assert.doesNotMatch(firstUse.description, /잠시 누른 뒤 끌면.*무빙/u);
 
   const diagramIds = getInteractionGuideIdsForPage("archive")
     .filter((id) => id.includes("interaction-diagram-"));
-  assert.equal(diagramIds.length, 7);
+  assert.equal(diagramIds.length, 9);
   assert.ok(diagramIds.every((id) => INTERACTION_GUIDES[id].permission === "manage"));
   assert.ok(diagramIds.every((id) => (
     INTERACTION_GUIDES[id].compactAnchor ?? INTERACTION_GUIDES[id].anchor
@@ -198,53 +210,62 @@ test("diagram first-use and manual tour share the exact visible editor anchor co
     "archive.diagram-room-tool"
   );
   assert.equal(
-    INTERACTION_GUIDES["archive.interaction-diagram-path"].anchor,
-    "archive.diagram-path-tool"
-  );
-  assert.equal(
     INTERACTION_GUIDES["archive.interaction-diagram-undo"].anchor,
     "archive.diagram-history"
   );
 });
 
-test("diagram movement help matches the one-click destination workflow", () => {
+test("diagram movement help uses the object menu and destination drag workflow", () => {
   const movement = INTERACTION_GUIDES["archive.interaction-diagram-path"];
   const fine = getInteractionGuideVariant(movement, "fine");
   const coarse = getInteractionGuideVariant(movement, "coarse");
 
-  assert.equal(fine?.demo, "tap");
-  assert.equal(coarse?.demo, "tap");
-  assert.match(fine?.description ?? "", /도착점을 클릭/u);
-  assert.match(coarse?.description ?? "", /도착점을 탭/u);
-  assert.doesNotMatch(fine?.description ?? "", /끌|드래그|그립니다/u);
-  assert.doesNotMatch(coarse?.description ?? "", /끌|드래그|그립니다/u);
+  assert.equal(fine?.demo, "movement-create");
+  assert.equal(coarse?.demo, "movement-create");
+  assert.match(fine?.description ?? "", /우클릭.*무빙 만들기.*목적지까지 끌/u);
+  assert.match(coarse?.description ?? "", /길게 눌러.*무빙 만들기.*목적지까지 끌/u);
+  assert.match(fine?.detail ?? "", /원본 오브젝트 위치는 그대로/u);
 });
 
-test("diagram person help separates repositioning from a held movement path", () => {
-  const person = INTERACTION_GUIDES["archive.interaction-diagram-person-move"];
-  const fine = getInteractionGuideVariant(person, "fine");
-  const coarse = getInteractionGuideVariant(person, "coarse");
+test("diagram object help keeps direct drag separate from context-menu movement", () => {
+  const move = INTERACTION_GUIDES["archive.interaction-diagram-person-move"];
+  const menu = INTERACTION_GUIDES["archive.interaction-diagram-object-menu"];
+  const moveFine = getInteractionGuideVariant(move, "fine");
+  const moveCoarse = getInteractionGuideVariant(move, "coarse");
+  const menuFine = getInteractionGuideVariant(menu, "fine");
+  const menuCoarse = getInteractionGuideVariant(menu, "coarse");
 
-  assert.equal(fine?.demo, "actor-movement");
-  assert.equal(coarse?.demo, "actor-movement");
-  assert.match(fine?.description ?? "", /짧게 끌면 위치/u);
-  assert.match(fine?.description ?? "", /0\.3초.*누른 뒤 끌면.*무빙 경로/u);
-  assert.match(coarse?.description ?? "", /0\.38초.*길게 누른 뒤 끌면.*무빙 경로/u);
-  assert.match(fine?.detail ?? "", /움직이지 않고.*경로를 만들지 않습니다/u);
-  assert.match(coarse?.detail ?? "", /움직이지 않고.*경로를 만들지 않습니다/u);
-  assert.doesNotMatch(`${fine?.description ?? ""} ${coarse?.description ?? ""}`, /인물만 이동/u);
+  assert.equal(moveFine?.demo, "object-drag");
+  assert.equal(moveCoarse?.demo, "object-drag");
+  assert.match(moveFine?.description ?? "", /인물·카메라·공간.*바로 끌어/u);
+  assert.match(moveFine?.detail ?? "", /무빙 경로를 만들지 않습니다/u);
+  assert.doesNotMatch(`${moveFine?.description ?? ""} ${moveCoarse?.description ?? ""}`, /0\.3초|0\.38초|길게.*무빙/u);
+
+  assert.equal(menuFine?.demo, "object-context-menu");
+  assert.equal(menuCoarse?.demo, "object-context-menu");
+  assert.match(menuFine?.description ?? "", /우클릭.*이름·색상/u);
+  assert.match(menuCoarse?.description ?? "", /길게 누르면.*이름·색상/u);
+  assert.match(menuCoarse?.detail ?? "", /무빙 경로를 바로 만들지 않습니다/u);
 });
 
-test("diagram person demo renders an actor route with a reduced-motion result", () => {
-  assert.match(interactionDemoSource, /case "actor-movement"/u);
-  assert.match(interactionDemoSource, /interaction-demo__actor-route-line/u);
-  assert.match(interactionDemoSource, /interaction-demo__actor-route-head/u);
+test("diagram demos cover menu, movement, curve, and pan with reduced-motion results", () => {
+  for (const demo of ["object-drag", "object-context-menu", "movement-create", "movement-curve", "camera-pan"]) {
+    assert.match(interactionDemoSource, new RegExp(`case "${demo}"`, "u"));
+  }
+  assert.doesNotMatch(interactionDemoSource, /case "actor-movement"/u);
+  assert.match(interactionDemoSource, /interaction-demo__movement-route-line/u);
+  assert.match(interactionDemoSource, /interaction-demo__curve-control/u);
+  assert.match(interactionDemoSource, /interaction-demo__camera-pan-line/u);
 
   const reducedMotionCss = globalCssSource.slice(
     globalCssSource.lastIndexOf("@media (prefers-reduced-motion: reduce)")
   );
-  assert.match(reducedMotionCss, /data-type="actor-movement"[^}]*actor-route/u);
-  assert.match(reducedMotionCss, /actor-route-line[^}]*stroke-dashoffset:\s*0/u);
+  assert.match(reducedMotionCss, /data-type="object-drag"[^}]*diagram-object--source/u);
+  assert.match(reducedMotionCss, /data-type="object-context-menu"[^}]*object-menu/u);
+  assert.match(reducedMotionCss, /data-type="movement-create"[^}]*movement-route/u);
+  assert.match(reducedMotionCss, /movement-route-line[^}]*stroke-dashoffset:\s*0/u);
+  assert.match(reducedMotionCss, /data-type="movement-curve"[^}]*curve-control/u);
+  assert.match(reducedMotionCss, /data-type="camera-pan"[^}]*camera-pan-line/u);
 });
 
 test("permission filtering uses the canonical exact key-staff rule", () => {
@@ -430,15 +451,18 @@ test("gesture variants retain the audited long-press thresholds and safe delete 
   assert.equal(duration("scene-list.interaction-scene-reorder", "coarse"), 480);
   assert.equal(duration("scene-list.interaction-actor-note", "coarse"), 540);
   assert.equal(duration("archive.interaction-touch-selection", "coarse"), 550);
-  assert.equal(duration("archive.interaction-diagram-person-move", "fine"), 300);
-  assert.equal(duration("archive.interaction-diagram-person-move", "coarse"), 380);
-  assert.equal(duration("archive.interaction-diagram-camera-move", "fine"), 200);
-  assert.equal(duration("archive.interaction-diagram-camera-move", "coarse"), 350);
+  assert.equal(duration("archive.interaction-diagram-person-move", "fine"), undefined);
+  assert.equal(duration("archive.interaction-diagram-person-move", "coarse"), undefined);
+  assert.equal(duration("archive.interaction-diagram-object-menu", "coarse"), 520);
+  assert.equal(duration("archive.interaction-diagram-camera-move", "fine"), undefined);
+  assert.equal(duration("archive.interaction-diagram-camera-move", "coarse"), 520);
+  assert.equal(duration("archive.interaction-diagram-curve", "coarse"), 520);
   const cameraFine = getInteractionGuideVariant(
     INTERACTION_GUIDES["archive.interaction-diagram-camera-move"],
     "fine"
   );
-  assert.match(cameraFine?.description ?? "", /두 열린 선.*촬영 방향.*화각 범위/u);
+  assert.match(cameraFine?.description ?? "", /무빙.*패닝.*각각 설정/u);
+  assert.match(cameraFine?.detail ?? "", /두 열린 선.*현재 화각/u);
 
   const archiveDelete = getInteractionGuideVariant(
     INTERACTION_GUIDES["archive.interaction-asset-delete"],

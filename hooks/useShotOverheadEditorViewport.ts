@@ -3,11 +3,12 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Keep the diagram editor on desktop-class pointers and tablet-sized screens.
- * The height guard prevents landscape phones from being treated as tablets.
+ * The editor uses pointer events and screen-space hit targets, so it can keep
+ * the same direct-drag/context-menu model on phones, tablets, and desktop.
+ * Only extremely small embedded viewports stay read-only.
  */
 export const SHOT_OVERHEAD_EDITOR_VIEWPORT_QUERY =
-  "(min-width: 720px) and (min-height: 700px), (min-width: 900px) and (min-height: 500px) and (hover: hover) and (pointer: fine)";
+  "(min-width: 320px) and (min-height: 480px), (min-width: 640px) and (min-height: 360px)";
 
 export function useShotOverheadEditorViewport() {
   return useSyncExternalStore(

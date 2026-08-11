@@ -19,7 +19,11 @@ export type ContextualInteractionType =
   | "filename-archive"
   | "crop-ratio"
   | "crop-scene-cut"
-  | "actor-movement"
+  | "object-drag"
+  | "object-context-menu"
+  | "movement-create"
+  | "movement-curve"
+  | "camera-pan"
   | "tap";
 
 export type ContextualInteractionGuideId =
@@ -51,10 +55,12 @@ export type ContextualInteractionGuideId =
   | "archive.interaction-asset-delete"
   | "archive.interaction-diagram-person-add"
   | "archive.interaction-diagram-person-move"
+  | "archive.interaction-diagram-object-menu"
   | "archive.interaction-diagram-camera-move"
   | "archive.interaction-diagram-rotate"
   | "archive.interaction-diagram-room"
   | "archive.interaction-diagram-path"
+  | "archive.interaction-diagram-curve"
   | "archive.interaction-diagram-undo";
 
 export type ContextualInteractionGuideVariant = {
@@ -134,10 +140,12 @@ const ARCHIVE_INTERACTION_GUIDES = [
   "archive.interaction-asset-delete",
   "archive.interaction-diagram-person-add",
   "archive.interaction-diagram-person-move",
+  "archive.interaction-diagram-object-menu",
   "archive.interaction-diagram-camera-move",
   "archive.interaction-diagram-rotate",
   "archive.interaction-diagram-room",
   "archive.interaction-diagram-path",
+  "archive.interaction-diagram-curve",
   "archive.interaction-diagram-undo"
 ] as const satisfies readonly ContextualInteractionGuideId[];
 
@@ -749,18 +757,40 @@ export const INTERACTION_GUIDES: Record<
     manualOnly: true,
     variants: {
       fine: {
-        title: "인물 위치 · 무빙",
-        description: "인물을 바로 짧게 끌면 위치가 바뀌고, 약 0.3초 누른 뒤 끌면 배우의 무빙 경로가 생깁니다.",
-        detail: "길게 누른 뒤 움직이지 않고 놓으면 경로를 만들지 않습니다.",
-        demo: "actor-movement",
-        durationMs: 300
+        title: "오브젝트 위치 이동",
+        description: "인물·카메라·공간을 바로 끌어 원하는 위치로 옮길 수 있습니다.",
+        detail: "일반 드래그는 오브젝트 위치만 바꾸며 무빙 경로를 만들지 않습니다.",
+        demo: "object-drag"
       },
       coarse: {
-        title: "인물 위치 · 무빙",
-        description: "인물을 바로 짧게 끌면 위치가 바뀌고, 약 0.38초 길게 누른 뒤 끌면 배우의 무빙 경로가 생깁니다.",
-        detail: "길게 누른 뒤 움직이지 않고 손을 떼면 경로를 만들지 않습니다.",
-        demo: "actor-movement",
-        durationMs: 380
+        title: "오브젝트 위치 이동",
+        description: "인물·카메라·공간을 바로 끌어 원하는 위치로 옮길 수 있습니다.",
+        detail: "일반 드래그는 오브젝트 위치만 바꾸며 무빙 경로를 만들지 않습니다.",
+        demo: "object-drag"
+      }
+    }
+  },
+  "archive.interaction-diagram-object-menu": {
+    id: "archive.interaction-diagram-object-menu",
+    page: "archive",
+    anchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "top",
+    priority: 80,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "오브젝트 편집 메뉴",
+        description: "오브젝트를 우클릭하면 이름·색상과 오브젝트별 추가 동작을 설정할 수 있습니다.",
+        detail: "브라우저 메뉴 대신 부감도 전용 편집 메뉴가 열립니다.",
+        demo: "object-context-menu"
+      },
+      coarse: {
+        title: "오브젝트 편집 메뉴",
+        description: "오브젝트를 길게 누르면 이름·색상과 오브젝트별 추가 동작을 설정할 수 있습니다.",
+        detail: "길게 누르기는 편집 메뉴만 열며 무빙 경로를 바로 만들지 않습니다.",
+        demo: "object-context-menu",
+        durationMs: 520
       }
     }
   },
@@ -770,20 +800,21 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.diagram-canvas",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 80,
+    priority: 90,
     manualOnly: true,
     variants: {
       fine: {
-        title: "카메라 이동",
-        description: "카메라를 약 0.2초 동안 누른 뒤 끌면 카메라만 이동합니다. 카메라의 두 열린 선은 촬영 방향과 화각 범위를 나타냅니다.",
-        demo: "long-press",
-        durationMs: 200
+        title: "카메라 무빙 · 패닝",
+        description: "카메라를 우클릭하면 위치가 변하는 무빙과, 제자리에서 방향만 바뀌는 패닝을 각각 설정할 수 있습니다.",
+        detail: "무빙은 경로와 도착 카메라로, 패닝은 카메라 주변 회전 화살표로 구분됩니다. 두 열린 선은 현재 화각입니다.",
+        demo: "camera-pan"
       },
       coarse: {
-        title: "카메라 이동",
-        description: "카메라를 약 0.35초 동안 길게 누른 뒤 끌면 카메라만 이동합니다. 카메라의 두 열린 선은 촬영 방향과 화각 범위를 나타냅니다.",
-        demo: "long-press",
-        durationMs: 350
+        title: "카메라 무빙 · 패닝",
+        description: "카메라를 길게 눌러 편집 메뉴를 열면 위치가 변하는 무빙과, 제자리에서 방향만 바뀌는 패닝을 각각 설정할 수 있습니다.",
+        detail: "무빙은 경로와 도착 카메라로, 패닝은 카메라 주변 회전 화살표로 구분됩니다. 두 열린 선은 현재 화각입니다.",
+        demo: "camera-pan",
+        durationMs: 520
       }
     }
   },
@@ -793,7 +824,7 @@ export const INTERACTION_GUIDES: Record<
     anchor: "archive.diagram-canvas",
     permission: "manage",
     preferredPlacement: "top",
-    priority: 90,
+    priority: 100,
     manualOnly: true,
     variants: {
       fine: {
@@ -815,7 +846,7 @@ export const INTERACTION_GUIDES: Record<
     compactAnchor: "archive.diagram-canvas",
     permission: "manage",
     preferredPlacement: "bottom",
-    priority: 100,
+    priority: 110,
     manualOnly: true,
     variants: {
       fine: {
@@ -835,22 +866,47 @@ export const INTERACTION_GUIDES: Record<
   "archive.interaction-diagram-path": {
     id: "archive.interaction-diagram-path",
     page: "archive",
-    anchor: "archive.diagram-path-tool",
-    compactAnchor: "archive.diagram-canvas",
+    anchor: "archive.diagram-canvas",
     permission: "manage",
     preferredPlacement: "bottom",
-    priority: 110,
+    priority: 120,
     manualOnly: true,
     variants: {
       fine: {
-        title: "동선 만들기",
-        description: "인물이나 카메라를 선택하고 동선 도구를 누른 뒤, 캔버스의 도착점을 클릭하면 이동 방향이 표시됩니다.",
-        demo: "tap"
+        title: "인물 · 카메라 무빙 만들기",
+        description: "인물이나 카메라를 우클릭하고 무빙 만들기를 선택한 뒤, 오브젝트에서 목적지까지 끌어 이동 경로를 만드세요.",
+        detail: "무빙을 만들어도 원본 오브젝트 위치는 그대로이며 목적지에는 연한 오브젝트가 표시됩니다.",
+        demo: "movement-create"
       },
       coarse: {
-        title: "동선 만들기",
-        description: "인물이나 카메라를 선택하고 동선 도구를 누른 뒤, 캔버스의 도착점을 탭하면 이동 방향이 표시됩니다.",
-        demo: "tap"
+        title: "인물 · 카메라 무빙 만들기",
+        description: "인물이나 카메라를 길게 눌러 무빙 만들기를 선택한 뒤, 오브젝트에서 목적지까지 끌어 이동 경로를 만드세요.",
+        detail: "무빙을 만들어도 원본 오브젝트 위치는 그대로이며 목적지에는 연한 오브젝트가 표시됩니다.",
+        demo: "movement-create"
+      }
+    }
+  },
+  "archive.interaction-diagram-curve": {
+    id: "archive.interaction-diagram-curve",
+    page: "archive",
+    anchor: "archive.diagram-canvas",
+    permission: "manage",
+    preferredPlacement: "top",
+    priority: 130,
+    manualOnly: true,
+    variants: {
+      fine: {
+        title: "곡선 무빙 편집",
+        description: "무빙 선을 우클릭해 포인트를 추가하고, 포인트를 끌어 곡선 이동을 만들 수 있습니다.",
+        detail: "무빙 선의 도착점을 옮기면 연한 도착 오브젝트도 함께 이동합니다.",
+        demo: "movement-curve"
+      },
+      coarse: {
+        title: "곡선 무빙 편집",
+        description: "무빙 선을 길게 눌러 포인트를 추가하고, 포인트를 끌어 곡선 이동을 만들 수 있습니다.",
+        detail: "무빙 선의 도착점을 옮기면 연한 도착 오브젝트도 함께 이동합니다.",
+        demo: "movement-curve",
+        durationMs: 520
       }
     }
   },
@@ -861,7 +917,7 @@ export const INTERACTION_GUIDES: Record<
     compactAnchor: "archive.diagram-canvas",
     permission: "manage",
     preferredPlacement: "bottom",
-    priority: 120,
+    priority: 140,
     manualOnly: true,
     variants: {
       fine: {

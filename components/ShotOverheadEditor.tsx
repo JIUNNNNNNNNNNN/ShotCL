@@ -17,7 +17,6 @@ import {
   Redo2,
   RotateCcw,
   RotateCw,
-  Route,
   Save,
   Square,
   Trash2,
@@ -30,18 +29,20 @@ import { useAutosave } from "@/hooks/useAutosave";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import {
   createEmptyShotOverheadDiagram,
+  getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
   getShotOverheadGridWorldSize,
+  getShotOverheadMovementGeometry,
   SHOT_OVERHEAD_PERSON_COLORS,
   SHOT_OVERHEAD_PERSON_COLOR_HEX
 } from "@/lib/shotOverhead";
 import {
-  createActorMovementPath,
-  getActorMovementEndPoint,
-  getActorMovementHoldDuration,
-  hasMinimumActorMovement,
-  shouldBeginActorReposition
-} from "@/lib/shotOverheadActorGesture";
+  createMovementPath,
+  getMovementEndPoint,
+  hasMinimumMovementDraft,
+  shouldBeginDirectDrag,
+  TOUCH_CONTEXT_MENU_HOLD_MS
+} from "@/lib/shotOverheadInteraction";
 import {
   canRedoShotOverheadHistory,
   canUndoShotOverheadHistory,
@@ -56,6 +57,7 @@ import {
 import { cn } from "@/lib/utils";
 import type {
   Shot,
+  ShotOverheadCameraPan,
   ShotOverheadDiagram,
   ShotOverheadLine,
   ShotOverheadMovementPath,
@@ -86,7 +88,7 @@ type ShotOverheadEditorProps = {
   ) => Promise<void> | void;
 };
 
-type Tool = "select" | "line" | "room" | "path";
+type Tool = "select" | "line" | "room";
 type Selection =
   | { kind: "person"; id: string }
   | { kind: "camera"; id: string }
@@ -103,29 +105,8 @@ type PendingMoveGesture = {
   startClient: ShotOverheadPoint;
   startWorld: ShotOverheadPoint;
   before: ShotOverheadDiagram;
-  timeoutId: number;
-};
-
-type ActorPendingGesture = {
-  kind: "actor-pending";
-  pointerId: number;
-  pointerType: string;
-  id: string;
-  startClient: ShotOverheadPoint;
-  startWorld: ShotOverheadPoint;
-  actorOrigin: ShotOverheadPoint;
-  before: ShotOverheadDiagram;
-  timeoutId: number;
-};
-
-type ActorMovementGesture = {
-  kind: "actor-movement";
-  pointerId: number;
-  id: string;
-  actorOrigin: ShotOverheadPoint;
-  pointerStartWorld: ShotOverheadPoint;
-  currentWorld: ShotOverheadPoint;
-  before: ShotOverheadDiagram;
+  movable: boolean;
+  contextMenuTimeoutId: number | null;
 };
 
 type MoveGesture = {
@@ -174,6 +155,28 @@ type PointGesture = {
   before: ShotOverheadDiagram;
 };
 
+type MovementCreateGesture = {
+  kind: "movement-create";
+  pointerId: number;
+  sourceType: "person" | "camera";
+  sourceId: string;
+  sourceOrigin: ShotOverheadPoint;
+  pointerStartWorld: ShotOverheadPoint;
+  currentEnd: ShotOverheadPoint;
+  before: ShotOverheadDiagram;
+};
+
+type CameraPanGesture = {
+  kind: "camera-pan";
+  pointerId: number;
+  cameraId: string;
+  panId: string;
+  startRotation: number;
+  finalRotation: number;
+  direction: ShotOverheadCameraPan["direction"];
+  before: ShotOverheadDiagram;
+};
+
 type PanGesture = {
   kind: "pan";
   pointerId: number;
@@ -181,7 +184,7 @@ type PanGesture = {
   startPan: ShotOverheadPoint;
 };
 
-type Gesture = ActorPendingGesture | ActorMovementGesture | PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | PanGesture;
+type Gesture = PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | MovementCreateGesture | CameraPanGesture | PanGesture;
 type WithoutGestureRuntime<T> = T extends unknown ? Omit<T, "pointerId" | "before"> : never;
 type ImmediateGestureInput = WithoutGestureRuntime<RotateGesture | ScaleGesture | RectResizeGesture | PointGesture>;
 
@@ -194,10 +197,20 @@ const MIN_LINE_LENGTH = 20;
 const EDITOR_HANDLE_DISTANCE = 52;
 const EDITOR_HANDLE_HIT_RADIUS_PX = 22;
 const EDITOR_HANDLE_EDGE_GAP_PX = 2;
-const FINE_HOLD_MS = 200;
-const COARSE_HOLD_MS = 350;
-const FINE_MOVE_TOLERANCE = 6;
-const COARSE_MOVE_TOLERANCE = 9;
+const MIN_CAMERA_PAN_DEGREES = 3;
+
+type CreationMode =
+  | { kind: "movement"; sourceType: "person" | "camera"; sourceId: string }
+  | { kind: "camera-pan"; cameraId: string; panId: string }
+  | null;
+
+type ObjectContextMenu = {
+  selection: NonNullable<Selection>;
+  clientX: number;
+  clientY: number;
+  world: ShotOverheadPoint;
+  labelDraft: string;
+};
 
 function createElementId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return `${prefix}-${crypto.randomUUID()}`;
@@ -292,6 +305,43 @@ function pathFromPoints(points: ShotOverheadPoint[], closed = false) {
   return `${points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ")}${closed ? " Z" : ""}`;
 }
 
+function distanceToSegment(
+  point: ShotOverheadPoint,
+  start: ShotOverheadPoint,
+  end: ShotOverheadPoint
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 0.001) return pointDistance(point, start);
+  const progress = clamp(
+    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
+    0,
+    1
+  );
+  return pointDistance(point, {
+    x: start.x + dx * progress,
+    y: start.y + dy * progress
+  });
+}
+
+function movementPointInsertionIndex(
+  points: ShotOverheadPoint[],
+  point: ShotOverheadPoint
+) {
+  if (points.length < 2) return 1;
+  let nearestIndex = 1;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const distance = distanceToSegment(point, points[index], points[index + 1]);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index + 1;
+    }
+  }
+  return nearestIndex;
+}
+
 function averagePoint(points: ShotOverheadPoint[]) {
   if (points.length === 0) return null;
   return {
@@ -345,27 +395,24 @@ function moveSelection(
     };
   }
   if (selection.kind === "line") {
+    const line = source.lines.find((item) => item.id === selection.id);
+    if (!line) return source;
+    const sharedDx = clamp(dx, -Math.min(line.x1, line.x2), canvasWidth - Math.max(line.x1, line.x2));
+    const sharedDy = clamp(dy, -Math.min(line.y1, line.y2), canvasHeight - Math.max(line.y1, line.y2));
     return {
       ...source,
       lines: source.lines.map((item) => item.id === selection.id
         ? {
             ...item,
-            x1: clamp(item.x1 + dx, 0, canvasWidth),
-            y1: clamp(item.y1 + dy, 0, canvasHeight),
-            x2: clamp(item.x2 + dx, 0, canvasWidth),
-            y2: clamp(item.y2 + dy, 0, canvasHeight)
+            x1: item.x1 + sharedDx,
+            y1: item.y1 + sharedDy,
+            x2: item.x2 + sharedDx,
+            y2: item.y2 + sharedDy
           }
         : item)
     };
   }
-  if (selection.kind === "path") {
-    return {
-      ...source,
-      movementPaths: source.movementPaths.map((item) => item.id === selection.id
-        ? { ...item, points: item.points.map((point) => ({ x: clamp(point.x + dx, 0, canvasWidth), y: clamp(point.y + dy, 0, canvasHeight) })) }
-        : item)
-    };
-  }
+  if (selection.kind === "path") return source;
   return {
     ...source,
     shapes: source.shapes.map((item) => {
@@ -377,11 +424,17 @@ function moveSelection(
           y: clamp(item.y + dy, 0, canvasHeight - item.height)
         };
       }
+      const minX = Math.min(...item.points.map((point) => point.x));
+      const maxX = Math.max(...item.points.map((point) => point.x));
+      const minY = Math.min(...item.points.map((point) => point.y));
+      const maxY = Math.max(...item.points.map((point) => point.y));
+      const sharedDx = clamp(dx, -minX, canvasWidth - maxX);
+      const sharedDy = clamp(dy, -minY, canvasHeight - maxY);
       return {
         ...item,
         points: item.points.map((point) => ({
-          x: clamp(point.x + dx, 0, canvasWidth),
-          y: clamp(point.y + dy, 0, canvasHeight)
+          x: point.x + sharedDx,
+          y: point.y + sharedDy
         }))
       };
     })
@@ -473,16 +526,28 @@ export function ShotOverheadEditor({
   const [pan, setPan] = useState<ShotOverheadPoint>({ x: 0, y: 0 });
   const [viewportScale, setViewportScale] = useState(1);
   const [gestureActive, setGestureActive] = useState(false);
-  const [actorMovementDraft, setActorMovementDraft] = useState<{
+  const [creationMode, setCreationMode] = useState<CreationMode>(null);
+  const [movementDraft, setMovementDraft] = useState<{
+    sourceType: "person" | "camera";
     sourceId: string;
     start: ShotOverheadPoint;
     end: ShotOverheadPoint;
   } | null>(null);
+  const [cameraPanDraft, setCameraPanDraft] = useState<{
+    cameraId: string;
+    startRotation: number;
+    finalRotation: number;
+    direction: ShotOverheadCameraPan["direction"];
+  } | null>(null);
+  const [contextMenu, setContextMenu] = useState<ObjectContextMenu | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const persistedRef = useRef(isPersisted);
   const persistedShotIdRef = useRef(shot.id);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const worldRef = useRef<SVGGElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const contextMenuTriggerRef = useRef<HTMLElement | SVGElement | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const finishGestureRef = useRef<(commit?: boolean, pointerId?: number) => void>(() => undefined);
   const keyDownHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
@@ -493,7 +558,6 @@ export function ShotOverheadEditor({
   const personToolGuideRef = useContextualGuideAnchor<HTMLButtonElement>(readOnly ? null : "archive.diagram-person-tool");
   const cameraToolGuideRef = useContextualGuideAnchor<HTMLButtonElement>(readOnly ? null : "archive.diagram-camera-tool");
   const roomToolGuideRef = useContextualGuideAnchor<HTMLButtonElement>(readOnly ? null : "archive.diagram-room-tool");
-  const pathToolGuideRef = useContextualGuideAnchor<HTMLButtonElement>(readOnly ? null : "archive.diagram-path-tool");
   const historyGuideRef = useContextualGuideAnchor<HTMLDivElement>(readOnly ? null : "archive.diagram-history");
 
   const diagram = history.current;
@@ -512,6 +576,30 @@ export function ShotOverheadEditor({
   const selectedLine = selected?.kind === "line" ? diagram.lines.find((item) => item.id === selected.id) : null;
   const selectedShape = selected?.kind === "shape" ? diagram.shapes.find((item) => item.id === selected.id) : null;
   const selectedPath = selected?.kind === "path" ? diagram.movementPaths.find((item) => item.id === selected.id) : null;
+  const contextSelection = contextMenu?.selection ?? null;
+  const contextPerson = contextSelection?.kind === "person"
+    ? diagram.people.find((item) => item.id === contextSelection.id) ?? null
+    : null;
+  const contextCamera = contextSelection?.kind === "camera"
+    ? diagram.cameras.find((item) => item.id === contextSelection.id) ?? null
+    : null;
+  const contextShape = contextSelection?.kind === "shape"
+    ? diagram.shapes.find((item) => item.id === contextSelection.id) ?? null
+    : null;
+  const contextLine = contextSelection?.kind === "line"
+    ? diagram.lines.find((item) => item.id === contextSelection.id) ?? null
+    : null;
+  const contextPath = contextSelection?.kind === "path"
+    ? diagram.movementPaths.find((item) => item.id === contextSelection.id) ?? null
+    : null;
+  const contextOwnerPaths = contextSelection?.kind === "person" || contextSelection?.kind === "camera"
+    ? diagram.movementPaths.filter((path) => (
+        path.sourceType === contextSelection.kind && path.sourceId === contextSelection.id
+      ))
+    : [];
+  const contextCameraPan = contextCamera
+    ? diagram.cameraPans.find((panAction) => panAction.cameraId === contextCamera.id) ?? null
+    : null;
   const initialSavedFingerprint = useMemo(
     () => editorDraftFingerprint(initialDiagram, initialMetadata),
     [initialDiagram, initialMetadata]
@@ -604,7 +692,10 @@ export function ShotOverheadEditor({
     setSelected(null);
     setLineStart(null);
     setRoomPoints([]);
-    setActorMovementDraft(null);
+    setCreationMode(null);
+    setMovementDraft(null);
+    setCameraPanDraft(null);
+    setContextMenu(null);
     setIsFinalizing(false);
     setPan({ x: 0, y: 0 });
   }, [initialDiagram, initialSavedFingerprint, shot.id]);
@@ -631,8 +722,8 @@ export function ShotOverheadEditor({
     return () => {
       mountedRef.current = false;
       const gesture = gestureRef.current;
-      if (gesture?.kind === "pending-move" || gesture?.kind === "actor-pending") {
-        window.clearTimeout(gesture.timeoutId);
+      if (gesture?.kind === "pending-move" && gesture.contextMenuTimeoutId !== null) {
+        window.clearTimeout(gesture.contextMenuTimeoutId);
       }
       gestureRef.current = null;
     };
@@ -678,8 +769,9 @@ export function ShotOverheadEditor({
 
   function clearPendingGesture() {
     const gesture = gestureRef.current;
-    if (gesture?.kind === "pending-move" || gesture?.kind === "actor-pending") {
-      window.clearTimeout(gesture.timeoutId);
+    if (gesture?.kind === "pending-move" && gesture.contextMenuTimeoutId !== null) {
+      window.clearTimeout(gesture.contextMenuTimeoutId);
+      gesture.contextMenuTimeoutId = null;
     }
   }
 
@@ -689,10 +781,11 @@ export function ShotOverheadEditor({
     clearPendingGesture();
     gestureRef.current = null;
     setGestureActive(false);
-    setActorMovementDraft(null);
+    setMovementDraft(null);
+    setCameraPanDraft(null);
     if ("before" in gesture) {
       if (commit) {
-        if (gesture.kind !== "actor-movement") {
+        if (gesture.kind !== "movement-create" && gesture.kind !== "camera-pan") {
           applyHistory((current) => pushShotOverheadHistory(current, current.current, gesture.before));
         }
       } else {
@@ -714,10 +807,39 @@ export function ShotOverheadEditor({
   }, []);
 
   useEffect(() => {
-    if (interactionLocked && gestureRef.current) {
-      finishGestureRef.current(false);
-    }
+    if (!interactionLocked) return;
+    if (gestureRef.current) finishGestureRef.current(false);
+    setContextMenu(null);
+    setCreationMode(null);
+    setMovementDraft(null);
+    setCameraPanDraft(null);
+    setTool("select");
+    setLineStart(null);
+    setRoomPoints([]);
   }, [interactionLocked]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const focusMenu = window.requestAnimationFrame(() => {
+      const menu = contextMenuRef.current;
+      const firstControl = menu?.querySelector<HTMLElement>('input, button[role="menuitem"]');
+      (firstControl ?? menu)?.focus({ preventScroll: true });
+    });
+    const closeFromOutside = (event: PointerEvent) => {
+      if (contextMenuRef.current?.contains(event.target as Node)) return;
+      setContextMenu(null);
+    };
+    const close = () => setContextMenu(null);
+    document.addEventListener("pointerdown", closeFromOutside, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.cancelAnimationFrame(focusMenu);
+      document.removeEventListener("pointerdown", closeFromOutside, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [contextMenu]);
 
   function isPanChord(event: React.PointerEvent<SVGElement>) {
     return event.button === 1 || (event.button === 0 && spaceHeldRef.current);
@@ -744,56 +866,167 @@ export function ShotOverheadEditor({
     return true;
   }
 
-  function beginPendingMove(event: React.PointerEvent<SVGElement>, selection: NonNullable<Selection>) {
+  function selectionLabel(selection: NonNullable<Selection>) {
+    const current = historyRef.current.current;
+    if (selection.kind === "person") return current.people.find((item) => item.id === selection.id)?.label ?? "";
+    if (selection.kind === "camera") return current.cameras.find((item) => item.id === selection.id)?.label ?? "";
+    if (selection.kind === "shape") return current.shapes.find((item) => item.id === selection.id)?.label ?? "";
+    return "";
+  }
+
+  function openObjectContextMenu(
+    selection: NonNullable<Selection>,
+    clientX: number,
+    clientY: number,
+    world = worldPoint(clientX, clientY, true),
+    trigger: HTMLElement | SVGElement | null = null
+  ) {
+    if (interactionLocked) return;
+    finishGesture(false);
+    setCreationMode(null);
+    setTool("select");
+    setLineStart(null);
+    setRoomPoints([]);
+    setSelected(selection);
+    contextMenuTriggerRef.current = trigger;
+    setContextMenu({
+      selection,
+      clientX,
+      clientY,
+      world,
+      labelDraft: selectionLabel(selection)
+    });
+  }
+
+  function handleObjectContextMenu(
+    event: React.MouseEvent<SVGElement>,
+    selection: NonNullable<Selection>
+  ) {
+    if (interactionLocked) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const keyboardInvocation = event.clientX === 0 && event.clientY === 0;
+    const clientX = keyboardInvocation ? bounds.left + bounds.width / 2 : event.clientX;
+    const clientY = keyboardInvocation ? bounds.top + bounds.height / 2 : event.clientY;
+    openObjectContextMenu(selection, clientX, clientY, undefined, event.currentTarget);
+  }
+
+  function handleObjectKeyDown(
+    event: React.KeyboardEvent<SVGElement>,
+    selection: NonNullable<Selection>
+  ) {
+    if (interactionLocked) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelected(selection);
+      return;
+    }
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const clientX = bounds.left + bounds.width / 2;
+    const clientY = bounds.top + bounds.height / 2;
+    openObjectContextMenu(selection, clientX, clientY, undefined, event.currentTarget);
+  }
+
+  function closeObjectContextMenu(restoreFocus = false) {
+    setContextMenu(null);
+    if (!restoreFocus) return;
+    const trigger = contextMenuTriggerRef.current;
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+    });
+  }
+
+  function beginCreationGesture(
+    event: React.PointerEvent<SVGElement>,
+    selection: Extract<NonNullable<Selection>, { kind: "person" | "camera" }>
+  ) {
+    const mode = creationMode;
+    const matchesMovement = mode?.kind === "movement"
+      && mode.sourceType === selection.kind
+      && mode.sourceId === selection.id;
+    const matchesPan = mode?.kind === "camera-pan"
+      && selection.kind === "camera"
+      && mode.cameraId === selection.id;
+    if (!matchesMovement && !matchesPan) return false;
+    if (interactionLocked || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return true;
+
+    const current = cloneShotOverheadDiagram(historyRef.current.current);
+    const source = selection.kind === "person"
+      ? current.people.find((item) => item.id === selection.id)
+      : current.cameras.find((item) => item.id === selection.id);
+    if (!source) {
+      setCreationMode(null);
+      return true;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    capturePointer(event.pointerId);
+    setSelected(selection);
+    if (matchesMovement) {
+      const origin = { x: source.x, y: source.y };
+      gestureRef.current = {
+        kind: "movement-create",
+        pointerId: event.pointerId,
+        sourceType: selection.kind,
+        sourceId: selection.id,
+        sourceOrigin: origin,
+        pointerStartWorld: worldPoint(event.clientX, event.clientY),
+        currentEnd: origin,
+        before: current
+      };
+      setMovementDraft({
+        sourceType: selection.kind,
+        sourceId: selection.id,
+        start: origin,
+        end: origin
+      });
+    } else if (selection.kind === "camera" && mode?.kind === "camera-pan") {
+      gestureRef.current = {
+        kind: "camera-pan",
+        pointerId: event.pointerId,
+        cameraId: selection.id,
+        panId: mode.panId,
+        startRotation: source.rotation,
+        finalRotation: source.rotation,
+        direction: "clockwise",
+        before: current
+      };
+      setCameraPanDraft({
+        cameraId: selection.id,
+        startRotation: source.rotation,
+        finalRotation: source.rotation,
+        direction: "clockwise"
+      });
+    }
+    setGestureActive(true);
+    return true;
+  }
+
+  function beginPendingMove(
+    event: React.PointerEvent<SVGElement>,
+    selection: NonNullable<Selection>,
+    movable = selection.kind !== "path"
+  ) {
     if (beginPan(event)) return;
+    if (
+      (selection.kind === "person" || selection.kind === "camera")
+      && beginCreationGesture(event, selection)
+    ) return;
     if (!event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
+    if (contextMenu || interactionLocked || tool !== "select") return;
     event.preventDefault();
     event.stopPropagation();
     setSelected(selection);
-    if (interactionLocked || tool !== "select") return;
     capturePointer(event.pointerId);
     const pointerType = event.pointerType || "mouse";
     const before = cloneShotOverheadDiagram(historyRef.current.current);
     const startWorld = worldPoint(event.clientX, event.clientY);
-    if (selection.kind === "person") {
-      const person = before.people.find((item) => item.id === selection.id);
-      if (!person) {
-        releasePointer(event.pointerId);
-        return;
-      }
-      const pending: ActorPendingGesture = {
-        kind: "actor-pending",
-        pointerId: event.pointerId,
-        pointerType,
-        id: selection.id,
-        startClient: { x: event.clientX, y: event.clientY },
-        startWorld,
-        actorOrigin: { x: person.x, y: person.y },
-        before,
-        timeoutId: 0
-      };
-      pending.timeoutId = window.setTimeout(() => {
-        if (!mountedRef.current || gestureRef.current !== pending) return;
-        gestureRef.current = {
-          kind: "actor-movement",
-          pointerId: pending.pointerId,
-          id: pending.id,
-          actorOrigin: pending.actorOrigin,
-          pointerStartWorld: pending.startWorld,
-          currentWorld: pending.actorOrigin,
-          before: pending.before
-        };
-        setActorMovementDraft({
-          sourceId: pending.id,
-          start: pending.actorOrigin,
-          end: pending.actorOrigin
-        });
-        setGestureActive(true);
-      }, getActorMovementHoldDuration(pointerType));
-      gestureRef.current = pending;
-      setGestureActive(true);
-      return;
-    }
     const pending: PendingMoveGesture = {
       kind: "pending-move",
       pointerId: event.pointerId,
@@ -802,19 +1035,23 @@ export function ShotOverheadEditor({
       startClient: { x: event.clientX, y: event.clientY },
       startWorld,
       before,
-      timeoutId: 0
+      movable,
+      contextMenuTimeoutId: null
     };
-    pending.timeoutId = window.setTimeout(() => {
-      if (!mountedRef.current || gestureRef.current !== pending) return;
-      gestureRef.current = {
-        kind: "move",
-        pointerId: pending.pointerId,
-        selection: pending.selection,
-        startWorld: pending.startWorld,
-        before: pending.before
-      };
-      setGestureActive(true);
-    }, pointerType === "mouse" ? FINE_HOLD_MS : COARSE_HOLD_MS);
+    if (pointerType !== "mouse") {
+      pending.contextMenuTimeoutId = window.setTimeout(() => {
+        if (!mountedRef.current || gestureRef.current !== pending) return;
+        gestureRef.current = null;
+        setGestureActive(false);
+        releasePointer(pending.pointerId);
+        openObjectContextMenu(
+          pending.selection,
+          pending.startClient.x,
+          pending.startClient.y,
+          pending.startWorld
+        );
+      }, TOUCH_CONTEXT_MENU_HOLD_MS);
+    }
     gestureRef.current = pending;
     setGestureActive(true);
   }
@@ -866,32 +1103,42 @@ export function ShotOverheadEditor({
     setTool("select");
   }
 
-  function removeSelected() {
-    if (!selected || interactionLocked || gestureRef.current) return;
+  function removeSelection(target: NonNullable<Selection>) {
+    if (interactionLocked || gestureRef.current) return;
     commitDiagram((current) => {
-      if (selected.kind === "person") return {
+      if (target.kind === "person") return {
         ...current,
-        people: current.people.filter((item) => item.id !== selected.id),
-        movementPaths: current.movementPaths.filter((item) => !(item.sourceType === "person" && item.sourceId === selected.id))
+        people: current.people.filter((item) => item.id !== target.id),
+        movementPaths: current.movementPaths.filter((item) => !(item.sourceType === "person" && item.sourceId === target.id))
       };
-      if (selected.kind === "camera") return {
+      if (target.kind === "camera") return {
         ...current,
-        cameras: current.cameras.filter((item) => item.id !== selected.id),
-        movementPaths: current.movementPaths.filter((item) => !(item.sourceType === "camera" && item.sourceId === selected.id))
+        cameras: current.cameras.filter((item) => item.id !== target.id),
+        movementPaths: current.movementPaths.filter((item) => !(item.sourceType === "camera" && item.sourceId === target.id)),
+        cameraPans: current.cameraPans.filter((item) => item.cameraId !== target.id)
       };
-      if (selected.kind === "line") return { ...current, lines: current.lines.filter((item) => item.id !== selected.id) };
-      if (selected.kind === "path") return { ...current, movementPaths: current.movementPaths.filter((item) => item.id !== selected.id) };
-      return { ...current, shapes: current.shapes.filter((item) => item.id !== selected.id) };
+      if (target.kind === "line") return { ...current, lines: current.lines.filter((item) => item.id !== target.id) };
+      if (target.kind === "path") return { ...current, movementPaths: current.movementPaths.filter((item) => item.id !== target.id) };
+      return { ...current, shapes: current.shapes.filter((item) => item.id !== target.id) };
     });
     setSelected(null);
+    setContextMenu(null);
+    setCreationMode(null);
+  }
+
+  function removeSelected() {
+    if (!selected) return;
+    removeSelection(selected);
   }
 
   function chooseTool(nextTool: Tool) {
     if (interactionLocked || gestureRef.current) return;
+    setCreationMode(null);
+    setContextMenu(null);
     setTool(nextTool);
     setLineStart(null);
     setRoomPoints([]);
-    if (nextTool !== "path") setSelected(nextTool === "select" ? selected : null);
+    setSelected(nextTool === "select" ? selected : null);
   }
 
   function finishRoom(closed: boolean) {
@@ -937,27 +1184,7 @@ export function ShotOverheadEditor({
       setRoomPoints((current) => [...current, point]);
       return;
     }
-    if (tool === "path") {
-      if (!selected || (selected.kind !== "person" && selected.kind !== "camera")) {
-        setTool("select");
-        return;
-      }
-      const source = selected.kind === "person"
-        ? diagram.people.find((item) => item.id === selected.id)
-        : diagram.cameras.find((item) => item.id === selected.id);
-      if (!source) return;
-      const path: ShotOverheadMovementPath = {
-        id: createElementId("movement"),
-        sourceType: selected.kind,
-        sourceId: selected.id,
-        points: [{ x: source.x, y: source.y }, point]
-      };
-      commitDiagram((current) => ({ ...current, movementPaths: [...current.movementPaths, path] }));
-      setSelected({ kind: "path", id: path.id });
-      setTool("select");
-      return;
-    }
-    setSelected(null);
+    if (!creationMode) setSelected(null);
   }
 
   function handleCanvasDoubleClick(event: React.MouseEvent<SVGSVGElement>) {
@@ -969,22 +1196,27 @@ export function ShotOverheadEditor({
   function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
-    if (gesture.kind === "actor-pending") {
-      if (!shouldBeginActorReposition(
+    if (gesture.kind === "pending-move") {
+      if (!shouldBeginDirectDrag(
         gesture.startClient,
         { x: event.clientX, y: event.clientY },
         gesture.pointerType
       )) return;
-      window.clearTimeout(gesture.timeoutId);
+      clearPendingGesture();
+      if (!gesture.movable) {
+        gestureRef.current = null;
+        setGestureActive(false);
+        releasePointer(event.pointerId);
+        return;
+      }
       const moveGesture: MoveGesture = {
         kind: "move",
         pointerId: gesture.pointerId,
-        selection: { kind: "person", id: gesture.id },
+        selection: gesture.selection,
         startWorld: gesture.startWorld,
         before: gesture.before
       };
       gestureRef.current = moveGesture;
-      setGestureActive(true);
       event.preventDefault();
       const point = worldPoint(event.clientX, event.clientY);
       replaceDiagram(moveSelection(
@@ -995,26 +1227,41 @@ export function ShotOverheadEditor({
       ));
       return;
     }
-    if (gesture.kind === "pending-move") {
-      const tolerance = gesture.pointerType === "mouse" ? FINE_MOVE_TOLERANCE : COARSE_MOVE_TOLERANCE;
-      if (Math.hypot(event.clientX - gesture.startClient.x, event.clientY - gesture.startClient.y) > tolerance) {
-        finishGesture(false, event.pointerId);
-      }
-      return;
-    }
-    if (gesture.kind === "actor-movement") {
+    if (gesture.kind === "movement-create") {
       event.preventDefault();
-      const end = getActorMovementEndPoint(
-        gesture.actorOrigin,
+      const end = getMovementEndPoint(
+        gesture.sourceOrigin,
         gesture.pointerStartWorld,
         worldPoint(event.clientX, event.clientY, false),
         { width: canvasWidth, height: canvasHeight }
       );
-      gesture.currentWorld = end;
-      setActorMovementDraft({
-        sourceId: gesture.id,
-        start: gesture.actorOrigin,
+      gesture.currentEnd = end;
+      setMovementDraft({
+        sourceType: gesture.sourceType,
+        sourceId: gesture.sourceId,
+        start: gesture.sourceOrigin,
         end
+      });
+      return;
+    }
+    if (gesture.kind === "camera-pan") {
+      event.preventDefault();
+      const camera = gesture.before.cameras.find((item) => item.id === gesture.cameraId);
+      if (!camera) return;
+      const finalRotation = normalizedRotation(pointerAngle(
+        worldPoint(event.clientX, event.clientY, false),
+        { x: camera.x, y: camera.y }
+      ));
+      const direction = normalizedAngleDelta(finalRotation - gesture.startRotation) >= 0
+        ? "clockwise"
+        : "counterclockwise";
+      gesture.finalRotation = finalRotation;
+      gesture.direction = direction;
+      setCameraPanDraft({
+        cameraId: gesture.cameraId,
+        startRotation: gesture.startRotation,
+        finalRotation,
+        direction
       });
       return;
     }
@@ -1041,7 +1288,10 @@ export function ShotOverheadEditor({
       const rotation = maybeSnapRotation(gesture.startRotation + delta, event.shiftKey);
       const next = cloneShotOverheadDiagram(gesture.before);
       if (gesture.selection.kind === "person") next.people = next.people.map((item) => item.id === gesture.selection.id ? { ...item, rotation } : item);
-      else if (gesture.selection.kind === "camera") next.cameras = next.cameras.map((item) => item.id === gesture.selection.id ? { ...item, rotation } : item);
+      else if (gesture.selection.kind === "camera") {
+        next.cameras = next.cameras.map((item) => item.id === gesture.selection.id ? { ...item, rotation } : item);
+        next.cameraPans = next.cameraPans.map((panAction) => panAction.cameraId === gesture.selection.id ? { ...panAction, startRotation: rotation } : panAction);
+      }
       else next.shapes = next.shapes.map((item) => item.id === gesture.selection.id && item.type === "rect" ? { ...item, rotation } : item);
       replaceDiagram(next);
       return;
@@ -1094,21 +1344,50 @@ export function ShotOverheadEditor({
 
   function handlePointerEnd(event: React.PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
-    if (gesture?.kind === "actor-movement" && gesture.pointerId === event.pointerId) {
+    if (gesture?.kind === "movement-create" && gesture.pointerId === event.pointerId) {
       gestureRef.current = null;
       setGestureActive(false);
-      setActorMovementDraft(null);
-      if (hasMinimumActorMovement(gesture.actorOrigin, gesture.currentWorld, viewportScale)) {
+      setMovementDraft(null);
+      setCreationMode(null);
+      if (hasMinimumMovementDraft(gesture.sourceOrigin, gesture.currentEnd, viewportScale)) {
         const next = cloneShotOverheadDiagram(gesture.before);
+        const path = createMovementPath(
+          createElementId("movement"),
+          gesture.sourceType,
+          gesture.sourceId,
+          gesture.sourceOrigin,
+          gesture.currentEnd
+        );
+        path.ownerAnchored = true;
         next.movementPaths = [
           ...next.movementPaths,
-          createActorMovementPath(
-            createElementId("movement"),
-            gesture.id,
-            gesture.actorOrigin,
-            gesture.currentWorld
-          )
+          path
         ];
+        applyHistory((current) => pushShotOverheadHistory(current, next, gesture.before));
+        setSelected({ kind: "path", id: path.id });
+      }
+      releasePointer(event.pointerId);
+      return;
+    }
+    if (gesture?.kind === "camera-pan" && gesture.pointerId === event.pointerId) {
+      gestureRef.current = null;
+      setGestureActive(false);
+      setCameraPanDraft(null);
+      setCreationMode(null);
+      const delta = normalizedAngleDelta(gesture.finalRotation - gesture.startRotation);
+      if (Math.abs(delta) >= MIN_CAMERA_PAN_DEGREES) {
+        const next = cloneShotOverheadDiagram(gesture.before);
+        const panAction: ShotOverheadCameraPan = {
+          id: gesture.panId,
+          cameraId: gesture.cameraId,
+          startRotation: gesture.startRotation,
+          finalRotation: gesture.finalRotation,
+          direction: gesture.direction
+        };
+        const existingIndex = next.cameraPans.findIndex((item) => item.id === gesture.panId);
+        next.cameraPans = existingIndex >= 0
+          ? next.cameraPans.map((item) => item.id === gesture.panId ? panAction : item)
+          : [...next.cameraPans, panAction];
         applyHistory((current) => pushShotOverheadHistory(current, next, gesture.before));
       }
       releasePointer(event.pointerId);
@@ -1119,10 +1398,16 @@ export function ShotOverheadEditor({
 
   function handlePointerCancel(event: React.PointerEvent<SVGSVGElement>) {
     finishGesture(false, event.pointerId);
+    setCreationMode(null);
   }
 
   keyDownHandlerRef.current = (event: KeyboardEvent) => {
     if (event.target instanceof Element && event.target.closest("[data-contextual-guide]")) return;
+    if (event.key === "Escape" && contextMenu) {
+      event.preventDefault();
+      closeObjectContextMenu(true);
+      return;
+    }
     const editable = isEditableTarget(event.target);
     const interactiveControl = isInteractiveControlTarget(event.target);
     const command = event.metaKey || event.ctrlKey;
@@ -1141,6 +1426,7 @@ export function ShotOverheadEditor({
       event.preventDefault();
       spaceHeldRef.current = false;
       finishGestureRef.current(false);
+      if (event.key === "Escape") setCreationMode(null);
       return;
     }
     if (command && event.key.toLowerCase() === "z" && !editable && !interactionLocked) {
@@ -1164,6 +1450,12 @@ export function ShotOverheadEditor({
       return;
     }
     if (event.key === "Escape") {
+      if (creationMode) {
+        setCreationMode(null);
+        setMovementDraft(null);
+        setCameraPanDraft(null);
+        return;
+      }
       if (tool === "room" && roomPoints.length >= 2) finishRoom(false);
       else if (tool !== "select" || lineStart || roomPoints.length) {
         setTool("select");
@@ -1214,11 +1506,123 @@ export function ShotOverheadEditor({
     applyHistory((current) => pushShotOverheadHistory(current, current.current, before));
   }
 
+  function applyContextMenuLabel() {
+    if (!contextMenu) return;
+    const { selection: target, labelDraft } = contextMenu;
+    if (target.kind !== "person" && target.kind !== "camera" && target.kind !== "shape") return;
+    commitDiagram((current) => {
+      if (target.kind === "person") return {
+        ...current,
+        people: current.people.map((item) => item.id === target.id ? { ...item, label: labelDraft.trim() } : item)
+      };
+      if (target.kind === "camera") return {
+        ...current,
+        cameras: current.cameras.map((item) => item.id === target.id ? { ...item, label: labelDraft.trim() } : item)
+      };
+      return {
+        ...current,
+        shapes: current.shapes.map((item) => item.id === target.id ? { ...item, label: labelDraft.trim() } : item)
+      };
+    });
+    setContextMenu(null);
+  }
+
+  function beginMovementMode(target: Extract<NonNullable<Selection>, { kind: "person" | "camera" }>) {
+    setSelected(target);
+    setContextMenu(null);
+    setTool("select");
+    setCreationMode({
+      kind: "movement",
+      sourceType: target.kind,
+      sourceId: target.id
+    });
+  }
+
+  function beginCameraPanMode(cameraId: string, panId = createElementId("camera-pan")) {
+    setSelected({ kind: "camera", id: cameraId });
+    setContextMenu(null);
+    setTool("select");
+    setCreationMode({ kind: "camera-pan", cameraId, panId });
+  }
+
+  function editMovement(pathId: string) {
+    setSelected({ kind: "path", id: pathId });
+    setContextMenu(null);
+    setCreationMode(null);
+  }
+
+  function addMovementControlPoint(pathId: string, point: ShotOverheadPoint) {
+    commitDiagram((current) => ({
+      ...current,
+      movementPaths: current.movementPaths.map((path) => {
+        if (path.id !== pathId) return path;
+        const geometry = getShotOverheadMovementGeometry(current, path);
+        if (!geometry) return path;
+        const insertionIndex = movementPointInsertionIndex(geometry.points, point);
+        return {
+          ...path,
+          ownerAnchored: true,
+          points: [
+            ...path.points.slice(0, insertionIndex),
+            { x: point.x, y: point.y },
+            ...path.points.slice(insertionIndex)
+          ]
+        };
+      })
+    }));
+    setSelected({ kind: "path", id: pathId });
+    setContextMenu(null);
+  }
+
+  function resetMovementStraight(pathId: string) {
+    commitDiagram((current) => ({
+      ...current,
+      movementPaths: current.movementPaths.map((path) => {
+        if (path.id !== pathId || path.points.length < 2) return path;
+        return {
+          ...path,
+          ownerAnchored: true,
+          points: [path.points[0], path.points[path.points.length - 1]]
+        };
+      })
+    }));
+    setSelected({ kind: "path", id: pathId });
+    setContextMenu(null);
+  }
+
+  function deleteMovement(pathId: string) {
+    commitDiagram((current) => ({
+      ...current,
+      movementPaths: current.movementPaths.filter((path) => path.id !== pathId)
+    }));
+    if (selected?.kind === "path" && selected.id === pathId) setSelected(null);
+    setContextMenu(null);
+  }
+
+  function deleteCameraPan(panId: string) {
+    commitDiagram((current) => ({
+      ...current,
+      cameraPans: current.cameraPans.filter((panAction) => panAction.id !== panId)
+    }));
+    setContextMenu(null);
+  }
+
   function rotateSelected(delta: number) {
     if (interactionLocked || gestureRef.current || !selected || (selected.kind !== "person" && selected.kind !== "camera")) return;
-    commitDiagram((current) => selected.kind === "person"
-      ? { ...current, people: current.people.map((item) => item.id === selected.id ? { ...item, rotation: normalizedRotation(item.rotation + delta) } : item) }
-      : { ...current, cameras: current.cameras.map((item) => item.id === selected.id ? { ...item, rotation: normalizedRotation(item.rotation + delta) } : item) });
+    commitDiagram((current) => {
+      if (selected.kind === "person") return {
+        ...current,
+        people: current.people.map((item) => item.id === selected.id ? { ...item, rotation: normalizedRotation(item.rotation + delta) } : item)
+      };
+      const camera = current.cameras.find((item) => item.id === selected.id);
+      if (!camera) return current;
+      const rotation = normalizedRotation(camera.rotation + delta);
+      return {
+        ...current,
+        cameras: current.cameras.map((item) => item.id === selected.id ? { ...item, rotation } : item),
+        cameraPans: current.cameraPans.map((panAction) => panAction.cameraId === selected.id ? { ...panAction, startRotation: rotation } : panAction)
+      };
+    });
   }
 
   async function persistAndClose() {
@@ -1259,22 +1663,39 @@ export function ShotOverheadEditor({
     ? lineStart ? "캔버스에서 선의 끝점을 선택하세요." : "캔버스에서 선의 시작점을 선택하세요."
     : tool === "room"
       ? roomPoints.length === 0 ? "공간의 첫 꼭짓점을 선택하세요." : "점을 이어 벽을 만들고 시작점을 누르면 닫힙니다."
-      : tool === "path"
-        ? "선택한 인물 또는 카메라가 이동할 도착점을 선택하세요."
+      : creationMode?.kind === "movement"
+        ? "강조된 오브젝트에서 목적지까지 끌어 무빙을 완성하세요. Esc 또는 우클릭으로 취소할 수 있습니다."
+      : creationMode?.kind === "camera-pan"
+        ? "강조된 카메라에서 최종 방향으로 끌어 패닝 각도를 정하세요."
         : selected?.kind === "person"
-          ? "인물은 바로 끌어 위치를 옮기고, 잠시 누른 뒤 끌어 무빙 경로를 만듭니다."
+          ? "인물을 끌어 위치를 옮기거나 우클릭해 이름·색상·무빙을 편집하세요."
+          : selected?.kind === "camera"
+            ? "카메라를 끌어 위치를 옮기거나 우클릭해 무빙과 패닝을 설정하세요."
+          : selected?.kind === "path"
+            ? "끝점과 포인트를 끌어 무빙을 편집하거나 우클릭해 포인트를 추가하세요."
           : selected
-            ? "짧게 누르면 선택하고, 잠시 누른 뒤 끌면 위치를 옮깁니다."
-          : "요소를 선택하거나 도구로 새 부감도를 구성하세요.";
+            ? "오브젝트를 끌어 위치를 바로 옮기고 우클릭해 편집하세요."
+          : "오브젝트를 끌어 옮기고 우클릭(터치는 길게 누르기)해 편집하세요.";
+
+  const contextMenuPosition = contextMenu ? (() => {
+    const rect = dialogRef.current?.getBoundingClientRect();
+    const localX = contextMenu.clientX - (rect?.left ?? 0);
+    const localY = contextMenu.clientY - (rect?.top ?? 0);
+    return {
+      left: clamp(localX, 8, Math.max(8, (rect?.width ?? 300) - 292)),
+      top: clamp(localY, 8, Math.max(8, (rect?.height ?? 360) - 430))
+    };
+  })() : null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-stretch justify-center overflow-hidden overscroll-none bg-field-bg/85 sm:p-3" onPointerDown={(event) => event.stopPropagation()}>
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="부감도 편집기"
         data-contextual-guide-overlay
-        className="flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden border border-field-divider bg-field-section text-field-text shadow-dialog sm:h-[min(96dvh,980px)] sm:max-w-[1500px] sm:rounded-[var(--radius-dialog)]"
+        className="relative flex h-[100dvh] max-h-[100dvh] min-h-0 w-full flex-col overflow-hidden border border-field-divider bg-field-section text-field-text shadow-dialog sm:h-[min(96dvh,980px)] sm:max-w-[1500px] sm:rounded-[var(--radius-dialog)]"
       >
         <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-field-border bg-field-panel px-3 sm:px-4">
           <div className="min-w-0 flex-1">
@@ -1301,7 +1722,6 @@ export function ShotOverheadEditor({
             <ToolButton ref={cameraToolGuideRef} onClick={addCamera} icon={<Camera />} label="카메라" />
             <ToolButton active={tool === "line"} onClick={() => chooseTool("line")} icon={<Minus />} label="선" />
             <ToolButton ref={roomToolGuideRef} active={tool === "room"} onClick={() => chooseTool("room")} icon={<Square />} label="공간" />
-            <ToolButton ref={pathToolGuideRef} active={tool === "path"} disabled={!selected || (selected.kind !== "person" && selected.kind !== "camera")} onClick={() => chooseTool("path")} icon={<Route />} label="동선" />
             <span className="mx-0.5 h-7 w-px shrink-0 bg-field-divider" />
             <div ref={historyGuideRef} className="flex shrink-0 gap-1">
               <ToolButton disabled={!canUndoShotOverheadHistory(history)} onClick={undo} icon={<Undo2 />} label="실행 취소" />
@@ -1322,7 +1742,7 @@ export function ShotOverheadEditor({
               preserveAspectRatio="xMidYMid meet"
               className={cn(
                 "block h-full w-full select-none",
-                tool === "line" || tool === "room" || tool === "path" ? "cursor-crosshair" : spaceHeldRef.current ? "cursor-grab" : "cursor-default",
+                tool === "line" || tool === "room" || creationMode ? "cursor-crosshair" : spaceHeldRef.current ? "cursor-grab" : "cursor-default",
                 gestureActive && "cursor-grabbing"
               )}
               shapeRendering="geometricPrecision"
@@ -1335,7 +1755,12 @@ export function ShotOverheadEditor({
               onLostPointerCapture={(event) => {
                 if (gestureRef.current?.pointerId === event.pointerId) finishGesture(false, event.pointerId);
               }}
-              onContextMenu={(event) => event.preventDefault()}
+              onContextMenu={(event) => {
+                if (interactionLocked) return;
+                event.preventDefault();
+                setCreationMode(null);
+                setContextMenu(null);
+              }}
             >
               <defs>
                 <pattern id="shot-overhead-editor-grid" width={gridWorldSize} height={gridWorldSize} patternUnits="userSpaceOnUse">
@@ -1344,6 +1769,7 @@ export function ShotOverheadEditor({
                 <ArrowMarker id="editor-arrow-black" color="var(--field-text)" />
                 <ArrowMarker id="editor-arrow-red" color="var(--field-danger)" />
                 <ArrowMarker id="editor-arrow-camera" color="var(--field-muted)" />
+                <ArrowMarker id="editor-arrow-pan" color="var(--field-primary)" />
                 {SHOT_OVERHEAD_PERSON_COLORS.map((color) => <ArrowMarker key={color} id={`editor-arrow-${color}`} color={SHOT_OVERHEAD_PERSON_COLOR_HEX[color]} />)}
               </defs>
               <g ref={worldRef} transform={`translate(${pan.x} ${pan.y})`}>
@@ -1354,7 +1780,7 @@ export function ShotOverheadEditor({
                   if (shape.type === "polyline") {
                     const labelPoint = averagePoint(shape.points);
                     return (
-                      <g key={shape.id}>
+                      <g key={shape.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${shape.label || "공간"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "shape", id: shape.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "shape", id: shape.id })}>
                         <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents={shape.closed ? "all" : "stroke"} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} style={{ touchAction: "none" }} />
                         <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
                         {shape.label && labelPoint ? <text x={labelPoint.x} y={labelPoint.y} textAnchor="middle" fill="var(--field-muted)" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
@@ -1374,7 +1800,7 @@ export function ShotOverheadEditor({
                     handleBounds
                   );
                   return (
-                    <g key={shape.id}>
+                    <g key={shape.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${shape.label || "공간"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "shape", id: shape.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "shape", id: shape.id })}>
                       <g transform={`rotate(${shape.rotation} ${pivot.x} ${pivot.y})`}>
                         <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="rgba(255,255,255,0.025)" stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} vectorEffect="non-scaling-stroke" pointerEvents="none" />
                         <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="transparent" stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="all" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} />
@@ -1398,7 +1824,7 @@ export function ShotOverheadEditor({
                   const isSelected = selected?.kind === "line" && selected.id === line.id;
                   const color = line.color === "red" ? "var(--field-danger)" : "var(--field-text)";
                   return (
-                    <g key={line.id}>
+                    <g key={line.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : "선 선택 및 편집"} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "line", id: line.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "line", id: line.id })}>
                       <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "line", id: line.id })} />
                       <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} stroke={isSelected ? "var(--field-accent)" : color} strokeWidth={isSelected ? 3 : 2.2} strokeLinecap="round" vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${line.color})`} pointerEvents="none" />
                       {isSelected && !readOnly ? (["start", "end"] as const).map((endpoint) => {
@@ -1411,33 +1837,84 @@ export function ShotOverheadEditor({
 
                 {diagram.movementPaths.map((path) => {
                   const person = path.sourceType === "person" ? diagram.people.find((item) => item.id === path.sourceId) : null;
+                  const camera = path.sourceType === "camera" ? diagram.cameras.find((item) => item.id === path.sourceId) : null;
+                  const geometry = getShotOverheadMovementGeometry(diagram, path);
+                  if (!geometry || (!person && !camera)) return null;
                   const color = person ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color] : "var(--field-muted)";
                   const isSelected = selected?.kind === "path" && selected.id === path.id;
+                  const ghostRotation = camera
+                    ? diagram.cameraPans.find((panAction) => panAction.cameraId === camera.id)?.finalRotation ?? camera.rotation
+                    : person?.rotation ?? 0;
                   return (
-                    <g key={path.id}>
-                      <path d={pathFromPoints(path.points)} fill="none" stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "path", id: path.id })} />
-                      <path d={pathFromPoints(path.points)} fill="none" stroke={isSelected ? "var(--field-accent)" : color} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined} vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${person?.color ?? "camera"})`} pointerEvents="none" />
-                      {isSelected && !readOnly ? path.points.map((point, index) => <g key={`${path.id}-${index}`}><circle cx={point.x} cy={point.y} r="6" fill="var(--field-accent)" pointerEvents="none" /><PointerHitCircle cx={point.x} cy={point.y} onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: "path-point", id: path.id, index })} /></g>) : null}
+                    <g key={path.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${path.sourceType === "person" ? "인물" : "카메라"} 무빙 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "path", id: path.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "path", id: path.id })}>
+                      <path d={geometry.pathData} fill="none" stroke="transparent" strokeWidth="18" vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "path", id: path.id }, false)} />
+                      <path d={geometry.pathData} fill="none" stroke={isSelected ? "var(--field-accent)" : color} strokeWidth={isSelected ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={path.sourceType === "camera" ? "8 6" : undefined} vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${person?.color ?? "camera"})`} pointerEvents="none" />
+                      {person ? (
+                        <g opacity="0.28" pointerEvents="none">
+                          <g transform={`translate(${geometry.end.x} ${geometry.end.y}) rotate(${ghostRotation}) scale(${person.scale})`}>
+                            <circle r={PERSON_RADIUS} fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke="var(--field-paper)" strokeWidth="2.5" />
+                            <path d="M 10 -4 L 21 0 L 10 4 Z" fill="var(--field-text)" />
+                          </g>
+                          {person.label ? <text x={geometry.end.x} y={geometry.end.y + 28 * person.scale} textAnchor="middle" fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} fontSize="14" fontWeight="650">{person.label}</text> : null}
+                        </g>
+                      ) : camera ? (
+                        <g transform={`rotate(${ghostRotation} ${geometry.end.x} ${geometry.end.y})`} opacity="0.28" pointerEvents="none">
+                          <rect x={geometry.end.x - 15} y={geometry.end.y - 11} width="27" height="22" rx="2" fill="var(--field-muted)" />
+                          <path d={`M ${geometry.end.x + 10} ${geometry.end.y - 8} L ${geometry.end.x + 26} ${geometry.end.y - 14} L ${geometry.end.x + 26} ${geometry.end.y + 14} L ${geometry.end.x + 10} ${geometry.end.y + 8} Z`} fill="var(--field-muted)" />
+                        </g>
+                      ) : null}
+                      {isSelected && !readOnly ? geometry.points.slice(1).map((point, offset) => {
+                        const index = offset + 1;
+                        const endpoint = index === geometry.points.length - 1;
+                        return (
+                          <g key={`${path.id}-${index}`}>
+                            <circle cx={point.x} cy={point.y} r={endpoint ? 7 : 6} fill={endpoint ? "var(--field-panel)" : "var(--field-accent)"} stroke="var(--field-accent)" strokeWidth="2.5" pointerEvents="none" />
+                            <PointerHitCircle cx={point.x} cy={point.y} className="cursor-move" onPointerDown={(event) => beginImmediateGesture(event, { kind: "point", target: "path-point", id: path.id, index })} />
+                          </g>
+                        );
+                      }) : null}
                     </g>
                   );
                 })}
 
-                {actorMovementDraft ? (() => {
-                  const person = diagram.people.find((item) => item.id === actorMovementDraft.sourceId);
-                  if (!person) return null;
+                {movementDraft ? (() => {
+                  const person = movementDraft.sourceType === "person"
+                    ? diagram.people.find((item) => item.id === movementDraft.sourceId)
+                    : null;
+                  const camera = movementDraft.sourceType === "camera"
+                    ? diagram.cameras.find((item) => item.id === movementDraft.sourceId)
+                    : null;
+                  if (!person && !camera) return null;
+                  const color = person ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color] : "var(--field-muted)";
                   return (
-                    <path
-                      d={pathFromPoints([actorMovementDraft.start, actorMovementDraft.end])}
-                      fill="none"
-                      stroke={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]}
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      vectorEffect="non-scaling-stroke"
-                      markerEnd={`url(#editor-arrow-${person.color})`}
-                      pointerEvents="none"
-                    />
+                    <g opacity="0.72" pointerEvents="none">
+                      <path d={pathFromPoints([movementDraft.start, movementDraft.end])} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeDasharray={camera ? "8 6" : undefined} vectorEffect="non-scaling-stroke" markerEnd={`url(#editor-arrow-${person?.color ?? "camera"})`} />
+                      {person ? (
+                        <g transform={`translate(${movementDraft.end.x} ${movementDraft.end.y}) rotate(${person.rotation}) scale(${person.scale})`} opacity="0.3">
+                          <circle r={PERSON_RADIUS} fill={color} stroke="var(--field-paper)" strokeWidth="2.5" />
+                          <path d="M 10 -4 L 21 0 L 10 4 Z" fill="var(--field-text)" />
+                        </g>
+                      ) : camera ? (
+                        <g transform={`rotate(${camera.rotation} ${movementDraft.end.x} ${movementDraft.end.y})`} opacity="0.3">
+                          <rect x={movementDraft.end.x - 15} y={movementDraft.end.y - 11} width="27" height="22" rx="2" fill="var(--field-muted)" />
+                          <path d={`M ${movementDraft.end.x + 10} ${movementDraft.end.y - 8} L ${movementDraft.end.x + 26} ${movementDraft.end.y - 14} L ${movementDraft.end.x + 26} ${movementDraft.end.y + 14} L ${movementDraft.end.x + 10} ${movementDraft.end.y + 8} Z`} fill="var(--field-muted)" />
+                        </g>
+                      ) : null}
+                    </g>
                   );
                 })() : null}
+
+                {[...diagram.cameraPans, ...(cameraPanDraft ? [{ id: "camera-pan-draft", ...cameraPanDraft }] : [])].map((panAction) => {
+                  const camera = diagram.cameras.find((item) => item.id === panAction.cameraId);
+                  const arc = camera ? getShotOverheadCameraPanArc(camera, panAction) : null;
+                  if (!arc) return null;
+                  return (
+                    <g key={panAction.id} opacity={panAction.id === "camera-pan-draft" ? 0.55 : 0.9} pointerEvents="none">
+                      <path d={arc.pathData} fill="none" stroke="var(--field-primary)" strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" markerEnd="url(#editor-arrow-pan)" />
+                      <text x={arc.labelPoint.x} y={arc.labelPoint.y} textAnchor="middle" dominantBaseline="middle" fill="var(--field-primary)" fontSize="11" fontWeight="800">PAN</text>
+                    </g>
+                  );
+                })}
 
                 {diagram.cameras.filter((camera) => camera.showFov).map((camera) => {
                   const rays = getShotOverheadFovRays(camera);
@@ -1479,9 +1956,9 @@ export function ShotOverheadEditor({
                     handleBounds
                   );
                   return (
-                    <g key={person.id}>
+                    <g key={person.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${person.label || "인물"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "person", id: person.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "person", id: person.id })}>
                       {isSelected ? <circle cx={person.x} cy={person.y} r={22 * person.scale} fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
-                      {actorMovementDraft?.sourceId === person.id ? <circle cx={person.x} cy={person.y} r={27 * person.scale} fill="none" stroke="var(--field-accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
+                      {creationMode?.kind === "movement" && creationMode.sourceType === "person" && creationMode.sourceId === person.id ? <circle cx={person.x} cy={person.y} r={27 * person.scale} fill="none" stroke="var(--field-primary)" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
                       <PointerHitCircle cx={person.x} cy={person.y} onPointerDown={(event) => beginPendingMove(event, { kind: "person", id: person.id })} />
                       <g transform={`translate(${person.x} ${person.y}) rotate(${person.rotation}) scale(${person.scale})`} pointerEvents="none">
                         <circle r={PERSON_RADIUS} fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} stroke="var(--field-paper)" strokeWidth="2.5" />
@@ -1506,8 +1983,9 @@ export function ShotOverheadEditor({
                     handleBounds
                   );
                   return (
-                    <g key={camera.id}>
+                    <g key={camera.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${camera.label || "카메라"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "camera", id: camera.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "camera", id: camera.id })}>
                       {isSelected ? <circle cx={camera.x} cy={camera.y} r="25" fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" pointerEvents="none" /> : null}
+                      {((creationMode?.kind === "movement" && creationMode.sourceType === "camera" && creationMode.sourceId === camera.id) || (creationMode?.kind === "camera-pan" && creationMode.cameraId === camera.id)) ? <circle cx={camera.x} cy={camera.y} r="31" fill="none" stroke="var(--field-primary)" strokeWidth="1.5" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null}
                       <PointerHitCircle cx={camera.x} cy={camera.y} onPointerDown={(event) => beginPendingMove(event, { kind: "camera", id: camera.id })} />
                       <g transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none">
                         <rect x={camera.x - 15} y={camera.y - 11} width="27" height="22" rx="2" fill="var(--field-text)" />
@@ -1556,6 +2034,131 @@ export function ShotOverheadEditor({
             <button type="button" onClick={() => void persistAndClose()} disabled={controlsLocked} className="flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--radius-control)] border border-field-primary bg-field-primary px-4 text-sm font-bold text-field-accent-foreground hover:bg-field-secondary disabled:opacity-50"><Save className="h-4 w-4" /> {isFinalizing ? "저장 중" : "저장"}</button>
           </footer>
         ) : <footer className="shrink-0 border-t border-field-border bg-field-panel px-4 py-2 text-center text-xs text-field-muted">{persistenceEnabled ? "화면을 넓히면 다시 편집할 수 있습니다. 기존 변경사항은 안전하게 저장됩니다." : "이 부감도는 읽기 전용입니다."}</footer>}
+
+        {contextMenu && contextMenuPosition ? (
+          <div
+            ref={contextMenuRef}
+            role="menu"
+            aria-label="부감도 오브젝트 편집"
+            tabIndex={-1}
+            data-context-menu-focus
+            data-shot-overhead-context-menu
+            className="absolute z-[120] flex max-h-[420px] w-[284px] flex-col gap-2 overflow-y-auto rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-2 text-field-text shadow-dialog outline-none"
+            style={contextMenuPosition}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                closeObjectContextMenu(true);
+                return;
+              }
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                const controls = Array.from(
+                  contextMenuRef.current?.querySelectorAll<HTMLElement>('input, button:not(:disabled)') ?? []
+                );
+                if (controls.length === 0) return;
+                event.preventDefault();
+                const currentIndex = controls.indexOf(document.activeElement as HTMLElement);
+                const direction = event.key === "ArrowDown" ? 1 : -1;
+                const nextIndex = currentIndex < 0
+                  ? 0
+                  : (currentIndex + direction + controls.length) % controls.length;
+                controls[nextIndex]?.focus({ preventScroll: true });
+              }
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-field-border pb-1.5">
+              <p className="text-xs font-extrabold text-field-text">
+                {contextPerson ? "인물 편집" : contextCamera ? "카메라 편집" : contextPath ? "무빙 편집" : contextLine ? "선 편집" : contextShape ? "공간 편집" : "오브젝트 편집"}
+              </p>
+              <button type="button" onClick={() => closeObjectContextMenu(true)} className="grid h-8 w-8 place-items-center rounded-[var(--radius-control)] text-field-muted hover:bg-field-hover hover:text-field-text" aria-label="편집 메뉴 닫기"><X className="h-4 w-4" /></button>
+            </div>
+
+            {(contextPerson || contextCamera || contextShape) ? (
+              <form className="flex items-end gap-1.5" onSubmit={(event) => { event.preventDefault(); applyContextMenuLabel(); }}>
+                <label className="min-w-0 flex-1 text-[10px] font-semibold text-field-muted">
+                  이름
+                  <input
+                    value={contextMenu.labelDraft}
+                    onChange={(event) => setContextMenu((current) => current ? { ...current, labelDraft: event.target.value } : current)}
+                    className="mt-1 h-9 w-full rounded-[var(--radius-control)] border border-field-border bg-field-input px-2 text-sm text-field-text outline-none focus:border-field-primary"
+                  />
+                </label>
+                <button type="submit" className="h-9 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-xs font-bold hover:bg-field-hover">적용</button>
+              </form>
+            ) : null}
+
+            {contextPerson ? (
+              <div>
+                <p className="mb-1 text-[10px] font-semibold text-field-muted">색상</p>
+                <div className="grid grid-cols-8 gap-1">
+                  {SHOT_OVERHEAD_PERSON_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      role="menuitem"
+                      aria-label={`${color} 색상`}
+                      aria-pressed={contextPerson.color === color}
+                      onClick={() => commitDiagram((current) => ({
+                        ...current,
+                        people: current.people.map((person) => person.id === contextPerson.id ? { ...person, color } : person)
+                      }))}
+                      className={cn("h-7 rounded-sm border-2", contextPerson.color === color ? "border-field-primary" : "border-transparent")}
+                      style={{ backgroundColor: SHOT_OVERHEAD_PERSON_COLOR_HEX[color] }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {(contextPerson || contextCamera) ? (
+              <>
+                <button type="button" role="menuitem" onClick={() => beginMovementMode({ kind: contextPerson ? "person" : "camera", id: (contextPerson ?? contextCamera)!.id })} className="h-9 rounded-[var(--radius-control)] border border-field-primary/60 bg-field-primary/10 px-3 text-left text-xs font-bold text-field-primary hover:bg-field-primary/15">무빙 만들기 · 다음 드래그</button>
+                {contextOwnerPaths.length > 0 ? (
+                  <div className="space-y-1 border-t border-field-border pt-1.5">
+                    <p className="text-[10px] font-semibold text-field-muted">연결된 무빙</p>
+                    {contextOwnerPaths.map((path, index) => (
+                      <div key={path.id} className="flex items-center gap-1">
+                        <button type="button" role="menuitem" onClick={() => editMovement(path.id)} className="h-8 min-w-0 flex-1 truncate rounded-[var(--radius-control)] border border-field-border bg-field-input px-2 text-left text-xs hover:bg-field-hover">무빙 {index + 1} 편집</button>
+                        <button type="button" role="menuitem" onClick={() => deleteMovement(path.id)} className="h-8 rounded-[var(--radius-control)] border border-field-danger/50 px-2 text-xs font-bold text-field-danger">삭제</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {contextCamera ? (
+              <>
+                <button type="button" role="menuitem" onClick={() => commitDiagram((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === contextCamera.id ? { ...camera, showFov: !camera.showFov } : camera) }))} className="h-9 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-left text-xs font-semibold hover:bg-field-hover">{contextCamera.showFov ? "화각 숨기기" : "화각 표시"}</button>
+                <button type="button" role="menuitem" onClick={() => beginCameraPanMode(contextCamera.id, contextCameraPan?.id)} className="h-9 rounded-[var(--radius-control)] border border-field-primary/60 bg-field-primary/10 px-3 text-left text-xs font-bold text-field-primary hover:bg-field-primary/15">{contextCameraPan ? "패닝 편집" : "패닝 설정"} · 다음 드래그</button>
+                {contextCameraPan ? <button type="button" role="menuitem" onClick={() => deleteCameraPan(contextCameraPan.id)} className="h-9 rounded-[var(--radius-control)] border border-field-danger/50 px-3 text-left text-xs font-bold text-field-danger">패닝 삭제</button> : null}
+              </>
+            ) : null}
+
+            {contextPath ? (
+              <>
+                <button type="button" role="menuitem" onClick={() => addMovementControlPoint(contextPath.id, contextMenu.world)} className="h-9 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-left text-xs font-semibold hover:bg-field-hover">포인트 추가</button>
+                <button type="button" role="menuitem" onClick={() => editMovement(contextPath.id)} className="h-9 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-left text-xs font-semibold hover:bg-field-hover">포인트 편집</button>
+                {contextPath.points.length > 2 ? <button type="button" role="menuitem" onClick={() => resetMovementStraight(contextPath.id)} className="h-9 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-left text-xs font-semibold hover:bg-field-hover">직선으로 초기화</button> : null}
+                <button type="button" role="menuitem" onClick={() => deleteMovement(contextPath.id)} className="h-9 rounded-[var(--radius-control)] border border-field-danger/50 px-3 text-left text-xs font-bold text-field-danger">무빙 삭제</button>
+              </>
+            ) : null}
+
+            {contextLine ? (
+              <div className="flex gap-1">
+                {(["black", "red"] as const).map((color) => <button key={color} type="button" role="menuitem" aria-pressed={contextLine.color === color} onClick={() => commitDiagram((current) => ({ ...current, lines: current.lines.map((line) => line.id === contextLine.id ? { ...line, color } : line) }))} className={cn("h-9 flex-1 rounded-[var(--radius-control)] border px-2 text-xs font-bold", contextLine.color === color ? "border-field-primary text-field-primary" : "border-field-border")}>{color === "black" ? "검정" : "빨강"}</button>)}
+              </div>
+            ) : null}
+
+            {contextSelection && contextSelection.kind !== "path" ? <button type="button" role="menuitem" onClick={() => removeSelection(contextSelection)} className="h-9 rounded-[var(--radius-control)] border border-field-danger/50 px-3 text-left text-xs font-bold text-field-danger">오브젝트 삭제</button> : null}
+          </div>
+        ) : null}
       </section>
     </div>
   );

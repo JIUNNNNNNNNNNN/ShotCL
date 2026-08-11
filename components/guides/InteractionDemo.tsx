@@ -116,8 +116,16 @@ function renderDemo(
       return <CropRatioDemo />;
     case "crop-scene-cut":
       return <CropSceneCutDemo />;
-    case "actor-movement":
-      return <ActorMovementDemo durationMs={durationMs} />;
+    case "object-drag":
+      return <ObjectDragDemo />;
+    case "object-context-menu":
+      return <ObjectContextMenuDemo longPress={typeof durationMs === "number"} />;
+    case "movement-create":
+      return <MovementCreateDemo />;
+    case "movement-curve":
+      return <MovementCurveDemo longPress={typeof durationMs === "number"} />;
+    case "camera-pan":
+      return <CameraPanDemo longPress={typeof durationMs === "number"} />;
     case "tap":
       return (
         <>
@@ -129,35 +137,104 @@ function renderDemo(
   }
 }
 
-function ActorMovementDemo({ durationMs }: { durationMs?: number }) {
+function ObjectDragDemo() {
   return (
-    <span className="interaction-demo__actor-stage">
-      <span className="interaction-demo__actor-marker">
-        <span className="interaction-demo__actor-head" />
-        <span className="interaction-demo__actor-body" />
+    <span className="interaction-demo__diagram-stage interaction-demo__object-drag-stage">
+      <DiagramActor className="interaction-demo__diagram-object--source" />
+      <DiagramActor className="interaction-demo__diagram-object--destination" ghost />
+      <span className="interaction-demo__diagram-drag-track" />
+      <Finger />
+      <span className="interaction-demo__diagram-caption">바로 끌기 · 위치 이동</span>
+    </span>
+  );
+}
+
+function ObjectContextMenuDemo({ longPress }: { longPress: boolean }) {
+  return (
+    <span className="interaction-demo__diagram-stage interaction-demo__object-menu-stage">
+      <DiagramActor className="interaction-demo__diagram-object--source" />
+      {longPress ? <Finger withRing /> : <MousePointer rightClick />}
+      <span className="interaction-demo__object-menu">
+        <strong>이름 · 색상</strong>
+        <span>무빙 만들기</span>
       </span>
+    </span>
+  );
+}
+
+function MovementCreateDemo() {
+  return (
+    <span className="interaction-demo__diagram-stage interaction-demo__movement-create-stage">
+      <DiagramActor className="interaction-demo__diagram-object--source" />
       <svg
-        className="interaction-demo__actor-route"
+        className="interaction-demo__movement-route"
         viewBox="0 0 150 42"
         preserveAspectRatio="none"
         focusable="false"
       >
         <path
-          className="interaction-demo__actor-route-line"
-          d="M 5 28 C 48 28, 83 8, 137 12"
+          className="interaction-demo__movement-route-line"
+          d="M 5 28 L 137 12"
           pathLength="1"
         />
         <path
-          className="interaction-demo__actor-route-head"
+          className="interaction-demo__movement-route-head"
           d="M 127 5 L 141 12 L 128 20"
         />
       </svg>
-      <span className="interaction-demo__actor-destination" />
-      <span className="interaction-demo__actor-legend">
-        <span>짧게 끌기 · 위치</span>
-        <strong>길게 누른 뒤 끌기 · 무빙</strong>
-      </span>
-      <Finger withRing={Boolean(durationMs)} />
+      <DiagramActor className="interaction-demo__diagram-object--destination" ghost />
+      <Finger />
+      <span className="interaction-demo__diagram-caption">메뉴 → 무빙 만들기 → 목적지까지 끌기</span>
+    </span>
+  );
+}
+
+function MovementCurveDemo({ longPress }: { longPress: boolean }) {
+  return (
+    <span className="interaction-demo__diagram-stage interaction-demo__movement-curve-stage">
+      <svg className="interaction-demo__curve-route" viewBox="0 0 190 58" preserveAspectRatio="none" focusable="false">
+        <path className="interaction-demo__curve-route-line interaction-demo__curve-route-line--straight" d="M 8 42 L 178 20" />
+        <path className="interaction-demo__curve-route-line interaction-demo__curve-route-line--curved" d="M 8 42 Q 91 1 178 20" />
+        <path className="interaction-demo__curve-route-head" d="M 166 14 L 181 20 L 168 29" />
+      </svg>
+      <span className="interaction-demo__curve-control" />
+      {longPress ? <Finger withRing /> : <MousePointer rightClick />}
+      <span className="interaction-demo__curve-action">포인트 추가 · 끌어 곡선 편집</span>
+    </span>
+  );
+}
+
+function CameraPanDemo({ longPress }: { longPress: boolean }) {
+  return (
+    <span className="interaction-demo__diagram-stage interaction-demo__camera-pan-stage">
+      <DiagramCamera className="interaction-demo__diagram-camera--source" />
+      <span className="interaction-demo__camera-move-line" />
+      <DiagramCamera className="interaction-demo__diagram-camera--ghost" />
+      <svg className="interaction-demo__camera-pan-arc" viewBox="0 0 72 62" focusable="false">
+        <path className="interaction-demo__camera-pan-line" d="M 13 47 A 28 28 0 0 1 56 13" />
+        <path className="interaction-demo__camera-pan-head" d="M 48 9 L 59 12 L 55 23" />
+      </svg>
+      <span className="interaction-demo__camera-move-key">MOVE · 위치 변화</span>
+      <span className="interaction-demo__camera-pan-key">PAN · 제자리 회전</span>
+      {longPress ? <Finger withRing /> : <MousePointer rightClick />}
+    </span>
+  );
+}
+
+function DiagramActor({ className = "", ghost = false }: { className?: string; ghost?: boolean }) {
+  return (
+    <span className={`interaction-demo__diagram-object interaction-demo__diagram-actor ${ghost ? "is-ghost" : ""} ${className}`.trim()}>
+      <span className="interaction-demo__diagram-actor-head" />
+      <span className="interaction-demo__diagram-actor-body" />
+    </span>
+  );
+}
+
+function DiagramCamera({ className = "" }: { className?: string }) {
+  return (
+    <span className={`interaction-demo__diagram-camera ${className}`.trim()}>
+      <span className="interaction-demo__diagram-camera-body" />
+      <span className="interaction-demo__diagram-camera-lens" />
     </span>
   );
 }

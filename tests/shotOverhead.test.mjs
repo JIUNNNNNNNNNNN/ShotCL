@@ -3,8 +3,11 @@ import test from "node:test";
 import {
   cloneShotOverheadDiagram,
   createEmptyShotOverheadDiagram,
+  getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
   getShotOverheadGridWorldSize,
+  getShotOverheadMovementGeometry,
+  getShotOverheadMovementPoints,
   hasShotOverheadContent,
   LEGACY_OVERHEAD_CANVAS_HEIGHT,
   LEGACY_OVERHEAD_CANVAS_WIDTH,
@@ -15,6 +18,7 @@ import {
 test("new diagrams use compact dimensions while missing legacy canvas keeps the old fallback", () => {
   const empty = createEmptyShotOverheadDiagram();
   assert.deepEqual(empty.canvas, { width: 960, height: 640 });
+  assert.deepEqual(empty.cameraPans, []);
   assert.equal(OVERHEAD_GRID_SIZE, 24);
   assert.equal(getShotOverheadGridWorldSize(1), 24);
   assert.equal(getShotOverheadGridWorldSize(0.625) * 0.625, 24);
@@ -103,6 +107,7 @@ test("legacy v1 diagrams keep their geometry and receive additive safe defaults"
     label: "거실"
   });
   assert.deepEqual(normalized.movementPaths, []);
+  assert.deepEqual(normalized.cameraPans, []);
 });
 
 test("person color, camera FOV, polyline rooms, and movement paths survive normalization", () => {
@@ -140,7 +145,14 @@ test("person color, camera FOV, polyline rooms, and movement paths survive norma
         sourceId: "camera",
         points: [{ x: 300, y: 300 }, { x: 420, y: 300 }]
       }
-    ]
+    ],
+    cameraPans: [{
+      id: "camera-pan",
+      cameraId: "camera",
+      startRotation: 45,
+      finalRotation: 135,
+      direction: "clockwise"
+    }]
   });
 
   assert.ok(normalized);
@@ -167,15 +179,24 @@ test("person color, camera FOV, polyline rooms, and movement paths survive norma
       id: "actor-path",
       sourceType: "person",
       sourceId: "actor",
+      ownerAnchored: true,
       points: [{ x: 100, y: 100 }, { x: 150, y: 180 }, { x: 260, y: 220 }]
     },
     {
       id: "camera-path",
       sourceType: "camera",
       sourceId: "camera",
+      ownerAnchored: true,
       points: [{ x: 300, y: 300 }, { x: 420, y: 300 }]
     }
   ]);
+  assert.deepEqual(normalized.cameraPans, [{
+    id: "camera-pan",
+    cameraId: "camera",
+    startRotation: 45,
+    finalRotation: 135,
+    direction: "clockwise"
+  }]);
 });
 
 test("malformed extended objects are discarded without damaging valid legacy content", () => {
@@ -188,8 +209,10 @@ test("malformed extended objects are discarded without damaging valid legacy con
     shapes: [{ id: "bad-room", type: "polyline", points: [{ x: 1, y: 2 }], closed: false }],
     movementPaths: [
       { id: "missing-source", sourceType: "person", sourceId: "", points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] },
-      { id: "too-short", sourceType: "camera", sourceId: "camera", points: [{ x: 0, y: 0 }] }
-    ]
+      { id: "too-short", sourceType: "camera", sourceId: "camera", points: [{ x: 0, y: 0 }] },
+      { id: "orphan", sourceType: "camera", sourceId: "missing-camera", points: [{ x: 0, y: 0 }, { x: 10, y: 10 }] }
+    ],
+    cameraPans: [{ id: "orphan-pan", cameraId: "missing-camera", startRotation: 0, finalRotation: 90 }]
   });
 
   assert.ok(normalized);
@@ -197,6 +220,7 @@ test("malformed extended objects are discarded without damaging valid legacy con
   assert.equal(normalized.lines.length, 1);
   assert.deepEqual(normalized.shapes, []);
   assert.deepEqual(normalized.movementPaths, []);
+  assert.deepEqual(normalized.cameraPans, []);
 });
 
 test("empty documents expose the extended arrays and movement-only content is discoverable", () => {
@@ -219,6 +243,7 @@ test("empty documents expose the extended arrays and movement-only content is di
 test("diagram clones do not share nested point arrays", () => {
   const original = normalizeShotOverheadDiagram({
     ...createEmptyShotOverheadDiagram(),
+    people: [{ id: "actor", x: 1, y: 2, scale: 1, rotation: 0, label: "A", color: "blue" }],
     shapes: [{
       id: "room",
       type: "polyline",
@@ -241,4 +266,106 @@ test("diagram clones do not share nested point arrays", () => {
 
   assert.equal(original.shapes[0].points[0].x, 10);
   assert.equal(original.movementPaths[0].points[0].y, 2);
+});
+
+test("movement starts derive from the owner while controls and endpoint remain in world coordinates", () => {
+  const normalized = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    people: [{ id: "actor", x: 140, y: 160, scale: 1, rotation: 15, label: "A", color: "blue" }],
+    movementPaths: [{
+      id: "legacy-curve",
+      sourceType: "person",
+      sourceId: "actor",
+      points: [{ x: 10, y: 20 }, { x: 260, y: 80 }, { x: 420, y: 260 }]
+    }]
+  });
+  assert.ok(normalized);
+  assert.equal(normalized.movementPaths[0].ownerAnchored, true);
+  assert.deepEqual(normalized.movementPaths[0].points, [
+    { x: 140, y: 160 },
+    { x: 260, y: 80 },
+    { x: 420, y: 260 }
+  ]);
+
+  const relocated = {
+    ...normalized,
+    people: normalized.people.map((person) => ({ ...person, x: 200, y: 190 }))
+  };
+  assert.deepEqual(getShotOverheadMovementPoints(relocated, normalized.movementPaths[0]), [
+    { x: 200, y: 190 },
+    { x: 260, y: 80 },
+    { x: 420, y: 260 }
+  ]);
+  const geometry = getShotOverheadMovementGeometry(relocated, normalized.movementPaths[0]);
+  assert.ok(geometry);
+  assert.match(geometry.pathData, /^M 200 190 C /);
+  assert.match(geometry.pathData, / 260 80 C /);
+  assert.match(geometry.pathData, / 420 260$/);
+  assert.deepEqual(geometry.end, { x: 420, y: 260 });
+  assert.equal(Number.isFinite(geometry.endTangentAngle), true);
+});
+
+test("legacy two-point movement remains a straight owner-linked path", () => {
+  const diagram = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    cameras: [{ id: "camera", x: 90, y: 120, rotation: 0, label: "CAM", showFov: true }],
+    movementPaths: [{
+      id: "legacy-straight",
+      sourceType: "camera",
+      sourceId: "camera",
+      points: [{ x: 20, y: 30 }, { x: 300, y: 240 }]
+    }]
+  });
+  assert.ok(diagram);
+  const geometry = getShotOverheadMovementGeometry(diagram, diagram.movementPaths[0]);
+  assert.ok(geometry);
+  assert.equal(geometry.pathData, "M 90 120 L 300 240");
+  assert.deepEqual(geometry.end, { x: 300, y: 240 });
+});
+
+test("camera pan normalization and arc geometry preserve explicit direction", () => {
+  const diagram = normalizeShotOverheadDiagram({
+    ...createEmptyShotOverheadDiagram(),
+    cameras: [{ id: "camera", x: 300, y: 200, rotation: 0, label: "CAM", showFov: true }],
+    cameraPans: [
+      { id: "pan-right", sourceId: "camera", startRotation: 0, endRotation: 90, direction: "clockwise" },
+      { id: "pan-left", cameraId: "camera", startRotation: 0, finalRotation: 270, direction: "counterclockwise" }
+    ]
+  });
+  assert.ok(diagram);
+  assert.deepEqual(diagram.cameraPans, [
+    { id: "pan-right", cameraId: "camera", startRotation: 0, finalRotation: 90, direction: "clockwise" },
+    { id: "pan-left", cameraId: "camera", startRotation: 0, finalRotation: 270, direction: "counterclockwise" }
+  ]);
+
+  const clockwise = getShotOverheadCameraPanArc(diagram.cameras[0], diagram.cameraPans[0]);
+  assert.ok(clockwise);
+  assert.equal(clockwise.deltaDegrees, 90);
+  assert.equal(clockwise.sweep, 1);
+  assert.equal(clockwise.largeArc, 0);
+  assert.deepEqual(clockwise.start, { x: 342, y: 200 });
+  assert.ok(Math.abs(clockwise.end.x - 300) < 0.001);
+  assert.ok(Math.abs(clockwise.end.y - 242) < 0.001);
+
+  const counterclockwise = getShotOverheadCameraPanArc(diagram.cameras[0], diagram.cameraPans[1]);
+  assert.ok(counterclockwise);
+  assert.equal(counterclockwise.deltaDegrees, -90);
+  assert.equal(counterclockwise.sweep, 0);
+  assert.ok(Math.abs(counterclockwise.end.x - 300) < 0.001);
+  assert.ok(Math.abs(counterclockwise.end.y - 158) < 0.001);
+});
+
+test("camera-only pan counts as diagram content and follows camera relocation", () => {
+  const empty = createEmptyShotOverheadDiagram();
+  const diagram = {
+    ...empty,
+    cameras: [{ id: "camera", x: 100, y: 120, rotation: 15, label: "CAM", showFov: true }],
+    cameraPans: [{ id: "pan", cameraId: "camera", startRotation: 15, finalRotation: 120, direction: "clockwise" }]
+  };
+  assert.equal(hasShotOverheadContent(diagram), true);
+  const first = getShotOverheadCameraPanArc(diagram.cameras[0], diagram.cameraPans[0]);
+  const moved = getShotOverheadCameraPanArc({ ...diagram.cameras[0], x: 180, y: 210 }, diagram.cameraPans[0]);
+  assert.ok(first && moved);
+  assert.equal(moved.center.x - first.center.x, 80);
+  assert.equal(moved.center.y - first.center.y, 90);
 });

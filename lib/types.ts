@@ -185,7 +185,24 @@ export type ShotOverheadMovementPath = {
   id: string;
   sourceType: "person" | "camera";
   sourceId: string;
+  /**
+   * The first point is a backwards-compatible owner-position cache. Renderers
+   * derive it from sourceId so moving the owner does not move control/end
+   * points that are stored in world coordinates.
+   */
+  ownerAnchored?: true;
   points: ShotOverheadPoint[];
+};
+
+export type ShotOverheadCameraPanDirection = "clockwise" | "counterclockwise";
+
+/** Camera rotation at one position; this is intentionally separate from movement. */
+export type ShotOverheadCameraPan = {
+  id: string;
+  cameraId: string;
+  startRotation: number;
+  finalRotation: number;
+  direction: ShotOverheadCameraPanDirection;
 };
 
 export type ShotOverheadDiagram = {
@@ -199,6 +216,7 @@ export type ShotOverheadDiagram = {
   lines: ShotOverheadLine[];
   shapes: ShotOverheadShape[];
   movementPaths: ShotOverheadMovementPath[];
+  cameraPans: ShotOverheadCameraPan[];
 };
 
 export type Shot = {

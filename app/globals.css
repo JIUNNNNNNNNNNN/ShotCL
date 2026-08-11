@@ -4095,16 +4095,14 @@ button {
   left: 82px;
 }
 
-.interaction-demo__actor-stage {
+.interaction-demo__diagram-stage {
   position: absolute;
   inset: 0;
   display: block;
 }
 
-.interaction-demo__actor-marker {
+.interaction-demo__diagram-object {
   position: absolute;
-  top: 30px;
-  left: 31px;
   z-index: 2;
   display: grid;
   width: 28px;
@@ -4116,7 +4114,12 @@ button {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 9%, transparent);
 }
 
-.interaction-demo__actor-head {
+.interaction-demo__diagram-object.is-ghost {
+  opacity: 0.26;
+  box-shadow: none;
+}
+
+.interaction-demo__diagram-actor-head {
   position: absolute;
   top: 5px;
   width: 7px;
@@ -4125,7 +4128,7 @@ button {
   border-radius: 50%;
 }
 
-.interaction-demo__actor-body {
+.interaction-demo__diagram-actor-body {
   position: absolute;
   top: 14px;
   width: 13px;
@@ -4134,21 +4137,126 @@ button {
   border-radius: 7px 7px 3px 3px;
 }
 
-.interaction-demo__actor-route {
+.interaction-demo__diagram-caption {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  border: 1px solid var(--ui-accent-border);
+  border-radius: 4px;
+  background: var(--ui-surface-3);
+  padding: 3px 6px;
+  color: var(--ui-accent);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.interaction-demo__object-drag-stage .interaction-demo__diagram-object--source {
+  top: 29px;
+  left: 31px;
+  animation: interaction-demo-object-drag var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__object-drag-stage .interaction-demo__diagram-object--destination {
+  top: 22px;
+  left: 177px;
+}
+
+.interaction-demo__diagram-drag-track {
+  position: absolute;
+  top: 43px;
+  left: 58px;
+  width: 120px;
+  border-top: 1px dashed var(--ui-accent-border);
+  transform: rotate(-3deg);
+  transform-origin: left;
+}
+
+.interaction-demo[data-type="object-drag"] .interaction-demo__finger {
+  top: 35px;
+  left: 43px;
+  z-index: 4;
+  animation-name: interaction-demo-object-drag-finger;
+}
+
+.interaction-demo__object-menu-stage .interaction-demo__diagram-object--source {
+  top: 31px;
+  left: 33px;
+}
+
+.interaction-demo__object-menu-stage .interaction-demo__pointer,
+.interaction-demo__object-menu-stage .interaction-demo__finger {
+  top: 35px;
+  left: 50px;
+  z-index: 4;
+}
+
+.interaction-demo[data-type="object-context-menu"]:not([data-duration-ms]) .interaction-demo__pointer-button--right,
+.interaction-demo[data-type="movement-curve"]:not([data-duration-ms]) .interaction-demo__pointer-button--right {
+  animation: interaction-demo-click var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__object-menu {
+  position: absolute;
+  top: 13px;
+  left: 105px;
+  display: grid;
+  width: 108px;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 5px;
+  background: var(--ui-surface-3);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 24%);
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+  animation: interaction-demo-object-menu var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__object-menu > :where(strong, span) {
+  min-height: 22px;
+  padding: 5px 8px;
+  color: var(--ui-text-secondary);
+  font-size: 8px;
+  line-height: 1.2;
+}
+
+.interaction-demo__object-menu > span {
+  border-top: 1px solid var(--ui-border-default);
+  color: var(--ui-accent);
+}
+
+.interaction-demo__movement-create-stage .interaction-demo__diagram-object--source {
+  top: 31px;
+  left: 27px;
+}
+
+.interaction-demo__movement-create-stage .interaction-demo__diagram-object--destination {
+  top: 18px;
+  left: 194px;
+  opacity: 0;
+  animation: interaction-demo-movement-ghost var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__movement-route {
   position: absolute;
   top: 23px;
-  left: 51px;
+  left: 49px;
   z-index: 1;
   width: 150px;
   height: 42px;
   overflow: visible;
   fill: none;
   opacity: 0;
-  animation: interaction-demo-actor-route var(--interaction-demo-loop) ease-in-out infinite;
+  animation: interaction-demo-movement-route var(--interaction-demo-loop) ease-in-out infinite;
 }
 
-.interaction-demo__actor-route-line,
-.interaction-demo__actor-route-head {
+.interaction-demo__movement-route-line,
+.interaction-demo__movement-route-head,
+.interaction-demo__curve-route-line,
+.interaction-demo__curve-route-head,
+.interaction-demo__camera-pan-line,
+.interaction-demo__camera-pan-head {
+  fill: none;
   vector-effect: non-scaling-stroke;
   stroke: var(--ui-accent);
   stroke-width: 2;
@@ -4156,61 +4264,180 @@ button {
   stroke-linejoin: round;
 }
 
-.interaction-demo__actor-route-line {
+.interaction-demo__movement-route-line {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: interaction-demo-actor-route-draw var(--interaction-demo-loop) ease-in-out infinite;
+  animation: interaction-demo-movement-route-draw var(--interaction-demo-loop) ease-in-out infinite;
 }
 
-.interaction-demo__actor-route-head {
+.interaction-demo__movement-route-head {
   opacity: 0;
-  animation: interaction-demo-actor-route-head var(--interaction-demo-loop) ease-in-out infinite;
+  animation: interaction-demo-movement-route-head var(--interaction-demo-loop) ease-in-out infinite;
 }
 
-.interaction-demo__actor-destination {
+.interaction-demo[data-type="movement-create"] .interaction-demo__finger {
   position: absolute;
-  top: 32px;
-  left: 194px;
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--ui-accent);
-  border-radius: 50%;
-  background: var(--ui-surface-2);
+  top: 35px;
+  left: 39px;
+  z-index: 4;
+  animation-name: interaction-demo-movement-finger;
+}
+
+.interaction-demo__movement-curve-stage .interaction-demo__pointer,
+.interaction-demo__movement-curve-stage .interaction-demo__finger {
+  position: absolute;
+  top: 35px;
+  left: 104px;
+  z-index: 4;
+}
+
+.interaction-demo__curve-route {
+  position: absolute;
+  top: 17px;
+  left: 27px;
+  width: 190px;
+  height: 58px;
+  overflow: visible;
+}
+
+.interaction-demo__curve-route-line,
+.interaction-demo__curve-route-head {
+  stroke-width: 2;
+}
+
+.interaction-demo__curve-route-line--straight {
+  animation: interaction-demo-curve-straight var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__curve-route-line--curved,
+.interaction-demo__curve-route-head {
   opacity: 0;
-  animation: interaction-demo-actor-destination var(--interaction-demo-loop) ease-in-out infinite;
+  animation: interaction-demo-curve-curved var(--interaction-demo-loop) ease-in-out infinite;
 }
 
-.interaction-demo__actor-legend {
+.interaction-demo__curve-control {
   position: absolute;
-  top: 8px;
-  right: 10px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--ui-text-muted);
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.interaction-demo__actor-legend > span,
-.interaction-demo__actor-legend > strong {
+  top: 47px;
+  left: 111px;
+  width: 9px;
+  height: 9px;
   border: 1px solid var(--ui-border-default);
-  border-radius: 3px;
+  border-radius: 50%;
+  background: var(--ui-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ui-accent) 12%, transparent);
+  opacity: 0;
+  animation: interaction-demo-curve-control var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__curve-action {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  border-color: var(--ui-accent-border);
+  border-radius: 4px;
   background: var(--ui-surface-3);
-  padding: 3px 5px;
+  padding: 3px 6px;
+  color: var(--ui-accent);
+  font-size: 8px;
+  font-weight: 800;
+  opacity: 0;
+  animation: interaction-demo-curve-action var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__diagram-camera {
+  position: absolute;
+  z-index: 4;
+  width: 30px;
+  height: 22px;
+}
+
+.interaction-demo__diagram-camera-body {
+  position: absolute;
+  inset: 3px 8px 3px 0;
+  border: 1px solid var(--ui-accent);
+  border-radius: 3px;
+  background: var(--ui-accent-soft);
+}
+
+.interaction-demo__diagram-camera-lens {
+  position: absolute;
+  top: 5px;
+  right: 0;
+  width: 10px;
+  height: 12px;
+  border: 1px solid var(--ui-accent);
+  clip-path: polygon(0 18%, 100% 0, 100% 100%, 0 82%);
+  background: var(--ui-accent-soft);
+}
+
+.interaction-demo__camera-pan-stage .interaction-demo__diagram-camera--source {
+  top: 34px;
+  left: 40px;
+}
+
+.interaction-demo__camera-pan-stage .interaction-demo__diagram-camera--ghost {
+  top: 34px;
+  left: 112px;
+  opacity: 0.24;
+}
+
+.interaction-demo__camera-move-line {
+  position: absolute;
+  top: 44px;
+  left: 68px;
+  width: 45px;
+  border-top: 1.5px dashed var(--ui-text-muted);
+}
+
+.interaction-demo__camera-pan-arc {
+  position: absolute;
+  top: 12px;
+  left: 18px;
+  width: 72px;
+  height: 62px;
+  overflow: visible;
+}
+
+.interaction-demo__camera-pan-line,
+.interaction-demo__camera-pan-head {
+  stroke-width: 2;
+  opacity: 0;
+  animation: interaction-demo-camera-pan var(--interaction-demo-loop) ease-in-out infinite;
+}
+
+.interaction-demo__camera-move-key,
+.interaction-demo__camera-pan-key {
+  position: absolute;
+  right: 9px;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 4px;
+  background: var(--ui-surface-3);
+  padding: 4px 6px;
+  color: var(--ui-text-secondary);
+  font-size: 8px;
+  font-weight: 800;
   white-space: nowrap;
 }
 
-.interaction-demo__actor-legend > strong {
+.interaction-demo__camera-move-key {
+  top: 13px;
+}
+
+.interaction-demo__camera-pan-key {
+  top: 40px;
   border-color: var(--ui-accent-border);
   color: var(--ui-accent);
 }
 
-.interaction-demo[data-type="actor-movement"] .interaction-demo__finger {
-  top: 34px;
-  left: 43px;
-  z-index: 4;
-  animation-name: interaction-demo-actor-finger;
+.interaction-demo__camera-pan-stage .interaction-demo__pointer,
+.interaction-demo__camera-pan-stage .interaction-demo__finger {
+  top: 37px;
+  left: 55px;
+  z-index: 5;
+}
+
+.interaction-demo[data-type="camera-pan"]:not([data-duration-ms]) .interaction-demo__pointer-button--right {
+  animation: interaction-demo-click var(--interaction-demo-loop) ease-in-out infinite;
 }
 
 .interaction-demo[data-type="context-scene-cut"] .interaction-demo__item {
@@ -4655,31 +4882,74 @@ button {
   46%, 68% { opacity: 1; transform: scale(1); }
 }
 
-@keyframes interaction-demo-actor-finger {
-  0%, 12%, 84%, 100% { opacity: 0; transform: translate(0, 8px); }
-  20%, 42% { opacity: 1; transform: translate(0, 0); }
-  66%, 76% { opacity: 1; transform: translate(137px, -12px); }
-  82% { opacity: 0; transform: translate(137px, -6px); }
+@keyframes interaction-demo-object-drag {
+  0%, 14%, 88%, 100% { transform: translate(0, 0); }
+  56%, 78% { transform: translate(146px, -7px); }
 }
 
-@keyframes interaction-demo-actor-route {
-  0%, 40%, 88%, 100% { opacity: 0; }
-  48%, 80% { opacity: 1; }
+@keyframes interaction-demo-object-drag-finger {
+  0%, 10%, 88%, 100% { opacity: 0; transform: translate(0, 7px); }
+  18%, 36% { opacity: 1; transform: translate(0, 0); }
+  58%, 78% { opacity: 1; transform: translate(146px, -7px); }
+  84% { opacity: 0; transform: translate(146px, -2px); }
 }
 
-@keyframes interaction-demo-actor-route-draw {
+@keyframes interaction-demo-object-menu {
+  0%, 36%, 88%, 100% { opacity: 0; transform: translateY(4px) scale(0.97); }
+  46%, 80% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes interaction-demo-movement-finger {
+  0%, 14%, 88%, 100% { opacity: 0; transform: translate(0, 7px); }
+  22%, 42% { opacity: 1; transform: translate(0, 0); }
+  66%, 80% { opacity: 1; transform: translate(145px, -13px); }
+  86% { opacity: 0; transform: translate(145px, -7px); }
+}
+
+@keyframes interaction-demo-movement-route {
+  0%, 38%, 90%, 100% { opacity: 0; }
+  46%, 84% { opacity: 1; }
+}
+
+@keyframes interaction-demo-movement-route-draw {
   0%, 40%, 100% { stroke-dashoffset: 1; }
   68%, 86% { stroke-dashoffset: 0; }
 }
 
-@keyframes interaction-demo-actor-route-head {
+@keyframes interaction-demo-movement-route-head {
   0%, 62%, 88%, 100% { opacity: 0; }
   68%, 82% { opacity: 1; }
 }
 
-@keyframes interaction-demo-actor-destination {
+@keyframes interaction-demo-movement-ghost {
   0%, 62%, 88%, 100% { opacity: 0; transform: scale(0.7); }
-  68%, 82% { opacity: 1; transform: scale(1); }
+  68%, 82% { opacity: 0.26; transform: scale(1); }
+}
+
+@keyframes interaction-demo-curve-straight {
+  0%, 42%, 88%, 100% { opacity: 1; }
+  52%, 82% { opacity: 0; }
+}
+
+@keyframes interaction-demo-curve-curved {
+  0%, 42%, 88%, 100% { opacity: 0; }
+  52%, 82% { opacity: 1; }
+}
+
+@keyframes interaction-demo-curve-control {
+  0%, 42%, 90%, 100% { opacity: 0; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(0); }
+  68%, 82% { opacity: 1; transform: translateY(-31px); }
+}
+
+@keyframes interaction-demo-curve-action {
+  0%, 34%, 88%, 100% { opacity: 0; transform: translateY(3px); }
+  44%, 80% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes interaction-demo-camera-pan {
+  0%, 38%, 88%, 100% { opacity: 0; stroke-dasharray: 80; stroke-dashoffset: 80; }
+  56%, 80% { opacity: 1; stroke-dasharray: 80; stroke-dashoffset: 0; }
 }
 
 @keyframes interaction-demo-info-action {
@@ -4992,19 +5262,40 @@ button {
     transform: scale(1);
   }
 
-  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route,
-  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route-head,
-  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-destination {
-    opacity: 1;
+  .interaction-demo[data-type="object-drag"] .interaction-demo__diagram-object--source {
+    transform: translate(146px, -7px);
   }
 
-  .interaction-demo[data-type="actor-movement"] .interaction-demo__actor-route-line {
+  .interaction-demo[data-type="object-drag"] .interaction-demo__finger,
+  .interaction-demo[data-type="movement-create"] .interaction-demo__finger {
+    opacity: 0.84;
+    transform: translate(145px, -13px);
+  }
+
+  .interaction-demo[data-type="object-context-menu"] .interaction-demo__object-menu,
+  .interaction-demo[data-type="movement-create"] .interaction-demo__movement-route,
+  .interaction-demo[data-type="movement-create"] .interaction-demo__movement-route-head,
+  .interaction-demo[data-type="movement-create"] .interaction-demo__diagram-object--destination,
+  .interaction-demo[data-type="movement-curve"] .interaction-demo__curve-action,
+  .interaction-demo[data-type="movement-curve"] .interaction-demo__curve-control,
+  .interaction-demo[data-type="movement-curve"] .interaction-demo__curve-route-line--curved,
+  .interaction-demo[data-type="movement-curve"] .interaction-demo__curve-route-head,
+  .interaction-demo[data-type="camera-pan"] .interaction-demo__camera-pan-line,
+  .interaction-demo[data-type="camera-pan"] .interaction-demo__camera-pan-head {
+    opacity: 1;
+    transform: none;
+  }
+
+  .interaction-demo[data-type="movement-create"] .interaction-demo__movement-route-line {
     stroke-dashoffset: 0;
   }
 
-  .interaction-demo[data-type="actor-movement"] .interaction-demo__finger {
-    opacity: 0.84;
-    transform: translate(137px, -12px);
+  .interaction-demo[data-type="movement-create"] .interaction-demo__diagram-object--destination {
+    opacity: 0.26;
+  }
+
+  .interaction-demo[data-type="movement-curve"] .interaction-demo__curve-route-line--straight {
+    opacity: 0;
   }
 
   .interaction-demo__info-action,

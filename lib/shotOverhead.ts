@@ -1,5 +1,7 @@
 import type {
   ShotOverheadCamera,
+  ShotOverheadCameraPan,
+  ShotOverheadCameraPanDirection,
   ShotOverheadDiagram,
   ShotOverheadLine,
   ShotOverheadMovementPath,
@@ -19,6 +21,7 @@ export const OVERHEAD_GRID_SIZE = 24;
 export const SHOT_OVERHEAD_FOV_NEAR_OFFSET = 10;
 export const SHOT_OVERHEAD_FOV_FAR_OFFSET = 115;
 export const SHOT_OVERHEAD_FOV_HALF_WIDTH = 48;
+export const SHOT_OVERHEAD_CAMERA_PAN_RADIUS = 42;
 export const SHOT_OVERHEAD_PERSON_COLORS = [
   "blue",
   "red",
@@ -44,6 +47,26 @@ export const SHOT_OVERHEAD_PERSON_COLOR_HEX: Record<ShotOverheadPersonColor, str
 export type ShotOverheadFovRay = {
   start: ShotOverheadPoint;
   end: ShotOverheadPoint;
+};
+
+export type ShotOverheadMovementGeometry = {
+  points: ShotOverheadPoint[];
+  pathData: string;
+  start: ShotOverheadPoint;
+  end: ShotOverheadPoint;
+  endTangentAngle: number;
+};
+
+export type ShotOverheadCameraPanArc = {
+  center: ShotOverheadPoint;
+  start: ShotOverheadPoint;
+  end: ShotOverheadPoint;
+  labelPoint: ShotOverheadPoint;
+  radius: number;
+  deltaDegrees: number;
+  largeArc: 0 | 1;
+  sweep: 0 | 1;
+  pathData: string;
 };
 
 export function getShotOverheadGridWorldSize(viewportScale: number) {
@@ -82,6 +105,109 @@ export function getShotOverheadFovRays(
       }
     }
   ];
+}
+
+/** Resolve the linked owner without copying it into the movement entity. */
+export function getShotOverheadMovementOwner(
+  diagram: Pick<ShotOverheadDiagram, "people" | "cameras">,
+  path: Pick<ShotOverheadMovementPath, "sourceType" | "sourceId">
+) {
+  return path.sourceType === "person"
+    ? diagram.people.find((person) => person.id === path.sourceId) ?? null
+    : diagram.cameras.find((camera) => camera.id === path.sourceId) ?? null;
+}
+
+/**
+ * Movement JSON retains its old points array, but point zero is an owner anchor
+ * rather than an independently editable world point. Controls and the endpoint
+ * stay in world coordinates when the actor/camera is relocated.
+ */
+export function getShotOverheadMovementPoints(
+  diagram: Pick<ShotOverheadDiagram, "people" | "cameras">,
+  path: Pick<ShotOverheadMovementPath, "sourceType" | "sourceId" | "points">
+): ShotOverheadPoint[] {
+  const owner = getShotOverheadMovementOwner(diagram, path);
+  if (!owner || path.points.length < 2) return [];
+  return [
+    { x: owner.x, y: owner.y },
+    ...path.points.slice(1).map((point) => ({ x: point.x, y: point.y }))
+  ];
+}
+
+/** Build a waypoint-interpolating Catmull-Rom curve as native cubic SVG. */
+export function getShotOverheadMovementGeometry(
+  diagram: Pick<ShotOverheadDiagram, "people" | "cameras">,
+  path: ShotOverheadMovementPath
+): ShotOverheadMovementGeometry | null {
+  const points = getShotOverheadMovementPoints(diagram, path);
+  if (points.length < 2) return null;
+  const start = points[0];
+  const end = points[points.length - 1];
+  if (points.length === 2) {
+    return {
+      points,
+      pathData: `M ${svgPoint(start)} L ${svgPoint(end)}`,
+      start,
+      end,
+      endTangentAngle: pointAngle(start, end)
+    };
+  }
+
+  const commands = [`M ${svgPoint(start)}`];
+  let finalControl = points[points.length - 2];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = points[Math.max(0, index - 1)];
+    const current = points[index];
+    const next = points[index + 1];
+    const after = points[Math.min(points.length - 1, index + 2)];
+    const controlOne = {
+      x: current.x + (next.x - previous.x) / 6,
+      y: current.y + (next.y - previous.y) / 6
+    };
+    const controlTwo = {
+      x: next.x - (after.x - current.x) / 6,
+      y: next.y - (after.y - current.y) / 6
+    };
+    finalControl = controlTwo;
+    commands.push(`C ${svgPoint(controlOne)} ${svgPoint(controlTwo)} ${svgPoint(next)}`);
+  }
+  return {
+    points,
+    pathData: commands.join(" "),
+    start,
+    end,
+    endTangentAngle: pointAngle(finalControl, end, points)
+  };
+}
+
+/** Camera-local directed rotation rendered as a small open arc. */
+export function getShotOverheadCameraPanArc(
+  camera: Pick<ShotOverheadCamera, "x" | "y">,
+  pan: Pick<ShotOverheadCameraPan, "startRotation" | "finalRotation" | "direction">,
+  radius = SHOT_OVERHEAD_CAMERA_PAN_RADIUS
+): ShotOverheadCameraPanArc | null {
+  const safeRadius = Number.isFinite(radius) ? Math.max(8, radius) : SHOT_OVERHEAD_CAMERA_PAN_RADIUS;
+  const startRotation = normalizedRotation(pan.startRotation);
+  const finalRotation = normalizedRotation(pan.finalRotation);
+  const deltaDegrees = directedRotationDelta(startRotation, finalRotation, pan.direction);
+  if (Math.abs(deltaDegrees) < 0.001) return null;
+  const center = { x: camera.x, y: camera.y };
+  const start = pointOnCircle(center, safeRadius, startRotation);
+  const end = pointOnCircle(center, safeRadius, finalRotation);
+  const labelPoint = pointOnCircle(center, safeRadius + 15, startRotation + deltaDegrees / 2);
+  const largeArc: 0 | 1 = Math.abs(deltaDegrees) > 180 ? 1 : 0;
+  const sweep: 0 | 1 = deltaDegrees > 0 ? 1 : 0;
+  return {
+    center,
+    start,
+    end,
+    labelPoint,
+    radius: safeRadius,
+    deltaDegrees,
+    largeArc,
+    sweep,
+    pathData: `M ${svgPoint(start)} A ${svgNumber(safeRadius)} ${svgNumber(safeRadius)} 0 ${largeArc} ${sweep} ${svgPoint(end)}`
+  };
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -190,7 +316,12 @@ function normalizeShape(value: unknown, index: number): ShotOverheadShape | null
   };
 }
 
-function normalizeMovementPath(value: unknown, index: number): ShotOverheadMovementPath | null {
+function normalizeMovementPath(
+  value: unknown,
+  index: number,
+  peopleById: Map<string, ShotOverheadPerson>,
+  camerasById: Map<string, ShotOverheadCamera>
+): ShotOverheadMovementPath | null {
   if (!isRecord(value)) return null;
   const sourceType = value.sourceType === "person"
     ? "person"
@@ -199,12 +330,48 @@ function normalizeMovementPath(value: unknown, index: number): ShotOverheadMovem
       : null;
   const sourceId = text(value.sourceId).trim();
   const points = normalizePoints(value.points);
-  if (!sourceType || !sourceId || points.length < 2) return null;
+  const owner = sourceType === "person"
+    ? peopleById.get(sourceId)
+    : sourceType === "camera"
+      ? camerasById.get(sourceId)
+      : null;
+  // An orphan cannot provide a derived start or a meaningful endpoint ghost.
+  if (!sourceType || !sourceId || !owner || points.length < 2) return null;
   return {
     id: text(value.id, `movement-${index + 1}`),
     sourceType,
     sourceId,
-    points
+    ownerAnchored: true,
+    points: [{ x: owner.x, y: owner.y }, ...points.slice(1)]
+  };
+}
+
+function normalizeCameraPan(
+  value: unknown,
+  index: number,
+  camerasById: Map<string, ShotOverheadCamera>
+): ShotOverheadCameraPan | null {
+  if (!isRecord(value)) return null;
+  const cameraId = text(value.cameraId || value.sourceId).trim();
+  const camera = camerasById.get(cameraId);
+  if (!camera) return null;
+  const startRotation = normalizedRotation(
+    isFiniteNumber(value.startRotation) ? value.startRotation : camera.rotation
+  );
+  const finalRotation = normalizedRotation(
+    isFiniteNumber(value.finalRotation)
+      ? value.finalRotation
+      : isFiniteNumber(value.endRotation)
+        ? value.endRotation
+        : startRotation
+  );
+  const direction = normalizePanDirection(value.direction, startRotation, finalRotation);
+  return {
+    id: text(value.id, `camera-pan-${index + 1}`),
+    cameraId,
+    startRotation,
+    finalRotation,
+    direction
   };
 }
 
@@ -225,7 +392,8 @@ export function createEmptyShotOverheadDiagram(): ShotOverheadDiagram {
     cameras: [],
     lines: [],
     shapes: [],
-    movementPaths: []
+    movementPaths: [],
+    cameraPans: []
   };
 }
 
@@ -234,17 +402,28 @@ export function normalizeShotOverheadDiagram(value: unknown): ShotOverheadDiagra
   if (!isRecord(value)) return null;
 
   const canvas = isRecord(value.canvas) ? value.canvas : {};
+  const people = normalizeArray(value.people, normalizePerson);
+  const cameras = normalizeArray(value.cameras, normalizeCamera);
+  const peopleById = new Map(people.map((person) => [person.id, person]));
+  const camerasById = new Map(cameras.map((camera) => [camera.id, camera]));
   return {
     version: 1,
     canvas: {
       width: Math.max(320, finiteNumber(canvas.width, LEGACY_OVERHEAD_CANVAS_WIDTH)),
       height: Math.max(240, finiteNumber(canvas.height, LEGACY_OVERHEAD_CANVAS_HEIGHT))
     },
-    people: normalizeArray(value.people, normalizePerson),
-    cameras: normalizeArray(value.cameras, normalizeCamera),
+    people,
+    cameras,
     lines: normalizeArray(value.lines, normalizeLine),
     shapes: normalizeArray(value.shapes, normalizeShape),
-    movementPaths: normalizeArray(value.movementPaths, normalizeMovementPath)
+    movementPaths: normalizeArray(
+      value.movementPaths,
+      (item, index) => normalizeMovementPath(item, index, peopleById, camerasById)
+    ),
+    cameraPans: normalizeArray(
+      value.cameraPans,
+      (item, index) => normalizeCameraPan(item, index, camerasById)
+    )
   };
 }
 
@@ -261,5 +440,63 @@ export function hasShotOverheadContent(diagram: ShotOverheadDiagram | null | und
     + diagram.cameras.length
     + diagram.lines.length
     + diagram.shapes.length
-    + (diagram.movementPaths?.length ?? 0) > 0;
+    + (diagram.movementPaths?.length ?? 0)
+    + (diagram.cameraPans?.length ?? 0) > 0;
+}
+
+function normalizePanDirection(
+  value: unknown,
+  startRotation: number,
+  finalRotation: number
+): ShotOverheadCameraPanDirection {
+  if (value === "clockwise" || value === "counterclockwise") return value;
+  const clockwiseDelta = positiveAngle(finalRotation - startRotation);
+  return clockwiseDelta <= 180 ? "clockwise" : "counterclockwise";
+}
+
+function directedRotationDelta(
+  startRotation: number,
+  finalRotation: number,
+  direction: ShotOverheadCameraPanDirection
+) {
+  return direction === "clockwise"
+    ? positiveAngle(finalRotation - startRotation)
+    : -positiveAngle(startRotation - finalRotation);
+}
+
+function positiveAngle(value: number) {
+  return ((value % 360) + 360) % 360;
+}
+
+function pointOnCircle(center: ShotOverheadPoint, radius: number, rotation: number) {
+  const radians = rotation * Math.PI / 180;
+  return {
+    x: center.x + Math.cos(radians) * radius,
+    y: center.y + Math.sin(radians) * radius
+  };
+}
+
+function pointAngle(
+  from: ShotOverheadPoint,
+  to: ShotOverheadPoint,
+  fallbackPoints: ShotOverheadPoint[] = []
+) {
+  let dx = to.x - from.x;
+  let dy = to.y - from.y;
+  if (Math.hypot(dx, dy) < 0.001) {
+    for (let index = fallbackPoints.length - 2; index >= 0; index -= 1) {
+      dx = to.x - fallbackPoints[index].x;
+      dy = to.y - fallbackPoints[index].y;
+      if (Math.hypot(dx, dy) >= 0.001) break;
+    }
+  }
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+function svgPoint(point: ShotOverheadPoint) {
+  return `${svgNumber(point.x)} ${svgNumber(point.y)}`;
+}
+
+function svgNumber(value: number) {
+  return String(Number(value.toFixed(3)));
 }

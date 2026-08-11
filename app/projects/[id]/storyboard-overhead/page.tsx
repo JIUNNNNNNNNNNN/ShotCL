@@ -4271,7 +4271,7 @@ export default function ProjectStoryboardOverheadPage() {
                 ) : null}
                 {activeType !== "storyboard" && !supportsDiagramEditing ? (
                   <span className="self-center text-[11px] text-field-muted">
-                    직접 제작·편집은 태블릿 또는 웹에서 지원됩니다.
+                    직접 제작·편집에는 세로 320×480 또는 가로 640×360 이상 화면이 필요합니다.
                   </span>
                 ) : null}
                 {selectedArchiveType ? (
