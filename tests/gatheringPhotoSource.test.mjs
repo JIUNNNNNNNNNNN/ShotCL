@@ -73,6 +73,7 @@ test("only a moving action drawer delays the source sheet", () => {
     triggeredFromActionDrawer: false,
     reducedMotion: false
   }), 0);
+  assert.match(chooserSource, /options\?\.origin === "card"/u);
 });
 
 test("camera is single rear capture and album preserves multiple selection without capture", () => {

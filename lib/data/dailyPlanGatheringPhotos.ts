@@ -29,7 +29,7 @@ export type GatheringPhotoMutationResult = {
   failedPhotos: GatheringPhotoFailure[];
 };
 
-type UploadGatheringPhotoInput = {
+export type UploadGatheringPhotoInput = {
   projectId: string;
   dailyPlanId: string;
   gatheringPointId: string | null;
@@ -42,6 +42,10 @@ type UploadGatheringPhotoInput = {
   thumbnailFile: File;
   originalFilename: string;
   expectedUpdatedAt: string;
+};
+
+export type ReplaceGatheringPhotoInput = UploadGatheringPhotoInput & {
+  replacedPhotoId: string;
 };
 
 type DeleteGatheringPhotoInput = {
@@ -111,22 +115,29 @@ export async function uploadDailyPlanGatheringPhoto(
   input: UploadGatheringPhotoInput
 ): Promise<GatheringPhotoMutationResult> {
   requireDatabaseProject(input.projectId);
-  const formData = new FormData();
-  formData.set("file", input.displayFile);
-  formData.set("thumbnail", input.thumbnailFile);
-  formData.set("photoId", input.photoId);
-  formData.set("departmentIds", JSON.stringify(input.departmentIds));
-  formData.set("originalFilename", input.originalFilename);
-  formData.set("expectedUpdatedAt", input.expectedUpdatedAt);
-  if (input.gatheringPointId) formData.set("gatheringPointId", input.gatheringPointId);
-  if (input.locationId) formData.set("locationId", input.locationId);
-  if (input.locationName) formData.set("locationName", input.locationName);
-  if (input.address) formData.set("address", input.address);
+  const formData = createGatheringPhotoUploadFormData(input);
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "POST",
     body: formData
   });
   return readMutationResponse(response, "집합장소 사진을 저장하지 못했습니다.");
+}
+
+/**
+ * 새 파일을 먼저 저장한 뒤 metadata를 교체하고, 성공한 뒤에만 이전
+ * Storage 파일을 정리하는 서버의 단일 사진 교체 계약을 사용합니다.
+ */
+export async function replaceDailyPlanGatheringPhoto(
+  input: ReplaceGatheringPhotoInput
+): Promise<GatheringPhotoMutationResult> {
+  requireDatabaseProject(input.projectId);
+  const formData = createGatheringPhotoUploadFormData(input);
+  formData.set("replacedPhotoId", input.replacedPhotoId);
+  const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
+    method: "POST",
+    body: formData
+  });
+  return readMutationResponse(response, "집합장소 사진을 변경하지 못했습니다.");
 }
 
 export async function deleteDailyPlanGatheringPhoto(
@@ -173,6 +184,21 @@ async function fetchGatheringApi(projectId: string, dailyPlanId: string, init: R
     `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}/gathering-photos`,
     { ...init, headers }
   );
+}
+
+function createGatheringPhotoUploadFormData(input: UploadGatheringPhotoInput) {
+  const formData = new FormData();
+  formData.set("file", input.displayFile);
+  formData.set("thumbnail", input.thumbnailFile);
+  formData.set("photoId", input.photoId);
+  formData.set("departmentIds", JSON.stringify(input.departmentIds));
+  formData.set("originalFilename", input.originalFilename);
+  formData.set("expectedUpdatedAt", input.expectedUpdatedAt);
+  if (input.gatheringPointId) formData.set("gatheringPointId", input.gatheringPointId);
+  if (input.locationId) formData.set("locationId", input.locationId);
+  if (input.locationName) formData.set("locationName", input.locationName);
+  if (input.address) formData.set("address", input.address);
+  return formData;
 }
 
 async function readMutationResponse(response: Response, fallbackMessage: string) {

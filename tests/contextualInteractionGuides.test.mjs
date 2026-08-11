@@ -74,14 +74,14 @@ test("fine/coarse capability chooses only real variants", () => {
   assert.equal(progressMedia.anchor, "progress.media-gallery");
 
   const gatheringPhoto = INTERACTION_GUIDES["progress.interaction-gathering-photo"];
-  assert.equal(gatheringPhoto.anchor, "progress.gathering-photo-add");
+  assert.equal(gatheringPhoto.anchor, "progress.gathering-photo-context");
   assert.equal(gatheringPhoto.compactAnchor, undefined);
-  assert.deepEqual(gatheringPhoto.standaloneContextAnchors, ["progress.gathering-photo-context"]);
+  assert.equal(gatheringPhoto.standaloneContextAnchors, undefined);
   assert.equal(gatheringPhoto.permission, "manage");
   assert.equal(getInteractionGuideVariant(gatheringPhoto, "fine"), null);
   assert.equal(
     getInteractionGuideVariant(gatheringPhoto, "coarse")?.description,
-    "사진 추가에서 바로 촬영하거나 앨범의 사진을 선택할 수 있습니다."
+    "빈 사진 영역을 누르면 촬영하거나 앨범에서 사진을 고를 수 있습니다. 기존 사진을 길게 누르면 사진을 변경하거나 삭제하고, 주소를 누르면 복사할 수 있습니다."
   );
 });
 

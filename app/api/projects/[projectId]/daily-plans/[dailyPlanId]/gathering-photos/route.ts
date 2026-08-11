@@ -9,6 +9,7 @@ import {
   removeGatheringPhoto,
   reorderGatheringPhotos
 } from "@/lib/dailyPlan/gatheringPoints";
+import { resolveGatheringPhotoReplacement } from "@/lib/dailyPlan/gatheringPhotoMutation";
 import {
   decodeDailyPlanMemo,
   encodeDailyPlanMemo,
@@ -305,6 +306,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const thumbnail = formData.get("thumbnail");
     const requestedPointId = cleanId(formData.get("gatheringPointId"));
     const requestedPhotoId = cleanId(formData.get("photoId"));
+    const replacedPhotoId = cleanId(formData.get("replacedPhotoId"));
     const requestedLocationId = cleanReferenceId(formData.get("locationId"));
     const requestedLocationName = normalizeGatheringLocationName(
       cleanText(formData.get("locationName"), 500)
@@ -349,24 +351,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     const photoId = requestedPhotoId || randomUUID();
+    if (replacedPhotoId && replacedPhotoId === photoId) {
+      return NextResponse.json({ error: "새 사진 ID는 기존 사진 ID와 달라야 합니다." }, { status: 409 });
+    }
     const existingPhoto = point.photos.find((photo) => photo.id === photoId);
-    if (existingPhoto) {
+    const replacedPhoto = replacedPhotoId
+      ? point.photos.find((photo) => photo.id === replacedPhotoId)
+      : null;
+    if (existingPhoto && (!replacedPhotoId || !replacedPhoto)) {
       return NextResponse.json({
         ok: true,
         gatheringPointId: point.id,
         photo: existingPhoto,
         memo: plan.memo,
         updatedAt: String(planRow.updated_at ?? ""),
+        cleanupWarning: "",
         appliedPhotoIds: [existingPhoto.id],
         failedPhotos: [],
         idempotent: true
       });
-    }
-    if (point.photos.length >= MAX_PHOTOS_PER_POINT) {
-      return NextResponse.json(
-        { error: `집합장소 사진은 최대 ${MAX_PHOTOS_PER_POINT}장까지 저장할 수 있습니다.` },
-        { status: 400 }
-      );
     }
     if (expectedUpdatedAt && String(planRow.updated_at ?? "") !== expectedUpdatedAt) {
       return NextResponse.json(
@@ -375,6 +378,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
           memo: plan.memo,
           updatedAt: String(planRow.updated_at ?? "")
         },
+        { status: 409 }
+      );
+    }
+    if (existingPhoto && replacedPhoto) {
+      return NextResponse.json(
+        { error: "새 사진 ID가 현재 저장본과 충돌합니다." },
+        { status: 409 }
+      );
+    }
+    if (replacedPhotoId && !replacedPhoto) {
+      return NextResponse.json({ error: "교체할 사진을 찾을 수 없습니다." }, { status: 404 });
+    }
+    if (!replacedPhotoId && point.photos.length > 0) {
+      return NextResponse.json(
+        { error: "집합장소 사진은 한 장만 저장할 수 있습니다. 기존 사진을 변경해주세요." },
         { status: 409 }
       );
     }
@@ -396,10 +414,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
       thumbnailUrl,
       storagePath: displayPath,
       thumbnailPath,
-      sortOrder: point.photos.length,
+      sortOrder: replacedPhoto?.sortOrder ?? point.photos.length,
       originalFilename: originalFilename || file.name
     };
-    meta = appendGatheringPhoto(meta, point.id, photo);
+    if (replacedPhoto) {
+      const replacement = resolveGatheringPhotoReplacement(point.photos, replacedPhoto.id, photo);
+      if (replacement.status !== "apply") {
+        const conflict = new Error("사진 교체 정보가 현재 저장본과 다릅니다.");
+        Object.assign(conflict, { status: 409 });
+        throw conflict;
+      }
+      meta = normalizeDailyPlanPrintMeta({
+        ...meta,
+        gatheringPoints: meta.gatheringPoints.map((item) => (
+          item.id === point.id ? { ...item, photos: replacement.photos } : item
+        ))
+      });
+    } else {
+      meta = appendGatheringPhoto(meta, point.id, photo);
+    }
     const saved = await saveMemo(
       supabase,
       params.projectId,
@@ -408,12 +441,33 @@ export async function POST(request: NextRequest, context: RouteContext) {
       String(planRow.updated_at ?? "")
     );
     uploadedPaths.length = 0;
+    let cleanupWarning = "";
+    if (replacedPhoto) {
+      const expectedPrefix = `${storageBasePath(
+        params.projectId,
+        params.dailyPlanId,
+        point.id,
+        replacedPhoto.id
+      )}/`;
+      const replacedPaths = [replacedPhoto.storagePath, replacedPhoto.thumbnailPath]
+        .filter((path) => path && path.startsWith(expectedPrefix));
+      if (replacedPaths.length > 0) {
+        try {
+          const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(replacedPaths);
+          if (removeError) throw removeError;
+        } catch (removeError) {
+          cleanupWarning = "새 사진은 저장했지만 이전 Storage 파일 일부를 정리하지 못했습니다.";
+          console.error("[gathering-photos:replace-cleanup]", safeError(removeError));
+        }
+      }
+    }
     return NextResponse.json({
       ok: true,
       gatheringPointId: point.id,
       photo,
       memo: String(saved.memo ?? ""),
       updatedAt: String(saved.updated_at ?? ""),
+      cleanupWarning,
       appliedPhotoIds: [photo.id],
       failedPhotos: []
     }, { status: 201 });
@@ -452,6 +506,25 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const supabase = requireProjectAccessDb();
     const planRow = await loadOwnedPlan(supabase, params.projectId, params.dailyPlanId);
     if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+    const plan = dailyPlanFromRow(planRow);
+    const meta = reconcileDailyPlanGatheringPoints(
+      decodeDailyPlanMemo(plan.memo),
+      plan.shootingLocations
+    );
+    const point = meta.gatheringPoints.find((item) => item.id === gatheringPointId);
+    const photo = point?.photos.find((item) => item.id === photoId);
+    if (!point) return NextResponse.json({ error: "집합장소를 찾을 수 없습니다." }, { status: 404 });
+    if (!photo) {
+      return NextResponse.json({
+        ok: true,
+        memo: plan.memo,
+        updatedAt: String(planRow.updated_at ?? ""),
+        cleanupWarning: "",
+        appliedPhotoIds: [],
+        failedPhotos: [],
+        idempotent: true
+      });
+    }
     const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 100);
     if (expectedUpdatedAt && String(planRow.updated_at ?? "") !== expectedUpdatedAt) {
       return NextResponse.json(
@@ -463,14 +536,6 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         { status: 409 }
       );
     }
-    const plan = dailyPlanFromRow(planRow);
-    const meta = reconcileDailyPlanGatheringPoints(
-      decodeDailyPlanMemo(plan.memo),
-      plan.shootingLocations
-    );
-    const point = meta.gatheringPoints.find((item) => item.id === gatheringPointId);
-    const photo = point?.photos.find((item) => item.id === photoId);
-    if (!point || !photo) return NextResponse.json({ error: "삭제할 사진을 찾을 수 없습니다." }, { status: 404 });
     const expectedPrefix = `${storageBasePath(params.projectId, params.dailyPlanId, gatheringPointId, photoId)}/`;
     const paths = [photo.storagePath, photo.thumbnailPath]
       .filter((path) => path && path.startsWith(expectedPrefix));
@@ -484,8 +549,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     );
     let cleanupWarning = "";
     if (paths.length > 0) {
-      const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
-      if (removeError) {
+      try {
+        const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+        if (removeError) throw removeError;
+      } catch (removeError) {
         cleanupWarning = "사진 정보는 삭제했지만 Storage 파일 일부를 정리하지 못했습니다.";
         console.error("[gathering-photos:delete-cleanup]", safeError(removeError));
       }
@@ -883,17 +950,21 @@ function gatheringPhotoError(error: unknown, fallbackMessage: string) {
     return NextResponse.json({ error: fallbackMessage }, { status: 503 });
   }
   const source = safeError(error);
+  // Storage/Supabase가 우연히 409를 반환하더라도 내부 메시지를 그대로
+  // 노출하지 않습니다. 최신 metadata가 붙은 우리 CAS 충돌만 사용자에게
+  // 안전한 conflict 응답으로 전달합니다.
+  const isMetadataConflict = source.status === 409 && Boolean(source.latestUpdatedAt);
   console.error("[gathering-photos]", source);
   return NextResponse.json(
     {
-      error: source.status === 409
+      error: isMetadataConflict
         ? source.message
         : fallbackMessage,
-      ...(source.status === 409 && source.latestUpdatedAt
+      ...(isMetadataConflict
         ? { memo: source.latestMemo, updatedAt: source.latestUpdatedAt }
         : {})
     },
-    { status: source.status === 409 ? 409 : 500 }
+    { status: isMetadataConflict ? 409 : 500 }
   );
 }
 

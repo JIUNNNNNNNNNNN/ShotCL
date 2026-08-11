@@ -6,18 +6,50 @@
   display: grid;
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--ui-card-gap);
+  gap: 10px;
+}
+
+.time {
+  display: inline-flex;
+  min-height: 34px;
   align-items: center;
+  gap: 8px;
+  color: var(--field-text);
+  font-size: clamp(1.25rem, 5.6cqi, 1.65rem);
+  font-weight: 850;
+  line-height: 1;
+  letter-spacing: -0.025em;
+}
+
+.timeIcon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--field-primary);
+}
+
+.missingTime {
+  color: var(--field-muted);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.mediaGroup {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
 }
 
 .media {
   position: relative;
   display: block;
-  width: 100%;
+  width: min(100%, 34rem, 74.6667dvh);
   min-width: 0;
   max-width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
+  justify-self: start;
 }
 
 .emptyMedia {
@@ -32,54 +64,238 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
+  padding: 12px;
   color: var(--field-muted);
 }
 
-.information {
-  min-width: 0;
-  align-self: center;
+.addMedia {
+  min-height: 112px;
+  cursor: pointer;
+  color: var(--field-subtle);
 }
 
-.address {
-  max-block-size: 4.5rem;
-  overflow-y: auto;
+.addMedia:hover {
+  border-color: var(--field-divider);
+  background: var(--field-hover);
+}
+
+.addMedia:active {
+  opacity: 0.88;
+}
+
+.addMedia:focus-visible,
+.manageableMedia:focus-visible,
+.addressButton:focus-visible {
+  border-color: var(--field-primary);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--field-primary-focus);
+}
+
+.addMediaLabel {
+  color: var(--field-text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.addMediaDescription {
+  color: var(--field-muted);
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.manageableMedia {
+  cursor: default;
+  touch-action: pan-y pinch-zoom;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.manageableMedia img {
+  pointer-events: none;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.pendingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 12px;
+  background: rgb(0 0 0 / 48%);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  animation: gathering-photo-spin 800ms linear infinite;
+}
+
+.photoFeedback {
+  min-height: 16px;
+  margin: 0;
+  overflow: hidden;
+  color: transparent;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 16px;
   overflow-wrap: anywhere;
-  scrollbar-width: thin;
 }
 
-@container (min-width: 480px) and (max-width: 559px) {
-  .layout {
-    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-    gap: 12px;
+.photoFeedbackVisible {
+  max-height: 32px;
+  overflow-y: auto;
+  color: var(--field-danger);
+}
+
+.addressButton {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 48px;
+  grid-template-columns: 18px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-control);
+  background: var(--field-input);
+  padding: 10px 12px;
+  color: var(--field-subtle);
+  text-align: left;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native);
+}
+
+button.addressButton:hover {
+  border-color: var(--field-divider);
+  background: var(--field-hover);
+  color: var(--field-text);
+}
+
+button.addressButton:active {
+  background: var(--field-soft);
+}
+
+.addressMissing {
+  color: var(--field-muted);
+}
+
+.addressIcon,
+.copyIcon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+
+.addressIcon {
+  color: var(--field-primary);
+}
+
+.copyIcon {
+  color: var(--field-muted);
+}
+
+.addressText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.copyFeedback {
+  position: absolute;
+  right: 9px;
+  bottom: 7px;
+  z-index: 1;
+  max-width: calc(100% - 18px);
+  border-radius: var(--radius-control);
+  background: rgb(0 0 0 / 84%);
+  padding: 3px 7px;
+  color: white;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.3;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition:
+    opacity var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-fast) var(--ease-out-native);
+}
+
+.copyFeedbackVisible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@container (min-width: 720px) {
+  .media {
+    width: min(100%, 38rem, 74.6667dvh);
   }
 }
 
-@container (min-width: 560px) {
-  .layout {
-    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-    gap: 10px;
-  }
-}
-
-@container (min-width: 760px) {
-  .layout {
-    grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
-    gap: 12px;
-  }
-}
-
+/* Wide, low-height phone landscapes remain the same time → photo → address stack. */
 @media (max-height: 699px) {
-  @container (min-width: 560px) {
-    .layout {
-      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-      gap: var(--ui-card-gap);
-    }
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .media {
+    width: min(100%, 25rem, 74.6667dvh);
+  }
+}
+
+@media (max-width: 359px), (max-height: 579px) {
+  .layout {
+    gap: 8px;
+  }
+
+  .time {
+    min-height: 30px;
+    font-size: 1.2rem;
+  }
+
+  .media {
+    width: min(100%, 23rem, 74.6667dvh);
+  }
+
+  .emptyMediaContent {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  .addressButton {
+    min-height: 46px;
+    padding-block: 8px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .media {
+  .media,
+  .addMedia,
+  .addressButton,
+  .copyFeedback {
     transition-duration: 0.01ms !important;
   }
+
+  .spinner {
+    animation: none;
+  }
+}
+
+@keyframes gathering-photo-spin {
+  to { transform: rotate(360deg); }
 }

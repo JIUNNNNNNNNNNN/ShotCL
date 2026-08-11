@@ -58,6 +58,8 @@ export type ProjectPageActionOverride = {
   disabled?: boolean;
   pending?: boolean;
   hidden?: boolean;
+  /** Keep an action in the persistent panel while omitting a duplicate compact-drawer entry. */
+  hiddenInDrawer?: boolean;
   closeDrawerOnSelect?: boolean;
   emphasis?: "primary" | "secondary";
   group?: ProjectPageActionGroup;

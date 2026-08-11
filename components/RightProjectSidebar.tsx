@@ -34,6 +34,11 @@ export function RightProjectSidebar({
 }: RightProjectSidebarProps) {
   if (!menu) return null;
 
+  const visibleMenu = mode === "drawer"
+    ? { ...menu, actions: menu.actions.filter((action) => !action.hiddenInDrawer) }
+    : menu;
+  if (visibleMenu.actions.length === 0) return null;
+
   if (mode === "panel") {
     return (
       <aside
@@ -41,8 +46,8 @@ export function RightProjectSidebar({
         aria-label={menu.ariaLabel}
         className="project-shell__action-panel no-print"
       >
-        <ActionMenuHeader projectName={projectName} menu={menu} />
-        <ActionMenuItems menu={menu} />
+        <ActionMenuHeader projectName={projectName} menu={visibleMenu} />
+        <ActionMenuItems menu={visibleMenu} />
       </aside>
     );
   }
@@ -63,7 +68,7 @@ export function RightProjectSidebar({
           id="project-action-drawer"
           role="dialog"
           aria-modal={drawerOpen ? "true" : undefined}
-          aria-label={menu.ariaLabel}
+          aria-label={visibleMenu.ariaLabel}
           tabIndex={-1}
           data-side="right"
           data-open={drawerOpen ? "true" : "false"}
@@ -71,10 +76,10 @@ export function RightProjectSidebar({
         >
           <ActionMenuHeader
             projectName={projectName}
-            menu={menu}
+            menu={visibleMenu}
             onClose={onDrawerClose}
           />
-          <ActionMenuItems menu={menu} onAction={onDrawerClose} />
+          <ActionMenuItems menu={visibleMenu} onAction={onDrawerClose} />
         </aside>
     </div>
   );
@@ -194,8 +199,6 @@ function PageActionItem({
     ? "daily-plan.pdf-actions"
     : action.id.startsWith("scenario")
       ? "scenario.actions"
-      : action.id === "progressGatheringPhotoAdd" && !action.disabled
-        ? "progress.gathering-photo-add"
       : null;
   const guideId = action.id === "dailyPlanPdf" || action.id === "dailyPlanPortraitPdf"
     ? "daily-plan.pdf"

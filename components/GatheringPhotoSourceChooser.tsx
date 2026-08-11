@@ -30,7 +30,11 @@ import styles from "./GatheringPhotoSourceChooser.module.css";
 const SOURCE_SHEET_CLOSE_MS = 140;
 
 export type GatheringPhotoSourceChooserHandle = {
-  open: () => "blocked" | "album-direct" | "source-sheet";
+  open: (options?: {
+    /** Card triggers are already outside the compact action drawer transition. */
+    origin?: "auto" | "card";
+    title?: string;
+  }) => "blocked" | "album-direct" | "source-sheet";
 };
 
 type GatheringPhotoSourceChooserProps = {
@@ -67,6 +71,7 @@ export const GatheringPhotoSourceChooser = forwardRef<
   const onFilesSelectedRef = useRef(onFilesSelected);
   const [sheetPhase, setSheetPhase] = useState<SheetPhase>("closed");
   const [sourceSheetRequested, setSourceSheetRequested] = useState(false);
+  const [sourceSheetTitle, setSourceSheetTitle] = useState("집합장소 사진 추가");
   const sheetRendered = sheetPhase !== "closed";
   const titleId = useId();
 
@@ -134,7 +139,7 @@ export const GatheringPhotoSourceChooser = forwardRef<
   }, []);
 
   useImperativeHandle(ref, () => ({
-    open() {
+    open(options) {
       if (disabled || typeof window === "undefined") return "blocked";
       const persistentProjectShell = window.matchMedia(PERSISTENT_PROJECT_SHELL_QUERY).matches;
       const presentation = resolveGatheringPhotoPickerPresentation({
@@ -148,16 +153,19 @@ export const GatheringPhotoSourceChooser = forwardRef<
       }
 
       clearOpenRequest();
+      setSourceSheetTitle(options?.title?.trim() || "집합장소 사진 추가");
       if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
       const trigger = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
       returnFocusRef.current = trigger;
-      const triggeredFromActionDrawer = requiresGatheringPhotoDrawerHandoff({
-        persistentProjectShell,
-        triggerInsideActionDrawer: Boolean(trigger?.closest("#project-action-drawer"))
-      });
+      const triggeredFromActionDrawer = options?.origin === "card"
+        ? false
+        : requiresGatheringPhotoDrawerHandoff({
+            persistentProjectShell,
+            triggerInsideActionDrawer: Boolean(trigger?.closest("#project-action-drawer"))
+          });
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const delay = resolveGatheringPhotoSourceSheetDelay({
         triggeredFromActionDrawer,
@@ -310,7 +318,7 @@ export const GatheringPhotoSourceChooser = forwardRef<
     >
       <section className={styles.sheet}>
         <header className={styles.header}>
-          <h2 id={titleId} className={styles.title}>집합장소 사진 추가</h2>
+          <h2 id={titleId} className={styles.title}>{sourceSheetTitle}</h2>
         </header>
         <div className={styles.actions}>
           <button

@@ -365,8 +365,7 @@ export const INTERACTION_GUIDES: Record<
   "progress.interaction-gathering-photo": {
     id: "progress.interaction-gathering-photo",
     page: "progress",
-    anchor: "progress.gathering-photo-add",
-    standaloneContextAnchors: ["progress.gathering-photo-context"],
+    anchor: "progress.gathering-photo-context",
     permission: "manage",
     preferredPlacement: "left",
     priority: 15,
@@ -374,7 +373,7 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       coarse: {
         title: "집합장소 사진",
-        description: "사진 추가에서 바로 촬영하거나 앨범의 사진을 선택할 수 있습니다.",
+        description: "빈 사진 영역을 누르면 촬영하거나 앨범에서 사진을 고를 수 있습니다. 기존 사진을 길게 누르면 사진을 변경하거나 삭제하고, 주소를 누르면 복사할 수 있습니다.",
         demo: "tap"
       }
     }

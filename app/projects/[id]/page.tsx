@@ -12,10 +12,7 @@ import {
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
-import type {
-  GatheringLocationActions,
-  GatheringPhotoPreview
-} from "@/components/DailyPlanGatheringLocations";
+import type { GatheringLocationActions } from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
@@ -23,7 +20,7 @@ import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { createShotsFromDrafts, deleteAllShots, deleteShot, listShots, reorderShots, updateShot, updateShotStatus } from "@/lib/data/shots";
-import { shotFromRow } from "@/lib/data/mappers";
+import { dailyPlanFromRow, shotFromRow } from "@/lib/data/mappers";
 import { getShotDiagramKey, loadShotOverheadDiagrams } from "@/lib/data/shotDiagrams";
 import {
   applyShotMediaLinks,
@@ -43,6 +40,7 @@ import {
   subscribeToShotChanges,
   type ShotRealtimeChange
 } from "@/lib/realtime/subscribeToShots";
+import { subscribeToDailyPlanChanges } from "@/lib/realtime/subscribeToDailyPlan";
 import { auditQuery } from "@/lib/queryAudit";
 import { getKoreaDateOnly } from "@/lib/koreaDate";
 import {
@@ -70,6 +68,7 @@ type EditingScheduleState = {
   sessionId: number;
   item: DailyPlanMealTime;
 };
+type ProgressImagePreview = { url: string; title: string };
 const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
 
 function hasMultipleProgressGalleryItems(
@@ -264,7 +263,7 @@ export default function ProjectDetailPage() {
   const [preview, setPreview] = useState<{
     url: string;
     title: string;
-    images?: GatheringPhotoPreview[];
+    images?: ProgressImagePreview[];
     index?: number;
   } | null>(null);
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
@@ -357,6 +356,32 @@ export default function ProjectDetailPage() {
   }, [upsertDailyPlan]);
   const selectedDailyPlanId = selectedPlan?.id ?? "";
   const hasCurrentProject = Boolean(project && project.id === projectId);
+
+  const handleRealtimeDailyPlanUpdate = useCallback((newRow: Record<string, unknown>) => {
+    let remotePlan: DailyPlan;
+    try {
+      remotePlan = dailyPlanFromRow(newRow);
+    } catch {
+      return;
+    }
+    const currentSelectedPlan = selectedPlanRef.current;
+    if (
+      !currentSelectedPlan
+      || remotePlan.projectId !== currentSelectedPlan.projectId
+      || remotePlan.id !== currentSelectedPlan.id
+      || !remotePlan.updatedAt
+    ) return;
+    commitDailyPlanPatch(remotePlan.id, remotePlan);
+  }, [commitDailyPlanPatch]);
+
+  useEffect(() => {
+    if (!isProgressView || isGuest || !projectId || !selectedDailyPlanId) return undefined;
+    return subscribeToDailyPlanChanges(
+      projectId,
+      selectedDailyPlanId,
+      (change) => handleRealtimeDailyPlanUpdate(change.newRow)
+    );
+  }, [handleRealtimeDailyPlanUpdate, isGuest, isProgressView, projectId, selectedDailyPlanId]);
 
   const refresh = useCallback(async () => {
     if (!projectId || isWorkspaceLoading) return;
@@ -740,12 +765,14 @@ export default function ProjectDetailPage() {
         progressGatheringPhotoAdd: {
           onSelect: gatheringLocationActions?.addPhotos,
           hidden: progressOnly || !gatheringLocationActions?.visible,
+          hiddenInDrawer: true,
           disabled: gatheringLocationActions?.addPhotosDisabled ?? true,
           pending: gatheringLocationActions?.addPhotosPending ?? false
         },
         progressGatheringPhotoManage: {
           onSelect: gatheringLocationActions?.managePhotos,
           hidden: progressOnly || !gatheringLocationActions?.visible,
+          hiddenInDrawer: true,
           disabled: gatheringLocationActions?.managePhotosDisabled ?? true
         },
         progressGatheringAddressEdit: {
@@ -769,11 +796,6 @@ export default function ProjectDetailPage() {
   useProjectPageActionMenu(progressActionMenu);
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
-  }, []);
-  const handleGatheringPhotoPreview = useCallback((images: GatheringPhotoPreview[], index: number) => {
-    const target = images[index];
-    if (!target) return;
-    setPreview({ url: target.url, title: target.title, images, index });
   }, []);
   const handleDailyPlanMetadataChange = useCallback((
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
@@ -1207,7 +1229,6 @@ export default function ProjectDetailPage() {
         plan={selectedPlan}
         canEdit={role === "admin"}
         onPlanMetadataChange={handleDailyPlanMetadataChange}
-        onPreview={handleGatheringPhotoPreview}
         onActionsChange={setGatheringLocationActions}
       />
 

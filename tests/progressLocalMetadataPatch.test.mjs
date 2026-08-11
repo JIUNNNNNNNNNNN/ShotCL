@@ -6,6 +6,10 @@ const progressPageSource = readFileSync(
   new URL("../app/projects/[id]/page.tsx", import.meta.url),
   "utf8"
 );
+const rightSidebarSource = readFileSync(
+  new URL("../components/RightProjectSidebar.tsx", import.meta.url),
+  "utf8"
+);
 
 function sourceBetween(startMarker, endMarker) {
   const start = progressPageSource.indexOf(startMarker);
@@ -43,4 +47,28 @@ test("archive rebuild and metadata patch callbacks are scoped by the selected ro
   assert.match(metadataPatchSource, /commitDailyPlanPatch\(selectedDailyPlanId, patch\)/);
   assert.match(metadataPatchSource, /\[commitDailyPlanPatch, selectedDailyPlanId\]/);
   assert.doesNotMatch(metadataPatchSource, /\bselectedPlan\b/);
+});
+
+test("compact Progress actions omit duplicate photo controls but keep address editing", () => {
+  const actionMenuSource = sourceBetween(
+    "const progressActionMenu = useMemo<ProjectPageActionMenuRegistration | null>(() => {",
+    "useProjectPageActionMenu(progressActionMenu);"
+  );
+  const addPhotos = actionMenuSource.slice(
+    actionMenuSource.indexOf("progressGatheringPhotoAdd: {"),
+    actionMenuSource.indexOf("progressGatheringPhotoManage: {")
+  );
+  const managePhotos = actionMenuSource.slice(
+    actionMenuSource.indexOf("progressGatheringPhotoManage: {"),
+    actionMenuSource.indexOf("progressGatheringAddressEdit: {")
+  );
+  const editAddress = actionMenuSource.slice(
+    actionMenuSource.indexOf("progressGatheringAddressEdit: {")
+  );
+
+  assert.match(addPhotos, /hiddenInDrawer: true/u);
+  assert.match(managePhotos, /hiddenInDrawer: true/u);
+  assert.doesNotMatch(editAddress, /hiddenInDrawer: true/u);
+  assert.match(rightSidebarSource, /mode === "drawer"[\s\S]*!action\.hiddenInDrawer/u);
+  assert.doesNotMatch(rightSidebarSource, /progress\.gathering-photo/u);
 });
