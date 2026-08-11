@@ -63,7 +63,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return upgradeJson({ ok: false, error: "Google 계정으로 로그인해야 합니다.", code: "GOOGLE_ACCOUNT_REQUIRED" }, 401);
     }
     if (!account.isEditor) {
-      return upgradeJson({ ok: false, error: "현재 테스트 버전의 편집 허용 계정이 아닙니다.", code: "EDITOR_ACCOUNT_REQUIRED" }, 403);
+      return upgradeJson({ ok: false, error: "이 계정에는 수정 권한이 없습니다.", code: "EDITOR_ACCOUNT_REQUIRED" }, 403);
     }
 
     const body = await readUpgradeBody(request);

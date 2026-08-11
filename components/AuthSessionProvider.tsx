@@ -50,7 +50,7 @@ type ApplySessionOptions = {
 };
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
-const GOOGLE_LOGIN_ERROR_MESSAGE = "Google 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+const GOOGLE_LOGIN_ERROR_MESSAGE = "Google 로그인에 실패했습니다. 다시 시도해 주세요.";
 
 export function AuthSessionProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -176,7 +176,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         synchronizedUserIdRef.current = "";
         setIsEditorEligible(false);
         setStatus("error");
-        setErrorMessage(error instanceof Error ? error.message : "계정 세션을 연결하지 못했습니다.");
+        setErrorMessage(GOOGLE_LOGIN_ERROR_MESSAGE);
       }
       if (throwOnError) throw error;
       return null;

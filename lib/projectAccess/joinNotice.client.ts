@@ -29,6 +29,15 @@ export function consumePendingProjectJoinNotice(projectId: string) {
   return notice ? { projectId: notice.projectId, reason: notice.reason } : null;
 }
 
+/** Strict Effects의 두 번째 consume(null)은 같은 프로젝트에서 이미 받은 notice를 지우지 않습니다. */
+export function reconcileProjectJoinNotice(
+  current: ProjectJoinNotice | null,
+  consumed: ProjectJoinNotice | null,
+  projectId: string
+) {
+  return consumed ?? (current?.projectId === projectId ? current : null);
+}
+
 function readPendingNotice(projectId: string) {
   if (pendingNotice && pendingNotice.expiresAt <= Date.now()) pendingNotice = null;
   return pendingNotice?.projectId === projectId ? pendingNotice : null;

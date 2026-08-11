@@ -41,7 +41,8 @@ export function isShotclEditorGoogleEmail(
 
 /**
  * Supabase 사용자의 연결된 identity를 우선 확인하고, identities가 생략되는
- * 응답 경로를 위해 app_metadata.providers와 primary provider를 보조로 봅니다.
+ * 응답 경로에서는 trusted app_metadata.providers만 보조로 봅니다.
+ * primary provider 한 필드만으로는 연결된 Google identity를 증명하지 않습니다.
  */
 export function hasLinkedGoogleIdentity(
   value: Pick<ShotclGoogleIdentityInput, "email" | "provider" | "providers" | "identities">
@@ -71,7 +72,7 @@ export function hasLinkedGoogleIdentity(
     && value.providers.some((provider) => normalizeAuthProvider(provider) === "google")) {
     return true;
   }
-  return normalizeAuthProvider(value.provider) === "google";
+  return false;
 }
 
 /** Google identity가 연결되고 이메일 확인이 끝난 Supabase 사용자만 신뢰합니다. */

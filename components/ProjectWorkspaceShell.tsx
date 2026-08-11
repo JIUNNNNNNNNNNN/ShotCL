@@ -19,6 +19,7 @@ import {
 } from "@/hooks/useProjectShellMode";
 import {
   consumePendingProjectJoinNotice,
+  reconcileProjectJoinNotice,
   type ProjectJoinNotice
 } from "@/lib/projectAccess/joinNotice.client";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
@@ -36,7 +37,6 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const persistentShell = usePersistentProjectShell();
   const [openDrawer, setOpenDrawer] = useState<OpenDrawer>(null);
   const [joinNotice, setJoinNotice] = useState<ProjectJoinNotice | null>(null);
-  const previousPersistentShellRef = useRef(persistentShell);
   const navigationToggleRef = useRef<HTMLButtonElement | null>(null);
   const actionToggleRef = useRef<HTMLButtonElement | null>(null);
   const navigationDrawerRef = useRef<HTMLElement | null>(null);
@@ -73,20 +73,10 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
     if (persistentShell) setOpenDrawer(null);
   }, [persistentShell]);
 
-  useLayoutEffect(() => {
-    const wasPersistent = previousPersistentShellRef.current;
-    previousPersistentShellRef.current = persistentShell;
-    if (wasPersistent && !persistentShell && joinNotice) {
-      setOpenDrawer("navigation");
-    }
-  }, [joinNotice, persistentShell]);
-
   useEffect(() => {
     const notice = consumePendingProjectJoinNotice(projectId);
-    if (!notice) return;
-    setJoinNotice(notice);
-    if (!persistentShell) setOpenDrawer("navigation");
-  }, [persistentShell, projectId]);
+    setJoinNotice((current) => reconcileProjectJoinNotice(current, notice, projectId));
+  }, [projectId]);
 
   useEffect(() => {
     if (!joinNotice) return undefined;

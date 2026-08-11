@@ -23,14 +23,21 @@ const NO_STORE_HEADERS = { "Cache-Control": "private, no-store", Vary: "Cookie" 
 export async function GET(request: NextRequest) {
   try {
     const account = await resolveShotclAuthenticatedAccount(request);
+    const editorAllowed = account?.isEditor ?? false;
     return sessionJson({
       loggedIn: Boolean(account),
       email: account?.email ?? null,
-      editorEligible: account?.isEditor ?? false
+      editorEligible: editorAllowed,
+      editorAllowed
     });
   } catch (error) {
     console.error("[shotcl-auth-session:get]", safeErrorMessage(error));
-    return sessionJson({ loggedIn: false, email: null, editorEligible: false }, 500);
+    return sessionJson({
+      loggedIn: false,
+      email: null,
+      editorEligible: false,
+      editorAllowed: false
+    }, 500);
   }
 }
 
@@ -91,6 +98,7 @@ export async function POST(request: NextRequest) {
       loggedIn: true,
       email: created.account.email,
       editorEligible: created.account.isEditor,
+      editorAllowed: created.account.isEditor,
       joinedProjectId,
       destination
     });
@@ -113,7 +121,12 @@ export async function DELETE(request: NextRequest) {
       return sessionJson({ error: "로그아웃 요청을 확인할 수 없습니다." }, 403);
     }
     await deleteShotclAccountSession(request);
-    const response = sessionJson({ loggedIn: false, email: null, editorEligible: false });
+    const response = sessionJson({
+      loggedIn: false,
+      email: null,
+      editorEligible: false,
+      editorAllowed: false
+    });
     clearShotclAccountSessionCookie(response);
     return response;
   } catch (error) {

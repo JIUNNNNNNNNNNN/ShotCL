@@ -31,6 +31,12 @@ export function ProjectGuideMenu({
         </p>
       </header>
 
+      <div
+        id={`project-account-permission-slot-${projectId}`}
+        data-project-account-permission-slot={projectId}
+        className="empty:hidden"
+      />
+
       <ProjectShootingCalendar
         projectId={projectId}
         projectName={projectName}

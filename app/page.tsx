@@ -582,7 +582,7 @@ function MainHomeContent() {
         return;
       }
       if (!isEditorEligible) {
-        showStatus(accountError || "프로젝트 생성 권한이 없는 계정입니다.");
+        showStatus("이 계정에는 프로젝트 생성 권한이 없습니다. 현재 테스트 버전에서는 승인된 계정만 새 프로젝트를 만들 수 있습니다.");
         return;
       }
       selectContextualAction(action, triggerElement);
@@ -742,8 +742,20 @@ function MainHomeContent() {
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isCreatingProject || projectNavigationRef.current) return;
-    if (!isGoogle || !isEditorEligible) {
-      setNewProjectError(accountError || "Google 프로젝트 생성 권한이 필요합니다.");
+    if (accountStatus === "loading" || accountStatus === "syncing") {
+      setNewProjectError("");
+      return;
+    }
+    if (accountStatus === "error") {
+      setNewProjectError(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
+    if (!isGoogle) {
+      setNewProjectError("새 프로젝트를 만들려면 Google 로그인이 필요합니다.");
+      return;
+    }
+    if (!isEditorEligible) {
+      setNewProjectError("이 계정에는 프로젝트 생성 권한이 없습니다. 현재 테스트 버전에서는 승인된 계정만 새 프로젝트를 만들 수 있습니다.");
       return;
     }
     const name = cleanProjectName(newProjectName);
@@ -921,10 +933,16 @@ function MainHomeContent() {
           ) : null}
           <button
             type="submit"
-            disabled={isCreatingProject}
+            disabled={isCreatingProject || accountStatus === "loading" || accountStatus === "syncing" || accountStatus === "error"}
             className="neon-primary min-h-11 w-full rounded-[10px] border px-4 text-sm font-black transition-[transform,background-color,border-color] duration-150 active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg"
           >
-            <span className="font-display">{isCreatingProject ? "만드는 중" : "프로젝트 만들기"}</span>
+            <span className="font-display">
+              {isCreatingProject
+                ? "만드는 중"
+                : accountStatus === "loading" || accountStatus === "syncing"
+                  ? "계정 확인 중"
+                  : "프로젝트 만들기"}
+            </span>
           </button>
         </form>
       </section>
@@ -1076,12 +1094,18 @@ function MainHomeContent() {
             <span className="truncate">
               {accountStatus === "loading" || accountStatus === "syncing"
                 ? "계정 확인 중"
+                : accountStatus === "error"
+                  ? "계정 확인 필요"
                 : isGoogle
                   ? accountLabel
                   : "Google 로그인"}
             </span>
           </button>
-          {!isGoogle && accountStatus !== "loading" && accountStatus !== "syncing" ? (
+          {isGoogle && accountStatus === "authenticated" && !isEditorEligible ? (
+            <p className="max-w-full text-right text-[9px] font-semibold leading-3 text-field-muted">
+              수정 권한 없음
+            </p>
+          ) : !isGoogle && accountStatus !== "loading" && accountStatus !== "syncing" ? (
             <p className="max-w-full text-right text-[9px] font-semibold leading-3 text-field-muted">
               참여 프로젝트를 계정에 저장합니다.
             </p>
@@ -1097,11 +1121,15 @@ function MainHomeContent() {
           const isGoPending = action.id === "go" && isResolvingGo;
           const isAccountPending = accountStatus === "loading" || accountStatus === "syncing";
           const actionDescription = action.id === "new"
-            ? !isGoogle
-              ? "Google 로그인 후 만들기"
-              : !isEditorEligible
-                ? "프로젝트 생성 권한 필요"
-                : action.description
+            ? isAccountPending
+              ? "계정 확인 중"
+              : accountStatus === "error"
+                ? "Google 계정 상태 확인 필요"
+                : !isGoogle
+                  ? "Google 로그인 후 만들기"
+                  : !isEditorEligible
+                    ? "수정 권한 없음"
+                    : action.description
             : action.description;
           const desktopRowClass = index === 0
             ? "min-[1180px]:row-start-1"

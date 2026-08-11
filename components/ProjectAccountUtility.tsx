@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import { ArrowRight, KeyRound, LoaderCircle, X } from "lucide-react";
+import { ArrowRight, KeyRound, LoaderCircle } from "lucide-react";
 import { useAuthSession } from "@/components/AuthSessionProvider";
+import {
+  ProjectAccountAuthErrorNotice,
+  ProjectAccountPermissionNotice
+} from "@/components/ProjectAccountPermissionNotice";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { ProjectKeyStaffUpgrade } from "@/components/ProjectKeyStaffUpgrade";
 import {
@@ -11,6 +16,7 @@ import {
   useContextualGuideAnchor
 } from "@/components/guides/ContextualGuideProvider";
 import { getSafeInternalPath } from "@/lib/auth/client";
+import { resolveProjectAccountPermissionNotice } from "@/lib/projectAccess/accountPresentation";
 import {
   isKeyStaffProjectRole,
   isStaffProjectRole
@@ -50,6 +56,17 @@ export function ProjectAccountUtility({
     role
   } = useProjectAccess();
   const [actionError, setActionError] = useState("");
+  const [homeNoticeTarget, setHomeNoticeTarget] = useState<HTMLElement | null>(null);
+  const keyStaffIntentHistoryRef = useRef({ projectId, seen: false });
+  if (keyStaffIntentHistoryRef.current.projectId !== projectId) {
+    keyStaffIntentHistoryRef.current = { projectId, seen: false };
+  }
+  if (
+    joinNotice?.projectId === projectId
+    && joinNotice.reason === "key_staff_google_required"
+  ) {
+    keyStaffIntentHistoryRef.current.seen = true;
+  }
   const safeReturnTo = getSafeInternalPath(returnTo, `/projects/${encodeURIComponent(projectId)}`);
   const accountHref = `/login?next=${encodeURIComponent(safeReturnTo)}`;
   const isPending = status === "loading" || status === "syncing";
@@ -57,10 +74,35 @@ export function ProjectAccountUtility({
   const isStaff = isStaffProjectRole(role);
   const accountGuideAnchorRef = useContextualGuideAnchor<HTMLElement>("shell.google-account");
   const authSettled = status === "anonymous" || status === "authenticated";
-  const guideEligible = !isGuest && isStaff && authSettled && !isGoogle;
+  const permissionNotice = resolveProjectAccountPermissionNotice({
+    projectId,
+    joinNoticeProjectId: joinNotice?.projectId ?? null,
+    joinReason: joinNotice?.reason ?? null,
+    isGuest,
+    status,
+    isGoogle,
+    editorAllowed: accountEditorEligible
+  });
+  const authErrorMessage = actionError || (
+    status === "error" ? sessionError : ""
+  );
+  const visiblePermissionNotice = authErrorMessage ? null : permissionNotice;
+  const keyStaffGoogleGuideEligible = visiblePermissionNotice?.kind === "google-required";
+  const guideEligible = !isGuest
+    && isStaff
+    && authSettled
+    && !isGoogle
+    && !actionError
+    && !sessionError
+    && !keyStaffIntentHistoryRef.current.seen
+    && !keyStaffGoogleGuideEligible;
   useAutoContextualGuide(
     "home.google-account-connect",
     guideEligible
+  );
+  useAutoContextualGuide(
+    "home.key-staff-google-required",
+    keyStaffGoogleGuideEligible
   );
   const canUpgrade = isStaff
     && accessMode === "member"
@@ -68,14 +110,19 @@ export function ProjectAccountUtility({
     && accountEditorEligible
     && projectEditorEligible;
 
+  useEffect(() => {
+    const nextTarget = document.getElementById(`project-account-permission-slot-${projectId}`);
+    setHomeNoticeTarget((current) => current === nextTarget ? current : nextTarget);
+  });
+
   if (isGuest || (!isStaff && !isKeyStaff)) return null;
 
   async function handleGoogleLogin() {
     if (isPending || status === "unavailable") return;
     setActionError("");
-    onDismissJoinNotice?.();
     try {
       await startGoogleOAuth(safeReturnTo);
+      onDismissJoinNotice?.();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다.");
     }
@@ -83,39 +130,53 @@ export function ProjectAccountUtility({
 
   return (
     <aside
-      ref={guideEligible ? accountGuideAnchorRef : undefined}
+      ref={guideEligible || keyStaffGoogleGuideEligible ? accountGuideAnchorRef : undefined}
       aria-label="Google 계정과 프로젝트 권한"
       className="flex-none border-t border-field-divider px-2 py-2.5"
     >
-      {joinNotice?.reason === "key_staff_google_required" ? (
-        <div className="relative mb-2 rounded-[var(--ui-radius-control)] border border-field-primary/45 bg-field-primary/10 py-2 pl-2 pr-8" role="status">
-          <p className="text-[10px] font-black leading-4 text-field-text">Key staff 비밀번호가 확인되었습니다.</p>
-          <p className="text-[10px] leading-4 text-field-muted">Google 로그인 후 수정 권한을 활성화할 수 있습니다.</p>
+      {visiblePermissionNotice?.kind === "google-required" ? (
+        <div className="grid gap-1 px-1 pb-1">
+          <p className="text-[10px] font-semibold leading-4 text-field-muted">
+            Key staff 비밀번호 확인됨 · 승인된 Google 계정 필요
+          </p>
           <button
             type="button"
-            onClick={onDismissJoinNotice}
-            className="absolute right-1 top-1 grid h-7 w-7 place-items-center text-field-muted hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-            aria-label="Key staff 안내 닫기"
+            disabled={isPending || status === "unavailable"}
+            onClick={() => void handleGoogleLogin()}
+            className="inline-flex min-h-11 w-full items-center gap-2 text-left text-xs font-bold text-field-text transition-colors hover:text-field-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <X className="h-3.5 w-3.5" aria-hidden />
+            <GoogleMark />
+            <span>Google 로그인</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0" aria-hidden />
           </button>
         </div>
-      ) : null}
-      {isKeyStaff ? (
+      ) : isKeyStaff ? (
         isGoogle ? (
-          <ConnectedAccountLink href={accountHref} label="Key staff" email={email} />
+          <>
+            <ConnectedAccountLink href={accountHref} label="Key staff" email={email} />
+            {visiblePermissionNotice?.kind === "editor-permission-required" ? (
+              <p className="mt-1 px-1 text-[10px] font-semibold leading-4 text-field-muted">
+                현재 Google 계정에는 수정 권한이 없습니다.
+              </p>
+            ) : null}
+          </>
         ) : (
           <div className="flex min-h-11 items-center gap-2 px-1" aria-label="Key staff 권한">
             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[var(--ui-radius-control)] border border-field-divider bg-field-soft text-field-muted">
               <KeyRound className="h-3.5 w-3.5" aria-hidden />
             </span>
-            <span className="text-xs font-bold leading-4 text-field-text">Key staff</span>
+            <span className="text-xs font-bold leading-4 text-field-text">Key staff · Google 인증 필요</span>
           </div>
         )
       ) : isPending ? (
         <div className="flex min-h-11 items-center gap-2 px-1 text-xs font-semibold text-field-muted" role="status">
           <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
           <span>Google 계정 확인 중</span>
+        </div>
+      ) : status === "error" ? (
+        <div className="flex min-h-11 items-center gap-2 px-1 text-xs font-semibold text-field-muted">
+          <GoogleMark />
+          <span>Google 계정 확인 필요</span>
         </div>
       ) : isGoogle ? (
         <>
@@ -129,7 +190,9 @@ export function ProjectAccountUtility({
             </>
           ) : status === "authenticated" ? (
             <p className="mt-1 px-1 text-[10px] font-semibold leading-4 text-field-muted">
-              이 계정은 테스트 버전의 수정 권한이 없습니다.
+              {visiblePermissionNotice?.kind === "editor-permission-required"
+                ? "이 계정에는 수정 권한이 없습니다. 권한이 필요하면 프로젝트 관리자에게 요청해 주세요."
+                : "현재 프로젝트의 수정 권한을 확인할 수 없습니다."}
             </p>
           ) : null}
         </>
@@ -156,6 +219,23 @@ export function ProjectAccountUtility({
           {actionError || sessionError}
         </p>
       ) : null}
+
+      {homeNoticeTarget && authErrorMessage ? createPortal(
+        <ProjectAccountAuthErrorNotice onRetry={() => void handleGoogleLogin()} />,
+        homeNoticeTarget
+      ) : homeNoticeTarget && visiblePermissionNotice ? createPortal(
+          <ProjectAccountPermissionNotice
+            notice={visiblePermissionNotice}
+            disabled={isPending || status === "unavailable"}
+            onGoogleLogin={visiblePermissionNotice.kind === "google-required"
+              ? () => void handleGoogleLogin()
+              : undefined}
+            onDismiss={visiblePermissionNotice.kind === "google-required"
+              ? onDismissJoinNotice
+              : undefined}
+          />,
+          homeNoticeTarget
+        ) : null}
     </aside>
   );
 }

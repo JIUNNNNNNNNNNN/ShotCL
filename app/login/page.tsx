@@ -74,7 +74,12 @@ function LoginContent() {
           <div className="flex min-h-28 items-center justify-center" aria-label="계정 확인 중">
             <InlineLoader />
           </div>
-        ) : isGoogle ? (
+        ) : status === "error" ? (
+          <div className="py-4 text-center">
+            <p className="text-sm font-black text-field-text">Google 계정 상태를 확인하지 못했습니다.</p>
+            <p className="mt-1 text-xs leading-5 text-field-muted">잠시 후 다시 로그인해 주세요.</p>
+          </div>
+        ) : isGoogle && status === "authenticated" ? (
           <>
             <div className="flex min-w-0 items-start gap-3">
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius-control)] border border-field-primary/55 bg-field-primary/10 text-sm font-black text-field-primary" aria-hidden>
@@ -84,7 +89,9 @@ function LoginContent() {
                 <p className="truncate text-sm font-black text-field-text">{email || "Google 계정"}</p>
                 <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-field-muted">
                   <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
-                  {isEditorEligible ? "프로젝트 생성 가능" : "프로젝트 참여 전용"}
+                  {isEditorEligible
+                    ? "프로젝트 생성·수정 가능"
+                    : "Google 로그인 완료 · 수정 권한 없음"}
                 </p>
               </div>
             </div>

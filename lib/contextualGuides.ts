@@ -28,6 +28,7 @@ export type ContextualGuideId =
   | "home.calendar-range"
   | "home.invite-staff"
   | "home.google-account-connect"
+  | "home.key-staff-google-required"
   | "basic-info.intro"
   | "daily-plan.intro"
   | "daily-plan.round-select"
@@ -336,6 +337,23 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     replayLabel: "Google 계정 연결",
     replayHidden: true
   },
+  "home.key-staff-google-required": {
+    id: "home.key-staff-google-required",
+    version: 1,
+    page: "home",
+    type: "anchor",
+    trigger: "feature",
+    priority: 115,
+    title: "Google 로그인이 필요합니다.",
+    description: "Key staff 비밀번호가 확인되었습니다. 수정·관리 기능은 승인된 Google 계정으로 로그인한 뒤 사용할 수 있습니다.",
+    compactDescription: "프로젝트 메뉴를 열어 승인된 Google 계정으로 로그인하면 수정·관리 기능을 사용할 수 있습니다.",
+    persistentAnchor: "shell.google-account",
+    compactAnchor: "shell.navigation-toggle",
+    preferredPlacement: "right",
+    permission: "any",
+    replayLabel: "Key staff Google 로그인",
+    replayHidden: true
+  },
   "basic-info.intro": {
     id: "basic-info.intro",
     version: 1,
@@ -627,7 +645,8 @@ const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
     "home.calendar-create",
     "home.calendar-range",
     "home.invite-staff",
-    "home.google-account-connect"
+    "home.google-account-connect",
+    "home.key-staff-google-required"
   ],
   basicInfo: ["basic-info.intro"],
   dailyPlan: ["daily-plan.intro", "daily-plan.round-select", "daily-plan.pdf"],

@@ -15,13 +15,19 @@ export async function POST(request: NextRequest) {
     const account = await resolveShotclAuthenticatedAccount(request);
     if (!account) {
       return NextResponse.json(
-        { error: "Google 계정으로 로그인한 뒤 프로젝트를 만들 수 있습니다." },
+        {
+          error: "Google 계정으로 로그인한 뒤 프로젝트를 만들 수 있습니다.",
+          code: "GOOGLE_ACCOUNT_REQUIRED"
+        },
         { status: 401 }
       );
     }
     if (!account.isEditor) {
       return NextResponse.json(
-        { error: "현재 테스트 버전에서 프로젝트를 만들 수 있는 편집자 계정이 아닙니다." },
+        {
+          error: "이 계정에는 프로젝트 생성 권한이 없습니다. 현재 테스트 버전에서는 승인된 계정만 새 프로젝트를 만들 수 있습니다.",
+          code: "EDITOR_ACCOUNT_REQUIRED"
+        },
         { status: 403 }
       );
     }

@@ -60,10 +60,11 @@ test("Main intro and Help replay expose one canonical Go guide", () => {
   assert.equal(getGuideIdsForPage("main").includes("main.go-first-use"), false);
 });
 
-test("project Home exposes one persistent Google account connection guide", () => {
+test("project Home keeps generic and Key staff Google guidance as separate one-time features", () => {
   const homeGuides = getGuideIdsForPage("home");
   const accountGuides = homeGuides.filter((id) => id === "home.google-account-connect");
   const definition = CONTEXTUAL_GUIDES["home.google-account-connect"];
+  const keyStaffDefinition = CONTEXTUAL_GUIDES["home.key-staff-google-required"];
 
   assert.deepEqual(accountGuides, ["home.google-account-connect"]);
   assert.equal(definition.trigger, "feature");
@@ -72,5 +73,14 @@ test("project Home exposes one persistent Google account connection guide", () =
   assert.equal(definition.compactAnchor, "shell.navigation-toggle");
   assert.equal(definition.replayHidden, true);
   assert.equal(getGuideStorageToken(definition.id), "home.google-account-connect@1");
-  assert.equal(homeGuides.some((id) => id.includes("key-staff")), false);
+  assert.deepEqual(
+    homeGuides.filter((id) => id.includes("key-staff-google")),
+    ["home.key-staff-google-required"]
+  );
+  assert.equal(keyStaffDefinition.trigger, "feature");
+  assert.equal(keyStaffDefinition.type, "anchor");
+  assert.equal(keyStaffDefinition.persistentAnchor, "shell.google-account");
+  assert.equal(keyStaffDefinition.compactAnchor, "shell.navigation-toggle");
+  assert.equal(keyStaffDefinition.replayHidden, true);
+  assert.equal(getGuideStorageToken(keyStaffDefinition.id), "home.key-staff-google-required@1");
 });

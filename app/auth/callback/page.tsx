@@ -9,7 +9,7 @@ import { InlineLoader } from "@/components/PixelDogLoader";
 import { getSafeInternalPath } from "@/lib/auth/client";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
-const GOOGLE_LOGIN_ERROR_MESSAGE = "Google 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+const GOOGLE_LOGIN_ERROR_MESSAGE = "Google 로그인에 실패했습니다. 다시 시도해 주세요.";
 
 export default function AuthCallbackPage() {
   return (
@@ -52,7 +52,7 @@ function AuthCallbackContent() {
     return (
       <section className="mx-auto flex min-h-[70dvh] w-full max-w-md items-center justify-center px-4">
         <div className="w-full rounded-[var(--radius-card)] border border-field-danger/60 bg-field-panel p-5 text-center shadow-card">
-          <h1 className="text-lg font-black text-field-text">로그인을 완료하지 못했습니다</h1>
+          <h1 className="text-lg font-black text-field-text">Google 로그인에 실패했습니다.</h1>
           <p role="alert" className="mt-2 text-sm leading-6 text-field-danger">{errorMessage}</p>
           <Link
             href={nextPath}

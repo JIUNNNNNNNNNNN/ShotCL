@@ -12,6 +12,7 @@ import {
 import {
   consumePendingProjectJoinNotice,
   peekPendingProjectJoinNotice,
+  reconcileProjectJoinNotice,
   setPendingProjectJoinNotice
 } from "../lib/projectAccess/joinNotice.client.ts";
 import {
@@ -56,6 +57,22 @@ test("the Key staff fallback notice is in-memory, project-scoped, and consumed o
     reason: "key_staff_google_required"
   });
   assert.equal(consumePendingProjectJoinNotice("project-a"), null);
+});
+
+test("Strict Effects preserve one consumed notice only for the current project", () => {
+  const projectANotice = {
+    projectId: "project-a",
+    reason: "key_staff_google_required"
+  };
+  assert.deepEqual(
+    reconcileProjectJoinNotice(null, projectANotice, "project-a"),
+    projectANotice
+  );
+  assert.deepEqual(
+    reconcileProjectJoinNotice(projectANotice, null, "project-a"),
+    projectANotice
+  );
+  assert.equal(reconcileProjectJoinNotice(projectANotice, null, "project-b"), null);
 });
 
 test("a live logout immediately removes member write capability without changing DB membership", () => {

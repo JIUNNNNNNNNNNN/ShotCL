@@ -31,6 +31,14 @@ const projectJoinRouteSource = readFileSync(
   new URL("../app/api/projects/join/route.ts", import.meta.url),
   "utf8"
 );
+const projectCreateRouteSource = readFileSync(
+  new URL("../app/api/projects/create/route.ts", import.meta.url),
+  "utf8"
+);
+const projectAccessRouteSource = readFileSync(
+  new URL("../app/api/projects/[projectId]/access/route.ts", import.meta.url),
+  "utf8"
+);
 const mainPageSource = readFileSync(
   new URL("../app/page.tsx", import.meta.url),
   "utf8"
@@ -101,6 +109,17 @@ test("Google provider metadata remains a safe fallback when identities are omitt
   }));
 });
 
+test("the primary provider alone does not prove a linked Google identity", () => {
+  const providerOnly = {
+    id: "user-provider-only",
+    email: "provider-only@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z",
+    provider: "google"
+  };
+  assert.equal(hasLinkedGoogleIdentity(providerOnly), false);
+  assert.equal(normalizeTrustedGoogleIdentity(providerOnly), null);
+});
+
 test("email-only or unconfirmed users are not accepted as Google identities", () => {
   const confirmedEmailOnly = {
     id: "user-3",
@@ -158,6 +177,22 @@ test("Google login eligibility remains separate from the editor allowlist", () =
   assert.ok(linkedGoogle);
   assert.equal(isShotclEditorGoogleEmail(linkedGoogle.email, ["editor@example.com"]), false);
   assert.equal(isShotclEditorGoogleEmail(linkedGoogle.email, ["reader@example.com"]), true);
+});
+
+test("a valid non-allowlisted Google account remains a successful session", () => {
+  assert.doesNotMatch(authSessionRouteSource, /if\s*\(\s*!created\.account\.isEditor/u);
+  assert.match(
+    authSessionRouteSource,
+    /editorEligible:\s*created\.account\.isEditor,\s*editorAllowed:\s*created\.account\.isEditor/u
+  );
+});
+
+test("New and Key staff upgrade expose stable auth and editor permission errors", () => {
+  assert.match(projectCreateRouteSource, /code:\s*"GOOGLE_ACCOUNT_REQUIRED"/u);
+  assert.match(projectCreateRouteSource, /이 계정에는 프로젝트 생성 권한이 없습니다\./u);
+  assert.match(projectCreateRouteSource, /code:\s*"EDITOR_ACCOUNT_REQUIRED"/u);
+  assert.match(projectAccessRouteSource, /Google 계정으로 로그인해야 합니다[\s\S]*code:\s*"GOOGLE_ACCOUNT_REQUIRED"/u);
+  assert.match(projectAccessRouteSource, /이 계정에는 수정 권한이 없습니다\.[\s\S]*code:\s*"EDITOR_ACCOUNT_REQUIRED"/u);
 });
 
 test("a rejected Google session clears only the app cookie and never deletes the Auth user", () => {
