@@ -23,6 +23,26 @@ export type DailyProgressCompletion = Pick<
   "totalCutCount" | "processedCutCount" | "remainingCutCount"
 >;
 
+/**
+ * 회차 목록처럼 이미 집계된 total/processed 값을 canonical 완료 구조로 바꿉니다.
+ * caller가 별도 비율식이나 0컷 완료 규칙을 만들지 않도록 count 정규화도 한곳에서 처리합니다.
+ */
+export function createDailyProgressCompletion(
+  totalCutCount: number,
+  processedCutCount: number
+): DailyProgressCompletion {
+  const normalizedTotal = normalizeProgressCount(totalCutCount);
+  const normalizedProcessed = Math.min(
+    normalizedTotal,
+    normalizeProgressCount(processedCutCount)
+  );
+  return {
+    totalCutCount: normalizedTotal,
+    processedCutCount: normalizedProcessed,
+    remainingCutCount: normalizedTotal - normalizedProcessed
+  };
+}
+
 /** 저장값과 레거시 표기를 진행표의 실제 status enum으로 정규화합니다. */
 export function normalizeProgressCutStatus(status: unknown): ShotStatus {
   const normalized = String(status ?? "").trim().toLowerCase();

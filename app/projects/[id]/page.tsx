@@ -34,20 +34,23 @@ import {
 } from "@/lib/data/shotMediaArchive";
 import {
   updateDailyPlanScheduleItem,
-  type DailyPlanScheduleItemMutationResult,
-  type DailyPlanListItem
+  type DailyPlanScheduleItemMutationResult
 } from "@/lib/data/dailyPlans";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
-import { compareDailyPlanEpisodes } from "@/lib/dailyPlan/carouselPresentation";
 import { saveScheduleImage } from "@/lib/data/storyboardFiles";
 import {
   subscribeToShotChanges,
   type ShotRealtimeChange
 } from "@/lib/realtime/subscribeToShots";
 import { auditQuery } from "@/lib/queryAudit";
-import { calculateDailyProgress } from "@/lib/progress/dailyProgress";
+import { getKoreaDateOnly } from "@/lib/koreaDate";
+import {
+  calculateDailyProgress,
+  createDailyProgressCompletion
+} from "@/lib/progress/dailyProgress";
 import { buildProgressMediaGalleryItems } from "@/lib/progress/mediaGallery";
+import { resolveRelevantProgressRound } from "@/lib/progress/resolveRelevantRound";
 import { buildProgressRoundHref } from "@/lib/projectNavigation";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
@@ -190,6 +193,7 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
 export default function ProjectDetailPage() {
+  const router = useRouter();
   const { role, isGuest, canEditProgressStatus } = useProjectAccess();
   const {
     projectId,
@@ -201,8 +205,46 @@ export default function ProjectDetailPage() {
   } = useProjectWorkspace();
   const progressOnly = role === "progress";
   const searchParams = useSearchParams();
-  const dailyPlanId = searchParams.get("dailyPlanId") ?? "";
-  const isProgressView = searchParams.get("view") === "progress" || Boolean(dailyPlanId);
+  const requestedDailyPlanId = searchParams.get("dailyPlanId") ?? "";
+  const isProgressView = searchParams.get("view") === "progress" || Boolean(requestedDailyPlanId);
+  const initialRoundResolutionRef = useRef<{ projectId: string; dailyPlanId: string } | null>(null);
+  const isFreshProgressRoot = isProgressView && !requestedDailyPlanId;
+  if (!isFreshProgressRoot) {
+    initialRoundResolutionRef.current = null;
+  } else if (
+    !isWorkspaceLoading
+    && project
+    && initialRoundResolutionRef.current?.projectId !== projectId
+  ) {
+    const todayKorea = getKoreaDateOnly();
+    const resolution = todayKorea
+      ? resolveRelevantProgressRound(
+          dailyPlans.map((plan) => ({
+            id: plan.id,
+            shootingDate: plan.shootingDate,
+            episode: plan.episode,
+            progress: createDailyProgressCompletion(
+              plan.progressTotal,
+              plan.progressCompleted
+            )
+          })),
+          todayKorea
+        )
+      : null;
+    // An empty/invalid result is latched too: automatic selection belongs to
+    // this landing only and must not react to later workspace or Realtime changes.
+    initialRoundResolutionRef.current = {
+      projectId,
+      dailyPlanId: resolution?.status === "resolved" ? resolution.round.id : ""
+    };
+  }
+  const initialDailyPlanId = isFreshProgressRoot
+    && initialRoundResolutionRef.current?.projectId === projectId
+    ? initialRoundResolutionRef.current.dailyPlanId
+    : "";
+  // A query-selected round always wins. The derived ID only bridges the first
+  // Progress-root render so detail loading can start before the canonical URL replace.
+  const dailyPlanId = requestedDailyPlanId || initialDailyPlanId;
   const progressEntryKey = `${projectId ?? "missing-project"}:${dailyPlanId || "episode-selection"}`;
   const [shots, setShots] = useState<Shot[]>([]);
   const [sessionBucketByShotId, setSessionBucketByShotId] = useState<Map<string, ProgressVisualBucket>>(() => new Map());
@@ -263,6 +305,19 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     activeProgressEntryKeyRef.current = progressEntryKey;
   }, [progressEntryKey]);
+
+  const canonicalizedLandingRef = useRef("");
+  useEffect(() => {
+    if (!isProgressView || requestedDailyPlanId) {
+      canonicalizedLandingRef.current = "";
+      return;
+    }
+    if (!initialDailyPlanId) return;
+    const landingKey = `${projectId}:${initialDailyPlanId}`;
+    if (canonicalizedLandingRef.current === landingKey) return;
+    canonicalizedLandingRef.current = landingKey;
+    router.replace(buildProgressRoundHref(projectId, initialDailyPlanId));
+  }, [initialDailyPlanId, isProgressView, projectId, requestedDailyPlanId, router]);
 
   useEffect(() => {
     shotsRef.current = shots;
@@ -1120,9 +1175,8 @@ export default function ProjectDetailPage() {
   if (!dailyPlanId || !selectedPlan) {
     return (
       <EpisodeSelection
-        projectId={project.id}
-        plans={dailyPlans}
-        invalidSelection={Boolean(dailyPlanId)}
+        hasPlans={dailyPlans.length > 0}
+        invalidSelection={Boolean(requestedDailyPlanId)}
       />
     );
   }
@@ -1402,34 +1456,21 @@ function compareUpdatedAt(left: string, right: string) {
 }
 
 function EpisodeSelection({
-  projectId,
-  plans,
+  hasPlans,
   invalidSelection
 }: {
-  projectId: string;
-  plans: DailyPlanListItem[];
+  hasPlans: boolean;
   invalidSelection: boolean;
 }) {
-  const router = useRouter();
-  const sortedPlans = useMemo(() => [...plans].sort(compareDailyPlanEpisodes), [plans]);
-  const onlyPlanId = sortedPlans.length === 1 ? sortedPlans[0]?.id.trim() ?? "" : "";
-
-  useEffect(() => {
-    if (!onlyPlanId) return;
-    router.replace(buildProgressRoundHref(projectId, onlyPlanId));
-  }, [onlyPlanId, projectId, router]);
-
   return (
     <section className="flex min-h-[min(24rem,calc(100dvh-8rem))] min-w-0 items-center justify-center px-3 py-6">
       <Card className="w-full max-w-md text-center">
         {invalidSelection ? <p role="alert" className="mt-3 border border-field-danger/40 bg-field-panel px-4 py-2 text-center text-sm font-semibold text-field-danger">선택한 회차를 찾을 수 없어 회차 목록으로 돌아왔습니다.</p> : null}
         <h1 className="ui-density-heading font-display font-black text-field-text">진행도</h1>
         <p className="mt-3 text-sm leading-6 text-field-muted">
-          {sortedPlans.length === 0
+          {!hasPlans
             ? "진행 가능한 일촬표가 없습니다."
-            : onlyPlanId
-              ? "회차 진행도로 이동하고 있습니다."
-              : "좌측 진행도 메뉴에서 회차를 선택하세요."}
+            : "진행도 회차를 자동으로 결정하지 못했습니다. 잠시 후 다시 시도해 주세요."}
         </p>
       </Card>
     </section>

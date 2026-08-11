@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getKoreaDateOnly } from "@/lib/koreaDate";
 import { calculateDailyProgress, calculateDailyProgressByPlan } from "@/lib/progress/dailyProgress";
-import { getKoreaDateOnly, resolveGoRound } from "@/lib/go/resolveGoRound";
+import { resolveRelevantProgressRound } from "@/lib/progress/resolveRelevantRound";
 import {
   getAccessGrant,
   ProjectAccessUnavailableError,
@@ -98,7 +99,7 @@ export async function GET(
     const todayKorea = getKoreaDateOnly();
     if (!todayKorea) throw new Error("대한민국 현재 날짜를 계산하지 못했습니다.");
 
-    const resolution = resolveGoRound(
+    const resolution = resolveRelevantProgressRound(
       plans.map((plan) => ({
         ...plan,
         progress: progressByPlan.get(plan.id) ?? EMPTY_PROGRESS
@@ -124,7 +125,7 @@ export async function GET(
       {
         ok: true,
         targetDailyPlanId: null,
-        reason: resolution.status === "empty" ? "empty" : "no-valid-date"
+        reason: "empty"
       },
       { headers: NO_STORE_HEADERS }
     );

@@ -4,6 +4,7 @@ export type GoTargetReason =
   | "before-first"
   | "next"
   | "after-last"
+  | "undated-fallback"
   | "no-valid-date"
   | "empty";
 
@@ -60,6 +61,7 @@ function isGoTargetReason(value: unknown): value is GoTargetReason {
     || value === "before-first"
     || value === "next"
     || value === "after-last"
+    || value === "undated-fallback"
     || value === "no-valid-date"
     || value === "empty";
 }
