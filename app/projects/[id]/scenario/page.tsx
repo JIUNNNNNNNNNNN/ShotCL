@@ -63,8 +63,8 @@ const ScenarioPdfSceneSegments = dynamic(
 export default function ProjectScenarioPage() {
   const params = useParams<{ id: string | string[] }>();
   const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const { role } = useProjectAccess();
-  const canEdit = role !== "progress";
+  const { role, isGuest } = useProjectAccess();
+  const canEdit = role === "admin" && !isGuest;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectedAssetIdRef = useRef("");
   const uploadInFlightRef = useRef(false);
@@ -584,17 +584,20 @@ export default function ProjectScenarioPage() {
       },
       scenarioShare: {
         onSelect: () => actionHandlersRef.current.share(),
+        hidden: isGuest,
         disabled: !selectedAsset || isSharing || isDeleting,
         pending: isSharing
       },
       scenarioDownload: {
         onSelect: handleDownload,
+        hidden: isGuest,
         disabled: !selectedAsset || isDownloading || isDeleting,
         pending: isDownloading,
         closeDrawerOnSelect: false
       },
       scenarioRefresh: {
         onSelect: () => actionHandlersRef.current.refresh(),
+        hidden: isGuest,
         disabled: hasStructuralChanges || isRefreshing || isSaving || isDeleting || isUploading,
         pending: isRefreshing,
         closeDrawerOnSelect: false
@@ -616,6 +619,7 @@ export default function ProjectScenarioPage() {
     isSharing,
     isUploading,
     hasStructuralChanges,
+    isGuest,
     projectId,
     selectedAsset,
     viewMode

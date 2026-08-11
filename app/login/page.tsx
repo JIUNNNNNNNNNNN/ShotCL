@@ -1,91 +1,66 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
-import { LogIn, LogOut, Mail } from "lucide-react";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowRight, LogOut, ShieldCheck } from "lucide-react";
+import { useAuthSession } from "@/components/AuthSessionProvider";
+import { InlineLoader } from "@/components/PixelDogLoader";
 import { PageHeader } from "@/components/PageHeader";
-import { getSupabaseBrowserClient, hasSupabaseEnv } from "@/lib/supabase/client";
+import { getSafeInternalPath } from "@/lib/auth/client";
+import { hasSupabaseEnv } from "@/lib/supabase/client";
 
-const fieldClass =
-  "min-h-12 w-full border border-field-border bg-field-input px-3 py-3 text-base text-field-text outline-none placeholder:text-field-muted focus:border-field-primary focus:ring-2 focus:ring-field-primary/30";
-
-/** Supabase Auth 이메일 매직링크 로그인 화면입니다. */
+/** Google 계정 한 가지 흐름만 제공하는 compact 로그인 화면입니다. */
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </Suspense>
+  );
+}
 
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
+function LoginContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const {
+    email,
+    errorMessage: sessionError,
+    isEditorEligible,
+    isGoogle,
+    signOut,
+    startGoogleOAuth,
+    status
+  } = useAuthSession();
+  const [actionError, setActionError] = useState("");
+  const nextPath = getSafeInternalPath(searchParams.get("next"));
+  const isBusy = status === "loading" || status === "syncing";
 
-    supabase.auth.getUser().then(({ data }) => {
-      setCurrentEmail(data.user?.email ?? null);
-    });
-  }, []);
-
-  /** 입력한 이메일로 Supabase 매직링크를 보냅니다. */
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const supabase = getSupabaseBrowserClient();
-
-    if (!supabase) {
-      setErrorMessage("Supabase 환경변수가 없어 개발 모드로 실행 중입니다.");
-      return;
-    }
-
-    setIsBusy(true);
-    setMessage("");
-    setErrorMessage("");
-
+  async function handleGoogleLogin() {
+    setActionError("");
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: {
-          emailRedirectTo: window.location.origin
-        }
-      });
-
-      if (error) throw error;
-      setMessage("이메일로 로그인 링크를 보냈습니다.");
+      await startGoogleOAuth(nextPath);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "로그인 링크를 보내지 못했습니다.");
-    } finally {
-      setIsBusy(false);
+      setActionError(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다.");
     }
   }
 
-  /** 현재 Supabase 세션을 로그아웃합니다. */
   async function handleLogout() {
-    const supabase = getSupabaseBrowserClient();
-    if (!supabase) return;
-
-    setIsBusy(true);
-    setMessage("");
-    setErrorMessage("");
-
+    setActionError("");
     try {
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
-      setCurrentEmail(null);
-      setMessage("로그아웃했습니다.");
+      await signOut();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "로그아웃하지 못했습니다.");
-    } finally {
-      setIsBusy(false);
+      setActionError(error instanceof Error ? error.message : "로그아웃하지 못했습니다.");
     }
   }
 
-  if (!hasSupabaseEnv()) {
+  if (!hasSupabaseEnv() || status === "unavailable") {
     return (
       <>
         <PageHeader
-          title="로그인"
-          description="현재 배포본은 테스트 모드이며 실제 계정 로그인과 프로젝트 공유가 비활성화되어 있습니다."
+          title="Google 계정"
+          description="현재 환경에서는 계정 로그인을 사용할 수 없습니다."
         />
-        <div className="rounded-[10px] border border-field-border bg-field-panel p-5 leading-6 text-field-muted shadow-card">
-          Supabase URL과 anon key가 연결되지 않았습니다. 환경변수를 연결한 뒤 실제 계정 로그인과 협업 공유를 사용할 수 있습니다.
+        <div className="mx-auto max-w-md rounded-[var(--radius-card)] border border-field-border bg-field-panel p-5 text-sm leading-6 text-field-muted shadow-card">
+          Supabase URL과 anon key를 연결한 뒤 Google 로그인을 사용할 수 있습니다.
         </div>
       </>
     );
@@ -93,49 +68,78 @@ export default function LoginPage() {
 
   return (
     <>
-      <PageHeader title="로그인" description="Supabase 이메일 매직링크로 접속합니다." />
+      <PageHeader title="Google 계정" description="ShotCL 계정 상태를 확인합니다." />
+      <section className="mx-auto grid w-full max-w-md gap-4 rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-5 shadow-card">
+        {isBusy ? (
+          <div className="flex min-h-28 items-center justify-center" aria-label="계정 확인 중">
+            <InlineLoader />
+          </div>
+        ) : isGoogle ? (
+          <>
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius-control)] border border-field-primary/55 bg-field-primary/10 text-sm font-black text-field-primary" aria-hidden>
+                G
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-black text-field-text">{email || "Google 계정"}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-xs font-bold text-field-muted">
+                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+                  {isEditorEligible ? "프로젝트 생성 가능" : "프로젝트 참여 전용"}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push(nextPath)}
+              className="neon-primary flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border px-4 text-sm font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            >
+              계속하기
+              <ArrowRight className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius-control)] border border-field-divider bg-field-input px-4 text-sm font-bold text-field-text hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            >
+              <LogOut className="h-4 w-4" aria-hidden />
+              로그아웃
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="text-center">
+              <span className="mx-auto grid h-11 w-11 place-items-center rounded-[var(--radius-control)] border border-field-divider bg-field-input text-base font-black text-field-text" aria-hidden>
+                G
+              </span>
+              <p className="mt-3 text-sm font-black text-field-text">Google 계정으로 시작</p>
+              <p className="mt-1 text-xs leading-5 text-field-muted">
+                프로젝트 참여 내역을 계정에 안전하게 연결합니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleGoogleLogin()}
+              className="neon-primary min-h-11 w-full rounded-[var(--radius-control)] border px-4 text-sm font-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            >
+              Google로 로그인
+            </button>
+          </>
+        )}
 
-      {message ? <div role="status" className="mb-4 border border-field-divider bg-field-soft p-4 text-sm font-semibold text-field-subtle">{message}</div> : null}
-      {errorMessage ? <div role="alert" className="mb-4 border border-field-danger bg-field-panel p-4 text-sm font-semibold text-field-danger">{errorMessage}</div> : null}
-
-      {currentEmail ? (
-        <section className="border border-field-border bg-field-panel p-4">
-          <p className="text-sm text-field-muted">현재 로그인</p>
-          <p className="mt-2 break-words text-lg font-black">{currentEmail}</p>
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={isBusy}
-            className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 border border-field-border bg-field-panel px-4 font-bold text-field-text transition-colors hover:border-field-divider hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:opacity-50"
-          >
-            <LogOut className="h-5 w-5" aria-hidden />
-            로그아웃
-          </button>
-        </section>
-      ) : (
-        <form onSubmit={handleLogin} className="grid gap-4 rounded-[10px] border border-field-border bg-field-panel p-4 shadow-card">
-          <label className="grid gap-2">
-            <span className="text-sm text-field-muted">이메일</span>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="crew@example.com"
-              className={fieldClass}
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={isBusy || !email.trim()}
-            className="flex min-h-12 items-center justify-center gap-2 border border-field-primary bg-field-primary px-4 font-bold text-field-accent-foreground transition-colors hover:border-field-secondary hover:bg-field-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary focus-visible:ring-offset-2 focus-visible:ring-offset-field-bg disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isBusy ? <Mail className="h-5 w-5" aria-hidden /> : <LogIn className="h-5 w-5" aria-hidden />}
-            {isBusy ? "전송 중" : "로그인 링크 받기"}
-          </button>
-        </form>
-      )}
+        {actionError || sessionError ? (
+          <p role="alert" className="text-center text-xs font-bold leading-5 text-field-danger">
+            {actionError || sessionError}
+          </p>
+        ) : null}
+      </section>
     </>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <div className="flex min-h-[50dvh] items-center justify-center">
+      <InlineLoader />
+    </div>
   );
 }

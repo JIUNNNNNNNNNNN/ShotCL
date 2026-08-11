@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getAccessGrant,
+  getProjectRequestAccess,
   getSessionToken,
   hashProjectSessionToken,
   ProjectAccessUnavailableError
 } from "@/lib/projectAccess/server";
 import {
   ensureProjectStaffInvite,
+  ensureProjectStaffInviteForAccount,
   getProjectStaffInviteManagementState,
   ProjectStaffInviteMigrationRequiredError,
   ProjectStaffInviteUnavailableError,
-  revokeProjectStaffInvite
+  revokeProjectStaffInvite,
+  revokeProjectStaffInviteForAccount
 } from "@/lib/projectStaffInvites.server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
@@ -41,16 +43,25 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     if (action === "revoke") {
-      const revoked = await revokeProjectStaffInvite(access.projectId, access.creatorSessionHash);
+      const revoked = access.mode === "account"
+        ? await revokeProjectStaffInviteForAccount(access.projectId, access.userId)
+        : await revokeProjectStaffInvite(access.projectId, access.creatorSessionHash);
       return inviteJson({ ok: true, status: "inactive", revoked });
     }
 
-    const state = await ensureProjectStaffInvite(
-      request,
-      access.projectId,
-      access.creatorSessionHash,
-      action === "rotate"
-    );
+    const state = access.mode === "account"
+      ? await ensureProjectStaffInviteForAccount(
+        request,
+        access.projectId,
+        access.userId,
+        action === "rotate"
+      )
+      : await ensureProjectStaffInvite(
+        request,
+        access.projectId,
+        access.creatorSessionHash,
+        action === "rotate"
+      );
     return inviteJson({ ok: true, ...state });
   } catch (error) {
     return inviteErrorResponse(error, "스탭 초대 링크를 변경하지 못했습니다.");
@@ -66,6 +77,16 @@ async function requireInviteAdmin(request: NextRequest, context: RouteContext) {
       400
     );
   }
+  const access = await getProjectRequestAccess(request, projectId);
+  if (access?.grant.role !== "admin") {
+    return inviteJson(
+      { ok: false, error: "스탭 초대 링크는 Key staff만 관리할 수 있습니다.", code: "PROJECT_STAFF_INVITE_FORBIDDEN" },
+      403
+    );
+  }
+  if (access.mode === "member" && access.accountUserId) {
+    return { projectId, mode: "account" as const, userId: access.accountUserId };
+  }
   const sessionToken = getSessionToken(request);
   if (!sessionToken) {
     return inviteJson(
@@ -73,15 +94,9 @@ async function requireInviteAdmin(request: NextRequest, context: RouteContext) {
       403
     );
   }
-  const grant = await getAccessGrant(request, projectId);
-  if (grant?.role !== "admin") {
-    return inviteJson(
-      { ok: false, error: "스탭 초대 링크는 Key staff만 관리할 수 있습니다.", code: "PROJECT_STAFF_INVITE_FORBIDDEN" },
-      403
-    );
-  }
   return {
     projectId,
+    mode: "legacy" as const,
     creatorSessionHash: hashProjectSessionToken(sessionToken)
   };
 }

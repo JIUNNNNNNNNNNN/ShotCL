@@ -56,8 +56,10 @@ export async function listProjects(): Promise<Project[]> {
   return mergeProjects(sharedProjects, projects);
 }
 
-/** 비밀번호 인증으로 생성된 현재 브라우저의 유효한 프로젝트 권한만 조회합니다. */
+/** 서버 account cookie와 기존 비밀번호 browser grant를 합친 canonical 프로젝트 목록입니다. */
 export async function listAccessibleProjects(): Promise<AccessibleProjectList> {
+  // Auth bearer를 여기서 별도로 붙이지 않습니다. AuthSessionProvider가 먼저
+  // /api/auth/session을 동기화하므로 서버의 HttpOnly account cookie가 권한 원본입니다.
   const response = await fetch("/api/projects/access-list", {
     cache: "no-store",
     credentials: "same-origin"

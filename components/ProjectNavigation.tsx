@@ -34,6 +34,7 @@ import {
   type ProjectNavigationCardItem
 } from "@/components/ProjectNavigationCardGrid";
 import { ProjectKeyStaffUpgrade } from "@/components/ProjectKeyStaffUpgrade";
+import { GuestAccountSaveCta } from "@/components/GuestAccountSaveCta";
 import {
   ContextualGuideHelpButton,
   useContextualGuide,
@@ -99,7 +100,7 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { role } = useProjectAccess();
+  const { role, isGuest } = useProjectAccess();
   const {
     project,
     projectId,
@@ -132,7 +133,7 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const sortedPlans = useMemo(() => [...dailyPlans].sort(compareDailyPlanEpisodes), [dailyPlans]);
   const activeItem = resolveActiveProjectNavigationItem(pathname, searchParams, projectId);
   // ProjectAccessGate의 project-scoped role이 승격 직후에도 canonical source입니다.
-  const canManageDailyPlans = (role ?? project?.accessRole) !== "progress";
+  const canManageDailyPlans = !isGuest && (role ?? project?.accessRole) !== "progress";
   const instanceId = drawer ? "drawer" : "panel";
   const projectHomeHref = buildProjectBasePath(projectId);
   const navigationRouteKey = `${pathname}?view=${searchParams.get("view") ?? ""}&dailyPlanId=${searchParams.get("dailyPlanId") ?? ""}`;
@@ -298,6 +299,21 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
     );
   }
 
+  if (isGuest) {
+    return (
+      <GuestProjectNavigation
+        drawer={drawer}
+        projectId={projectId}
+        projectName={projectName}
+        pathname={pathname}
+        searchParams={searchParams}
+        isLoading={isLoading}
+        error={error}
+        onNavigate={notifyNavigation}
+      />
+    );
+  }
+
   return (
     <>
       <nav
@@ -376,6 +392,96 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
         document.body
       ) : null}
     </>
+  );
+}
+
+function GuestProjectNavigation({
+  drawer,
+  projectId,
+  projectName,
+  pathname,
+  searchParams,
+  isLoading,
+  error,
+  onNavigate
+}: {
+  drawer: boolean;
+  projectId: string;
+  projectName: string;
+  pathname: string;
+  searchParams: Pick<URLSearchParams, "get">;
+  isLoading: boolean;
+  error: string;
+  onNavigate: (href: string) => void;
+}) {
+  const progressHref = buildProjectNavigationHref(projectId, "progress");
+  const scenarioHref = buildProjectNavigationHref(projectId, "scenario");
+  const progressActive = resolveActiveProjectNavigationItem(pathname, searchParams, projectId) === "progress";
+  const scenarioActive = pathname.replace(/\/$/u, "") === scenarioHref;
+
+  return (
+    <nav
+      aria-label="게스트 프로젝트 메뉴"
+      className={`project-navigation flex min-h-0 min-w-0 flex-col ${drawer ? "flex-1" : "h-full"}`}
+    >
+      <div className="project-navigation__project-summary text-center">
+        <p className="break-words text-sm font-black leading-5 text-field-text [overflow-wrap:anywhere]" title={projectName}>
+          {projectName}
+        </p>
+        <p className="mt-1 text-[11px] font-bold text-field-primary">게스트 읽기 전용</p>
+        {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
+        {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트를 불러오지 못했습니다.")}</p> : null}
+      </div>
+
+      <div className="project-navigation__menu-scroll grid content-start gap-2">
+        <GuestNavigationLink
+          href={progressHref}
+          active={progressActive}
+          icon={ListChecks}
+          label="진행도"
+          onNavigate={onNavigate}
+        />
+        <GuestNavigationLink
+          href={scenarioHref}
+          active={scenarioActive}
+          icon={BookOpen}
+          label="시나리오"
+          onNavigate={onNavigate}
+        />
+      </div>
+
+      <GuestAccountSaveCta nextPath={progressHref} />
+    </nav>
+  );
+}
+
+function GuestNavigationLink({
+  href,
+  active,
+  icon: Icon,
+  label,
+  onNavigate
+}: {
+  href: string;
+  active: boolean;
+  icon: LucideIcon;
+  label: string;
+  onNavigate: (href: string) => void;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      onClick={() => onNavigate(href)}
+      className={`flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] border px-3 py-2.5 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+        active
+          ? "border-field-primary bg-field-primary-soft text-field-primary"
+          : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"
+      }`}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+      {label}
+    </Link>
   );
 }
 

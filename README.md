@@ -13,7 +13,8 @@ app/
   projects/[id]/analysis-runs/page.tsx
                                   AI 원본 결과와 최종 확정 결과 비교 기록
   projects/[id]/edit/page.tsx      새 편집 방식 안내
-  login/page.tsx                   Supabase 이메일 매직링크 로그인
+  login/page.tsx                   Supabase Google 계정 확인·로그아웃
+  auth/callback/page.tsx           Google OAuth PKCE callback
   api/analyze-storyboard/route.ts  서버 AI 분석 API 자리
 components/                        공통 UI
 lib/
@@ -107,6 +108,7 @@ cp .env.local.example .env.local
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=
+SHOTCL_EDITOR_GOOGLE_EMAILS=
 NEXT_PUBLIC_USE_LOCAL_DATA=false
 NEXT_PUBLIC_ENABLE_DEV_ANON_AUTH=true
 OPENAI_API_KEY=
@@ -118,6 +120,9 @@ TESSDATA_PREFIX=
 ```
 
 `OPENAI_API_KEY`는 서버 API route에서만 사용합니다. `NEXT_PUBLIC_`이 붙지 않은 값은 브라우저에 노출하지 않습니다.
+
+Google 계정, 테스트 편집자 allowlist, 로그인 없는 초대 링크 설정은
+[`docs/google-auth-guest-access.md`](docs/google-auth-guest-access.md)의 적용 순서를 따르세요.
 
 ### Open-Meteo 날씨 자동 입력
 
@@ -133,12 +138,12 @@ TESSDATA_PREFIX=
 4. 기존 MVP DB가 이미 있다면 `supabase/migration_shots_cut_status_image.sql`을 실행합니다.
 5. AI 분석 기록 기능을 쓰려면 `supabase/migration_analysis_runs.sql`을 실행합니다.
 6. 이전에 `migration_analysis_runs.sql`을 이미 실행했다면 `supabase/migration_analysis_text_quality.sql`도 실행합니다.
-7. Authentication에서 이메일 로그인을 켭니다.
+7. Google 계정 기능은 `docs/google-auth-guest-access.md`의 Google Provider·callback 설정을 적용합니다.
 8. 로그인 화면 없이 MVP를 테스트하려면 Authentication 설정에서 Anonymous sign-ins를 켭니다.
 9. Storage에 `storyboards` 버킷이 생겼는지 확인합니다.
 10. Realtime에서 `public.shots` 테이블이 활성화되어 있는지 확인합니다.
 
-Supabase 환경변수를 넣으면 `/login`에서 이메일 매직링크 로그인을 사용할 수 있습니다. 개발 모드에서는 localStorage 또는 Anonymous Auth로 로그인 화면 없이 테스트할 수 있습니다.
+Supabase 환경변수와 Google Provider를 연결하면 `/login`에서 Google 계정을 확인할 수 있습니다. 개발 모드에서는 localStorage 또는 Anonymous Auth로 기존 MVP 데이터 흐름을 별도 테스트할 수 있지만, 초대 Guest 열람에는 Anonymous Auth를 사용하지 않습니다.
 
 메인 화면 하단의 “개발용 Supabase 점검” 패널은 개발 중에만 보입니다. 키 전체 값은 보여주지 않고 URL/anon key 설정 여부, 인증 세션, `projects` select/insert 결과와 Supabase error message/code/details를 화면에 표시합니다.
 

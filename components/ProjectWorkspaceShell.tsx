@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Menu, PanelRight, TriangleAlert, X } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { HomeButton } from "@/components/HomeButton";
+import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { ProjectNavigation, getProjectPageTitle } from "@/components/ProjectNavigation";
 import { useCurrentProjectPageActionMenu } from "@/components/ProjectPageActions";
 import { RightProjectSidebar } from "@/components/RightProjectSidebar";
@@ -26,6 +27,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const searchParams = useSearchParams();
   const routeKey = `${pathname}?${searchParams.toString()}`;
   const menu = useCurrentProjectPageActionMenu();
+  const { isGuest } = useProjectAccess();
   const { projectName } = useProjectWorkspace();
   const persistentShell = usePersistentProjectShell();
   const [openDrawer, setOpenDrawer] = useState<OpenDrawer>(null);
@@ -66,7 +68,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   }, [persistentShell]);
 
   const pageTitle = getProjectPageTitle(pathname, searchParams);
-  const hasRightPanel = Boolean(menu?.actions.length);
+  const hasRightPanel = !isGuest && Boolean(menu?.actions.length);
   const modalDrawerOpen = !persistentShell && openDrawer !== null;
   useContextualGuideBlocker("project-shell-drawer", modalDrawerOpen);
 
@@ -85,7 +87,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
 
       {!persistentShell ? <header className="project-shell__app-bar no-print" inert={modalDrawerOpen}>
         <div className="project-shell__mobile-home">
-          <HomeButton embedded />
+          {!isGuest ? <HomeButton embedded /> : <span aria-hidden />}
         </div>
         <button
           ref={setNavigationToggleRef}
@@ -118,7 +120,7 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
       </header> : null}
 
       <main ref={contentRef} className="project-shell__content" id="project-main-content" inert={modalDrawerOpen}>
-        {isDemoStorageMode() ? <ProjectTestModeWarning /> : null}
+        {isDemoStorageMode() && !isGuest ? <ProjectTestModeWarning /> : null}
         <div className="project-shell__page">{children}</div>
       </main>
 

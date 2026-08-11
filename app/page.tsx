@@ -2,6 +2,8 @@
 
 import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { UserRound } from "lucide-react";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { InlineLoader } from "@/components/PixelDogLoader";
 import {
   ContextualGuideHelpButton,
@@ -92,10 +94,12 @@ const homeActions = [
 
 /** New, Join, Go를 고정 카드로 제공하는 앱 진입 화면입니다. */
 export default function HomePage() {
+  const { isGoogle, user } = useAuthSession();
+  const accountKey = isGoogle && user?.id ? `google:${user.id}` : "anonymous";
   return (
     <Suspense fallback={<MainPageFallback />}>
-      <ContextualGuideProvider userNamespace="" role={null}>
-        <MainHomeContent />
+      <ContextualGuideProvider userNamespace={isGoogle ? user?.id ?? "" : ""} role={null}>
+        <MainHomeContent key={accountKey} />
       </ContextualGuideProvider>
     </Suspense>
   );
@@ -114,6 +118,18 @@ function MainPageFallback() {
 
 function MainHomeContent() {
   const router = useRouter();
+  const {
+    accountGeneration,
+    email,
+    errorMessage: accountError,
+    isEditorEligible,
+    isGoogle,
+    startGoogleOAuth,
+    status: accountStatus,
+    user
+  } = useAuthSession();
+  const accountAvatarUrl = getGoogleAvatarUrl(user?.user_metadata);
+  const accountLabel = getGoogleAccountLabel(user?.user_metadata, email);
   const {
     activeGuideId,
     isGuideCompleted,
@@ -154,6 +170,8 @@ function MainHomeContent() {
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectNavigationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectsLoadPromiseRef = useRef<Promise<AccessibleProjectSnapshot> | null>(null);
+  const projectsLoadGenerationRef = useRef(0);
+  const observedAccountGenerationRef = useRef(accountGeneration);
   const allAccessibleProjectsRef = useRef<Project[]>([]);
   const dismissedProjectIdsRef = useRef(new Set<string>());
   const preferenceOwnerIdRef = useRef("");
@@ -187,6 +205,26 @@ function MainHomeContent() {
     window.addEventListener("pageshow", resetNavigationState);
     return () => window.removeEventListener("pageshow", resetNavigationState);
   }, []);
+
+  useEffect(() => {
+    if (observedAccountGenerationRef.current === accountGeneration) return;
+    observedAccountGenerationRef.current = accountGeneration;
+    projectsLoadGenerationRef.current += 1;
+    projectsLoadPromiseRef.current = null;
+    allAccessibleProjectsRef.current = [];
+    dismissedProjectIdsRef.current = new Set();
+    preferenceOwnerIdRef.current = "";
+    setProjects([]);
+    setHasLoadedProjects(false);
+    void loadAccessibleProjectList(true).catch(() => undefined);
+  }, [accountGeneration]);
+
+  useEffect(() => {
+    if (selectedAction === "new" && (!isGoogle || !isEditorEligible)) {
+      setSelectedAction(null);
+      setNewProjectError("");
+    }
+  }, [isEditorEligible, isGoogle, selectedAction]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -329,6 +367,7 @@ function MainHomeContent() {
 
     setIsLoading(true);
     setErrorMessage("");
+    const loadGeneration = projectsLoadGenerationRef.current;
     const request = listAccessibleProjects()
       .then(async ({ projects: accessibleProjects, preferenceScope }) => {
         const preferenceOwnerId = await resolveDismissedProjectOwnerId(preferenceScope);
@@ -342,7 +381,7 @@ function MainHomeContent() {
           dismissedProjectIds,
           preferenceOwnerId
         };
-        if (isMountedRef.current) {
+        if (isMountedRef.current && projectsLoadGenerationRef.current === loadGeneration) {
           allAccessibleProjectsRef.current = accessibleProjects;
           dismissedProjectIdsRef.current = dismissedProjectIds;
           preferenceOwnerIdRef.current = preferenceOwnerId;
@@ -352,14 +391,16 @@ function MainHomeContent() {
         return snapshot;
       })
       .catch((error) => {
-        if (isMountedRef.current) {
+        if (isMountedRef.current && projectsLoadGenerationRef.current === loadGeneration) {
           setErrorMessage(error instanceof Error ? error.message : "참여한 프로젝트를 불러오지 못했습니다.");
         }
         throw error;
       })
       .finally(() => {
-        projectsLoadPromiseRef.current = null;
-        if (isMountedRef.current) setIsLoading(false);
+        if (projectsLoadPromiseRef.current === request) projectsLoadPromiseRef.current = null;
+        if (isMountedRef.current && projectsLoadGenerationRef.current === loadGeneration) {
+          setIsLoading(false);
+        }
       });
     projectsLoadPromiseRef.current = request;
     return request;
@@ -519,7 +560,25 @@ function MainHomeContent() {
   function handleActionClick(action: HomeAction, triggerElement: HTMLButtonElement) {
     if (interactionLocked || projectNavigationRef.current || joinSubmissionRef.current) return;
     selectedActionTriggerRef.current = triggerElement;
-    if (action === "new" || action === "join") {
+    if (accountStatus === "loading" || accountStatus === "syncing") {
+      showStatus("계정 확인 중입니다.");
+      return;
+    }
+    if (action === "new") {
+      if (!isGoogle) {
+        void startGoogleOAuth("/").catch((error) => {
+          showStatus(error instanceof Error ? error.message : "Google 로그인을 시작하지 못했습니다.");
+        });
+        return;
+      }
+      if (!isEditorEligible) {
+        showStatus(accountError || "프로젝트 생성 권한이 없는 계정입니다.");
+        return;
+      }
+      selectContextualAction(action, triggerElement);
+      return;
+    }
+    if (action === "join") {
       selectContextualAction(action, triggerElement);
       return;
     }
@@ -669,6 +728,10 @@ function MainHomeContent() {
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isCreatingProject || projectNavigationRef.current) return;
+    if (!isGoogle || !isEditorEligible) {
+      setNewProjectError(accountError || "Google 프로젝트 생성 권한이 필요합니다.");
+      return;
+    }
     const name = cleanProjectName(newProjectName);
     if (!name) {
       setNewProjectError("프로젝트 이름을 입력하세요.");
@@ -709,6 +772,10 @@ function MainHomeContent() {
   async function handleJoinProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (joinSubmissionRef.current || projectNavigationRef.current) return;
+    if (accountStatus === "loading" || accountStatus === "syncing") {
+      setJoinProjectError("계정 확인이 끝난 뒤 다시 참여해주세요.");
+      return;
+    }
     const projectName = cleanProjectName(joinProjectName);
     if (!projectName || !/^\d{4}$/.test(joinPassword)) {
       setJoinProjectError("프로젝트 이름과 4자리 비밀번호를 입력하세요");
@@ -961,7 +1028,31 @@ function MainHomeContent() {
       }}
     >
       <h1 id="home-actions-title" className="sr-only">프로젝트 시작</h1>
-      <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-20">
+      <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => router.push("/login?next=/")}
+          className="flex min-h-10 max-w-[min(14rem,55vw)] items-center gap-2 rounded-[var(--radius-control)] border border-field-divider bg-field-panel/95 px-3 text-xs font-bold text-field-subtle shadow-card hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+          aria-label={isGoogle ? `Google 계정 ${email || "로그인됨"}` : "Google 계정 로그인"}
+        >
+          {isGoogle && accountAvatarUrl ? (
+            <img
+              src={accountAvatarUrl}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="h-5 w-5 shrink-0 rounded-[6px] object-cover"
+            />
+          ) : (
+            <UserRound className="h-4 w-4 shrink-0" aria-hidden />
+          )}
+          <span className="truncate">
+            {accountStatus === "loading" || accountStatus === "syncing"
+              ? "계정 확인 중"
+              : isGoogle
+                ? accountLabel
+                : "Google 로그인"}
+          </span>
+        </button>
         <ContextualGuideHelpButton onReplayGuide={handleGuideReplay} />
       </div>
       <div
@@ -970,6 +1061,14 @@ function MainHomeContent() {
         {homeActions.map((action, index) => {
           const isSelected = action.id !== "go" && selectedAction === action.id;
           const isGoPending = action.id === "go" && isResolvingGo;
+          const isAccountPending = accountStatus === "loading" || accountStatus === "syncing";
+          const actionDescription = action.id === "new"
+            ? !isGoogle
+              ? "Google 로그인 후 만들기"
+              : !isEditorEligible
+                ? "프로젝트 생성 권한 필요"
+                : action.description
+            : action.description;
           const desktopRowClass = index === 0
             ? "min-[1180px]:row-start-1"
             : index === 1
@@ -985,7 +1084,7 @@ function MainHomeContent() {
                     ? joinActionGuideAnchorRef
                     : goActionGuideAnchorRef}
                 type="button"
-                disabled={interactionLocked}
+                disabled={interactionLocked || isAccountPending}
                 aria-label={action.ariaLabel}
                 aria-pressed={action.id === "go" ? undefined : isSelected}
                 aria-expanded={action.id === "go" ? undefined : isSelected}
@@ -1006,7 +1105,7 @@ function MainHomeContent() {
                   {action.label}
                 </span>
                 <span className="mt-3 flex min-h-5 items-center justify-center text-center text-xs font-bold text-field-muted">
-                  {isGoPending ? <InlineLoader /> : action.description}
+                  {isGoPending || isAccountPending ? <InlineLoader /> : actionDescription}
                 </span>
               </button>
 
@@ -1059,4 +1158,26 @@ function MainHomeContent() {
       </div>
     </section>
   );
+}
+
+function getGoogleAvatarUrl(metadata: unknown) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "";
+  const candidate = (metadata as Record<string, unknown>).avatar_url;
+  if (typeof candidate !== "string") return "";
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
+function getGoogleAccountLabel(metadata: unknown, fallbackEmail: string | null) {
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const value = metadata as Record<string, unknown>;
+    const name = [value.full_name, value.name]
+      .find((candidate) => typeof candidate === "string" && candidate.trim());
+    if (typeof name === "string") return name.trim();
+  }
+  return fallbackEmail || "Google 계정";
 }

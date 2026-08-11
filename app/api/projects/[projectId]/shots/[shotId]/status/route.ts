@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
+import {
+  getProjectRequestAccess,
+  ProjectAccessUnavailableError,
+  requireProjectAccessDb
+} from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { ShotStatus } from "@/lib/types";
 
@@ -13,8 +17,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
     const body = (await request.json()) as { status?: ShotStatus };
     if (!body.status || !statuses.includes(body.status)) return NextResponse.json({ error: "허용되지 않은 상태입니다." }, { status: 400 });
 
-    const grant = await getAccessGrant(request, projectId);
-    if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
+    const access = await getProjectRequestAccess(request, projectId);
+    const grant = access?.grant ?? null;
+    const canUpdateStatus = grant?.role === "admin"
+      || (access?.mode === "member" && access.editorEligible);
+    // Guest·legacy·비허용 계정은 진행도를 읽을 수만 있습니다. Allowlist로
+    // 검증된 Google Staff member의 기존 현장 상태 변경 권한은 유지합니다.
+    if (!grant || !canUpdateStatus) {
+      return NextResponse.json(
+        { error: "편집이 허용된 프로젝트 스탭만 컷 상태를 변경할 수 있습니다." },
+        { status: grant ? 403 : 401 }
+      );
+    }
     const supabase = requireProjectAccessDb();
     const { data: current, error: currentError } = await supabase.from("shots").select("id,status").eq("id", shotId).eq("project_id", projectId).maybeSingle();
     if (currentError) throw currentError;

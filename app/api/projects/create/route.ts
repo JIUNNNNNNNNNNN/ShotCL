@@ -1,15 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cleanProjectName, isValidPasscode, normalizeProjectName } from "@/lib/projectAccess/core";
 import {
-  ensureSessionToken,
   hashPasscode,
   ProjectAccessUnavailableError,
-  requireProjectAccessDb,
-  saveAccessGrant
+  requireProjectAccessDb
 } from "@/lib/projectAccess/server";
+import {
+  resolveShotclAuthenticatedAccount,
+  ShotclAccountUnavailableError
+} from "@/lib/projectAccess/accountServer";
 
 export async function POST(request: NextRequest) {
   try {
+    const account = await resolveShotclAuthenticatedAccount(request);
+    if (!account) {
+      return NextResponse.json(
+        { error: "Google 계정으로 로그인한 뒤 프로젝트를 만들 수 있습니다." },
+        { status: 401 }
+      );
+    }
+    if (!account.isEditor) {
+      return NextResponse.json(
+        { error: "현재 테스트 버전에서 프로젝트를 만들 수 있는 편집자 계정이 아닙니다." },
+        { status: 403 }
+      );
+    }
+
     const body = (await request.json()) as { projectName?: string; adminPassword?: string; progressPassword?: string; shootDate?: string };
     const projectName = cleanProjectName(body.projectName ?? "");
     const adminPassword = body.adminPassword ?? "";
@@ -35,7 +51,8 @@ export async function POST(request: NextRequest) {
         normalized_name: normalizedName,
         shoot_date: body.shootDate || null,
         description: "",
-        share_enabled: true
+        share_enabled: true,
+        created_by: account.userId
       })
       .select("id,name,shoot_date,description,created_at,share_enabled")
       .single();
@@ -56,17 +73,22 @@ export async function POST(request: NextRequest) {
       throw credentialError;
     }
 
-    const response = NextResponse.json({ success: true, project: { ...project, access_role: "admin" }, role: "admin" }, { status: 201 });
-    const token = ensureSessionToken(request, response);
-    try {
-      await saveAccessGrant(token, project.id, "admin");
-    } catch (error) {
+    const { error: membershipError } = await supabase.from("project_members").upsert({
+      project_id: project.id,
+      user_id: account.userId,
+      role: "admin"
+    }, { onConflict: "project_id,user_id" });
+    if (membershipError) {
       await supabase.from("projects").delete().eq("id", project.id);
-      throw error;
+      throw membershipError;
     }
-    return response;
+    return NextResponse.json(
+      { success: true, project: { ...project, access_role: "admin" }, role: "admin" },
+      { status: 201 }
+    );
   } catch (error) {
-    const message = error instanceof ProjectAccessUnavailableError ? error.message : "프로젝트를 만들지 못했습니다.";
-    return NextResponse.json({ error: message }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
+    const unavailable = error instanceof ProjectAccessUnavailableError || error instanceof ShotclAccountUnavailableError;
+    const message = unavailable ? error.message : "프로젝트를 만들지 못했습니다.";
+    return NextResponse.json({ error: message }, { status: unavailable ? 503 : 500 });
   }
 }

@@ -325,7 +325,7 @@ export function ProjectStaffInviteCard({
         스탭 초대
       </h3>
       <p id="project-staff-invite-description" className="mt-1 text-[11px] font-medium leading-[1.55] text-field-muted">
-        링크로 참여한 사용자는 일반 스탭 권한으로 등록됩니다.
+        링크로 진행도와 시나리오를 바로 확인하고, 원하면 Google 계정에 저장할 수 있습니다.
       </p>
 
       <div className="mt-3 grid min-w-0 gap-2" aria-busy={isBusy} aria-describedby="project-staff-invite-description">
@@ -521,10 +521,8 @@ function buildKakaoInviteMessage(projectName: string, inviteUrl: string) {
   return [
     `[ShotCL] ${projectName} 스탭 초대`,
     "",
-    "아래 링크를 열어 프로젝트에 참여해 주세요.",
+    "로그인 없이 진행도와 시나리오를 바로 확인할 수 있습니다.",
     inviteUrl,
-    "",
-    "프로젝트 아이디와 비밀번호 입력 없이 참여할 수 있습니다."
   ].join("\n");
 }
 

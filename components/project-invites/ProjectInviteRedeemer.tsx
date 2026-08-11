@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowRight, UserRoundPlus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -32,6 +32,7 @@ export function ProjectInviteRedeemer({
   const [isJoining, setIsJoining] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const requestInFlightRef = useRef(false);
+  const autoJoinAttemptedRef = useRef(false);
   const joinControllerRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
 
@@ -43,12 +44,12 @@ export function ProjectInviteRedeemer({
     };
   }, []);
 
-  function openProgress(destination: string) {
+  const openProgress = useCallback((destination: string) => {
     // 전체 navigation으로 새 access cookie를 server layout에 반영하되 invite POST는 history에서 제거합니다.
     window.location.replace(destination);
-  }
+  }, []);
 
-  async function joinProject() {
+  const joinProject = useCallback(async () => {
     if (requestInFlightRef.current || state.status !== "valid") return;
     requestInFlightRef.current = true;
     setIsJoining(true);
@@ -80,13 +81,6 @@ export function ProjectInviteRedeemer({
         throw new Error(payload.error || "프로젝트에 참여하지 못했습니다.");
       }
       if (controller.signal.aborted || !mountedRef.current) return;
-      const nextState: InviteScreenState = {
-        status: payload.status === "already_member" ? "already_member" : "valid",
-        projectId: payload.projectId,
-        projectName: payload.projectName || state.projectName,
-        destination: payload.destination
-      };
-      setState(nextState);
       openProgress(payload.destination);
     } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return;
@@ -97,7 +91,13 @@ export function ProjectInviteRedeemer({
       setIsJoining(false);
       requestInFlightRef.current = false;
     }
-  }
+  }, [openProgress, state]);
+
+  useEffect(() => {
+    if (state.status !== "valid" || autoJoinAttemptedRef.current) return;
+    autoJoinAttemptedRef.current = true;
+    void joinProject();
+  }, [joinProject, state.status]);
 
   const valid = state.status === "valid" || state.status === "already_member";
   const alreadyMember = state.status === "already_member";
@@ -116,10 +116,10 @@ export function ProjectInviteRedeemer({
               {state.projectName}
             </h1>
             <p className="mt-2 text-sm font-bold leading-6 text-field-subtle">
-              {alreadyMember ? "이미 참여 중인 프로젝트입니다." : "스탭으로 초대되었습니다."}
+              {alreadyMember ? "이미 참여 중인 프로젝트입니다." : "게스트 화면을 준비하고 있습니다."}
             </p>
             <p className="mt-1 text-xs leading-5 text-field-muted">
-              초대 링크로 새로 참여하면 일반 스탭 권한으로 등록됩니다.
+              초대 링크에서는 진행도와 시나리오를 읽기 전용으로 확인할 수 있습니다.
             </p>
 
             <div className="mt-6 grid gap-2">
@@ -129,10 +129,24 @@ export function ProjectInviteRedeemer({
                   <ArrowRight className="h-4 w-4" aria-hidden />
                 </Button>
               ) : (
-                <Button className="min-h-11 w-full" disabled={isJoining} onClick={joinProject}>
-                  {isJoining ? "참여 중" : "프로젝트 참여"}
-                  {!isJoining ? <ArrowRight className="h-4 w-4" aria-hidden /> : null}
-                </Button>
+                <>
+                  <p role="status" aria-live="polite" className="min-h-11 py-3 text-sm font-bold text-field-primary">
+                    {isJoining ? "진행도를 여는 중…" : errorMessage ? "자동 연결에 실패했습니다." : "초대 링크 확인 중…"}
+                  </p>
+                  {errorMessage ? (
+                    <Button
+                      className="min-h-11 w-full"
+                      disabled={isJoining}
+                      onClick={() => {
+                        autoJoinAttemptedRef.current = true;
+                        void joinProject();
+                      }}
+                    >
+                      다시 시도
+                      <ArrowRight className="h-4 w-4" aria-hidden />
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
           </>

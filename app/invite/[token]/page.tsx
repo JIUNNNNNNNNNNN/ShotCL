@@ -6,9 +6,11 @@ import {
   type InviteScreenState
 } from "@/components/project-invites/ProjectInviteRedeemer";
 import {
-  getAccessGrantByToken,
+  getProjectRequestAccessFromTokens,
+  PROJECT_GUEST_INVITE_COOKIE,
   PROJECT_SESSION_COOKIE
 } from "@/lib/projectAccess/server";
+import { SHOTCL_ACCOUNT_COOKIE } from "@/lib/projectAccess/accountServer";
 import {
   inspectProjectStaffInvite,
   ProjectStaffInviteMigrationRequiredError,
@@ -44,10 +46,13 @@ async function resolveInitialState(token: string): Promise<InviteScreenState> {
     const invite = await inspectProjectStaffInvite(token);
     if (!invite) return { status: "invalid" };
     const cookieStore = await cookies();
-    const browserToken = cookieStore.get(PROJECT_SESSION_COOKIE)?.value ?? null;
-    const grant = await getAccessGrantByToken(browserToken, invite.projectId);
+    const access = await getProjectRequestAccessFromTokens(invite.projectId, {
+      accountSessionToken: cookieStore.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null,
+      guestInviteToken: cookieStore.get(PROJECT_GUEST_INVITE_COOKIE)?.value ?? null,
+      legacySessionToken: cookieStore.get(PROJECT_SESSION_COOKIE)?.value ?? null
+    });
     return {
-      status: grant ? "already_member" : "valid",
+      status: access ? "already_member" : "valid",
       projectId: invite.projectId,
       projectName: invite.projectName,
       destination: buildProjectNavigationHref(invite.projectId, "progress")

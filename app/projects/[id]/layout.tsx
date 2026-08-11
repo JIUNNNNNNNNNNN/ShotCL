@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
 import { ProjectAccessGate } from "@/components/ProjectAccessGate";
 import {
-  getAccessGrantByToken,
   getAccessPreferenceScope,
+  getProjectRequestAccessFromTokens,
+  PROJECT_GUEST_INVITE_COOKIE,
   PROJECT_SESSION_COOKIE,
   ProjectAccessUnavailableError
 } from "@/lib/projectAccess/server";
+import { SHOTCL_ACCOUNT_COOKIE } from "@/lib/projectAccess/accountServer";
 import { normalizeProjectId } from "@/lib/projectId";
 
 export default async function ProjectLayout({ children, params }: { children: React.ReactNode; params: Promise<{ id: string }> }) {
@@ -13,12 +15,22 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const projectId = normalizeProjectId(id);
   const cookieStore = await cookies();
   const projectSessionToken = cookieStore.get(PROJECT_SESSION_COOKIE)?.value ?? null;
+  const guestInviteToken = cookieStore.get(PROJECT_GUEST_INVITE_COOKIE)?.value ?? null;
+  const accountSessionToken = cookieStore.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null;
   let role: "admin" | "progress" | null = null;
   let projectName: string | null = null;
+  let accessMode: "member" | "guest" | "legacy" | null = null;
+  let editorEligible = false;
   try {
-    const grant = await getAccessGrantByToken(projectSessionToken, projectId);
-    role = grant?.role ?? null;
-    projectName = grant?.projectName ?? null;
+    const access = await getProjectRequestAccessFromTokens(projectId, {
+      accountSessionToken,
+      guestInviteToken,
+      legacySessionToken: projectSessionToken
+    });
+    role = access?.grant.role ?? null;
+    projectName = access?.grant.projectName ?? null;
+    accessMode = access?.mode ?? null;
+    editorEligible = access?.editorEligible ?? false;
   } catch (error) {
     if (!(error instanceof ProjectAccessUnavailableError)) throw error;
   }
@@ -27,7 +39,15 @@ export default async function ProjectLayout({ children, params }: { children: Re
       projectId={projectId}
       projectName={projectName}
       role={role}
-      accessPreferenceScope={getAccessPreferenceScope(projectSessionToken)}
+      accessMode={accessMode}
+      editorEligible={editorEligible}
+      accessPreferenceScope={getAccessPreferenceScope(
+        accessMode === "member"
+          ? accountSessionToken
+          : accessMode === "guest"
+            ? guestInviteToken
+            : projectSessionToken
+      )}
     >
       {children}
     </ProjectAccessGate>

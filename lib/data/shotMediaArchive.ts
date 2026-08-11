@@ -45,10 +45,13 @@ export type BuildProgressArchiveMediaMapInput = {
 
 /** 콘티·부감도 아카이브 이미지를 한 요청으로 불러옵니다. */
 export async function loadProgressArchiveMediaAssets(
-  projectId: string
+  projectId: string,
+  dailyPlanId?: string
 ): Promise<ProgressArchiveMediaAsset[]> {
+  const query = new URLSearchParams({ media: "1" });
+  if (dailyPlanId?.trim()) query.set("dailyPlanId", dailyPlanId.trim());
   const response = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/reference-assets?media=1`,
+    `/api/projects/${encodeURIComponent(projectId)}/reference-assets?${query}`,
     { cache: "no-store" }
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError & {

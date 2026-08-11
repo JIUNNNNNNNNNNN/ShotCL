@@ -7,14 +7,16 @@ import {
   clearJoinFailures,
   getAccessGrant,
   getKeyStaffUpgradeAttemptKey,
-  getSessionToken,
   isJoinRateLimited,
   ProjectAccessUnavailableError,
   recordJoinFailure,
   requireProjectAccessDb,
-  upgradeAccessGrantToAdmin,
   verifyPasscode
 } from "@/lib/projectAccess/server";
+import {
+  resolveShotclAuthenticatedAccount,
+  ShotclAccountUnavailableError
+} from "@/lib/projectAccess/accountServer";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
@@ -54,6 +56,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     if (!isSameOriginJsonRequest(request)) {
       return upgradeJson({ ok: false, error: "권한 변경 요청을 확인할 수 없습니다.", code: "PROJECT_ACCESS_REQUEST_FORBIDDEN" }, 403);
+    }
+
+    const account = await resolveShotclAuthenticatedAccount(request);
+    if (!account) {
+      return upgradeJson({ ok: false, error: "Google 계정으로 로그인해야 합니다.", code: "GOOGLE_ACCOUNT_REQUIRED" }, 401);
+    }
+    if (!account.isEditor) {
+      return upgradeJson({ ok: false, error: "현재 테스트 버전의 편집 허용 계정이 아닙니다.", code: "EDITOR_ACCOUNT_REQUIRED" }, 403);
     }
 
     const body = await readUpgradeBody(request);
@@ -103,14 +113,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return upgradeJson({ ok: false, error: "비밀번호가 올바르지 않습니다.", code: "PROJECT_ACCESS_PASSWORD_MISMATCH" }, 401);
     }
 
-    const sessionToken = getSessionToken(request);
-    if (!sessionToken) {
-      return upgradeJson({ ok: false, error: "현재 프로젝트의 Staff 권한을 확인할 수 없습니다.", code: "PROJECT_ACCESS_FORBIDDEN" }, 403);
-    }
-    const updateResult = await upgradeAccessGrantToAdmin(sessionToken, projectId);
-    if (updateResult === "missing") {
-      return upgradeJson({ ok: false, error: "현재 프로젝트의 Staff 권한을 확인할 수 없습니다.", code: "PROJECT_ACCESS_FORBIDDEN" }, 403);
-    }
+    const { error: membershipError } = await supabase.from("project_members").upsert({
+      project_id: projectId,
+      user_id: account.userId,
+      role: "admin"
+    }, { onConflict: "project_id,user_id" });
+    if (membershipError) throw membershipError;
     try {
       await clearJoinFailures(attemptKey);
     } catch (cleanupError) {
@@ -123,10 +131,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return upgradeJson({
       ok: true,
       role: "admin",
-      status: updateResult === "upgraded" ? "upgraded" : "already_key_staff"
+      status: "upgraded"
     });
   } catch (error) {
-    if (!(error instanceof ProjectAccessUnavailableError)) {
+    if (!(error instanceof ProjectAccessUnavailableError) && !(error instanceof ShotclAccountUnavailableError)) {
       console.error("[project-access-upgrade] Unable to upgrade current grant", {
         projectId,
         error: error instanceof Error ? error.message : "Unknown error"
@@ -134,7 +142,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
     return upgradeJson(
       { ok: false, error: "권한을 변경하지 못했습니다.", code: "PROJECT_ACCESS_UNAVAILABLE" },
-      error instanceof ProjectAccessUnavailableError ? 503 : 500
+      error instanceof ProjectAccessUnavailableError || error instanceof ShotclAccountUnavailableError ? 503 : 500
     );
   }
 }

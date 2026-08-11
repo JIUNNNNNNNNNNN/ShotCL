@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  createProjectSessionToken,
-  getSessionToken,
-  hashProjectSessionToken,
+  clearProjectGuestInviteCookie,
   ProjectAccessUnavailableError,
-  setProjectSessionCookie
+  setProjectGuestInviteCookie
 } from "@/lib/projectAccess/server";
+import {
+  linkShotclAccountProjectMembership,
+  resolveShotclAuthenticatedAccount
+} from "@/lib/projectAccess/accountServer";
 import {
   inspectProjectStaffInvite,
   ProjectStaffInviteMigrationRequiredError,
-  ProjectStaffInviteUnavailableError,
-  redeemProjectStaffInvite
+  ProjectStaffInviteUnavailableError
 } from "@/lib/projectStaffInvites.server";
 import { buildProjectNavigationHref } from "@/lib/projectNavigation";
 
@@ -45,22 +46,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
     const { token } = await context.params;
-    const browserSessionToken = getSessionToken(request) || createProjectSessionToken();
-    const result = await redeemProjectStaffInvite(
-      token,
-      hashProjectSessionToken(browserSessionToken)
-    );
-    if (!result) return invalidInviteResponse();
+    const invite = await inspectProjectStaffInvite(token);
+    if (!invite) return invalidInviteResponse();
+    const account = await resolveShotclAuthenticatedAccount(request);
+    const linkedRole = account
+      ? await linkShotclAccountProjectMembership(account.userId, invite.projectId)
+      : null;
 
     const response = publicInviteJson({
       ok: true,
-      status: result.alreadyMember ? "already_member" : "joined",
-      projectId: result.projectId,
-      projectName: result.projectName,
-      alreadyMember: result.alreadyMember,
-      destination: buildProjectNavigationHref(result.projectId, "progress")
+      status: linkedRole ? "account_linked" : "guest_ready",
+      projectId: invite.projectId,
+      projectName: invite.projectName,
+      destination: buildProjectNavigationHref(invite.projectId, "progress")
     });
-    setProjectSessionCookie(response, browserSessionToken);
+    if (linkedRole) clearProjectGuestInviteCookie(response);
+    else setProjectGuestInviteCookie(response, token);
     return response;
   } catch (error) {
     return publicInviteErrorResponse(error);

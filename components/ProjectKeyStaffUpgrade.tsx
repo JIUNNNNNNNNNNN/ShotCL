@@ -13,7 +13,8 @@ const SUCCESS_MESSAGE_MS = 1800;
 
 /** 일반 Staff에게만 보이는 왼쪽 패널 하단의 compact 권한 전환 utility입니다. */
 export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
-  const { role, applyVerifiedRole } = useProjectAccess();
+  const { role, accessMode, editorEligible, applyVerifiedRole } = useProjectAccess();
+  const canUpgrade = accessMode === "member" && editorEligible && isStaffProjectRole(role);
   const [expanded, setExpanded] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -49,14 +50,14 @@ export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
   }, [expanded]);
 
   useEffect(() => {
-    if (isStaffProjectRole(role)) return;
+    if (canUpgrade) return;
     requestGenerationRef.current += 1;
     pendingRef.current = false;
     setPending(false);
     setExpanded(false);
     setPassword("");
     setError("");
-  }, [role]);
+  }, [canUpgrade]);
 
   useEffect(() => () => {
     if (successTimerRef.current) clearTimeout(successTimerRef.current);
@@ -131,7 +132,7 @@ export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
     );
   }
 
-  if (!isStaffProjectRole(role)) return null;
+  if (!canUpgrade) return null;
 
   return (
     <div className="flex-none border-t border-field-divider px-2 py-2.5">

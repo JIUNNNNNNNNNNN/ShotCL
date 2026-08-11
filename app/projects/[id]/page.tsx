@@ -190,7 +190,7 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
 export default function ProjectDetailPage() {
-  const { role } = useProjectAccess();
+  const { role, isGuest, canEditProgressStatus } = useProjectAccess();
   const {
     projectId,
     project,
@@ -242,7 +242,9 @@ export default function ProjectDetailPage() {
   const nextScheduleSessionIdRef = useRef(0);
   editingScheduleRef.current = editingSchedule;
   const progressCutListGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.cut-list");
-  const progressStatusGuideRef = useContextualGuideAnchor<HTMLDivElement>("progress.status-controls");
+  const progressStatusGuideRef = useContextualGuideAnchor<HTMLDivElement>(
+    canEditProgressStatus ? "progress.status-controls" : null
+  );
   const { completeGuide, requestGuide } = useContextualGuide();
   useAutoContextualGuide(
     "progress.intro",
@@ -325,7 +327,10 @@ export default function ProjectDetailPage() {
           ? auditQuery(
               "progress.loadArchiveMedia",
               "app/projects/[id]/page.tsx:refresh",
-              () => loadProgressArchiveMediaAssets(projectId)
+              () => loadProgressArchiveMediaAssets(
+                projectId,
+                isGuest ? selectedDailyPlanId : undefined
+              )
             ).catch(() => [] as ProgressArchiveMediaAsset[])
           : Promise.resolve([] as ProgressArchiveMediaAsset[])
       ]);
@@ -391,6 +396,7 @@ export default function ProjectDetailPage() {
     }
   }, [
     commitSessionBuckets,
+    isGuest,
     isWorkspaceLoading,
     progressEntryKey,
     project,
@@ -543,9 +549,9 @@ export default function ProjectDetailPage() {
   }, [commitSessionBuckets, rebuildArchiveMedia, refreshSelectedShots]);
 
   useEffect(() => {
-    if (!projectId || !selectedDailyPlanId) return undefined;
+    if (isGuest || !projectId || !selectedDailyPlanId) return undefined;
     return subscribeToShotChanges(projectId, handleRealtimeShotChanges, selectedDailyPlanId);
-  }, [handleRealtimeShotChanges, projectId, selectedDailyPlanId]);
+  }, [handleRealtimeShotChanges, isGuest, projectId, selectedDailyPlanId]);
 
   const refreshSelectedShotMedia = useCallback(async () => {
     if (!projectId || !dailyPlanId) return;
@@ -712,6 +718,7 @@ export default function ProjectDetailPage() {
   }, [commitDailyPlanPatch, selectedPlan]);
 
   const handleStatusChange = useCallback(async (targetShot: Shot, status: ShotStatus) => {
+    if (!canEditProgressStatus) return;
     completeGuide("progress.intro");
     requestGuide("progress.status", "feature");
     const requestedEntryKey = activeProgressEntryKeyRef.current;
@@ -771,7 +778,7 @@ export default function ProjectDetailPage() {
         statusMutationQueueByShotIdRef.current.delete(targetShot.id);
       }
     }
-  }, [completeGuide, requestGuide]);
+  }, [canEditProgressStatus, completeGuide, requestGuide]);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -1003,20 +1010,24 @@ export default function ProjectDetailPage() {
   }
 
   const handleOpenMedia = useCallback((shot: Shot, type: ShotMediaType) => {
+    if (isGuest) return;
     setMediaPicker({ shot, type });
-  }, []);
+  }, [isGuest]);
 
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
-      onOpen={setEditingShot}
+      onOpen={isGuest ? () => undefined : setEditingShot}
       onOpenMedia={handleOpenMedia}
       archiveMedia={archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
       onStatusChange={handleStatusChange}
       progressOnly={progressOnly}
+      cardOpenDisabled={isGuest}
+      statusReadOnly={!canEditProgressStatus}
+      showMediaActions={!isGuest}
       interactionMediaGuideTarget={shot.id === mediaGuideShotId}
     />
-  ), [archiveMediaByShotId, handleOpenMedia, handleStatusChange, mediaGuideShotId, progressOnly]);
+  ), [archiveMediaByShotId, canEditProgressStatus, handleOpenMedia, handleStatusChange, isGuest, mediaGuideShotId, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
@@ -1175,12 +1186,15 @@ export default function ProjectDetailPage() {
                   <ProgressScheduleCard
                     key={item.id}
                     item={item}
-                    onOpen={(scheduleItem) => setEditingSchedule({
-                      dailyPlanId,
-                      entryKey: progressEntryKey,
-                      sessionId: ++nextScheduleSessionIdRef.current,
-                      item: scheduleItem
-                    })}
+                    onOpen={(scheduleItem) => {
+                      if (isGuest) return;
+                      setEditingSchedule({
+                        dailyPlanId,
+                        entryKey: progressEntryKey,
+                        sessionId: ++nextScheduleSessionIdRef.current,
+                        item: scheduleItem
+                      });
+                    }}
                     onImagePreview={handleImagePreview}
                   />
                 ))}
@@ -1248,7 +1262,7 @@ export default function ProjectDetailPage() {
         onSave={handleSaveNewShot}
       /> : null}
 
-      {editingShot ? <ShotEditorModal
+      {!isGuest && editingShot ? <ShotEditorModal
         key={editingShot.id}
         mode="edit"
         open
@@ -1261,7 +1275,7 @@ export default function ProjectDetailPage() {
         onDelete={progressOnly ? undefined : handleDeleteShot}
       /> : null}
 
-      {editingSchedule ? (
+      {!isGuest && editingSchedule ? (
         <ProgressScheduleEditorModal
           key={`${editingSchedule.dailyPlanId}:${editingSchedule.item.id}:${editingSchedule.sessionId}`}
           item={editingSchedule.item}
@@ -1292,7 +1306,7 @@ export default function ProjectDetailPage() {
           onClose={() => setPreview(null)}
         />
       ) : null}
-      {mediaPicker ? (
+      {!isGuest && mediaPicker ? (
         <ShotArchivePicker
           shot={mediaPicker.shot}
           initialType={mediaPicker.type}

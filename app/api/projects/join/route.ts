@@ -12,6 +12,10 @@ import {
   recordJoinFailure,
   verifyPasscode
 } from "@/lib/projectAccess/server";
+import {
+  resolveShotclAuthenticatedAccount,
+  ShotclAccountUnavailableError
+} from "@/lib/projectAccess/accountServer";
 
 const INVALID_MESSAGE = "프로젝트 이름 또는 비밀번호가 올바르지 않습니다";
 
@@ -55,19 +59,46 @@ export async function POST(request: NextRequest) {
       verifyPasscode(password, credentials.admin_password_hash, credentials.admin_password_salt),
       verifyPasscode(password, credentials.progress_password_hash, credentials.progress_password_salt)
     ]);
-    const role: SharedProjectRole | null = matchesAdmin ? "admin" : matchesProgress ? "progress" : null;
-    if (!role) {
+    const passwordRole: SharedProjectRole | null = matchesAdmin ? "admin" : matchesProgress ? "progress" : null;
+    if (!passwordRole) {
       await recordJoinFailure(attemptKey);
       return NextResponse.json({ error: INVALID_MESSAGE }, { status: 401 });
     }
     await clearJoinFailures(attemptKey);
 
+    const account = await resolveShotclAuthenticatedAccount(request);
+    let role: SharedProjectRole = "progress";
+    if (account) {
+      const { data: existingMembership, error: membershipReadError } = await supabase
+        .from("project_members")
+        .select("role")
+        .eq("project_id", project.id)
+        .eq("user_id", account.userId)
+        .maybeSingle();
+      if (membershipReadError) throw membershipReadError;
+      const membershipRole = existingMembership?.role === "admin" || (passwordRole === "admin" && account.isEditor)
+        ? "admin"
+        : "crew";
+      const { error: membershipError } = await supabase.from("project_members").upsert({
+        project_id: project.id,
+        user_id: account.userId,
+        role: membershipRole
+      }, { onConflict: "project_id,user_id" });
+      if (membershipError) throw membershipError;
+      role = account.isEditor && membershipRole === "admin" ? "admin" : "progress";
+    }
+
     const response = NextResponse.json({ success: true, projectId: project.id, projectName: project.name, role });
-    const token = ensureSessionToken(request, response);
-    await saveAccessGrant(token, project.id, role);
+    if (!account) {
+      // 기존 이름/비밀번호 참여는 호환을 위해 남기되, 계정 없는 cookie grant는
+      // 어떤 비밀번호를 썼더라도 읽기 전용 Staff로만 발급합니다.
+      const token = ensureSessionToken(request, response);
+      await saveAccessGrant(token, project.id, "progress");
+    }
     return response;
   } catch (error) {
-    const message = error instanceof ProjectAccessUnavailableError ? error.message : "프로젝트에 참여하지 못했습니다.";
-    return NextResponse.json({ error: message }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
+    const unavailable = error instanceof ProjectAccessUnavailableError || error instanceof ShotclAccountUnavailableError;
+    const message = unavailable ? error.message : "프로젝트에 참여하지 못했습니다.";
+    return NextResponse.json({ error: message }, { status: unavailable ? 503 : 500 });
   }
 }

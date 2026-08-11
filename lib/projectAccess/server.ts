@@ -6,12 +6,35 @@ import type { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 import { normalizeProjectId } from "@/lib/projectId";
 import type { ProjectAccessGrant, SharedProjectRole } from "@/lib/projectAccess/core";
+import { resolveEffectiveProjectRole } from "@/lib/projectAccess/accountCore";
+import {
+  getShotclBearerToken,
+  resolveShotclAuthenticatedAccountFromCredentials,
+  SHOTCL_ACCOUNT_COOKIE
+} from "@/lib/projectAccess/accountServer";
+import { isGuestProjectApiRequestAllowed } from "@/lib/projectAccess/guestApiAccess";
 
 const scrypt = promisify(scryptCallback);
 export const PROJECT_SESSION_COOKIE = "shotcl_project_session";
+export const PROJECT_GUEST_INVITE_COOKIE = "shotcl_guest_invite";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const STAFF_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export class ProjectAccessUnavailableError extends Error {}
+
+export type ProjectRequestAccessMode = "member" | "guest" | "legacy";
+export type ProjectRequestAccess = {
+  grant: ProjectAccessGrant;
+  mode: ProjectRequestAccessMode;
+  editorEligible: boolean;
+  accountUserId?: string;
+};
+export type ProjectRequestAccessTokens = {
+  accountSessionToken?: string | null;
+  bearerToken?: string | null;
+  guestInviteToken?: string | null;
+  legacySessionToken?: string | null;
+};
 
 export function requireProjectAccessDb() {
   const supabase = getSupabaseAdminClient();
@@ -117,6 +140,35 @@ export function setProjectSessionCookie(response: NextResponse, token: string) {
   });
 }
 
+/** Staff 초대 원본 token은 JS에 노출하지 않고 활성 invite 확인에만 씁니다. */
+export function setProjectGuestInviteCookie(response: NextResponse, rawInviteToken: string) {
+  if (!STAFF_INVITE_TOKEN_PATTERN.test(rawInviteToken)) {
+    throw new Error("초대 token 형식이 올바르지 않습니다.");
+  }
+  response.cookies.set(PROJECT_GUEST_INVITE_COOKIE, rawInviteToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS
+  });
+}
+
+export function clearProjectGuestInviteCookie(response: NextResponse) {
+  response.cookies.set(PROJECT_GUEST_INVITE_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0
+  });
+}
+
+export function getProjectGuestInviteToken(request: NextRequest) {
+  const token = request.cookies.get(PROJECT_GUEST_INVITE_COOKIE)?.value ?? "";
+  return STAFF_INVITE_TOKEN_PATTERN.test(token) ? token : null;
+}
+
 export function ensureSessionToken(request: NextRequest, response: NextResponse) {
   const existing = getSessionToken(request);
   const token = existing || createProjectSessionToken();
@@ -168,16 +220,37 @@ export async function upgradeAccessGrantToAdmin(
   if (data?.role === "admin") return "upgraded";
 
   // 동시에 제출된 첫 요청이 이미 승격했다면 두 번째 요청도 안전한 no-op 성공입니다.
-  const currentGrant = await getAccessGrantByToken(token, databaseProjectId);
+  const currentGrant = await getLegacyAccessGrantByToken(token, databaseProjectId);
   return currentGrant?.role === "admin" ? "already-admin" : "missing";
 }
 
 export async function getAccessGrant(request: NextRequest, projectId: string): Promise<ProjectAccessGrant | null> {
-  const token = getSessionToken(request);
-  return getAccessGrantByToken(token, projectId);
+  return (await getProjectRequestAccess(request, projectId))?.grant ?? null;
 }
 
-export async function getAccessGrantByToken(token: string | null, projectId: string): Promise<ProjectAccessGrant | null> {
+export async function getProjectRequestAccess(request: NextRequest, projectId: string) {
+  const access = await getProjectRequestAccessFromTokens(projectId, {
+    accountSessionToken: request.cookies.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null,
+    bearerToken: getShotclBearerToken(request),
+    guestInviteToken: getProjectGuestInviteToken(request),
+    legacySessionToken: getSessionToken(request)
+  });
+  if (access?.mode === "guest" && !isGuestProjectApiRequestAllowed({
+    method: request.method,
+    pathname: request.nextUrl.pathname,
+    projectId,
+    searchParams: request.nextUrl.searchParams
+  })) {
+    return null;
+  }
+  return access;
+}
+
+export async function getProjectRequestAccessMode(request: NextRequest, projectId: string) {
+  return (await getProjectRequestAccess(request, projectId))?.mode ?? null;
+}
+
+async function getLegacyAccessGrantByToken(token: string | null, projectId: string): Promise<ProjectAccessGrant | null> {
   if (!token) return null;
   const supabase = requireProjectAccessDb();
   const databaseProjectId = normalizeProjectId(projectId);
@@ -222,7 +295,7 @@ export async function listAccessGrants(request: NextRequest) {
     .eq("projects.share_enabled", true)
     .order("joined_at", { ascending: false });
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((row) => ({ ...row, role: "progress" as SharedProjectRole }));
 }
 
 /**
@@ -234,47 +307,119 @@ export async function canAdministerProject(request: NextRequest, projectId: stri
   return (await getProjectRequestRole(request, projectId)) === "admin";
 }
 
+/** Staff가 허용된 제한 mutation을 수행할 때도 allowlisted account인지 확인합니다. */
+export async function canMutateProjectAsStaff(request: NextRequest, projectId: string) {
+  const access = await getProjectRequestAccess(request, projectId);
+  return access?.mode === "member" && access.editorEligible;
+}
+
 /** passcode 공유 세션과 레거시 Supabase Auth를 하나의 서버 권한 판정으로 합칩니다. */
 export async function getProjectRequestRole(
   request: NextRequest,
   projectId: string
 ): Promise<SharedProjectRole | null> {
-  const supabase = requireProjectAccessDb();
-  const databaseProjectId = normalizeProjectId(projectId);
-  const grant = await getAccessGrant(request, databaseProjectId);
-  if (grant) return grant.role;
-
-  const { data, error } = await supabase
-    .from("projects")
-    .select("share_enabled,created_by")
-    .eq("id", databaseProjectId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data || data.share_enabled) return null;
-
-  const bearerToken = getBearerToken(request);
-  if (!bearerToken) return null;
-  const { data: authData, error: authError } = await supabase.auth.getUser(bearerToken);
-  if (authError || !authData.user) return null;
-  if (String(data.created_by ?? "") === authData.user.id) return "admin";
-
-  const { data: membership, error: membershipError } = await supabase
-    .from("project_members")
-    .select("role")
-    .eq("project_id", databaseProjectId)
-    .eq("user_id", authData.user.id)
-    .maybeSingle();
-  if (membershipError) {
-    // 초기 MVP DB에는 project_members가 없을 수 있습니다. 소유자 검증은 위에서 완료했습니다.
-    if (membershipError.code === "42P01" || membershipError.code === "PGRST205") return null;
-    throw membershipError;
-  }
-  if (membership?.role === "admin") return "admin";
-  return membership ? "progress" : null;
+  return (await getProjectRequestAccess(request, projectId))?.grant.role ?? null;
 }
 
-function getBearerToken(request: NextRequest) {
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
+export async function getProjectRequestAccessFromTokens(
+  projectId: string,
+  tokens: ProjectRequestAccessTokens
+): Promise<ProjectRequestAccess | null> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  const supabase = requireProjectAccessDb();
+  const account = await resolveShotclAuthenticatedAccountFromCredentials({
+    accountSessionToken: tokens.accountSessionToken,
+    bearerToken: tokens.bearerToken
+  });
+
+  if (account) {
+    const [projectResult, membershipResult] = await Promise.all([
+      supabase
+        .from("projects")
+        .select("id,name,created_at,created_by")
+        .eq("id", databaseProjectId)
+        .maybeSingle(),
+      supabase
+        .from("project_members")
+        .select("role,created_at")
+        .eq("project_id", databaseProjectId)
+        .eq("user_id", account.userId)
+        .maybeSingle()
+    ]);
+    if (projectResult.error) throw projectResult.error;
+    if (membershipResult.error) {
+      if (membershipResult.error.code !== "42P01" && membershipResult.error.code !== "PGRST205") {
+        throw membershipResult.error;
+      }
+    }
+    const project = projectResult.data;
+    const membership = membershipResult.data;
+    const isOwner = String(project?.created_by ?? "") === account.userId;
+    const role = resolveEffectiveProjectRole({
+      accountAuthenticated: true,
+      accountEligible: account.isEditor,
+      isOwner,
+      membershipRole: membership?.role,
+      guestInviteActive: false,
+      legacyGrantRole: null
+    });
+    if (project && role) {
+      return {
+        mode: "member",
+        editorEligible: account.isEditor,
+        accountUserId: account.userId,
+        grant: {
+          projectId: String(project.id),
+          projectName: String(project.name || "프로젝트"),
+          role,
+          joinedAt: String(membership?.created_at || project.created_at || "")
+        }
+      };
+    }
+  }
+
+  const legacyGrant = account
+    ? null
+    : await getLegacyAccessGrantByToken(tokens.legacySessionToken ?? null, databaseProjectId);
+  const rawInviteToken = tokens.guestInviteToken && STAFF_INVITE_TOKEN_PATTERN.test(tokens.guestInviteToken)
+    ? tokens.guestInviteToken
+    : null;
+  if (rawInviteToken) {
+    // projectStaffInvites.server가 이 module을 참조하므로 순환 초기화를 피하기 위해 늦게 읽습니다.
+    const { inspectProjectStaffInvite } = await import("@/lib/projectStaffInvites.server");
+    const invite = await inspectProjectStaffInvite(rawInviteToken);
+    const guestRole = resolveEffectiveProjectRole({
+      accountAuthenticated: false,
+      accountEligible: false,
+      isOwner: false,
+      membershipRole: null,
+      guestInviteActive: invite?.projectId === databaseProjectId,
+      legacyGrantRole: null
+    });
+    if (invite?.projectId === databaseProjectId && guestRole) {
+      return {
+        mode: "guest",
+        editorEligible: false,
+        grant: {
+          projectId: invite.projectId,
+          projectName: invite.projectName,
+          role: guestRole,
+          joinedAt: legacyGrant?.joinedAt ?? ""
+        }
+      };
+    }
+  }
+
+  if (!legacyGrant) return null;
+  const role = resolveEffectiveProjectRole({
+    accountAuthenticated: false,
+    accountEligible: false,
+    isOwner: false,
+    membershipRole: null,
+    guestInviteActive: false,
+    legacyGrantRole: legacyGrant.role
+  });
+  return role
+    ? { mode: "legacy", editorEligible: false, grant: { ...legacyGrant, role } }
+    : null;
 }

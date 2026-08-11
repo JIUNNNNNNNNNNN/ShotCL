@@ -24,6 +24,9 @@ type ShotCardProps = {
   archiveMedia?: ProgressArchiveMediaAsset[];
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
   progressOnly?: boolean;
+  cardOpenDisabled?: boolean;
+  statusReadOnly?: boolean;
+  showMediaActions?: boolean;
   isOverheadLoading?: boolean;
   interactionMediaGuideTarget?: boolean;
 };
@@ -36,6 +39,9 @@ export const ShotCard = memo(function ShotCard({
   archiveMedia = [],
   onStatusChange,
   progressOnly = false,
+  cardOpenDisabled = false,
+  statusReadOnly = false,
+  showMediaActions = true,
   isOverheadLoading = false,
   interactionMediaGuideTarget = false
 }: ShotCardProps) {
@@ -120,12 +126,13 @@ export const ShotCard = memo(function ShotCard({
   }
 
   function handleCardOpen(event: React.MouseEvent<HTMLElement>) {
-    if (shouldIgnoreCardOpen(event.target)) return;
+    if (cardOpenDisabled || shouldIgnoreCardOpen(event.target)) return;
     onOpen(shot);
   }
 
   function handleStatusClick(event: React.MouseEvent<HTMLButtonElement>, status: ShotStatus) {
     event.stopPropagation();
+    if (statusReadOnly) return;
     onStatusChange(shot, shot.status === status ? "pending" : status);
   }
 
@@ -139,9 +146,10 @@ export const ShotCard = memo(function ShotCard({
     <>
       <article
         onClick={handleCardOpen}
-        aria-label={progressOnly ? `${cutLabel} 상세 보기` : `${cutLabel} 수정`}
+        aria-label={cardOpenDisabled ? cutLabel : progressOnly ? `${cutLabel} 상세 보기` : `${cutLabel} 수정`}
         className={cn(
-          "ui-motion-surface relative grid min-w-0 cursor-pointer gap-2 overflow-hidden rounded-[var(--radius-card)] border p-2 text-center transition-[background-color,border-color,transform] active:scale-[0.995] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
+          "ui-motion-surface relative grid min-w-0 gap-2 overflow-hidden rounded-[var(--radius-card)] border p-2 text-center transition-[background-color,border-color,transform] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
+          cardOpenDisabled ? "cursor-default" : "cursor-pointer active:scale-[0.995]",
           isOk
             ? "border-status-ok/80 bg-status-ok/10"
             : isOmit
@@ -158,7 +166,7 @@ export const ShotCard = memo(function ShotCard({
               <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
                 <span className="font-display">{statusLabel}</span>
               </p>
-              <div className="flex flex-wrap items-center justify-center gap-1 sm:ml-auto">
+              {showMediaActions ? <div className="flex flex-wrap items-center justify-center gap-1 sm:ml-auto">
                 <button
                   type="button"
                   onClick={(event) => {
@@ -190,7 +198,7 @@ export const ShotCard = memo(function ShotCard({
                   <Map className="h-3.5 w-3.5" aria-hidden />
                   부감도
                 </button>
-              </div>
+              </div> : null}
             </div>
 
             <div className="mt-0.5 grid min-w-0 gap-1 text-center text-[11px] font-normal leading-4 text-field-muted sm:grid-cols-2">
@@ -227,10 +235,11 @@ export const ShotCard = memo(function ShotCard({
           <button
             type="button"
             data-no-drag="true"
+            disabled={statusReadOnly}
             onClick={(event) => handleStatusClick(event, "ok")}
             aria-pressed={isOk}
             className={cn(
-              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-default disabled:opacity-55 disabled:active:scale-100",
               isOk ? "border-status-ok/80 bg-status-ok/10 text-status-ok" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
             )}
           >
@@ -239,10 +248,11 @@ export const ShotCard = memo(function ShotCard({
           <button
             type="button"
             data-no-drag="true"
+            disabled={statusReadOnly}
             onClick={(event) => handleStatusClick(event, "omit")}
             aria-pressed={isOmit}
             className={cn(
-              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
+              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-default disabled:opacity-55 disabled:active:scale-100",
               isOmit ? "border-field-danger bg-field-danger text-field-text" : "border-field-danger/60 bg-field-input text-field-danger"
             )}
           >

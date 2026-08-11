@@ -34,7 +34,17 @@ export function getSupabaseBrowserClient() {
   if (!browserClient) {
     browserClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        auth: {
+          autoRefreshToken: true,
+          // OAuth PKCE code 교환은 /auth/callback 한 곳에서만 수행해
+          // provider 초기화와 callback page가 같은 code를 중복 소비하지 않게 합니다.
+          detectSessionInUrl: false,
+          flowType: "pkce",
+          persistSession: true
+        }
+      }
     );
   }
 

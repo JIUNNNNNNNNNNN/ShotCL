@@ -143,12 +143,63 @@ export async function ensureProjectStaffInvite(
   }
 }
 
+export async function ensureProjectStaffInviteForAccount(
+  request: NextRequest,
+  projectId: string,
+  userId: string,
+  rotate: boolean
+): Promise<ProjectStaffInviteManagementState> {
+  try {
+    const candidateInviteId = randomUUID();
+    const candidateToken = deriveProjectStaffInviteToken(candidateInviteId, projectId);
+    const supabase = requireProjectAccessDb();
+    const { data, error } = await supabase.rpc("ensure_project_staff_invite_for_account", {
+      p_project_id: projectId,
+      p_user_id: userId,
+      p_candidate_invite_id: candidateInviteId,
+      p_candidate_token_hash: hashProjectStaffInviteToken(candidateToken),
+      p_rotate: rotate
+    });
+    if (error) throw error;
+    const payload = asInviteRpcPayload(data);
+    const inviteId = String(payload?.inviteId ?? "");
+    const returnedProjectId = String(payload?.projectId ?? "");
+    const tokenHash = String(payload?.tokenHash ?? "");
+    const createdAt = String(payload?.createdAt ?? "");
+    if (!inviteId || returnedProjectId !== projectId || !SHA256_HEX_PATTERN.test(tokenHash) || !createdAt) {
+      throw new ProjectStaffInviteUnavailableError("초대 링크 응답 형식이 올바르지 않습니다.");
+    }
+    return serializeActiveInvite(request, {
+      id: inviteId,
+      project_id: returnedProjectId,
+      token_hash: tokenHash,
+      created_at: createdAt
+    });
+  } catch (error) {
+    throw normalizeInviteDatabaseError(error);
+  }
+}
+
 export async function revokeProjectStaffInvite(projectId: string, creatorSessionHash: string) {
   try {
     const supabase = requireProjectAccessDb();
     const { data, error } = await supabase.rpc("revoke_project_staff_invite", {
       p_project_id: projectId,
       p_creator_session_hash: creatorSessionHash
+    });
+    if (error) throw error;
+    return data === true;
+  } catch (error) {
+    throw normalizeInviteDatabaseError(error);
+  }
+}
+
+export async function revokeProjectStaffInviteForAccount(projectId: string, userId: string) {
+  try {
+    const supabase = requireProjectAccessDb();
+    const { data, error } = await supabase.rpc("revoke_project_staff_invite_for_account", {
+      p_project_id: projectId,
+      p_user_id: userId
     });
     if (error) throw error;
     return data === true;
