@@ -777,13 +777,13 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "오브젝트 위치 이동",
-        description: "인물·카메라·공간을 바로 끌어 원하는 위치로 옮길 수 있습니다.",
+        description: "인물·카메라·공간 오브젝트를 끌어 원하는 위치로 이동할 수 있습니다.",
         detail: "일반 드래그는 오브젝트 위치만 바꾸며 무빙 경로를 만들지 않습니다.",
         demo: "object-drag"
       },
       coarse: {
         title: "오브젝트 위치 이동",
-        description: "인물·카메라·공간을 바로 끌어 원하는 위치로 옮길 수 있습니다.",
+        description: "인물·카메라·공간 오브젝트를 끌어 원하는 위치로 이동할 수 있습니다.",
         detail: "일반 드래그는 오브젝트 위치만 바꾸며 무빙 경로를 만들지 않습니다.",
         demo: "object-drag"
       }
@@ -800,13 +800,13 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "오브젝트 편집 메뉴",
-        description: "오브젝트를 우클릭하면 이름·색상과 오브젝트별 추가 동작을 설정할 수 있습니다.",
+        description: "오브젝트를 우클릭하면 이름·색상과 오브젝트별 동작을 편집할 수 있습니다.",
         detail: "브라우저 메뉴 대신 부감도 전용 편집 메뉴가 열립니다.",
         demo: "object-context-menu"
       },
       coarse: {
         title: "오브젝트 편집 메뉴",
-        description: "오브젝트를 길게 누르면 이름·색상과 오브젝트별 추가 동작을 설정할 수 있습니다.",
+        description: "오브젝트를 길게 누르면 편집 메뉴가 열립니다. 메뉴에서 이름·색상과 오브젝트별 동작을 편집할 수 있습니다.",
         detail: "길게 누르기는 편집 메뉴만 열며 무빙 경로를 바로 만들지 않습니다.",
         demo: "object-context-menu",
         durationMs: 520
@@ -848,12 +848,12 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "방향 회전",
-        description: "선택한 인물이나 카메라의 회전 핸들을 끌어 방향만 조정합니다.",
+        description: "선택한 인물이나 카메라의 회전 컨트롤 포인트를 끌어 방향을 조정할 수 있습니다.",
         demo: "drag"
       },
       coarse: {
         title: "방향 회전",
-        description: "선택한 인물이나 카메라의 회전 핸들을 끌어 방향만 조정합니다.",
+        description: "선택한 인물이나 카메라의 회전 컨트롤 포인트를 끌어 방향을 조정할 수 있습니다.",
         demo: "drag"
       }
     }
@@ -871,13 +871,13 @@ export const INTERACTION_GUIDES: Record<
       fine: {
         title: "공간 만들기",
         description: "공간 도구로 점을 이어 벽을 만들고, 시작점에 연결하면 닫힌 공간이 됩니다.",
-        detail: "Enter로 닫고, 더블클릭이나 Escape로 열린 벽을 끝낼 수 있습니다.",
+        detail: "Enter로 닫고, 더블클릭이나 Escape로 열린 벽을 끝낼 수 있습니다. 만든 공간은 모서리 컨트롤 포인트를 끌어 형태를 조정할 수 있습니다.",
         demo: "tap"
       },
       coarse: {
         title: "공간 만들기",
         description: "공간 도구로 점을 이어 벽을 만들고, 시작점에 연결하면 닫힌 공간이 됩니다.",
-        detail: "완료 동작으로 닫힌 공간을 만들거나 열린 벽으로 끝낼 수 있습니다.",
+        detail: "완료 동작으로 닫힌 공간을 만들거나 열린 벽으로 끝낼 수 있습니다. 만든 공간은 모서리 컨트롤 포인트를 끌어 형태를 조정할 수 있습니다.",
         demo: "tap"
       }
     }
@@ -916,13 +916,13 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "곡선 무빙 편집",
-        description: "무빙 선을 우클릭해 포인트를 추가하고, 포인트를 끌어 곡선 이동을 만들 수 있습니다.",
+        description: "무빙 선을 우클릭해 포인트를 추가하고, 컨트롤 포인트를 끌어 경로 형태를 조정할 수 있습니다.",
         detail: "무빙 선의 도착점을 옮기면 연한 도착 오브젝트도 함께 이동합니다.",
         demo: "movement-curve"
       },
       coarse: {
         title: "곡선 무빙 편집",
-        description: "무빙 선을 길게 눌러 포인트를 추가하고, 포인트를 끌어 곡선 이동을 만들 수 있습니다.",
+        description: "무빙 선을 길게 눌러 포인트를 추가하고, 컨트롤 포인트를 끌어 경로 형태를 조정할 수 있습니다.",
         detail: "무빙 선의 도착점을 옮기면 연한 도착 오브젝트도 함께 이동합니다.",
         demo: "movement-curve",
         durationMs: 520

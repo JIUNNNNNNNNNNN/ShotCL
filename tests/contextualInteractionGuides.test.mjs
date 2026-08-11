@@ -197,10 +197,16 @@ test("diagram first-use and manual tour share the exact visible editor anchor co
   assert.equal(firstUse.persistentAnchor, "archive.diagram-canvas");
   assert.equal(firstUse.compactAnchor, "archive.diagram-canvas");
   assert.equal(firstUse.permission, "manage");
-  assert.equal(firstUse.version, 2);
-  assert.match(firstUse.description, /바로 끌어 위치/u);
-  assert.match(firstUse.description, /우클릭.*길게 눌러 편집 메뉴/u);
-  assert.doesNotMatch(firstUse.description, /잠시 누른 뒤 끌면.*무빙/u);
+  assert.equal(firstUse.version, 3);
+  assert.match(firstUse.description, /오브젝트를 끌어 위치를 이동/u);
+  assert.match(firstUse.description, /우클릭.*터치 화면에서는 길게 눌러.*이름·색상.*동작을 편집/u);
+  assert.match(firstUse.compactDescription ?? "", /길게 눌러 편집 메뉴/u);
+  assert.match(firstUse.description, /모서리나 컨트롤 포인트.*형태와 방향/u);
+  assert.match(firstUse.compactDescription ?? "", /모서리나 컨트롤 포인트.*형태와 방향/u);
+  assert.doesNotMatch(
+    `${firstUse.description} ${firstUse.compactDescription ?? ""}`,
+    /잠시 누른 뒤 끌면.*무빙/u
+  );
 
   const diagramIds = getInteractionGuideIdsForPage("archive")
     .filter((id) => id.includes("interaction-diagram-"));
@@ -248,15 +254,44 @@ test("diagram object help keeps direct drag separate from context-menu movement"
 
   assert.equal(moveFine?.demo, "object-drag");
   assert.equal(moveCoarse?.demo, "object-drag");
-  assert.match(moveFine?.description ?? "", /인물·카메라·공간.*바로 끌어/u);
+  assert.match(moveFine?.description ?? "", /인물·카메라·공간 오브젝트를 끌어.*위치로 이동/u);
   assert.match(moveFine?.detail ?? "", /무빙 경로를 만들지 않습니다/u);
   assert.doesNotMatch(`${moveFine?.description ?? ""} ${moveCoarse?.description ?? ""}`, /0\.3초|0\.38초|길게.*무빙/u);
 
   assert.equal(menuFine?.demo, "object-context-menu");
   assert.equal(menuCoarse?.demo, "object-context-menu");
-  assert.match(menuFine?.description ?? "", /우클릭.*이름·색상/u);
-  assert.match(menuCoarse?.description ?? "", /길게 누르면.*이름·색상/u);
+  assert.match(menuFine?.description ?? "", /우클릭.*이름·색상.*동작을 편집/u);
+  assert.match(menuCoarse?.description ?? "", /길게 누르면 편집 메뉴.*이름·색상.*동작을 편집/u);
   assert.match(menuCoarse?.detail ?? "", /무빙 경로를 바로 만들지 않습니다/u);
+});
+
+test("diagram help describes direct manipulation without a bottom inspector dependency", () => {
+  const firstUse = CONTEXTUAL_GUIDES["archive.diagram-editor-first-use"];
+  const diagramGuides = getInteractionGuideIdsForPage("archive")
+    .filter((id) => id.includes("interaction-diagram-"))
+    .map((id) => INTERACTION_GUIDES[id]);
+  const guideCopy = [
+    firstUse.description,
+    firstUse.compactDescription,
+    ...diagramGuides.flatMap((guide) => [
+      guide.variants.fine.description,
+      guide.variants.fine.detail,
+      guide.variants.coarse.description,
+      guide.variants.coarse.detail
+    ])
+  ].filter(Boolean).join(" ");
+
+  assert.doesNotMatch(
+    guideCopy,
+    /하단.*(?:라벨|색상|속성|편집)|아래쪽.*(?:라벨|색상|속성|편집)|인스펙터|inspector/iu
+  );
+
+  const rotate = INTERACTION_GUIDES["archive.interaction-diagram-rotate"];
+  const room = INTERACTION_GUIDES["archive.interaction-diagram-room"];
+  const curve = INTERACTION_GUIDES["archive.interaction-diagram-curve"];
+  assert.match(getInteractionGuideVariant(rotate, "fine")?.description ?? "", /컨트롤 포인트.*방향/u);
+  assert.match(getInteractionGuideVariant(room, "coarse")?.detail ?? "", /모서리 컨트롤 포인트.*형태/u);
+  assert.match(getInteractionGuideVariant(curve, "fine")?.description ?? "", /컨트롤 포인트.*경로 형태/u);
 });
 
 test("diagram demos cover menu, movement, curve, and pan with reduced-motion results", () => {
