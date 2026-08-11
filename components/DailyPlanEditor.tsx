@@ -84,6 +84,7 @@ import { filterRenderablePreviewRows } from "@/lib/dailyPlan/previewDisplay";
 import {
   DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
   getNextDailyPlanDocumentDensity,
+  resolveDailyPlanPreviewFit,
   type DailyPlanDocumentDensity,
   type DailyPlanDocumentOrientation,
   type DailyPlanPageLayout
@@ -4556,12 +4557,11 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       setPageLayout((current) => current === nextPageLayout ? current : nextPageLayout);
       const measuredWidth = Math.max(previewPageWidth, currentDocument.scrollWidth);
       const measuredHeight = Math.max(previewPageHeight, currentDocument.scrollHeight);
-      const nextScale = Math.min(1, availableWidth / measuredWidth);
-      const nextMeasurement = {
-        scale: nextScale,
-        scaledWidth: measuredWidth * nextScale,
-        scaledHeight: measuredHeight * nextScale
-      };
+      const nextMeasurement = resolveDailyPlanPreviewFit({
+        availableWidth,
+        logicalWidth: measuredWidth,
+        logicalHeight: measuredHeight
+      });
       setMeasurement((current) => (
         areDailyPlanPreviewMeasurementsEqual(current, nextMeasurement)
           ? current
@@ -4646,7 +4646,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       data-density={density}
       data-page-layout={pageLayout}
       data-scale={measurement.scale.toFixed(4)}
-      className="mt-4 w-full min-w-0 max-w-full bg-[#e8e8e5]"
+      className="mt-4 w-full min-w-0 max-w-full overflow-x-clip bg-[#e8e8e5]"
     >
       <div
         className="relative mx-auto max-w-full"
