@@ -108,6 +108,15 @@ import {
   MAX_DAILY_PLAN_RUNTIME_MINUTES,
   parseDailyPlanRuntimeMinutesInput
 } from "@/lib/dailyPlan/runtimeMinutes";
+import {
+  calculateTimetableRuntimeMinutes as calculateRuntimeMinutes,
+  deriveTimetableTimeChain,
+  getTimetableRuntimeMinutes as getRuntimeMinutes,
+  getTimetableStartTimeStates,
+  normalizeTimetableTime,
+  parseTimetableRuntimeMinutes as parseRuntimeMinutes,
+  shiftTimetableTime as shiftTime
+} from "@/lib/dailyPlan/timetableStartTimes";
 import type { DailyPlan, DailyPlanDraft, DailyPlanLocation, DailyPlanMealTime, DailyPlanShot, DailyPlanShotDraft, Project, ProjectBasicInfo, ProjectSceneItem, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { DailyPlanDocument } from "@/components/DailyPlanDocument";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
@@ -528,12 +537,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const printCleanupTimeoutRef = useRef<number | null>(null);
   const editorTrashRef = useRef<HTMLDivElement | null>(null);
   const automaticStartRowIdsRef = useRef<Set<string>>(
-    new Set(initialPrintMeta.automaticTimetableRowIds)
+    // Persisted IDs belonged to the retired continuously-linked behavior.
+    // Only rows added in this mounted editor may enter the one-shot queue.
+    new Set()
   );
 
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
     [mealTimes, printMeta.timetableRowOrder, scenes]
+  );
+  const timetableStartTimeStates = useMemo(
+    () => getTimetableStartTimeStates(timetableRows.map(toTimetableTimeChainRow)),
+    [timetableRows]
   );
   const timetableRowKeys = useMemo(
     () => timetableRows.map(getEditorTimetableRowKey),
@@ -1084,7 +1099,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function addScene() {
-    setScenes((current) => [...current, createBlankScene()]);
+    const nextScene = createBlankScene();
+    automaticStartRowIdsRef.current.add(`scene:${nextScene.id}`);
+    setScenes((current) => [...current, nextScene]);
     setPrintMeta((current) => ({
       ...current,
       timetableRowOrder: current.timetableRowOrder.length > 0
@@ -1365,8 +1382,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     if (nextRows === timetableRows) return;
     const nextSnapshot = createTimetableMutationSnapshot(
       nextRows,
-      printMeta,
-      automaticStartRowIdsRef.current
+      printMeta
     );
     persistTimetableMutation(nextSnapshot);
   }
@@ -1381,8 +1397,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
     const nextSnapshot = createTimetableMutationSnapshot(
       nextRows,
-      printMeta,
-      automaticStartRowIdsRef.current
+      printMeta
     );
     setPendingTimetableDeleteKey(null);
     timetableInteraction.clearSelection();
@@ -2307,7 +2322,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         onClickCapture={(event) => timetableInteraction.onRowClickCapture(rowKey, event)}
                         onContextMenu={(event) => timetableInteraction.onRowContextMenu(rowKey, event)}
                       >
-                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} /></td>
+                        <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={meal.startTime} onChange={(value) => updateMealTimeField(mealIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} expectedStartTime={timetableStartTimeStates.get(rowKey)?.expectedStartTime} isStartTimeMismatch={timetableStartTimeStates.get(rowKey)?.isMismatch} /></td>
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                           <span className={timetableFieldLabelClass}>장소</span>
@@ -2363,7 +2378,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         openTimetableSceneContextMenu(rowKey, event.clientX, event.clientY);
                       }}
                     >
-                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} /></td>
+                      <td className={`${timetableCellClass} max-md:order-2 max-md:col-span-3`}><span className={timetableFieldLabelClass}>시작</span><TimeWheelPicker label="시작시간" value={scene.startTime} onChange={(value) => updateSceneTimeField(sceneIndex, "startTime", value)} compact showLabel={false} controlClassName={timetableControlClass} expectedStartTime={timetableStartTimeStates.get(rowKey)?.expectedStartTime} isStartTimeMismatch={timetableStartTimeStates.get(rowKey)?.isMismatch} /></td>
                       <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)} onChange={(value) => updateSceneTimeField(sceneIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                       <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                         <span className={timetableFieldLabelClass}>장소</span>
@@ -4372,7 +4387,9 @@ function TimeWheelPicker({
   compact = false,
   inline = false,
   showLabel = true,
-  controlClassName = ""
+  controlClassName = "",
+  expectedStartTime = null,
+  isStartTimeMismatch = false
 }: {
   label: string;
   value: string;
@@ -4381,12 +4398,16 @@ function TimeWheelPicker({
   inline?: boolean;
   showLabel?: boolean;
   controlClassName?: string;
+  expectedStartTime?: string | null;
+  isStartTimeMismatch?: boolean;
 }) {
   const savedDigits = formatTimeToHHMM(value);
   const [draftValue, setDraftValue] = useState(savedDigits);
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const isInvalid = draftValue.length === 4 && !isValidHHMM(draftValue);
+  const showStartTimeMismatch = isStartTimeMismatch
+    && (!isFocused || (draftValue.length === 4 && isValidHHMM(draftValue)));
 
   useEffect(() => setDraftValue(savedDigits), [savedDigits]);
 
@@ -4415,7 +4436,7 @@ function TimeWheelPicker({
       {showLabel ? <span className={compact ? "text-xs font-black text-field-subtle" : "text-sm font-black text-field-subtle"}>{label}</span> : null}
       <input
         ref={inputRef}
-        className={`${compactInputClass} h-auto min-h-[38px] py-1.5 leading-[1.35] ${controlClassName} ${isInvalid ? "!border-field-danger" : ""}`}
+        className={`${compactInputClass} h-auto min-h-[38px] py-1.5 leading-[1.35] ${controlClassName} ${isInvalid ? "!border-field-danger" : ""} ${showStartTimeMismatch ? "!text-field-danger" : ""}`}
         type="text"
         value={isFocused ? draftValue : formatTimeDisplay(value)}
         inputMode="numeric"
@@ -4452,6 +4473,10 @@ function TimeWheelPicker({
         }}
         aria-invalid={isInvalid}
         aria-label={`${label} ${value || "미입력"}`}
+        aria-description={showStartTimeMismatch && expectedStartTime
+          ? `계산상 예상 시작시간 ${expectedStartTime}과 다릅니다.`
+          : undefined}
+        data-timetable-start-mismatch={showStartTimeMismatch ? "true" : undefined}
         title={isInvalid ? "0000~2359 사이의 유효한 24시간 형식으로 입력해주세요." : undefined}
       />
     </div>
@@ -5969,28 +5994,15 @@ function removeActorFromSceneCast(
 
 function createTimetableMutationSnapshot(
   rows: EditorTimetableRow[],
-  sourcePrintMeta: DailyPlanPrintMeta,
-  sourceAutomaticRowIds: Set<string>
+  sourcePrintMeta: DailyPlanPrintMeta
 ): TimetableMutationSnapshot {
-  const survivingRowKeys = new Set(rows.map(getEditorTimetableRowKey));
-  const automaticStartRowIds = new Set(
-    Array.from(sourceAutomaticRowIds).filter((rowKey) => survivingRowKeys.has(rowKey))
-  );
-  const updates = getAutomaticTimetableStartUpdates(rows, automaticStartRowIds);
-  const chainedRows = rows.map((row): EditorTimetableRow => {
-    const nextStartTime = updates.get(getEditorTimetableRowKey(row));
-    if (nextStartTime === undefined || nextStartTime === row.item.startTime) return row;
-    const nextItem = nextStartTime
-      ? applyTimeFieldEdit(row.item, "startTime", nextStartTime)
-      : { ...row.item, startTime: "", endTime: "" };
-    return row.type === "scene"
-      ? { ...row, item: nextItem as SceneBlockInput }
-      : { ...row, item: nextItem as DailyPlanMealTime };
-  });
-  const scenes = chainedRows
+  // Reorder/delete only changes row structure. Start times are user data and
+  // must never be recalculated as a side effect of moving a row.
+  const automaticStartRowIds = new Set<string>();
+  const scenes = rows
     .filter((row): row is Extract<EditorTimetableRow, { type: "scene" }> => row.type === "scene")
     .map((row) => row.item);
-  const mealTimes = chainedRows
+  const mealTimes = rows
     .filter((row): row is Extract<EditorTimetableRow, { type: "event" }> => row.type === "event")
     .map((row) => row.item);
 
@@ -6000,7 +6012,7 @@ function createTimetableMutationSnapshot(
     automaticStartRowIds,
     printMeta: {
       ...sourcePrintMeta,
-      timetableRowOrder: chainedRows.map((row) => row.type),
+      timetableRowOrder: rows.map((row) => row.type),
       automaticTimetableRowIds: Array.from(automaticStartRowIds)
     }
   };
@@ -6021,69 +6033,37 @@ function getTimetableRowLabel(rows: EditorTimetableRow[], rowKey: string) {
   return formatSceneNumber(row.item.sceneNumber) || "촬영 행";
 }
 
-function setStartTimeSource(automaticRowIds: Set<string>, rowKey: string, value: string | number | null) {
+function setStartTimeSource(automaticRowIds: Set<string>, rowKey: string, _value: string | number | null) {
   if (!rowKey) return;
-  if (String(value ?? "").trim()) automaticRowIds.delete(rowKey);
-  else automaticRowIds.add(rowKey);
+  // A direct user edit, including clearing the field, ends one-shot auto-fill.
+  automaticRowIds.delete(rowKey);
 }
 
 /**
- * 화면에 보이는 TIME TABLE 순서를 따라 빈/자동 시작시간만 연결합니다.
- * Set에 없는 기존 비어 있지 않은 값은 저장된 수동값으로 간주해 덮어쓰지 않습니다.
+ * 새로 추가된 빈 행만 화면의 TIME TABLE 순서대로 한 번 자동 입력합니다.
+ * 채워진 값과 reorder 결과는 이후 사용자 값으로 취급해 다시 쓰지 않습니다.
  */
 function getAutomaticTimetableStartUpdates(
   rows: EditorTimetableRow[],
   automaticRowIds: Set<string>
 ) {
-  const updates = new Map<string, string>();
-  let previousStartTime = "";
-  let previousRuntimeMinutes: number | null = null;
-
-  rows.forEach((row) => {
-    const rowKey = getEditorTimetableRowKey(row);
-    const currentStartTime = row.item.startTime.trim();
-    const isAutomatic = automaticRowIds.has(rowKey);
-    const canReceiveAutomaticTime = row.type === "scene" || isMeaningfulTimetableEvent(row.item);
-    let effectiveStartTime = currentStartTime;
-
-    if (isAutomatic || (!currentStartTime && canReceiveAutomaticTime)) {
-      const calculatedStartTime =
-        previousStartTime && previousRuntimeMinutes != null
-          ? shiftTime(previousStartTime, previousRuntimeMinutes)
-          : "";
-
-      if (calculatedStartTime) {
-        automaticRowIds.add(rowKey);
-        effectiveStartTime = calculatedStartTime;
-        if (calculatedStartTime !== currentStartTime) updates.set(rowKey, calculatedStartTime);
-      } else if (isAutomatic && currentStartTime) {
-        effectiveStartTime = "";
-        updates.set(rowKey, "");
-      }
-    }
-
-    previousStartTime = effectiveStartTime;
-    previousRuntimeMinutes = getRuntimeMinutes(
-      row.item.runtimeMinutes,
-      row.item.runtime,
-      effectiveStartTime,
-      row.item.endTime
-    );
-  });
-
-  return updates;
+  const result = deriveTimetableTimeChain(
+    rows.map(toTimetableTimeChainRow),
+    automaticRowIds
+  );
+  result.consumedAutomaticRowKeys.forEach((rowKey) => automaticRowIds.delete(rowKey));
+  return result.automaticUpdates;
 }
 
-function isMeaningfulTimetableEvent(event: DailyPlanMealTime) {
-  return Boolean(
-    event.endTime.trim()
-    || event.runtimeMinutes != null
-    || event.runtime?.trim()
-    || event.locationId?.trim()
-    || event.memo.trim()
-    || event.progressMemo?.trim()
-    || event.imageUrl
-  );
+function toTimetableTimeChainRow(row: EditorTimetableRow) {
+  return {
+    rowKey: getEditorTimetableRowKey(row),
+    startTime: row.item.startTime,
+    endTime: row.item.endTime,
+    runtimeMinutes: row.item.runtimeMinutes,
+    runtime: row.item.runtime,
+    canReceiveAutomaticTime: true
+  };
 }
 
 function getAdditionalSchedulePreviewValues(event: DailyPlanMealTime) {
@@ -6204,14 +6184,6 @@ function calculateRuntime(startTime: string, endTime: string) {
   return formatRuntimeMinutes(calculateRuntimeMinutes(startTime, endTime));
 }
 
-function calculateRuntimeMinutes(startTime: string, endTime: string) {
-  const start = parseTimeMinutes(startTime);
-  const end = parseTimeMinutes(endTime);
-  if (start == null || end == null) return null;
-  const diff = end >= start ? end - start : end + 24 * 60 - start;
-  return diff > 0 ? diff : null;
-}
-
 function formatRuntimeMinutes(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value) || value < 0) return "";
   if (value === 0) return "0M";
@@ -6220,11 +6192,6 @@ function formatRuntimeMinutes(value: number | null | undefined) {
   if (minutes === 0) return `${hours}H`;
   if (hours === 0) return `${minutes}M`;
   return `${hours}H${minutes}M`;
-}
-
-function getRuntimeMinutes(runtimeMinutes: number | null | undefined, legacyRuntime: string | undefined, startTime: string, endTime: string) {
-  if (runtimeMinutes != null && Number.isFinite(runtimeMinutes) && runtimeMinutes >= 0) return runtimeMinutes;
-  return parseRuntimeMinutes(legacyRuntime ?? "") ?? calculateRuntimeMinutes(startTime, endTime);
 }
 
 function applyTimeFieldEdit<T extends { startTime: string; endTime: string; runtimeMinutes?: number | null; runtime?: string }>(
@@ -6268,40 +6235,6 @@ function applyTimeFieldEdit<T extends { startTime: string; endTime: string; runt
   return next;
 }
 
-function parseRuntimeMinutes(value: string) {
-  const normalized = String(value ?? "").toUpperCase().replace(/\s+/g, "");
-  const numericMinutes = normalized.match(/^(\d+)(?:분)?$/);
-  if (numericMinutes) {
-    const minutes = Number(numericMinutes[1]);
-    return Number.isFinite(minutes) && minutes >= 0 && minutes <= maxRuntimeMinutes
-      ? minutes
-      : null;
-  }
-
-  const match = normalized.match(/^(?:(\d+)(?:H|시간))?(?:(\d+)(?:M|분))?$/);
-  if (!match || (!match[1] && !match[2])) return null;
-  const hours = Number(match[1] || 0);
-  const minutes = Number(match[2] || 0);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
-  const totalMinutes = hours * 60 + minutes;
-  return totalMinutes >= 0 && totalMinutes <= maxRuntimeMinutes ? totalMinutes : null;
-}
-
-function shiftTime(value: string, offsetMinutes: number) {
-  const source = parseTimeMinutes(value);
-  if (source == null) return value;
-  const shifted = ((source + offsetMinutes) % (24 * 60) + 24 * 60) % (24 * 60);
-  return `${String(Math.floor(shifted / 60)).padStart(2, "0")}:${String(shifted % 60).padStart(2, "0")}`;
-}
-
-function parseTimeMinutes(value: string) {
-  const match = formatTimeDisplay(String(value ?? "")).match(/^(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
-  return hour * 60 + minute;
-}
 
 function syncFirstCut(cuts: SceneCutInput[], patch: Partial<SceneCutInput>) {
   const source = cuts.length > 0 ? cuts : [createBlankCut([])];
@@ -6447,8 +6380,7 @@ function parseHHMMToTime(value: string) {
 }
 
 function formatTimeToHHMM(value: string) {
-  const digits = sanitizeNumericInput(value, 4);
-  return isValidHHMM(digits) ? digits : "";
+  return normalizeTimetableTime(value)?.replace(":", "") ?? "";
 }
 
 function formatTimeDisplay(value: string) {
