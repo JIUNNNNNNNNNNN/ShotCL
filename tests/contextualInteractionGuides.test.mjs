@@ -210,7 +210,18 @@ test("diagram first-use and manual tour share the exact visible editor anchor co
 
   const diagramIds = getInteractionGuideIdsForPage("archive")
     .filter((id) => id.includes("interaction-diagram-"));
-  assert.equal(diagramIds.length, 9);
+  assert.deepEqual(diagramIds, [
+    "archive.interaction-diagram-person-add",
+    "archive.interaction-diagram-person-move",
+    "archive.interaction-diagram-object-menu",
+    "archive.interaction-diagram-camera-move",
+    "archive.interaction-diagram-rotate",
+    "archive.interaction-diagram-room",
+    "archive.interaction-diagram-path",
+    "archive.interaction-diagram-curve",
+    "archive.interaction-diagram-undo"
+  ]);
+  assert.ok(diagramIds.every((id) => INTERACTION_GUIDES[id].manualOnly === true));
   assert.ok(diagramIds.every((id) => INTERACTION_GUIDES[id].permission === "manage"));
   assert.ok(diagramIds.every((id) => (
     INTERACTION_GUIDES[id].compactAnchor ?? INTERACTION_GUIDES[id].anchor
@@ -254,7 +265,8 @@ test("diagram object help keeps direct drag separate from context-menu movement"
 
   assert.equal(moveFine?.demo, "object-drag");
   assert.equal(moveCoarse?.demo, "object-drag");
-  assert.match(moveFine?.description ?? "", /인물·카메라·공간 오브젝트를 끌어.*위치로 이동/u);
+  assert.match(moveFine?.description ?? "", /인물·카메라 본체를 끌어.*공간은 벽 선을 끌어.*이동/u);
+  assert.match(moveCoarse?.detail ?? "", /공간 안쪽은 이동 대상이 아니므로.*인물과 카메라를 바로 선택/u);
   assert.match(moveFine?.detail ?? "", /무빙 경로를 만들지 않습니다/u);
   assert.doesNotMatch(`${moveFine?.description ?? ""} ${moveCoarse?.description ?? ""}`, /0\.3초|0\.38초|길게.*무빙/u);
 
@@ -289,9 +301,39 @@ test("diagram help describes direct manipulation without a bottom inspector depe
   const rotate = INTERACTION_GUIDES["archive.interaction-diagram-rotate"];
   const room = INTERACTION_GUIDES["archive.interaction-diagram-room"];
   const curve = INTERACTION_GUIDES["archive.interaction-diagram-curve"];
-  assert.match(getInteractionGuideVariant(rotate, "fine")?.description ?? "", /컨트롤 포인트.*방향/u);
+  assert.match(getInteractionGuideVariant(rotate, "fine")?.description ?? "", /인물.*컨트롤 포인트.*카메라.*화각 선.*방향/u);
   assert.match(getInteractionGuideVariant(room, "coarse")?.detail ?? "", /모서리 컨트롤 포인트.*형태/u);
   assert.match(getInteractionGuideVariant(curve, "fine")?.description ?? "", /컨트롤 포인트.*경로 형태/u);
+});
+
+test("diagram manual help matches FOV, open-wall, room-hit, and ghost-direction workflows", () => {
+  const cameraMove = INTERACTION_GUIDES["archive.interaction-diagram-camera-move"];
+  const rotate = INTERACTION_GUIDES["archive.interaction-diagram-rotate"];
+  const room = INTERACTION_GUIDES["archive.interaction-diagram-room"];
+  const movement = INTERACTION_GUIDES["archive.interaction-diagram-path"];
+  const curve = INTERACTION_GUIDES["archive.interaction-diagram-curve"];
+  const cameraMoveFine = getInteractionGuideVariant(cameraMove, "fine");
+  const rotateFine = getInteractionGuideVariant(rotate, "fine");
+  const rotateCoarse = getInteractionGuideVariant(rotate, "coarse");
+  const roomFine = getInteractionGuideVariant(room, "fine");
+  const roomCoarse = getInteractionGuideVariant(room, "coarse");
+  const movementFine = getInteractionGuideVariant(movement, "fine");
+  const curveCoarse = getInteractionGuideVariant(curve, "coarse");
+
+  assert.match(rotateFine?.description ?? "", /카메라는 두 화각 선 중 어느 부분이든 끌어.*방향/u);
+  assert.match(rotateCoarse?.description ?? "", /카메라는 두 화각 선 중 어느 부분이든 손가락으로 끌어.*방향/u);
+  assert.match(rotateFine?.detail ?? "", /카메라 본체.*위치만 이동.*화각 선.*방향만/u);
+
+  assert.match(roomFine?.description ?? "", /시작점에 연결하면 닫힌 공간.*우클릭하면 열린 벽.*완성/u);
+  assert.doesNotMatch(roomCoarse?.description ?? "", /우클릭/u);
+  assert.match(roomCoarse?.description ?? "", /열린 벽 완료를 누르면.*그 형태 그대로 완성/u);
+  assert.match(roomFine?.detail ?? "", /공간은 벽 선을 끌어.*이동.*모서리 컨트롤 포인트.*형태/u);
+  assert.match(roomCoarse?.detail ?? "", /투명한 안쪽.*인물과 카메라 선택을 방해하지 않습니다/u);
+
+  assert.match(cameraMoveFine?.detail ?? "", /고스트 카메라는 원래 카메라 방향을 유지/u);
+  assert.match(cameraMoveFine?.detail ?? "", /고스트를 선택.*화각 선.*경로나 원본 카메라와 별개로 최종 방향/u);
+  assert.match(movementFine?.detail ?? "", /카메라 고스트의 방향은 이동 경로와 별도로 편집/u);
+  assert.match(curveCoarse?.detail ?? "", /끝점.*고스트 위치만.*최종 방향은 경로와 별도로 유지/u);
 });
 
 test("diagram demos cover menu, movement, curve, and pan with reduced-motion results", () => {

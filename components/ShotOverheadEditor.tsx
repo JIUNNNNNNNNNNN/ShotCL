@@ -25,6 +25,7 @@ import { useAutosave } from "@/hooks/useAutosave";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import {
   createEmptyShotOverheadDiagram,
+  getShotOverheadCameraMovementGhost,
   getShotOverheadCameraPanArc,
   getShotOverheadFovRays,
   getShotOverheadGridWorldSize,
@@ -41,6 +42,7 @@ import {
   createMovementPath,
   getMovementEndPoint,
   getShotOverheadInteractionTargetMetrics,
+  getShotOverheadRotationFromPointerDrag,
   hasMinimumMovementDraft,
   resolveNearestShotOverheadHandle,
   screenDeltaToShotOverheadWorld,
@@ -96,6 +98,7 @@ type Tool = "select" | "line" | "room";
 type Selection =
   | { kind: "person"; id: string }
   | { kind: "camera"; id: string }
+  | { kind: "ghost-camera"; pathId: string }
   | { kind: "line"; id: string }
   | { kind: "shape"; id: string }
   | { kind: "path"; id: string }
@@ -124,9 +127,9 @@ type MoveGesture = {
 type RotateGesture = {
   kind: "rotate";
   pointerId: number;
-  selection: Extract<NonNullable<Selection>, { kind: "person" | "camera" | "shape" }>;
+  selection: Extract<NonNullable<Selection>, { kind: "person" | "camera" | "shape" | "ghost-camera" }>;
   pivot: ShotOverheadPoint;
-  startAngle: number;
+  pointerAtStart: ShotOverheadPoint;
   startRotation: number;
   before: ShotOverheadDiagram;
 };
@@ -161,6 +164,17 @@ type PointGesture = {
   before: ShotOverheadDiagram;
 };
 
+type PendingGhostCameraGesture = {
+  kind: "pending-ghost-camera";
+  pointerId: number;
+  pointerType: string;
+  pathId: string;
+  pointIndex: number;
+  startClient: ShotOverheadPoint;
+  grab: ShotOverheadPointGrab;
+  before: ShotOverheadDiagram;
+};
+
 type MovementCreateGesture = {
   kind: "movement-create";
   pointerId: number;
@@ -178,7 +192,10 @@ type CameraPanGesture = {
   cameraId: string;
   panId: string;
   startRotation: number;
+  initialFinalRotation: number;
   finalRotation: number;
+  pointerAtStart: ShotOverheadPoint;
+  existing: boolean;
   direction: ShotOverheadCameraPan["direction"];
   before: ShotOverheadDiagram;
 };
@@ -190,7 +207,7 @@ type PanGesture = {
   startPan: ShotOverheadPoint;
 };
 
-type Gesture = PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | MovementCreateGesture | CameraPanGesture | PanGesture;
+type Gesture = PendingMoveGesture | MoveGesture | RotateGesture | ScaleGesture | RectResizeGesture | PointGesture | PendingGhostCameraGesture | MovementCreateGesture | CameraPanGesture | PanGesture;
 type WithoutGestureRuntime<T> = T extends unknown ? Omit<T, "pointerId" | "before"> : never;
 type ImmediateGestureInput = WithoutGestureRuntime<RotateGesture | ScaleGesture | RectResizeGesture | PointGesture>;
 
@@ -319,10 +336,6 @@ function normalizedAngleDelta(angle: number) {
   return ((angle + 180) % 360 + 360) % 360 - 180;
 }
 
-function pointerAngle(point: ShotOverheadPoint, pivot: ShotOverheadPoint) {
-  return Math.atan2(point.y - pivot.y, point.x - pivot.x) * (180 / Math.PI);
-}
-
 function maybeSnapRotation(rotation: number, shiftKey: boolean) {
   const normalized = normalizedRotation(rotation);
   return shiftKey ? normalizedRotation(Math.round(normalized / 15) * 15) : normalized;
@@ -420,6 +433,7 @@ function moveSelection(
 ): ShotOverheadDiagram {
   const canvasWidth = source.canvas.width;
   const canvasHeight = source.canvas.height;
+  if (selection.kind === "ghost-camera") return source;
   if (selection.kind === "person") {
     return {
       ...source,
@@ -625,25 +639,7 @@ export function ShotOverheadEditor({
         }
       ];
     }
-    if (selected.kind === "camera") {
-      const camera = diagram.cameras.find((item) => item.id === selected.id);
-      if (!camera) return [];
-      const center = { x: camera.x, y: camera.y };
-      const point = clampHandleCenter(
-        pointAtAngle(center, EDITOR_HANDLE_DISTANCE / viewportScale, camera.rotation - 90),
-        handleBounds
-      );
-      return [{
-        id: `camera:${camera.id}:rotate`,
-        point,
-        connectorFrom: center,
-        label: "카메라 방향 회전",
-        cursor: "grab",
-        visual: "solid",
-        priority: 20,
-        action: { kind: "rotate", selection: selected, pivot: center, rotation: camera.rotation }
-      }];
-    }
+    if (selected.kind === "camera" || selected.kind === "ghost-camera") return [];
     if (selected.kind === "line") {
       const line = diagram.lines.find((item) => item.id === selected.id);
       if (!line) return [];
@@ -664,10 +660,11 @@ export function ShotOverheadEditor({
       const path = diagram.movementPaths.find((item) => item.id === selected.id);
       const geometry = path ? getShotOverheadMovementGeometry(diagram, path) : null;
       if (!path || !geometry) return [];
-      return geometry.points.slice(1).map((point, offset) => {
+      return geometry.points.slice(1).flatMap((point, offset) => {
         const index = offset + 1;
         const endpoint = index === geometry.points.length - 1;
-        return {
+        if (path.sourceType === "camera" && endpoint) return [];
+        return [{
           id: `path:${path.id}:point:${index}`,
           point,
           label: endpoint ? "무빙 목적지" : `무빙 조절점 ${index}`,
@@ -675,7 +672,7 @@ export function ShotOverheadEditor({
           visual: endpoint ? "outline" as const : "solid" as const,
           priority: endpoint ? 35 : 30,
           action: { kind: "point" as const, target: "path-point" as const, id: path.id, index }
-        };
+        }];
       });
     }
     const shape = diagram.shapes.find((item) => item.id === selected.id);
@@ -1127,6 +1124,53 @@ export function ShotOverheadEditor({
     openObjectContextMenu(selection, clientX, clientY, undefined, event.currentTarget);
   }
 
+  function beginGhostCameraPointer(
+    event: React.PointerEvent<SVGElement>,
+    pathId: string
+  ) {
+    if (beginPan(event)) return;
+    if (
+      interactionLocked
+      || contextMenu
+      || creationMode
+      || tool !== "select"
+      || !event.isPrimary
+      || event.button !== 0
+      || hasForeignPointerOwner(event.pointerId)
+    ) return;
+    const before = cloneShotOverheadDiagram(historyRef.current.current);
+    const path = before.movementPaths.find((item) => item.id === pathId && item.sourceType === "camera");
+    const geometry = path ? getShotOverheadMovementGeometry(before, path) : null;
+    if (!path || !geometry) return;
+    event.preventDefault();
+    event.stopPropagation();
+    capturePointer(event.pointerId);
+    gestureRef.current = {
+      kind: "pending-ghost-camera",
+      pointerId: event.pointerId,
+      pointerType: event.pointerType || "mouse",
+      pathId,
+      pointIndex: path.points.length - 1,
+      startClient: { x: event.clientX, y: event.clientY },
+      grab: createShotOverheadPointGrab(
+        geometry.end,
+        worldPoint(event.clientX, event.clientY)
+      ),
+      before
+    };
+    setGestureActive(true);
+  }
+
+  function handleGhostCameraKeyDown(
+    event: React.KeyboardEvent<SVGElement>,
+    pathId: string
+  ) {
+    if (interactionLocked || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelected({ kind: "ghost-camera", pathId });
+  }
+
   function closeObjectContextMenu(restoreFocus = false) {
     setContextMenu(null);
     if (!restoreFocus) return;
@@ -1144,10 +1188,7 @@ export function ShotOverheadEditor({
     const matchesMovement = mode?.kind === "movement"
       && mode.sourceType === selection.kind
       && mode.sourceId === selection.id;
-    const matchesPan = mode?.kind === "camera-pan"
-      && selection.kind === "camera"
-      && mode.cameraId === selection.id;
-    if (!matchesMovement && !matchesPan) return false;
+    if (!matchesMovement) return false;
     if (interactionLocked || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return true;
 
     const current = cloneShotOverheadDiagram(historyRef.current.current);
@@ -1163,42 +1204,23 @@ export function ShotOverheadEditor({
     event.stopPropagation();
     capturePointer(event.pointerId);
     setSelected(selection);
-    if (matchesMovement) {
-      const origin = { x: source.x, y: source.y };
-      gestureRef.current = {
-        kind: "movement-create",
-        pointerId: event.pointerId,
-        sourceType: selection.kind,
-        sourceId: selection.id,
-        sourceOrigin: origin,
-        pointerStartWorld: worldPoint(event.clientX, event.clientY),
-        currentEnd: origin,
-        before: current
-      };
-      setMovementDraft({
-        sourceType: selection.kind,
-        sourceId: selection.id,
-        start: origin,
-        end: origin
-      });
-    } else if (selection.kind === "camera" && mode?.kind === "camera-pan") {
-      gestureRef.current = {
-        kind: "camera-pan",
-        pointerId: event.pointerId,
-        cameraId: selection.id,
-        panId: mode.panId,
-        startRotation: source.rotation,
-        finalRotation: source.rotation,
-        direction: "clockwise",
-        before: current
-      };
-      setCameraPanDraft({
-        cameraId: selection.id,
-        startRotation: source.rotation,
-        finalRotation: source.rotation,
-        direction: "clockwise"
-      });
-    }
+    const origin = { x: source.x, y: source.y };
+    gestureRef.current = {
+      kind: "movement-create",
+      pointerId: event.pointerId,
+      sourceType: selection.kind,
+      sourceId: selection.id,
+      sourceOrigin: origin,
+      pointerStartWorld: worldPoint(event.clientX, event.clientY),
+      currentEnd: origin,
+      before: current
+    };
+    setMovementDraft({
+      sourceType: selection.kind,
+      sourceId: selection.id,
+      start: origin,
+      end: origin
+    });
     setGestureActive(true);
     return true;
   }
@@ -1263,6 +1285,49 @@ export function ShotOverheadEditor({
       pointerId: event.pointerId,
       before: cloneShotOverheadDiagram(historyRef.current.current)
     } as Gesture;
+    setGestureActive(true);
+  }
+
+  function beginCameraPanGesture(
+    event: React.PointerEvent<SVGElement>,
+    cameraId: string,
+    panId: string
+  ) {
+    if (
+      creationMode?.kind !== "camera-pan"
+      || creationMode.cameraId !== cameraId
+      || creationMode.panId !== panId
+    ) return;
+    if (beginPan(event)) return;
+    if (interactionLocked || !event.isPrimary || event.button !== 0 || hasForeignPointerOwner(event.pointerId)) return;
+    const before = cloneShotOverheadDiagram(historyRef.current.current);
+    const camera = before.cameras.find((item) => item.id === cameraId);
+    if (!camera) {
+      setCreationMode(null);
+      return;
+    }
+    const existing = before.cameraPans.find((item) => item.id === panId) ?? null;
+    const startRotation = existing?.startRotation ?? camera.rotation;
+    const finalRotation = existing?.finalRotation ?? camera.rotation;
+    const direction = existing?.direction ?? "clockwise";
+    event.preventDefault();
+    event.stopPropagation();
+    capturePointer(event.pointerId);
+    setSelected({ kind: "camera", id: cameraId });
+    gestureRef.current = {
+      kind: "camera-pan",
+      pointerId: event.pointerId,
+      cameraId,
+      panId,
+      startRotation,
+      initialFinalRotation: finalRotation,
+      finalRotation,
+      pointerAtStart: worldPoint(event.clientX, event.clientY),
+      direction,
+      existing: Boolean(existing),
+      before
+    };
+    setCameraPanDraft({ cameraId, startRotation, finalRotation, direction });
     setGestureActive(true);
   }
 
@@ -1394,6 +1459,10 @@ export function ShotOverheadEditor({
         movementPaths: current.movementPaths.filter((item) => !(item.sourceType === "camera" && item.sourceId === target.id)),
         cameraPans: current.cameraPans.filter((item) => item.cameraId !== target.id)
       };
+      if (target.kind === "ghost-camera") return {
+        ...current,
+        movementPaths: current.movementPaths.filter((item) => item.id !== target.pathId)
+      };
       if (target.kind === "line") return { ...current, lines: current.lines.filter((item) => item.id !== target.id) };
       if (target.kind === "path") return { ...current, movementPaths: current.movementPaths.filter((item) => item.id !== target.id) };
       return { ...current, shapes: current.shapes.filter((item) => item.id !== target.id) };
@@ -1471,6 +1540,13 @@ export function ShotOverheadEditor({
     finishRoom(false);
   }
 
+  function handleRoomContextMenuCapture(event: React.MouseEvent<SVGSVGElement>) {
+    if (interactionLocked || tool !== "room") return;
+    event.preventDefault();
+    event.stopPropagation();
+    finishRoom(false);
+  }
+
   function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
     if (!gesture) {
@@ -1484,6 +1560,36 @@ export function ShotOverheadEditor({
       return;
     }
     if (gesture.pointerId !== event.pointerId) return;
+    if (gesture.kind === "pending-ghost-camera") {
+      if (!shouldBeginDirectDrag(
+        gesture.startClient,
+        { x: event.clientX, y: event.clientY },
+        gesture.pointerType
+      )) return;
+      const pointGesture: PointGesture = {
+        kind: "point",
+        pointerId: gesture.pointerId,
+        target: "path-point",
+        id: gesture.pathId,
+        index: gesture.pointIndex,
+        grab: gesture.grab,
+        before: gesture.before
+      };
+      gestureRef.current = pointGesture;
+      setSelected({ kind: "ghost-camera", pathId: gesture.pathId });
+      event.preventDefault();
+      const point = applyShotOverheadPointGrab(
+        pointGesture.grab,
+        worldPoint(event.clientX, event.clientY),
+        { width: canvasWidth, height: canvasHeight }
+      );
+      replaceDiagram(applyShotOverheadPointTarget(
+        cloneShotOverheadDiagram(pointGesture.before),
+        pointGesture,
+        point
+      ));
+      return;
+    }
     if (gesture.kind === "pending-move") {
       if (!shouldBeginDirectDrag(
         gesture.startClient,
@@ -1536,10 +1642,12 @@ export function ShotOverheadEditor({
       event.preventDefault();
       const camera = gesture.before.cameras.find((item) => item.id === gesture.cameraId);
       if (!camera) return;
-      const finalRotation = normalizedRotation(pointerAngle(
-        worldPoint(event.clientX, event.clientY, false),
-        { x: camera.x, y: camera.y }
-      ));
+      const finalRotation = maybeSnapRotation(getShotOverheadRotationFromPointerDrag(
+        gesture.initialFinalRotation,
+        { x: camera.x, y: camera.y },
+        gesture.pointerAtStart,
+        worldPoint(event.clientX, event.clientY, false)
+      ), event.shiftKey);
       const direction = normalizedAngleDelta(finalRotation - gesture.startRotation) >= 0
         ? "clockwise"
         : "counterclockwise";
@@ -1577,13 +1685,22 @@ export function ShotOverheadEditor({
       return;
     }
     if (gesture.kind === "rotate") {
-      const delta = normalizedAngleDelta(pointerAngle(point, gesture.pivot) - gesture.startAngle);
-      const rotation = maybeSnapRotation(gesture.startRotation + delta, event.shiftKey);
-      replaceDiagram(applyShotOverheadRotation(
-        cloneShotOverheadDiagram(gesture.before),
-        gesture.selection,
-        rotation
-      ));
+      const rotation = maybeSnapRotation(getShotOverheadRotationFromPointerDrag(
+        gesture.startRotation,
+        gesture.pivot,
+        gesture.pointerAtStart,
+        point
+      ), event.shiftKey);
+      const next = cloneShotOverheadDiagram(gesture.before);
+      if (gesture.selection.kind === "ghost-camera") {
+        const pathId = gesture.selection.pathId;
+        next.movementPaths = next.movementPaths.map((path) => path.id === pathId
+          ? { ...path, finalRotation: rotation }
+          : path);
+        replaceDiagram(next);
+      } else {
+        replaceDiagram(applyShotOverheadRotation(next, gesture.selection, rotation));
+      }
       return;
     }
     if (gesture.kind === "person-scale") {
@@ -1627,13 +1744,20 @@ export function ShotOverheadEditor({
       kind: "rotate",
       selection,
       pivot,
-      startAngle: pointerAngle(point, pivot),
+      pointerAtStart: point,
       startRotation: rotation
     });
   }
 
   function handlePointerEnd(event: React.PointerEvent<SVGSVGElement>) {
     const gesture = gestureRef.current;
+    if (gesture?.kind === "pending-ghost-camera" && gesture.pointerId === event.pointerId) {
+      gestureRef.current = null;
+      setGestureActive(false);
+      setSelected({ kind: "ghost-camera", pathId: gesture.pathId });
+      releasePointer(event.pointerId);
+      return;
+    }
     if (gesture?.kind === "movement-create" && gesture.pointerId === event.pointerId) {
       gestureRef.current = null;
       setGestureActive(false);
@@ -1649,6 +1773,10 @@ export function ShotOverheadEditor({
           gesture.currentEnd
         );
         path.ownerAnchored = true;
+        if (gesture.sourceType === "camera") {
+          const source = next.cameras.find((camera) => camera.id === gesture.sourceId);
+          if (source) path.finalRotation = source.rotation;
+        }
         next.movementPaths = [
           ...next.movementPaths,
           path
@@ -1664,8 +1792,13 @@ export function ShotOverheadEditor({
       setGestureActive(false);
       setCameraPanDraft(null);
       setCreationMode(null);
-      const delta = normalizedAngleDelta(gesture.finalRotation - gesture.startRotation);
-      if (Math.abs(delta) >= MIN_CAMERA_PAN_DEGREES) {
+      const panDelta = normalizedAngleDelta(gesture.finalRotation - gesture.startRotation);
+      const editedDelta = Math.abs(normalizedAngleDelta(
+        gesture.finalRotation - gesture.initialFinalRotation
+      ));
+      const shouldCommit = Math.abs(panDelta) >= MIN_CAMERA_PAN_DEGREES
+        && (!gesture.existing || editedDelta >= 0.1);
+      if (shouldCommit) {
         const next = cloneShotOverheadDiagram(gesture.before);
         const panAction: ShotOverheadCameraPan = {
           id: gesture.panId,
@@ -1864,7 +1997,10 @@ export function ShotOverheadEditor({
       ...current,
       movementPaths: current.movementPaths.filter((path) => path.id !== pathId)
     }));
-    if (selected?.kind === "path" && selected.id === pathId) setSelected(null);
+    if (
+      (selected?.kind === "path" && selected.id === pathId)
+      || (selected?.kind === "ghost-camera" && selected.pathId === pathId)
+    ) setSelected(null);
     setContextMenu(null);
   }
 
@@ -1928,15 +2064,17 @@ export function ShotOverheadEditor({
   const instruction = tool === "line"
     ? lineStart ? "캔버스에서 선의 끝점을 선택하세요." : "캔버스에서 선의 시작점을 선택하세요."
     : tool === "room"
-      ? roomPoints.length === 0 ? "공간의 첫 꼭짓점을 선택하세요." : "점을 이어 벽을 만들고 시작점을 누르면 닫힙니다."
+      ? roomPoints.length === 0 ? "공간의 첫 꼭짓점을 선택하세요." : "점을 이어 벽을 만들고 시작점을 누르면 닫힙니다. 우클릭 또는 열린 벽 완료로 선을 열린 채 저장합니다."
       : creationMode?.kind === "movement"
         ? "강조된 오브젝트에서 목적지까지 끌어 무빙을 완성하세요. Esc 또는 우클릭으로 취소할 수 있습니다."
       : creationMode?.kind === "camera-pan"
-        ? "강조된 카메라에서 최종 방향으로 끌어 패닝 각도를 정하세요."
+        ? "표시된 최종 화각 선의 어느 부분이든 끌어 패닝 방향을 정하세요. 카메라 본체 drag는 위치만 옮깁니다."
         : selected?.kind === "person"
           ? "인물을 끌어 위치를 옮기거나 우클릭해 이름·색상·무빙을 편집하세요."
           : selected?.kind === "camera"
-            ? "카메라를 끌어 위치를 옮기거나 우클릭해 무빙과 패닝을 설정하세요."
+            ? "카메라 본체를 끌어 위치를 옮기고, 양쪽 화각 선의 어느 부분이든 끌어 방향을 조절하세요."
+          : selected?.kind === "ghost-camera"
+            ? "고스트 카메라의 양쪽 화각 선을 끌어 무빙과 독립적인 최종 방향을 조절하세요."
           : selected?.kind === "path"
             ? "끝점과 포인트를 끌어 무빙을 편집하거나 우클릭해 포인트를 추가하세요."
           : selected
@@ -1988,6 +2126,28 @@ export function ShotOverheadEditor({
             <ToolButton ref={cameraToolGuideRef} onClick={addCamera} icon={<Camera />} label="카메라" />
             <ToolButton active={tool === "line"} onClick={() => chooseTool("line")} icon={<Minus />} label="선" />
             <ToolButton ref={roomToolGuideRef} active={tool === "room"} onClick={() => chooseTool("room")} icon={<Square />} label="공간" />
+            {tool === "room" ? (
+              <>
+                <button
+                  type="button"
+                  disabled={roomPoints.length < 2}
+                  onClick={() => finishRoom(false)}
+                  className="h-11 shrink-0 rounded-[var(--radius-control)] border border-field-primary bg-field-primary px-3 text-xs font-bold text-field-accent-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  열린 벽 완료
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRoomPoints([]);
+                    setTool("select");
+                  }}
+                  className="h-11 shrink-0 rounded-[var(--radius-control)] border border-field-border bg-field-input px-3 text-xs font-bold text-field-subtle hover:bg-field-hover"
+                >
+                  취소
+                </button>
+              </>
+            ) : null}
             <span className="mx-0.5 h-7 w-px shrink-0 bg-field-divider" />
             <div ref={historyGuideRef} className="flex shrink-0 gap-1">
               <ToolButton disabled={!canUndoShotOverheadHistory(history)} onClick={undo} icon={<Undo2 />} label="실행 취소" />
@@ -2027,8 +2187,14 @@ export function ShotOverheadEditor({
                 if (!gestureRef.current) setHoveredControlHandleId(null);
               }}
               onLostPointerCapture={(event) => {
-                if (gestureRef.current?.pointerId === event.pointerId) finishGesture(false, event.pointerId);
+                const active = gestureRef.current;
+                if (active?.pointerId !== event.pointerId) return;
+                finishGesture(false, event.pointerId);
+                if (active.kind === "movement-create" || active.kind === "camera-pan") {
+                  setCreationMode(null);
+                }
               }}
+              onContextMenuCapture={handleRoomContextMenuCapture}
               onContextMenu={(event) => {
                 if (interactionLocked) return;
                 event.preventDefault();
@@ -2055,8 +2221,8 @@ export function ShotOverheadEditor({
                     const labelPoint = averagePoint(shape.points);
                     return (
                       <g key={shape.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${shape.label || "공간"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "shape", id: shape.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "shape", id: shape.id })}>
-                        <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents={shape.closed ? "all" : "stroke"} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} style={{ touchAction: "none" }} />
                         <path d={pathFromPoints(shape.points, shape.closed)} fill={shape.closed ? "rgba(255,255,255,0.025)" : "none"} stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} strokeLinejoin="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                        <path d={pathFromPoints(shape.points, shape.closed)} fill="none" stroke="transparent" strokeWidth={interactionTargetMetrics.roomStrokeHitWidthPx} vectorEffect="non-scaling-stroke" pointerEvents="stroke" className="cursor-move" onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} style={{ touchAction: "none" }} />
                         {shape.label && labelPoint ? <text x={labelPoint.x} y={labelPoint.y} textAnchor="middle" fill="var(--field-muted)" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
                       </g>
                     );
@@ -2066,7 +2232,7 @@ export function ShotOverheadEditor({
                     <g key={shape.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${shape.label || "공간"} 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "shape", id: shape.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "shape", id: shape.id })}>
                       <g transform={`rotate(${shape.rotation} ${pivot.x} ${pivot.y})`}>
                         <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="rgba(255,255,255,0.025)" stroke={isSelected ? "var(--field-accent)" : "var(--field-secondary-text)"} strokeOpacity={isSelected ? 1 : 0.82} strokeWidth={isSelected ? 3 : 2.2} strokeDasharray={isSelected ? "8 6" : undefined} vectorEffect="non-scaling-stroke" pointerEvents="none" />
-                        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="transparent" stroke="transparent" strokeWidth="44" vectorEffect="non-scaling-stroke" pointerEvents="all" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} />
+                        <rect x={shape.x} y={shape.y} width={shape.width} height={shape.height} fill="none" stroke="transparent" strokeWidth={interactionTargetMetrics.roomStrokeHitWidthPx} vectorEffect="non-scaling-stroke" pointerEvents="stroke" className="cursor-move" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "shape", id: shape.id })} />
                         {shape.label ? <text x={shape.x + 12} y={shape.y + 24} fill="var(--field-muted)" fontSize="17" fontWeight="600" pointerEvents="none">{shape.label}</text> : null}
                       </g>
                     </g>
@@ -2088,12 +2254,11 @@ export function ShotOverheadEditor({
                   const person = path.sourceType === "person" ? diagram.people.find((item) => item.id === path.sourceId) : null;
                   const camera = path.sourceType === "camera" ? diagram.cameras.find((item) => item.id === path.sourceId) : null;
                   const geometry = getShotOverheadMovementGeometry(diagram, path);
+                  const cameraGhost = camera ? getShotOverheadCameraMovementGhost(diagram, path) : null;
                   if (!geometry || (!person && !camera)) return null;
                   const color = person ? SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color] : "var(--field-muted)";
                   const isSelected = selected?.kind === "path" && selected.id === path.id;
-                  const ghostRotation = camera
-                    ? diagram.cameraPans.find((panAction) => panAction.cameraId === camera.id)?.finalRotation ?? camera.rotation
-                    : person?.rotation ?? 0;
+                  const ghostRotation = cameraGhost?.rotation ?? person?.rotation ?? 0;
                   return (
                     <g key={path.id} tabIndex={readOnly ? undefined : 0} role={readOnly ? undefined : "button"} aria-label={readOnly ? undefined : `${path.sourceType === "person" ? "인물" : "카메라"} 무빙 선택 및 편집`} onKeyDown={(event) => handleObjectKeyDown(event, { kind: "path", id: path.id })} onContextMenu={(event) => handleObjectContextMenu(event, { kind: "path", id: path.id })}>
                       <path d={geometry.pathData} fill="none" stroke="transparent" strokeWidth={interactionTargetMetrics.pathHitWidthPx} vectorEffect="non-scaling-stroke" pointerEvents="stroke" style={{ touchAction: "none" }} onPointerDown={(event) => beginPendingMove(event, { kind: "path", id: path.id }, false)} />
@@ -2106,7 +2271,7 @@ export function ShotOverheadEditor({
                           </g>
                           {person.label ? <text x={geometry.end.x} y={geometry.end.y + 28 * person.scale} textAnchor="middle" fill={SHOT_OVERHEAD_PERSON_COLOR_HEX[person.color]} fontSize="14" fontWeight="650">{person.label}</text> : null}
                         </g>
-                      ) : camera ? (
+                      ) : camera && cameraGhost ? (
                         <g transform={`rotate(${ghostRotation} ${geometry.end.x} ${geometry.end.y})`} opacity="0.28" pointerEvents="none">
                           <rect x={geometry.end.x - 15} y={geometry.end.y - 11} width="27" height="22" rx="2" fill="var(--field-muted)" />
                           <path d={`M ${geometry.end.x + 10} ${geometry.end.y - 8} L ${geometry.end.x + 26} ${geometry.end.y - 14} L ${geometry.end.x + 26} ${geometry.end.y + 14} L ${geometry.end.x + 10} ${geometry.end.y + 8} Z`} fill="var(--field-muted)" />
@@ -2157,25 +2322,162 @@ export function ShotOverheadEditor({
 
                 {diagram.cameras.filter((camera) => camera.showFov).map((camera) => {
                   const rays = getShotOverheadFovRays(camera);
+                  const interactive = !readOnly
+                    && !interactionLocked
+                    && !contextMenu
+                    && !creationMode
+                    && tool === "select"
+                    && selected?.kind === "camera"
+                    && selected.id === camera.id;
                   return (
-                    <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`} pointerEvents="none">
+                    <g key={`${camera.id}-fov`} transform={`rotate(${camera.rotation} ${camera.x} ${camera.y})`}>
                       {rays.map((ray, index) => (
-                        <line
-                          key={index}
-                          x1={ray.start.x}
-                          y1={ray.start.y}
-                          x2={ray.end.x}
-                          y2={ray.end.y}
-                          stroke="var(--field-accent)"
-                          strokeOpacity="0.28"
-                          strokeWidth="1.25"
-                          strokeLinecap="round"
-                          vectorEffect="non-scaling-stroke"
-                        />
+                        <g key={index}>
+                          <line
+                            x1={ray.start.x}
+                            y1={ray.start.y}
+                            x2={ray.end.x}
+                            y2={ray.end.y}
+                            stroke="var(--field-accent)"
+                            strokeOpacity="0.28"
+                            strokeWidth="1.25"
+                            strokeLinecap="round"
+                            vectorEffect="non-scaling-stroke"
+                            pointerEvents="none"
+                          />
+                          {interactive ? (
+                            <line
+                              x1={ray.start.x}
+                              y1={ray.start.y}
+                              x2={ray.end.x}
+                              y2={ray.end.y}
+                              stroke="transparent"
+                              strokeWidth={interactionTargetMetrics.fovHitWidthPx}
+                              vectorEffect="non-scaling-stroke"
+                              pointerEvents="stroke"
+                              className="cursor-grab"
+                              style={{ touchAction: "none" }}
+                              data-shot-overhead-fov-hit="camera"
+                              onPointerDown={(event) => beginRotate(
+                                event,
+                                { kind: "camera", id: camera.id },
+                                { x: camera.x, y: camera.y },
+                                camera.rotation
+                              )}
+                            />
+                          ) : null}
+                        </g>
                       ))}
                     </g>
                   );
                 })}
+
+                {creationMode?.kind === "camera-pan" ? (() => {
+                  const camera = diagram.cameras.find((item) => item.id === creationMode.cameraId);
+                  if (!camera) return null;
+                  const existing = diagram.cameraPans.find((item) => item.id === creationMode.panId) ?? null;
+                  const finalRotation = cameraPanDraft?.cameraId === camera.id
+                    ? cameraPanDraft.finalRotation
+                    : existing?.finalRotation ?? camera.rotation;
+                  const rays = getShotOverheadFovRays({ x: camera.x, y: camera.y, rotation: finalRotation });
+                  return (
+                    <g transform={`rotate(${finalRotation} ${camera.x} ${camera.y})`} data-shot-overhead-pan-fov>
+                      {rays.map((ray, index) => (
+                        <g key={index}>
+                          <line x1={ray.start.x} y1={ray.start.y} x2={ray.end.x} y2={ray.end.y} stroke="var(--field-primary)" strokeOpacity="0.58" strokeWidth="1.25" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                          <line
+                            x1={ray.start.x}
+                            y1={ray.start.y}
+                            x2={ray.end.x}
+                            y2={ray.end.y}
+                            stroke="transparent"
+                            strokeWidth={interactionTargetMetrics.fovHitWidthPx}
+                            vectorEffect="non-scaling-stroke"
+                            pointerEvents="stroke"
+                            className="cursor-grab"
+                            style={{ touchAction: "none" }}
+                            data-shot-overhead-fov-hit="pan"
+                            onPointerDown={(event) => beginCameraPanGesture(
+                              event,
+                              camera.id,
+                              creationMode.panId
+                            )}
+                          />
+                        </g>
+                      ))}
+                    </g>
+                  );
+                })() : null}
+
+                <g data-shot-overhead-ghost-interaction-layer>
+                  {diagram.movementPaths.map((path) => {
+                    const cameraGhost = path.sourceType === "camera"
+                      ? getShotOverheadCameraMovementGhost(diagram, path)
+                      : null;
+                    if (!cameraGhost) return null;
+                    const isSelected = selected?.kind === "ghost-camera" && selected.pathId === path.id;
+                    const interactiveFov = isSelected
+                      && !readOnly
+                      && !interactionLocked
+                      && !contextMenu
+                      && !creationMode
+                      && tool === "select";
+                    const rays = interactiveFov
+                      ? getShotOverheadFovRays({ x: cameraGhost.x, y: cameraGhost.y, rotation: cameraGhost.rotation })
+                      : [];
+                    return (
+                      <g
+                        key={`ghost-interaction:${path.id}`}
+                        tabIndex={readOnly ? undefined : 0}
+                        role={readOnly ? undefined : "button"}
+                        aria-label={readOnly ? undefined : "고스트 카메라 최종 방향 선택"}
+                        onKeyDown={(event) => handleGhostCameraKeyDown(event, path.id)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (!interactionLocked) setSelected({ kind: "ghost-camera", pathId: path.id });
+                        }}
+                      >
+                        {isSelected ? (
+                          <circle cx={cameraGhost.x} cy={cameraGhost.y} r="25" fill="none" stroke="var(--field-accent)" strokeWidth="2.5" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                        ) : null}
+                        {interactiveFov ? (
+                          <g transform={`rotate(${cameraGhost.rotation} ${cameraGhost.x} ${cameraGhost.y})`}>
+                            {rays.map((ray, index) => (
+                              <g key={index}>
+                                <line x1={ray.start.x} y1={ray.start.y} x2={ray.end.x} y2={ray.end.y} stroke="var(--field-accent)" strokeOpacity="0.48" strokeWidth="1.25" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+                                <line
+                                  x1={ray.start.x}
+                                  y1={ray.start.y}
+                                  x2={ray.end.x}
+                                  y2={ray.end.y}
+                                  stroke="transparent"
+                                  strokeWidth={interactionTargetMetrics.fovHitWidthPx}
+                                  vectorEffect="non-scaling-stroke"
+                                  pointerEvents="stroke"
+                                  className="cursor-grab"
+                                  style={{ touchAction: "none" }}
+                                  data-shot-overhead-fov-hit="ghost"
+                                  onPointerDown={(event) => beginRotate(
+                                    event,
+                                    { kind: "ghost-camera", pathId: path.id },
+                                    { x: cameraGhost.x, y: cameraGhost.y },
+                                    cameraGhost.rotation
+                                  )}
+                                />
+                              </g>
+                            ))}
+                          </g>
+                        ) : null}
+                        <PointerHitCircle
+                          cx={cameraGhost.x}
+                          cy={cameraGhost.y}
+                          onPointerDown={(event) => beginGhostCameraPointer(event, path.id)}
+                        />
+                      </g>
+                    );
+                  })}
+                </g>
 
                 {diagram.people.map((person) => {
                   const isSelected = selected?.kind === "person" && selected.id === person.id;

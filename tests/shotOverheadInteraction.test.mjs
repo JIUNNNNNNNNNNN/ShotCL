@@ -4,11 +4,15 @@ import {
   DIRECT_DRAG_COARSE_TOLERANCE_PX,
   DIRECT_DRAG_FINE_TOLERANCE_PX,
   MOVEMENT_CREATION_MIN_DISTANCE_PX,
+  SHOT_OVERHEAD_COARSE_FOV_HIT_WIDTH_PX,
   SHOT_OVERHEAD_COARSE_HANDLE_HIT_DIAMETER_PX,
   SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX,
+  SHOT_OVERHEAD_COARSE_ROOM_STROKE_HIT_WIDTH_PX,
   SHOT_OVERHEAD_COARSE_VISIBLE_HANDLE_DIAMETER_PX,
+  SHOT_OVERHEAD_FINE_FOV_HIT_WIDTH_PX,
   SHOT_OVERHEAD_FINE_HANDLE_HIT_DIAMETER_PX,
   SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX,
+  SHOT_OVERHEAD_FINE_ROOM_STROKE_HIT_WIDTH_PX,
   SHOT_OVERHEAD_FINE_VISIBLE_HANDLE_DIAMETER_PX,
   TOUCH_CONTEXT_MENU_HOLD_MS,
   applyShotOverheadPointGrab,
@@ -19,8 +23,10 @@ import {
   createMovementPath,
   getMovementEndPoint,
   getShotOverheadInteractionTargetMetrics,
+  getShotOverheadRotationFromPointerDrag,
   hasMinimumMovementDraft,
   resolveNearestShotOverheadHandle,
+  resolveNearestShotOverheadStroke,
   screenDeltaToShotOverheadWorld,
   shotOverheadWorldPointToClient,
   shouldBeginDirectDrag
@@ -131,12 +137,16 @@ test("fine and coarse targets keep small visuals with larger interaction areas",
   assert.deepEqual(getShotOverheadInteractionTargetMetrics("mouse"), {
     visibleHandleDiameterPx: SHOT_OVERHEAD_FINE_VISIBLE_HANDLE_DIAMETER_PX,
     handleHitDiameterPx: SHOT_OVERHEAD_FINE_HANDLE_HIT_DIAMETER_PX,
-    pathHitWidthPx: SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX
+    pathHitWidthPx: SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX,
+    fovHitWidthPx: SHOT_OVERHEAD_FINE_FOV_HIT_WIDTH_PX,
+    roomStrokeHitWidthPx: SHOT_OVERHEAD_FINE_ROOM_STROKE_HIT_WIDTH_PX
   });
   assert.deepEqual(getShotOverheadInteractionTargetMetrics("touch"), {
     visibleHandleDiameterPx: SHOT_OVERHEAD_COARSE_VISIBLE_HANDLE_DIAMETER_PX,
     handleHitDiameterPx: SHOT_OVERHEAD_COARSE_HANDLE_HIT_DIAMETER_PX,
-    pathHitWidthPx: SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX
+    pathHitWidthPx: SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX,
+    fovHitWidthPx: SHOT_OVERHEAD_COARSE_FOV_HIT_WIDTH_PX,
+    roomStrokeHitWidthPx: SHOT_OVERHEAD_COARSE_ROOM_STROKE_HIT_WIDTH_PX
   });
   assert.equal(SHOT_OVERHEAD_FINE_VISIBLE_HANDLE_DIAMETER_PX, 10);
   assert.equal(SHOT_OVERHEAD_FINE_HANDLE_HIT_DIAMETER_PX, 28);
@@ -144,6 +154,10 @@ test("fine and coarse targets keep small visuals with larger interaction areas",
   assert.equal(SHOT_OVERHEAD_COARSE_VISIBLE_HANDLE_DIAMETER_PX, 12);
   assert.equal(SHOT_OVERHEAD_COARSE_HANDLE_HIT_DIAMETER_PX, 44);
   assert.equal(SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX, 44);
+  assert.equal(SHOT_OVERHEAD_FINE_FOV_HIT_WIDTH_PX, 16);
+  assert.equal(SHOT_OVERHEAD_COARSE_FOV_HIT_WIDTH_PX, 28);
+  assert.equal(SHOT_OVERHEAD_FINE_ROOM_STROKE_HIT_WIDTH_PX, 16);
+  assert.equal(SHOT_OVERHEAD_COARSE_ROOM_STROKE_HIT_WIDTH_PX, 28);
 });
 
 test("nearest handle resolution is distance-first and deterministic on ties", () => {
@@ -163,6 +177,44 @@ test("nearest handle resolution is distance-first and deterministic on ties", ()
   const stableTie = tied.map((candidate) => ({ ...candidate, hovered: false }));
   assert.equal(resolveNearestShotOverheadHandle({ x: 0, y: 0 }, stableTie)?.value, "stable-a");
   assert.equal(resolveNearestShotOverheadHandle({ x: 100, y: 100 }, tied), null);
+});
+
+test("both FOV rays accept near, middle, and far hits without covering distant objects", () => {
+  const rays = [
+    { value: "left", stableId: "left", start: { x: 110, y: 100 }, end: { x: 215, y: 52 }, hitWidthPx: 16 },
+    { value: "right", stableId: "right", start: { x: 110, y: 100 }, end: { x: 215, y: 148 }, hitWidthPx: 16 }
+  ];
+  for (const point of [
+    { x: 116, y: 97 },
+    { x: 162, y: 77 },
+    { x: 210, y: 54 }
+  ]) {
+    assert.equal(resolveNearestShotOverheadStroke(point, rays)?.value, "left");
+  }
+  for (const point of [
+    { x: 116, y: 103 },
+    { x: 162, y: 123 },
+    { x: 210, y: 146 }
+  ]) {
+    assert.equal(resolveNearestShotOverheadStroke(point, rays)?.value, "right");
+  }
+  assert.equal(resolveNearestShotOverheadStroke({ x: 160, y: 160 }, rays), null);
+});
+
+test("FOV rotation keeps its grabbed ray offset and camera pivot fixed", () => {
+  const rotated = getShotOverheadRotationFromPointerDrag(
+    35,
+    { x: 100, y: 100 },
+    { x: 160, y: 125 },
+    { x: 125, y: 160 }
+  );
+  assert.ok(Math.abs(rotated - 79.76027010391915) < 1e-9);
+  assert.equal(getShotOverheadRotationFromPointerDrag(
+    350,
+    { x: 100, y: 100 },
+    { x: 160, y: 100 },
+    { x: 100, y: 40 }
+  ), 260);
 });
 
 test("one direct drag release creates one undo entry", () => {

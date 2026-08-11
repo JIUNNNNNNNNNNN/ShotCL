@@ -14,6 +14,10 @@ export const SHOT_OVERHEAD_FINE_HANDLE_HIT_DIAMETER_PX = 28;
 export const SHOT_OVERHEAD_COARSE_HANDLE_HIT_DIAMETER_PX = 44;
 export const SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX = 28;
 export const SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX = 44;
+export const SHOT_OVERHEAD_FINE_FOV_HIT_WIDTH_PX = 16;
+export const SHOT_OVERHEAD_COARSE_FOV_HIT_WIDTH_PX = 28;
+export const SHOT_OVERHEAD_FINE_ROOM_STROKE_HIT_WIDTH_PX = 16;
+export const SHOT_OVERHEAD_COARSE_ROOM_STROKE_HIT_WIDTH_PX = 28;
 
 export type ShotOverheadViewportRect = {
   left: number;
@@ -42,10 +46,21 @@ export type ShotOverheadHandleCandidate<T> = {
   priority?: number;
 };
 
+export type ShotOverheadStrokeCandidate<T> = {
+  value: T;
+  stableId: string;
+  start: ShotOverheadPoint;
+  end: ShotOverheadPoint;
+  hitWidthPx: number;
+  priority?: number;
+};
+
 export type ShotOverheadInteractionTargetMetrics = {
   visibleHandleDiameterPx: number;
   handleHitDiameterPx: number;
   pathHitWidthPx: number;
+  fovHitWidthPx: number;
+  roomStrokeHitWidthPx: number;
 };
 
 export type ShotOverheadPointTarget = {
@@ -61,6 +76,34 @@ export type ShotOverheadRotatableTarget = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizedAngleDelta(value: number) {
+  return ((value + 540) % 360) - 180;
+}
+
+function pointerAngle(point: ShotOverheadPoint, pivot: ShotOverheadPoint) {
+  return Math.atan2(point.y - pivot.y, point.x - pivot.x) * (180 / Math.PI);
+}
+
+function distanceToSegment(
+  point: ShotOverheadPoint,
+  start: ShotOverheadPoint,
+  end: ShotOverheadPoint
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared <= 0.001) return Math.hypot(point.x - start.x, point.y - start.y);
+  const progress = clamp(
+    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
+    0,
+    1
+  );
+  return Math.hypot(
+    point.x - (start.x + dx * progress),
+    point.y - (start.y + dy * progress)
+  );
 }
 
 /**
@@ -243,12 +286,16 @@ export function getShotOverheadInteractionTargetMetrics(
     ? {
         visibleHandleDiameterPx: SHOT_OVERHEAD_COARSE_VISIBLE_HANDLE_DIAMETER_PX,
         handleHitDiameterPx: SHOT_OVERHEAD_COARSE_HANDLE_HIT_DIAMETER_PX,
-        pathHitWidthPx: SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX
+        pathHitWidthPx: SHOT_OVERHEAD_COARSE_PATH_HIT_WIDTH_PX,
+        fovHitWidthPx: SHOT_OVERHEAD_COARSE_FOV_HIT_WIDTH_PX,
+        roomStrokeHitWidthPx: SHOT_OVERHEAD_COARSE_ROOM_STROKE_HIT_WIDTH_PX
       }
     : {
         visibleHandleDiameterPx: SHOT_OVERHEAD_FINE_VISIBLE_HANDLE_DIAMETER_PX,
         handleHitDiameterPx: SHOT_OVERHEAD_FINE_HANDLE_HIT_DIAMETER_PX,
-        pathHitWidthPx: SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX
+        pathHitWidthPx: SHOT_OVERHEAD_FINE_PATH_HIT_WIDTH_PX,
+        fovHitWidthPx: SHOT_OVERHEAD_FINE_FOV_HIT_WIDTH_PX,
+        roomStrokeHitWidthPx: SHOT_OVERHEAD_FINE_ROOM_STROKE_HIT_WIDTH_PX
       };
 }
 
@@ -291,6 +338,51 @@ export function resolveNearestShotOverheadHandle<T>(
   });
 
   return eligible[0]?.candidate ?? null;
+}
+
+/** Resolve a thin visual stroke through a larger screen-space interaction width. */
+export function resolveNearestShotOverheadStroke<T>(
+  pointerClient: ShotOverheadPoint,
+  candidates: readonly ShotOverheadStrokeCandidate<T>[]
+): ShotOverheadStrokeCandidate<T> | null {
+  const eligible = candidates
+    .map((candidate) => ({
+      candidate,
+      distance: distanceToSegment(pointerClient, candidate.start, candidate.end)
+    }))
+    .filter(({ candidate, distance }) => (
+      Number.isFinite(distance)
+      && Number.isFinite(candidate.hitWidthPx)
+      && candidate.hitWidthPx >= 0
+      && distance <= candidate.hitWidthPx / 2
+    ));
+
+  eligible.sort((left, right) => {
+    const distanceDelta = left.distance - right.distance;
+    if (Math.abs(distanceDelta) > 0.001) return distanceDelta;
+    const priorityDelta = (right.candidate.priority ?? 0) - (left.candidate.priority ?? 0);
+    if (priorityDelta !== 0) return priorityDelta;
+    return left.candidate.stableId < right.candidate.stableId
+      ? -1
+      : left.candidate.stableId > right.candidate.stableId
+        ? 1
+        : 0;
+  });
+
+  return eligible[0]?.candidate ?? null;
+}
+
+/** Rotate around a fixed pivot while preserving where on a FOV ray was grabbed. */
+export function getShotOverheadRotationFromPointerDrag(
+  startRotation: number,
+  pivot: ShotOverheadPoint,
+  pointerAtStart: ShotOverheadPoint,
+  pointerCurrent: ShotOverheadPoint
+) {
+  const delta = normalizedAngleDelta(
+    pointerAngle(pointerCurrent, pivot) - pointerAngle(pointerAtStart, pivot)
+  );
+  return ((startRotation + delta) % 360 + 360) % 360;
 }
 
 export function getDirectDragTolerance(pointerType: string) {
