@@ -312,7 +312,7 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     trigger: "feature",
     priority: 100,
     title: "스탭 초대",
-    description: "카카오톡으로 초대 링크를 바로 복사할 수 있습니다.",
+    description: "카카오톡 공유하기를 누르면 초대 문구와 링크를 복사할 수 있습니다.",
     persistentAnchor: "home.invite-action",
     compactAnchor: "home.invite-action",
     preferredPlacement: "left",

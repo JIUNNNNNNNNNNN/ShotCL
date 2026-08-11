@@ -2,9 +2,9 @@
 
 import {
   Check,
-  Copy,
   Link2,
   MoreHorizontal,
+  Share2,
   UserRoundPlus
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -171,7 +171,7 @@ export function ProjectStaffInviteCard({
     }, FEEDBACK_DURATION_MS);
   }
 
-  function requestInviteGuideFromCopyAction() {
+  function requestInviteGuideFromShareAction() {
     if (role === "admin" && primaryActionContainerRef.current) {
       requestGuide("home.invite-staff", "feature");
     }
@@ -214,7 +214,7 @@ export function ProjectStaffInviteCard({
     }
   }
 
-  async function copyInviteMessage() {
+  async function shareInviteToKakao() {
     if (requestInFlightRef.current || inviteState.status === "rotation_required") {
       if (inviteState.status === "rotation_required") {
         copyAfterRotationRef.current = true;
@@ -222,7 +222,7 @@ export function ProjectStaffInviteCard({
       }
       return;
     }
-    requestInviteGuideFromCopyAction();
+    requestInviteGuideFromShareAction();
     let activeState = inviteState;
     if (activeState.status === "inactive" || activeState.status === "error") {
       const created = await runAction("ensure");
@@ -241,7 +241,7 @@ export function ProjectStaffInviteCard({
     try {
       await copyText(buildKakaoInviteMessage(projectName, inviteUrl));
       if (operationSequenceRef.current !== operationId || currentProjectIdRef.current !== requestedProjectId) return;
-      showFeedback("복사 완료");
+      showFeedback("초대 문구와 링크가 복사되었습니다.");
     } catch (error) {
       if (operationSequenceRef.current !== operationId) return;
       showFeedback(error instanceof Error ? error.message : "클립보드에 복사하지 못했습니다.", true);
@@ -254,7 +254,7 @@ export function ProjectStaffInviteCard({
 
   async function copyInviteUrl() {
     if (requestInFlightRef.current || inviteState.status !== "active") return;
-    requestInviteGuideFromCopyAction();
+    requestInviteGuideFromShareAction();
     const requestedProjectId = projectId;
     const operationId = ++operationSequenceRef.current;
     requestInFlightRef.current = true;
@@ -288,14 +288,14 @@ export function ProjectStaffInviteCard({
       await copyActiveInviteMessage(result.inviteUrl);
       return;
     }
-    showFeedback(action === "rotate" ? "새 링크를 만들었습니다." : "초대 링크를 비활성화했습니다.");
+    showFeedback(action === "rotate" ? "새 링크를 발급했습니다." : "초대 링크를 비활성화했습니다.");
   }
 
   const isBusy = pendingAction !== null;
   const managementAvailable = inviteState.status === "active" || inviteState.status === "rotation_required";
   const statusText = getStatusText(inviteState);
   const pendingStatus = pendingAction === "rotate"
-    ? "새 초대 링크를 만드는 중입니다."
+    ? "새 초대 링크를 발급하는 중입니다."
     : pendingAction === "revoke"
       ? "초대 링크를 비활성화하는 중입니다."
       : "";
@@ -325,7 +325,7 @@ export function ProjectStaffInviteCard({
         스탭 초대
       </h3>
       <p id="project-staff-invite-description" className="mt-1 text-[11px] font-medium leading-[1.55] text-field-muted">
-        링크로 진행도와 시나리오를 바로 확인하고, 원하면 Google 계정에 저장할 수 있습니다.
+        카카오톡으로 현장 진행도와 시나리오를 공유할 수 있습니다.
       </p>
 
       <div className="mt-3 grid min-w-0 gap-2" aria-busy={isBusy} aria-describedby="project-staff-invite-description">
@@ -333,41 +333,52 @@ export function ProjectStaffInviteCard({
           <Button
             className="min-h-11 w-full min-w-0 px-2 text-xs sm:text-sm"
             disabled={isBusy || inviteState.status === "loading"}
-            onClick={copyInviteMessage}
+            onClick={shareInviteToKakao}
           >
-            {feedback === "복사 완료" ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : <Copy className="h-4 w-4 shrink-0" aria-hidden />}
-            {pendingAction === "ensure" ? "링크 만드는 중" : pendingAction === "copy-message" ? "복사 중" : "카카오톡으로 복사"}
+            {feedback === "초대 문구와 링크가 복사되었습니다."
+              ? <Check className="h-4 w-4 shrink-0" aria-hidden />
+              : <Share2 className="h-4 w-4 shrink-0" aria-hidden />}
+            {pendingAction === "ensure"
+              ? "공유 준비 중…"
+              : pendingAction === "copy-message"
+                ? "복사 중…"
+                : "카카오톡 공유하기"}
           </Button>
         </div>
 
-        {inviteState.status === "active" ? (
-          <Button
-            variant="secondary"
-            className="min-h-11 w-full min-w-0 px-2 text-xs"
-            disabled={isBusy}
-            onClick={copyInviteUrl}
-          >
-            <Link2 className="h-4 w-4 shrink-0" aria-hidden />
-            {pendingAction === "copy-link" ? "복사 중" : "링크 복사"}
-          </Button>
-        ) : null}
+        {inviteState.status === "active" || managementAvailable ? (
+          <div className="flex min-w-0 items-center justify-center gap-1">
+            {inviteState.status === "active" ? (
+              <Button
+                variant="ghost"
+                className="min-h-11 min-w-0 px-3 text-xs"
+                disabled={isBusy}
+                onClick={copyInviteUrl}
+              >
+                <Link2 className="h-4 w-4 shrink-0" aria-hidden />
+                {pendingAction === "copy-link" ? "복사 중…" : "링크 복사"}
+              </Button>
+            ) : null}
 
-        {managementAvailable ? (
-          <div ref={managementTriggerContainerRef}>
-            <Button
-              variant="ghost"
-              className="min-h-11 w-full text-xs"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              disabled={isBusy}
-              onClick={() => {
-                if (isBusy) return;
-                setMenuOpen((current) => !current);
-              }}
-            >
-              <MoreHorizontal className="h-4 w-4" aria-hidden />
-              링크 관리
-            </Button>
+            {managementAvailable ? (
+              <div ref={managementTriggerContainerRef}>
+                <Button
+                  variant="ghost"
+                  className="min-h-11 min-w-11 px-0"
+                  aria-label="링크 관리"
+                  title="링크 관리"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (isBusy) return;
+                    setMenuOpen((current) => !current);
+                  }}
+                >
+                  <MoreHorizontal className="h-4 w-4" aria-hidden />
+                </Button>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -394,7 +405,7 @@ export function ProjectStaffInviteCard({
               setConfirmAction("rotate");
             }}
           >
-            새 링크 만들기
+            새 링크 발급
           </button>
           {inviteState.status === "active" ? (
             <button
@@ -423,7 +434,7 @@ export function ProjectStaffInviteCard({
           className="ui-motion-dialog mt-2 border border-field-divider bg-field-dialog p-3 text-left"
         >
           <h4 id="invite-management-confirm-title" className="text-xs font-black leading-5 text-field-text">
-            {confirmAction === "rotate" ? "새 링크를 만드시겠습니까?" : "초대 링크를 비활성화하시겠습니까?"}
+            {confirmAction === "rotate" ? "새 링크를 발급하시겠습니까?" : "초대 링크를 비활성화하시겠습니까?"}
           </h4>
           <p id="invite-management-confirm-description" className="mt-1 text-[11px] leading-5 text-field-muted">
             {confirmAction === "rotate"
@@ -450,8 +461,8 @@ export function ProjectStaffInviteCard({
               onClick={confirmManagementAction}
             >
               {isBusy
-                ? confirmAction === "rotate" ? "만드는 중" : "처리 중"
-                : confirmAction === "rotate" ? "새로 만들기" : "비활성화"}
+                ? confirmAction === "rotate" ? "발급 중" : "처리 중"
+                : confirmAction === "rotate" ? "새 링크 발급" : "비활성화"}
             </Button>
           </div>
         </section>
@@ -527,9 +538,9 @@ function buildKakaoInviteMessage(projectName: string, inviteUrl: string) {
 }
 
 function getStatusText(state: InviteState) {
-  if (state.status === "loading") return "초대 링크 확인 중";
-  if (state.status === "inactive") return "활성 초대 링크 없음";
-  if (state.status === "rotation_required") return "서버 키 변경으로 새 링크가 필요합니다.";
+  if (state.status === "loading") return "공유 링크 확인 중";
+  if (state.status === "inactive") return "공유 링크는 첫 공유 때 준비됩니다.";
+  if (state.status === "rotation_required") return "공유하려면 링크를 새로 발급해야 합니다.";
   if (state.status === "error") return state.message;
-  return "활성 초대 링크를 여러 스탭에게 재사용할 수 있습니다.";
+  return "공유 링크 준비됨";
 }
