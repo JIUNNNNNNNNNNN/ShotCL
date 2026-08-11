@@ -4,9 +4,11 @@ import {
   type DailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
 import {
-  DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN,
   DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS,
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
+  DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN,
+  DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN,
+  getDailyPlanAdditionalScheduleCellLayout,
   type DailyPlanPreviewTimetableRow
 } from "@/lib/dailyPlan/previewTimetable";
 import {
@@ -495,7 +497,7 @@ export function DailyPlanPortraitDocument({
                 <tr key={`portrait-detail-${index}`} className={row.type === "additionalSchedule" ? eventRowClass : undefined}>
                   {row.type === "additionalSchedule" ? (
                     <td colSpan={portraitColumnCount} className={`${cellClass} daily-plan-cell--wrap`}>
-                      {joinPreviewValues(row.location, row.memo)}
+                      {getPreviewCellText(row.memo)}
                     </td>
                   ) : (
                     <TimetableCells
@@ -746,6 +748,7 @@ function AdditionalScheduleCells({
 }: {
   row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
 }) {
+  const layout = getDailyPlanAdditionalScheduleCellLayout(row.location);
   return (
     <>
       {[row.start, row.end, row.runtime].map((value, index) => (
@@ -753,18 +756,16 @@ function AdditionalScheduleCells({
           {getPreviewCellText(value)}
         </td>
       ))}
+      {layout.hasLocation ? (
+        <td colSpan={layout.locationSpan} className={`${cellClass} !p-0`}>
+          <AdditionalScheduleCellContent value={row.location} />
+        </td>
+      ) : null}
       <td
-        colSpan={DAILY_PLAN_TIMETABLE_ADDITIONAL_CONTENT_SPAN}
+        colSpan={layout.contentSpan}
         className="daily-plan-cell border border-black !p-0 align-middle"
       >
-        <div className="daily-plan-additional-grid grid min-h-7 grid-cols-2">
-          <div className="daily-plan-additional-cell daily-plan-cell--wrap flex min-w-0 items-center justify-center border-r border-black text-center" aria-label="기타 일정 장소">
-            {getPreviewCellText(row.location)}
-          </div>
-          <div className="daily-plan-additional-cell daily-plan-cell--wrap flex min-w-0 items-center justify-center text-center" aria-label="기타 일정 메모">
-            {getPreviewCellText(row.memo)}
-          </div>
-        </div>
+        <AdditionalScheduleCellContent value={row.memo} />
       </td>
     </>
   );
@@ -775,6 +776,10 @@ function PortraitAdditionalScheduleSummaryCells({
 }: {
   row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
 }) {
+  const layout = getDailyPlanAdditionalScheduleCellLayout(
+    row.location,
+    portraitColumnCount - DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN
+  );
   return (
     <>
       {[row.start, row.end, row.runtime].map((value, index) => (
@@ -782,10 +787,29 @@ function PortraitAdditionalScheduleSummaryCells({
           {getPreviewCellText(value)}
         </td>
       ))}
-      <td colSpan={7} className={`${cellClass} daily-plan-cell--wrap`}>
-        {joinPreviewValues(row.location, row.memo)}
+      {layout.hasLocation ? (
+        <td colSpan={layout.locationSpan} className={`${cellClass} !p-0`}>
+          <AdditionalScheduleCellContent value={row.location} />
+        </td>
+      ) : null}
+      <td colSpan={layout.contentSpan} className={`${cellClass} !p-0`}>
+        <AdditionalScheduleCellContent value={row.memo} />
       </td>
     </>
+  );
+}
+
+function AdditionalScheduleCellContent({
+  value
+}: {
+  value: unknown;
+}) {
+  return (
+    <div
+      className="daily-plan-additional-grid daily-plan-additional-cell daily-plan-cell--wrap flex min-h-7 min-w-0 items-center justify-center text-center"
+    >
+      {getPreviewCellText(value)}
+    </div>
   );
 }
 
@@ -887,7 +911,7 @@ function createTimetableFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDis
     { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
     { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
     { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
+    { key: "location", label: "LOCATION", span: DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN, value: rows.map((row) => row.location) },
     {
       key: "dayNight",
       label: "D/N",
@@ -934,7 +958,7 @@ function createPortraitSummaryFields(rows: DailyPlanPreviewTimetableRow[]): Prev
     { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
     { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
     { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: 2, value: rows.map((row) => row.location) },
+    { key: "location", label: "LOCATION", span: DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN, value: rows.map((row) => row.location) },
     {
       key: "dayNight",
       label: "D/N/S",
@@ -1003,13 +1027,6 @@ function getTimetableFieldValue(row: DailyPlanPreviewTimetableRow, key: string) 
   if (key === "cast") return row.cast;
   if (key in row) return row[key as keyof typeof row];
   return "";
-}
-
-function joinPreviewValues(...values: unknown[]) {
-  return values
-    .map((value) => getPreviewCellText(value).trim())
-    .filter(Boolean)
-    .join(" · ");
 }
 
 function getTimetableRowDisplayValues(row: DailyPlanPreviewTimetableRow) {
