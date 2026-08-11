@@ -21,8 +21,32 @@ export function buildGoogleOAuthCallbackUrl(origin: string, nextPath = "/") {
   return callback.toString();
 }
 
+/** OAuth return path가 가리키는 현재 프로젝트 UUID만 session sync hint로 사용합니다. */
+export function getProjectIdFromInternalPath(value: unknown) {
+  const safePath = getSafeInternalPath(value, "/");
+  const pathname = new URL(safePath, SAFE_PATH_ORIGIN).pathname;
+  const match = pathname.match(/^\/projects\/([^/]+)(?:\/|$)/u);
+  if (!match) return null;
+  let candidate = "";
+  try {
+    candidate = decodeURIComponent(match[1]).trim().toLowerCase();
+  } catch {
+    return null;
+  }
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(candidate)
+    ? candidate
+    : null;
+}
+
+export function getAccountSessionSyncKey(accessToken: string, projectId: string | null) {
+  return `${accessToken.trim()}\u0000${projectId?.trim().toLowerCase() || ""}`;
+}
+
 /** 유효한 Supabase JWT를 서버의 HttpOnly account session으로 교환합니다. */
-export async function syncAccountSession(accessToken: string): Promise<AccountSessionSyncResult> {
+export async function syncAccountSession(
+  accessToken: string,
+  projectId: string | null = null
+): Promise<AccountSessionSyncResult> {
   const token = accessToken.trim();
   if (!token) throw new Error("로그인 세션을 확인할 수 없습니다.");
 
@@ -34,7 +58,10 @@ export async function syncAccountSession(accessToken: string): Promise<AccountSe
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ action: "sync" })
+    body: JSON.stringify({
+      action: "sync",
+      ...(projectId ? { projectId } : {})
+    })
   });
   const payload = await readAccountPayload(response);
   if (!response.ok) {

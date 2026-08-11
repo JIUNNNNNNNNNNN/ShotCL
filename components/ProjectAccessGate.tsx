@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useAuthSession } from "@/components/AuthSessionProvider";
 import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
 import { ProjectWorkspaceProvider } from "@/components/ProjectWorkspaceContext";
 import { ProjectWorkspaceShell } from "@/components/ProjectWorkspaceShell";
@@ -14,6 +15,10 @@ import {
   type ProjectScopedRoleOverride,
   type SharedProjectRole
 } from "@/lib/projectAccess/core";
+import {
+  isMemberReadOnlyFallback,
+  resolveLiveProjectCapability
+} from "@/lib/projectAccess/clientCapability";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
 import {
   resolveDismissedProjectOwnerId,
@@ -47,7 +52,7 @@ export function ProjectAccessGate({
   projectName,
   role,
   accessMode,
-  editorEligible,
+  accountUserId,
   accessPreferenceScope,
   children
 }: {
@@ -56,24 +61,51 @@ export function ProjectAccessGate({
   role: SharedProjectRole | null;
   accessMode: ProjectAccessMode | null;
   editorEligible: boolean;
+  accountUserId: string | null;
   accessPreferenceScope: string;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const {
+    isEditorEligible: liveAccountEditorEligible,
+    isGoogle,
+    status: accountStatus,
+    user: liveAccountUser
+  } = useAuthSession();
   const [verifiedRoleOverride, setVerifiedRoleOverride] = useState<ProjectScopedRoleOverride>(null);
-  const currentRole = accessMode === "guest"
+  const serverScopedRole = accessMode === "guest"
     ? "progress"
     : resolveProjectScopedRole(projectId, role, verifiedRoleOverride);
+  // server layout이 확인한 계정 ID와 현재 Supabase 사용자 ID가 일치한 뒤에만 쓰기
+  // capability를 노출합니다. 인증 복원·로그아웃·계정 전환 중에는 fail-closed이며,
+  // DB membership 자체를 client에서 변경하지는 않습니다.
+  const liveCapability = resolveLiveProjectCapability({
+    accessMode,
+    scopedRole: serverScopedRole,
+    accountStatus,
+    serverAccountUserId: accountUserId,
+    liveAccountUserId: liveAccountUser?.id ?? null,
+    isGoogle,
+    liveAccountEditorEligible
+  });
+  const effectiveEditorEligible = liveCapability.editorEligible;
+  const currentRole = liveCapability.role;
   const isGuest = accessMode === "guest";
+  const memberReadOnlyFallback = isMemberReadOnlyFallback({
+    accessMode,
+    serverRole: serverScopedRole,
+    resolvedRole: currentRole,
+    accountStatus
+  });
   const canEditProgressStatus = currentRole === "admin"
-    || (accessMode === "member" && editorEligible && currentRole === "progress");
+    || (effectiveEditorEligible && currentRole === "progress");
   const applyVerifiedRole = useCallback((nextRole: SharedProjectRole) => {
     // 이 client callback은 서버 승격 성공 응답만 반영하며 downgrade는 허용하지 않습니다.
-    if (isGuest || !isKeyStaffProjectRole(nextRole)) return;
+    if (isGuest || !effectiveEditorEligible || !isKeyStaffProjectRole(nextRole)) return;
     setVerifiedRoleOverride({ projectId, role: nextRole });
-  }, [isGuest, projectId]);
+  }, [effectiveEditorEligible, isGuest, projectId]);
   const progressPath = `/projects/${projectId}`;
   const progressHref = `${progressPath}?view=progress`;
   const progressReadablePaths = new Set([
@@ -84,13 +116,20 @@ export function ProjectAccessGate({
     `${progressPath}/costumes`,
     `${progressPath}/storyboard-overhead`
   ]);
+  const memberRestrictedFallback = memberReadOnlyFallback
+    && !progressReadablePaths.has(pathname);
   const guestProgressRoute = pathname === progressPath
     && (searchParams.get("view") === "progress" || Boolean(searchParams.get("dailyPlanId")));
   const guestRouteAllowed = guestProgressRoute || pathname === `${progressPath}/scenario`;
   const missingAccess = currentRole === null || accessMode === null;
   const denied = missingAccess
     || (isGuest && !guestRouteAllowed)
-    || (!isGuest && currentRole === "progress" && !progressReadablePaths.has(pathname));
+    || (
+      !isGuest
+      && currentRole === "progress"
+      && !memberReadOnlyFallback
+      && !progressReadablePaths.has(pathname)
+    );
   const deniedDestination = missingAccess ? "/" : isGuest ? progressHref : progressPath;
 
   useEffect(() => {
@@ -107,10 +146,10 @@ export function ProjectAccessGate({
   // 자식 페이지의 일반 data-loading effect보다 먼저 실행되며 render도 순수하게 유지합니다.
   useLayoutEffect(() => {
     clearProjectReadCache(projectId);
-  }, [accessMode, projectId, role]);
+  }, [accessMode, effectiveEditorEligible, projectId, role]);
 
   useEffect(() => {
-    if (!role || isGuest) return;
+    if (!currentRole || isGuest) return;
     rememberProjectSelection(projectId);
 
     let isCurrent = true;
@@ -120,7 +159,7 @@ export function ProjectAccessGate({
     return () => {
       isCurrent = false;
     };
-  }, [accessPreferenceScope, isGuest, projectId, role]);
+  }, [accessPreferenceScope, currentRole, isGuest, projectId]);
 
   useEffect(() => {
     if (denied) router.replace(deniedDestination);
@@ -131,10 +170,10 @@ export function ProjectAccessGate({
     isShared: currentRole !== null,
     accessMode,
     isGuest,
-    editorEligible: accessMode === "member" && editorEligible,
+    editorEligible: effectiveEditorEligible,
     canEditProgressStatus,
     applyVerifiedRole
-  }), [accessMode, applyVerifiedRole, canEditProgressStatus, currentRole, editorEligible, isGuest]);
+  }), [accessMode, applyVerifiedRole, canEditProgressStatus, currentRole, effectiveEditorEligible, isGuest]);
 
   if (denied) {
     return (
@@ -167,7 +206,25 @@ export function ProjectAccessGate({
       >
         <ProjectPageActionsProvider>
           <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
-            <ProjectWorkspaceShell>{children}</ProjectWorkspaceShell>
+            <ProjectWorkspaceShell>
+              {memberRestrictedFallback ? (
+                <section className="mx-auto flex min-h-[35dvh] w-full max-w-lg items-center justify-center px-4 py-8 text-center">
+                  <div className="rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-5 shadow-card">
+                    <p
+                      role={accountStatus === "error" || accountStatus === "unavailable" ? "alert" : "status"}
+                      className="text-sm font-black text-field-text"
+                    >
+                      {accountStatus === "error" || accountStatus === "unavailable"
+                        ? "Google 계정 권한을 확인할 수 없어 수정 화면을 잠갔습니다."
+                        : "Google 계정 권한을 확인하는 중입니다."}
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-field-muted">
+                      왼쪽 계정 영역에서 상태를 확인해 주세요. 계정 확인 전에는 이 화면의 저장 기능이 실행되지 않습니다.
+                    </p>
+                  </div>
+                </section>
+              ) : children}
+            </ProjectWorkspaceShell>
           </ProjectWorkspaceProvider>
         </ProjectPageActionsProvider>
       </ContextualGuideProvider>

@@ -17,6 +17,10 @@ import {
   isPersistentProjectShellViewport,
   usePersistentProjectShell
 } from "@/hooks/useProjectShellMode";
+import {
+  consumePendingProjectJoinNotice,
+  type ProjectJoinNotice
+} from "@/lib/projectAccess/joinNotice.client";
 import { isDemoStorageMode } from "@/lib/runtimeMode";
 
 type OpenDrawer = "navigation" | "actions" | null;
@@ -28,9 +32,11 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
   const routeKey = `${pathname}?${searchParams.toString()}`;
   const menu = useCurrentProjectPageActionMenu();
   const { isGuest } = useProjectAccess();
-  const { projectName } = useProjectWorkspace();
+  const { projectId, projectName } = useProjectWorkspace();
   const persistentShell = usePersistentProjectShell();
   const [openDrawer, setOpenDrawer] = useState<OpenDrawer>(null);
+  const [joinNotice, setJoinNotice] = useState<ProjectJoinNotice | null>(null);
+  const previousPersistentShellRef = useRef(persistentShell);
   const navigationToggleRef = useRef<HTMLButtonElement | null>(null);
   const actionToggleRef = useRef<HTMLButtonElement | null>(null);
   const navigationDrawerRef = useRef<HTMLElement | null>(null);
@@ -67,6 +73,27 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
     if (persistentShell) setOpenDrawer(null);
   }, [persistentShell]);
 
+  useLayoutEffect(() => {
+    const wasPersistent = previousPersistentShellRef.current;
+    previousPersistentShellRef.current = persistentShell;
+    if (wasPersistent && !persistentShell && joinNotice) {
+      setOpenDrawer("navigation");
+    }
+  }, [joinNotice, persistentShell]);
+
+  useEffect(() => {
+    const notice = consumePendingProjectJoinNotice(projectId);
+    if (!notice) return;
+    setJoinNotice(notice);
+    if (!persistentShell) setOpenDrawer("navigation");
+  }, [persistentShell, projectId]);
+
+  useEffect(() => {
+    if (!joinNotice) return undefined;
+    const timerId = window.setTimeout(() => setJoinNotice(null), 15_000);
+    return () => window.clearTimeout(timerId);
+  }, [joinNotice]);
+
   const pageTitle = getProjectPageTitle(pathname, searchParams);
   const hasRightPanel = !isGuest && Boolean(menu?.actions.length);
   const modalDrawerOpen = !persistentShell && openDrawer !== null;
@@ -81,7 +108,10 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
     >
       {persistentShell ? (
         <aside className="project-shell__navigation no-print" aria-label="프로젝트 전체 메뉴">
-          <ProjectNavigation />
+          <ProjectNavigation
+            joinNotice={joinNotice}
+            onDismissJoinNotice={() => setJoinNotice(null)}
+          />
         </aside>
       ) : null}
 
@@ -173,6 +203,8 @@ export function ProjectWorkspaceShell({ children }: { children: React.ReactNode 
             </div>
             <ProjectNavigation
               drawer
+              joinNotice={joinNotice}
+              onDismissJoinNotice={() => setJoinNotice(null)}
               onNavigate={() => setOpenDrawer(null)}
               onGuideReplay={closeDrawer}
             />

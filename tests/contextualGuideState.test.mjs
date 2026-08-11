@@ -8,7 +8,9 @@ import {
   shouldLearnGuideOnExit
 } from "../lib/contextualGuideState.ts";
 import {
+  CONTEXTUAL_GUIDES,
   getGuideIdsForPage,
+  getGuideStorageToken,
   MAIN_INTRO_GUIDE_IDS
 } from "../lib/contextualGuides.ts";
 
@@ -56,4 +58,19 @@ test("Main intro and Help replay expose one canonical Go guide", () => {
   );
   assert.equal(MAIN_INTRO_GUIDE_IDS.filter((id) => id.includes("go")).length, 1);
   assert.equal(getGuideIdsForPage("main").includes("main.go-first-use"), false);
+});
+
+test("project Home exposes one persistent Google account connection guide", () => {
+  const homeGuides = getGuideIdsForPage("home");
+  const accountGuides = homeGuides.filter((id) => id === "home.google-account-connect");
+  const definition = CONTEXTUAL_GUIDES["home.google-account-connect"];
+
+  assert.deepEqual(accountGuides, ["home.google-account-connect"]);
+  assert.equal(definition.trigger, "feature");
+  assert.equal(definition.type, "anchor");
+  assert.equal(definition.persistentAnchor, "shell.google-account");
+  assert.equal(definition.compactAnchor, "shell.navigation-toggle");
+  assert.equal(definition.replayHidden, true);
+  assert.equal(getGuideStorageToken(definition.id), "home.google-account-connect@1");
+  assert.equal(homeGuides.some((id) => id.includes("key-staff")), false);
 });

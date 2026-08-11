@@ -36,7 +36,6 @@ function AuthCallbackContent() {
     void completionRef.current.then((destination) => {
       if (cancelled) return;
       router.replace(destination);
-      router.refresh();
     }).catch((error) => {
       if (!cancelled) {
         setErrorMessage(
@@ -71,7 +70,7 @@ function AuthCallbackContent() {
 async function finishGoogleLogin(
   searchParams: { get: (name: string) => string | null },
   nextPath: string,
-  refreshAccount: () => Promise<{ destination: string | null } | null>
+  refreshAccount: (nextPath?: string) => Promise<{ destination: string | null } | null>
 ) {
   const providerError = searchParams.get("error_description") || searchParams.get("error");
   if (providerError) throw new PublicAuthError(GOOGLE_LOGIN_ERROR_MESSAGE);
@@ -89,7 +88,7 @@ async function finishGoogleLogin(
   }
   if (!session) throw new PublicAuthError(GOOGLE_LOGIN_ERROR_MESSAGE);
 
-  const account = await refreshAccount();
+  const account = await refreshAccount(nextPath);
   return getSafeInternalPath(account?.destination, nextPath);
 }
 

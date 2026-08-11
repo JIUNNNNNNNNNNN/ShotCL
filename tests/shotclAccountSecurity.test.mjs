@@ -19,6 +19,22 @@ const accountServerSource = readFileSync(
   new URL("../lib/projectAccess/accountServer.ts", import.meta.url),
   "utf8"
 );
+const authProviderSource = readFileSync(
+  new URL("../components/AuthSessionProvider.tsx", import.meta.url),
+  "utf8"
+);
+const authCallbackSource = readFileSync(
+  new URL("../app/auth/callback/page.tsx", import.meta.url),
+  "utf8"
+);
+const projectJoinRouteSource = readFileSync(
+  new URL("../app/api/projects/join/route.ts", import.meta.url),
+  "utf8"
+);
+const mainPageSource = readFileSync(
+  new URL("../app/page.tsx", import.meta.url),
+  "utf8"
+);
 
 test("server editor allowlist is normalized, deduplicated, and empty means nobody", () => {
   assert.deepEqual(parseShotclEditorGoogleEmails(undefined), []);
@@ -157,6 +173,66 @@ test("a rejected Google session clears only the app cookie and never deletes the
     `${authSessionRouteSource}\n${accountServerSource}`,
     /(?:admin\.)?deleteUser\s*\(/
   );
+});
+
+test("an unexpected account sync failure also clears the stale app cookie", () => {
+  const postCatch = authSessionRouteSource.indexOf('console.error("[shotcl-auth-session:post]"');
+  const deleteHandler = authSessionRouteSource.indexOf("export async function DELETE", postCatch);
+  assert.ok(postCatch >= 0 && deleteHandler > postCatch);
+  assert.match(
+    authSessionRouteSource.slice(postCatch, deleteHandler),
+    /clearShotclAccountSessionCookie\(response\)/u
+  );
+});
+
+test("a successful password Join retires any previous guest capability", () => {
+  const successResponse = projectJoinRouteSource.indexOf("const response = NextResponse.json");
+  const successReturn = projectJoinRouteSource.indexOf("return response;", successResponse);
+  assert.ok(successResponse >= 0 && successReturn > successResponse);
+  assert.match(
+    projectJoinRouteSource.slice(successResponse, successReturn),
+    /clearProjectGuestInviteCookie\(response\)/u
+  );
+});
+
+test("Main blocks account-backed Join and Go while account synchronization is in error", () => {
+  const actionHandler = mainPageSource.slice(
+    mainPageSource.indexOf("function handleActionClick"),
+    mainPageSource.indexOf("function handleGuideReplay")
+  );
+  const joinHandler = mainPageSource.slice(
+    mainPageSource.indexOf("async function handleJoinProject"),
+    mainPageSource.indexOf("function renderNewProjectForm")
+  );
+  const goHandler = mainPageSource.slice(
+    mainPageSource.indexOf("async function resolveGoProject"),
+    mainPageSource.indexOf("function handleActionClick")
+  );
+  assert.match(actionHandler, /accountStatus === "error"/u);
+  assert.match(joinHandler, /accountStatus === "error"/u);
+  assert.match(goHandler, /accountStatus === "error"/u);
+  assert.doesNotMatch(actionHandler, /accountStatus === "unavailable"/u);
+});
+
+test("current-project legacy access wins over a stale guest invite during account linking", () => {
+  const legacyCheck = authSessionRouteSource.indexOf("const legacyGrant =");
+  const legacyBranch = authSessionRouteSource.indexOf("if (legacyGrant)", legacyCheck);
+  const guestInspection = authSessionRouteSource.indexOf("inspectProjectStaffInvite", legacyBranch);
+  assert.ok(legacyCheck >= 0 && legacyBranch > legacyCheck && guestInspection > legacyBranch);
+});
+
+test("OAuth callback avoids an extra refresh and logout marks the first server clear as complete", () => {
+  assert.doesNotMatch(authCallbackSource, /router\.refresh\s*\(/u);
+  const signOutStart = authProviderSource.indexOf("const signOut =");
+  const signOutEnd = authProviderSource.indexOf("const email =", signOutStart);
+  const signOutSource = authProviderSource.slice(signOutStart, signOutEnd);
+  const operationInvalidation = signOutSource.indexOf("operationRef.current += 1");
+  const serverClear = signOutSource.indexOf("enqueueAccountMutation(clearAccountSession)");
+  assert.ok(operationInvalidation >= 0 && serverClear > operationInvalidation);
+  assert.equal((signOutSource.match(/enqueueAccountMutation\(clearAccountSession\)/gu) ?? []).length, 1);
+  assert.match(signOutSource, /lastSynchronizedTokenRef\.current = "";/u);
+  const afterSupabaseSignOut = signOutSource.slice(signOutSource.indexOf("auth.signOut"));
+  assert.doesNotMatch(afterSupabaseSignOut, /applySession\(null, \{ force: true \}\)/u);
 });
 
 test("admin requires an allowlisted Google owner or admin membership", () => {

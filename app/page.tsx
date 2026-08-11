@@ -32,6 +32,7 @@ import {
   readRememberedProjectSelection,
   rememberProjectSelection
 } from "@/lib/projectAccess/recentProject";
+import { setPendingProjectJoinNotice } from "@/lib/projectAccess/joinNotice.client";
 import {
   buildProgressRoundHref,
   buildProjectNavigationHref
@@ -463,6 +464,7 @@ function MainHomeContent() {
       router.prefetch(projectPath);
       router.push(projectPath);
     } catch {
+      setPendingProjectJoinNotice(null);
       releaseProjectNavigation(attemptId);
       showStatus("프로젝트를 열지 못했습니다");
       return;
@@ -476,6 +478,10 @@ function MainHomeContent() {
   }
 
   async function resolveGoProject() {
+    if (accountStatus === "error") {
+      showStatus(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
     if (projectNavigationRef.current) return;
     const attemptId = navigationAttemptRef.current + 1;
     navigationAttemptRef.current = attemptId;
@@ -562,6 +568,10 @@ function MainHomeContent() {
     selectedActionTriggerRef.current = triggerElement;
     if (accountStatus === "loading" || accountStatus === "syncing") {
       showStatus("계정 확인 중입니다.");
+      return;
+    }
+    if (accountStatus === "error") {
+      showStatus(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
       return;
     }
     if (action === "new") {
@@ -694,6 +704,10 @@ function MainHomeContent() {
   }
 
   async function openPreviouslyJoinedProject(project: Project | undefined) {
+    if (accountStatus === "error") {
+      setJoinProjectError(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
     if (!project || projectNavigationRef.current) return;
     const attemptId = navigationAttemptRef.current + 1;
     navigationAttemptRef.current = attemptId;
@@ -776,6 +790,10 @@ function MainHomeContent() {
       setJoinProjectError("계정 확인이 끝난 뒤 다시 참여해주세요.");
       return;
     }
+    if (accountStatus === "error") {
+      setJoinProjectError(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
+      return;
+    }
     const projectName = cleanProjectName(joinProjectName);
     if (!projectName || !/^\d{4}$/.test(joinPassword)) {
       setJoinProjectError("프로젝트 이름과 4자리 비밀번호를 입력하세요");
@@ -795,12 +813,18 @@ function MainHomeContent() {
       const payload = (await response.json()) as {
         projectId?: string;
         role?: "admin" | "progress";
+        reason?: "key_staff_google_required" | null;
         error?: string;
       };
       if (!response.ok || !payload.projectId || !payload.role) {
         throw new Error(payload.error || "프로젝트 이름 또는 비밀번호가 올바르지 않습니다");
       }
       await restoreProjectAfterJoin(payload.projectId);
+      setPendingProjectJoinNotice(
+        payload.reason === "key_staff_google_required"
+          ? { projectId: payload.projectId, reason: payload.reason }
+          : null
+      );
       setJoinPassword("");
       rememberProjectSelection(payload.projectId);
       const attemptId = navigationAttemptRef.current + 1;
@@ -917,10 +941,13 @@ function MainHomeContent() {
         <h2 id="join-project-panel-title" className="font-display text-center text-sm font-black text-field-text">
           프로젝트 참여
         </h2>
+        <p className="mt-2 text-center text-[11px] font-semibold leading-5 text-field-muted">
+          Staff 비밀번호로 바로 열람할 수 있습니다. Key staff 수정 권한은 승인된 Google 로그인 후 활성화됩니다.
+        </p>
         <form
           ref={joinFieldsGuideAnchorRef}
           onSubmit={handleJoinProject}
-          className="mt-4 grid min-w-0 gap-3"
+          className="mt-3 grid min-w-0 gap-3"
         >
           <label className="grid min-w-0 gap-1.5 text-xs font-bold text-field-subtle" htmlFor="join-project-name">
             프로젝트 이름
@@ -1028,31 +1055,38 @@ function MainHomeContent() {
       }}
     >
       <h1 id="home-actions-title" className="sr-only">프로젝트 시작</h1>
-      <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-20 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => router.push("/login?next=/")}
-          className="flex min-h-10 max-w-[min(14rem,55vw)] items-center gap-2 rounded-[var(--radius-control)] border border-field-divider bg-field-panel/95 px-3 text-xs font-bold text-field-subtle shadow-card hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-          aria-label={isGoogle ? `Google 계정 ${email || "로그인됨"}` : "Google 계정 로그인"}
-        >
-          {isGoogle && accountAvatarUrl ? (
-            <img
-              src={accountAvatarUrl}
-              alt=""
-              referrerPolicy="no-referrer"
-              className="h-5 w-5 shrink-0 rounded-[6px] object-cover"
-            />
-          ) : (
-            <UserRound className="h-4 w-4 shrink-0" aria-hidden />
-          )}
-          <span className="truncate">
-            {accountStatus === "loading" || accountStatus === "syncing"
-              ? "계정 확인 중"
-              : isGoogle
-                ? accountLabel
-                : "Google 로그인"}
-          </span>
-        </button>
+      <div className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] z-20 flex items-start gap-2">
+        <div className="grid max-w-[min(14rem,55vw)] justify-items-end gap-1">
+          <button
+            type="button"
+            onClick={() => router.push("/login?next=/")}
+            className="flex min-h-10 max-w-full items-center gap-2 rounded-[var(--radius-control)] border border-field-divider bg-field-panel/95 px-3 text-xs font-bold text-field-subtle shadow-card hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+            aria-label={isGoogle ? `Google 계정 ${email || "로그인됨"}` : "Google 계정 로그인"}
+          >
+            {isGoogle && accountAvatarUrl ? (
+              <img
+                src={accountAvatarUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                className="h-5 w-5 shrink-0 rounded-[6px] object-cover"
+              />
+            ) : (
+              <UserRound className="h-4 w-4 shrink-0" aria-hidden />
+            )}
+            <span className="truncate">
+              {accountStatus === "loading" || accountStatus === "syncing"
+                ? "계정 확인 중"
+                : isGoogle
+                  ? accountLabel
+                  : "Google 로그인"}
+            </span>
+          </button>
+          {!isGoogle && accountStatus !== "loading" && accountStatus !== "syncing" ? (
+            <p className="max-w-full text-right text-[9px] font-semibold leading-3 text-field-muted">
+              참여 프로젝트를 계정에 저장합니다.
+            </p>
+          ) : null}
+        </div>
         <ContextualGuideHelpButton onReplayGuide={handleGuideReplay} />
       </div>
       <div

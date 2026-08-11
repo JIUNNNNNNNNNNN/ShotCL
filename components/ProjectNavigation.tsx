@@ -33,7 +33,7 @@ import {
   ProjectNavigationCardGrid,
   type ProjectNavigationCardItem
 } from "@/components/ProjectNavigationCardGrid";
-import { ProjectKeyStaffUpgrade } from "@/components/ProjectKeyStaffUpgrade";
+import { ProjectAccountUtility } from "@/components/ProjectAccountUtility";
 import { GuestAccountSaveCta } from "@/components/GuestAccountSaveCta";
 import {
   ContextualGuideHelpButton,
@@ -59,6 +59,7 @@ import {
   type ProjectNavigationItemId
 } from "@/lib/projectNavigation";
 import type { DailyPlan } from "@/lib/types";
+import type { ProjectJoinNotice } from "@/lib/projectAccess/joinNotice.client";
 
 export { getProjectPageTitle } from "@/lib/projectNavigation";
 
@@ -66,6 +67,8 @@ type ProjectNavigationProps = {
   onNavigate?: (href: string) => void;
   onGuideReplay?: () => void;
   drawer?: boolean;
+  joinNotice?: ProjectJoinNotice | null;
+  onDismissJoinNotice?: () => void;
 };
 
 type PlanContextMenu = {
@@ -96,7 +99,13 @@ const CONTEXT_MENU_HEIGHT = 92;
 const CONTEXT_MENU_EDGE = 8;
 
 /** 프로젝트의 공통 기능과 회차를 데스크톱 고정 패널·모바일 drawer에서 함께 사용합니다. */
-export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }: ProjectNavigationProps) {
+export function ProjectNavigation({
+  onNavigate,
+  onGuideReplay,
+  drawer = false,
+  joinNotice = null,
+  onDismissJoinNotice
+}: ProjectNavigationProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -137,6 +146,8 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
   const instanceId = drawer ? "drawer" : "panel";
   const projectHomeHref = buildProjectBasePath(projectId);
   const navigationRouteKey = `${pathname}?view=${searchParams.get("view") ?? ""}&dailyPlanId=${searchParams.get("dailyPlanId") ?? ""}`;
+  const search = searchParams.toString();
+  const accountReturnTo = `${pathname}${search ? `?${search}` : ""}`;
   const cardItems = useMemo<ProjectNavigationCardItem[]>(() => [
     {
       id: "projectHome",
@@ -363,7 +374,12 @@ export function ProjectNavigation({ onNavigate, onGuideReplay, drawer = false }:
           ) : null}
         </div>
 
-        <ProjectKeyStaffUpgrade projectId={projectId} />
+        <ProjectAccountUtility
+          projectId={projectId}
+          returnTo={accountReturnTo}
+          joinNotice={joinNotice}
+          onDismissJoinNotice={onDismissJoinNotice}
+        />
       </nav>
 
       {contextMenu && typeof document !== "undefined" ? createPortal(

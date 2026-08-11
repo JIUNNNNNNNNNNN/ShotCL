@@ -11,8 +11,10 @@ import {
 } from "@/lib/projectAccess/accountServer";
 import {
   clearProjectGuestInviteCookie,
+  getLegacyAccessGrant,
   getProjectGuestInviteToken
 } from "@/lib/projectAccess/server";
+import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { inspectProjectStaffInvite } from "@/lib/projectStaffInvites.server";
 import { buildProjectNavigationHref } from "@/lib/projectNavigation";
 
@@ -37,7 +39,10 @@ export async function POST(request: NextRequest) {
     if (!isSameOriginRequest(request, true)) {
       return sessionJson({ error: "로그인 요청을 확인할 수 없습니다." }, 403);
     }
-    const body = await request.json().catch(() => null) as { action?: unknown } | null;
+    const body = await request.json().catch(() => null) as {
+      action?: unknown;
+      projectId?: unknown;
+    } | null;
     if (body?.action !== "sync") {
       return sessionJson({ error: "로그인 동기화 요청이 올바르지 않습니다." }, 400);
     }
@@ -58,14 +63,28 @@ export async function POST(request: NextRequest) {
 
     let destination: string | null = null;
     let joinedProjectId: string | null = null;
-    const guestInviteToken = getProjectGuestInviteToken(request);
-    const guestInvite = guestInviteToken
-      ? await inspectProjectStaffInvite(guestInviteToken)
+    const requestedProjectId = typeof body?.projectId === "string"
+      ? normalizeProjectId(body.projectId)
+      : "";
+    const legacyGrant = isValidDatabaseProjectId(requestedProjectId)
+      ? await getLegacyAccessGrant(request, requestedProjectId)
       : null;
-    if (guestInvite) {
-      await linkShotclAccountProjectMembership(created.account.userId, guestInvite.projectId);
-      joinedProjectId = guestInvite.projectId;
-      destination = buildProjectNavigationHref(guestInvite.projectId, "progress");
+    const guestInviteToken = getProjectGuestInviteToken(request);
+    if (legacyGrant) {
+      // 프로젝트 안에서 OAuth를 시작한 경우에는 현재 URL에서 온 한 프로젝트의
+      // passcode grant를 먼저 연결합니다. 과거 guest cookie가 남아 있어도 현재
+      // 사용자의 명시적 흐름을 가로채지 않습니다.
+      await linkShotclAccountProjectMembership(created.account.userId, requestedProjectId);
+      joinedProjectId = requestedProjectId;
+    } else {
+      const guestInvite = guestInviteToken
+        ? await inspectProjectStaffInvite(guestInviteToken)
+        : null;
+      if (guestInvite) {
+        await linkShotclAccountProjectMembership(created.account.userId, guestInvite.projectId);
+        joinedProjectId = guestInvite.projectId;
+        destination = buildProjectNavigationHref(guestInvite.projectId, "progress");
+      }
     }
 
     const response = sessionJson({
@@ -80,7 +99,11 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error("[shotcl-auth-session:post]", safeErrorMessage(error));
-    return sessionJson({ error: "로그인 세션을 만들지 못했습니다." }, 500);
+    const response = sessionJson({ error: "로그인 세션을 만들지 못했습니다." }, 500);
+    // 계정 전환 중 새 session 회전·membership 연결이 실패하면 이전 사용자의
+    // app cookie가 권한 원본으로 남지 않도록 브라우저 capability를 fail-closed 합니다.
+    clearShotclAccountSessionCookie(response);
+    return response;
   }
 }
 

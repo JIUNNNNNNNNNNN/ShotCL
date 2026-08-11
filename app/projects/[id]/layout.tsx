@@ -21,6 +21,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
   let projectName: string | null = null;
   let accessMode: "member" | "guest" | "legacy" | null = null;
   let editorEligible = false;
+  let accountUserId: string | null = null;
   try {
     const access = await getProjectRequestAccessFromTokens(projectId, {
       accountSessionToken,
@@ -31,6 +32,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
     projectName = access?.grant.projectName ?? null;
     accessMode = access?.mode ?? null;
     editorEligible = access?.editorEligible ?? false;
+    accountUserId = access?.accountUserId ?? null;
   } catch (error) {
     if (!(error instanceof ProjectAccessUnavailableError)) throw error;
   }
@@ -41,6 +43,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
       role={role}
       accessMode={accessMode}
       editorEligible={editorEligible}
+      accountUserId={accountUserId}
       accessPreferenceScope={getAccessPreferenceScope(
         accessMode === "member"
           ? accountSessionToken

@@ -27,6 +27,7 @@ export type ContextualGuideId =
   | "home.calendar-create"
   | "home.calendar-range"
   | "home.invite-staff"
+  | "home.google-account-connect"
   | "basic-info.intro"
   | "daily-plan.intro"
   | "daily-plan.round-select"
@@ -58,6 +59,7 @@ export type ContextualGuideAnchorKey =
   | "main.join-fields"
   | "home.calendar-grid"
   | "home.invite-action"
+  | "shell.google-account"
   | "basic-info.form"
   | "shell.navigation.daily-plans"
   | "shell.navigation-toggle"
@@ -315,6 +317,23 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     preferredPlacement: "left",
     permission: "admin",
     replayLabel: "스탭 초대"
+  },
+  "home.google-account-connect": {
+    id: "home.google-account-connect",
+    version: 1,
+    page: "home",
+    type: "anchor",
+    trigger: "feature",
+    priority: 110,
+    title: "Google 계정 연결",
+    description: "Google 로그인으로 참여한 프로젝트를 계정에 저장하고 권한을 확인할 수 있습니다.",
+    compactDescription: "프로젝트 메뉴를 열어 Google 계정을 연결할 수 있습니다.",
+    persistentAnchor: "shell.google-account",
+    compactAnchor: "shell.navigation-toggle",
+    preferredPlacement: "right",
+    permission: "any",
+    replayLabel: "Google 계정 연결",
+    replayHidden: true
   },
   "basic-info.intro": {
     id: "basic-info.intro",
@@ -601,7 +620,13 @@ const PAGE_GUIDES: Record<ContextualGuidePage, ContextualGuideId[]> = {
     ...MAIN_NEW_FEATURE_GUIDE_IDS,
     "main.join-fields"
   ],
-  home: ["home.intro", "home.calendar-create", "home.calendar-range", "home.invite-staff"],
+  home: [
+    "home.intro",
+    "home.calendar-create",
+    "home.calendar-range",
+    "home.invite-staff",
+    "home.google-account-connect"
+  ],
   basicInfo: ["basic-info.intro"],
   dailyPlan: ["daily-plan.intro", "daily-plan.round-select", "daily-plan.pdf"],
   progress: ["progress.intro", "progress.status"],

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cleanProjectName, isValidPasscode, normalizeProjectName, type SharedProjectRole } from "@/lib/projectAccess/core";
+import {
+  cleanProjectName,
+  getJoinAccessReason,
+  isValidPasscode,
+  normalizeProjectName,
+  type SharedProjectRole
+} from "@/lib/projectAccess/core";
 import {
   burnPasscodeVerification,
+  clearProjectGuestInviteCookie,
   clearJoinFailures,
   ensureSessionToken,
   getJoinAttemptKey,
@@ -88,13 +95,22 @@ export async function POST(request: NextRequest) {
       role = account.isEditor && membershipRole === "admin" ? "admin" : "progress";
     }
 
-    const response = NextResponse.json({ success: true, projectId: project.id, projectName: project.name, role });
+    const response = NextResponse.json({
+      success: true,
+      projectId: project.id,
+      projectName: project.name,
+      role,
+      reason: getJoinAccessReason(passwordRole, Boolean(account))
+    });
     if (!account) {
       // 기존 이름/비밀번호 참여는 호환을 위해 남기되, 계정 없는 cookie grant는
       // 어떤 비밀번호를 썼더라도 읽기 전용 Staff로만 발급합니다.
       const token = ensureSessionToken(request, response);
       await saveAccessGrant(token, project.id, "progress");
     }
+    // 비밀번호 Join은 사용자가 방금 명시적으로 선택한 Staff/member 흐름입니다.
+    // 과거 또는 같은 프로젝트의 guest capability가 이후 access 판정을 가로채지 않게 합니다.
+    clearProjectGuestInviteCookie(response);
     return response;
   } catch (error) {
     const unavailable = error instanceof ProjectAccessUnavailableError || error instanceof ShotclAccountUnavailableError;

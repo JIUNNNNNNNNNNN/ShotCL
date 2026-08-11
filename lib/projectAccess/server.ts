@@ -228,6 +228,14 @@ export async function getAccessGrant(request: NextRequest, projectId: string): P
   return (await getProjectRequestAccess(request, projectId))?.grant ?? null;
 }
 
+/**
+ * OAuth 직후 account access가 legacy grant를 가리는 경우에도, 요청한 한 프로젝트의
+ * 기존 passcode grant만 명시적으로 재검증해 account membership 연결에 사용합니다.
+ */
+export async function getLegacyAccessGrant(request: NextRequest, projectId: string) {
+  return getLegacyAccessGrantByToken(getSessionToken(request), projectId);
+}
+
 export async function getProjectRequestAccess(request: NextRequest, projectId: string) {
   const access = await getProjectRequestAccessFromTokens(projectId, {
     accountSessionToken: request.cookies.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null,

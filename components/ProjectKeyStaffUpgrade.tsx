@@ -12,7 +12,13 @@ import {
 const SUCCESS_MESSAGE_MS = 1800;
 
 /** 일반 Staff에게만 보이는 왼쪽 패널 하단의 compact 권한 전환 utility입니다. */
-export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
+export function ProjectKeyStaffUpgrade({
+  projectId,
+  embedded = false
+}: {
+  projectId: string;
+  embedded?: boolean;
+}) {
   const { role, accessMode, editorEligible, applyVerifiedRole } = useProjectAccess();
   const canUpgrade = accessMode === "member" && editorEligible && isStaffProjectRole(role);
   const [expanded, setExpanded] = useState(false);
@@ -124,7 +130,9 @@ export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
 
   if (showSuccess) {
     return (
-      <div className="flex-none border-t border-field-divider px-2 py-3 text-center">
+      <div className={embedded
+        ? "py-2 text-center"
+        : "flex-none border-t border-field-divider px-2 py-3 text-center"}>
         <p role="status" className="text-[11px] font-semibold leading-4 text-field-primary">
           Key staff 권한으로 전환되었습니다.
         </p>
@@ -135,7 +143,9 @@ export function ProjectKeyStaffUpgrade({ projectId }: { projectId: string }) {
   if (!canUpgrade) return null;
 
   return (
-    <div className="flex-none border-t border-field-divider px-2 py-2.5">
+    <div className={embedded
+      ? "pt-1"
+      : "flex-none border-t border-field-divider px-2 py-2.5"}>
       {!expanded ? (
         <button
           type="button"

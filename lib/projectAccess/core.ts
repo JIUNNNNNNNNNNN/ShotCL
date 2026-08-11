@@ -20,6 +20,8 @@ export type KeyStaffUpgradeDecision =
   | "invalid-password"
   | "upgrade";
 
+export type JoinAccessReason = "key_staff_google_required" | null;
+
 /** 이름 비교와 DB unique key에 동일하게 쓰는 정규화 규칙입니다. */
 export function normalizeProjectName(value: string) {
   return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
@@ -55,6 +57,19 @@ export function getKeyStaffUpgradeDecision(
   if (isKeyStaffProjectRole(role)) return "already-key-staff";
   if (!isStaffProjectRole(role)) return "forbidden";
   return passwordMatches ? "upgrade" : "invalid-password";
+}
+
+/**
+ * Key staff 비밀번호가 맞더라도 Google 계정이 없으면 관리 권한을 만들지 않고,
+ * Staff fallback의 이유만 응답에 노출합니다. 비밀번호나 검증 intent는 보존하지 않습니다.
+ */
+export function getJoinAccessReason(
+  passwordRole: SharedProjectRole,
+  accountAuthenticated: boolean
+): JoinAccessReason {
+  return passwordRole === "admin" && !accountAuthenticated
+    ? "key_staff_google_required"
+    : null;
 }
 
 /** 한 프로젝트의 로컬 승격 결과가 다른 프로젝트 role에 섞이지 않게 합니다. */

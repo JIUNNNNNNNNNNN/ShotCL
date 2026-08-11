@@ -13,6 +13,8 @@ import type { Session, User } from "@supabase/supabase-js";
 import {
   buildGoogleOAuthCallbackUrl,
   clearAccountSession,
+  getAccountSessionSyncKey,
+  getProjectIdFromInternalPath,
   getSafeInternalPath,
   syncAccountSession,
   type AccountSessionSyncResult
@@ -38,7 +40,13 @@ type AuthSessionContextValue = {
   accountGeneration: number;
   startGoogleOAuth: (nextPath?: string) => Promise<void>;
   signOut: () => Promise<void>;
-  refreshAccount: () => Promise<AccountSessionSyncResult | null>;
+  refreshAccount: (nextPath?: string) => Promise<AccountSessionSyncResult | null>;
+};
+
+type ApplySessionOptions = {
+  force?: boolean;
+  throwOnError?: boolean;
+  projectId?: string | null;
 };
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
@@ -54,10 +62,11 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
   const operationRef = useRef(0);
   const synchronizedUserIdRef = useRef("");
   const lastSynchronizedTokenRef = useRef<string | null>(null);
+  const lastSynchronizedProjectIdRef = useRef<string | null>(null);
   const lastSyncResultRef = useRef<AccountSessionSyncResult | null>(null);
   const accountMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const inFlightSyncRef = useRef<{
-    token: string;
+    key: string;
     promise: Promise<AccountSessionSyncResult>;
   } | null>(null);
 
@@ -76,9 +85,14 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
 
   const applySession = useCallback(async (
     session: Session | null,
-    force = false,
-    throwOnError = false
+    options: ApplySessionOptions = {}
   ) => {
+    const {
+      force = false,
+      throwOnError = false,
+      projectId: requestedProjectId = null
+    } = options;
+    const projectId = requestedProjectId?.trim().toLowerCase() || null;
     const operationId = operationRef.current + 1;
     operationRef.current = operationId;
     const nextUser = session?.user ?? null;
@@ -88,6 +102,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       const alreadyCleared = lastSynchronizedTokenRef.current === "";
       if (!force && alreadyCleared) {
         if (mountedRef.current) {
+          setIsEditorEligible(false);
           setStatus("anonymous");
           setErrorMessage("");
         }
@@ -103,6 +118,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       }
       if (!mountedRef.current || operationRef.current !== operationId) return null;
       lastSynchronizedTokenRef.current = "";
+      lastSynchronizedProjectIdRef.current = null;
       lastSyncResultRef.current = null;
       synchronizedUserIdRef.current = "";
       setIsEditorEligible(false);
@@ -112,7 +128,12 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     }
 
     const token = session.access_token;
-    if (!force && lastSynchronizedTokenRef.current === token && lastSyncResultRef.current) {
+    if (
+      !force
+      && lastSynchronizedTokenRef.current === token
+      && lastSyncResultRef.current
+      && (!projectId || lastSynchronizedProjectIdRef.current === projectId)
+    ) {
       if (mountedRef.current) {
         setIsEditorEligible(lastSyncResultRef.current.editorEligible);
         setStatus("authenticated");
@@ -127,17 +148,19 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       if (synchronizedUserIdRef.current !== session.user.id) setIsEditorEligible(false);
     }
 
+    const syncKey = getAccountSessionSyncKey(token, projectId);
     try {
       let syncPromise: Promise<AccountSessionSyncResult>;
-      if (inFlightSyncRef.current?.token === token) {
+      if (inFlightSyncRef.current?.key === syncKey) {
         syncPromise = inFlightSyncRef.current.promise;
       } else {
-        syncPromise = enqueueAccountMutation(() => syncAccountSession(token));
-        inFlightSyncRef.current = { token, promise: syncPromise };
+        syncPromise = enqueueAccountMutation(() => syncAccountSession(token, projectId));
+        inFlightSyncRef.current = { key: syncKey, promise: syncPromise };
       }
       const result = await syncPromise;
       if (!mountedRef.current || operationRef.current !== operationId) return result;
       lastSynchronizedTokenRef.current = token;
+      lastSynchronizedProjectIdRef.current = projectId;
       lastSyncResultRef.current = result;
       synchronizedUserIdRef.current = session.user.id;
       setIsEditorEligible(result.editorEligible);
@@ -148,6 +171,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     } catch (error) {
       if (mountedRef.current && operationRef.current === operationId) {
         lastSynchronizedTokenRef.current = null;
+        lastSynchronizedProjectIdRef.current = null;
         lastSyncResultRef.current = null;
         synchronizedUserIdRef.current = "";
         setIsEditorEligible(false);
@@ -157,7 +181,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       if (throwOnError) throw error;
       return null;
     } finally {
-      if (inFlightSyncRef.current?.token === token) inFlightSyncRef.current = null;
+      if (inFlightSyncRef.current?.key === syncKey) inFlightSyncRef.current = null;
     }
   }, [enqueueAccountMutation]);
 
@@ -185,14 +209,20 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         setErrorMessage("로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
         return;
       }
-      void applySession(data.session);
+      void applySession(data.session, {
+        projectId: getCurrentCallbackProjectId()
+      });
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       authEventVersion += 1;
       // auth callback 안에서 다시 Supabase API를 호출하지 않도록 다음 task에서 동기화합니다.
       window.setTimeout(() => {
-        if (mountedRef.current) void applySession(session);
+        if (mountedRef.current) {
+          void applySession(session, {
+            projectId: getCurrentCallbackProjectId()
+          });
+        }
       }, 0);
     });
 
@@ -203,19 +233,24 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     };
   }, [applySession]);
 
-  const refreshAccount = useCallback(async () => {
+  const refreshAccount = useCallback(async (nextPath = "/") => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) return null;
     const { data, error } = await supabase.auth.getSession();
     if (error) throw error;
-    // callback 완료나 사용자의 명시적 갱신에서는 같은 access token이어도
-    // server HttpOnly cookie와 editor allowlist 판정을 다시 확인합니다.
-    return applySession(data.session, true, true);
+    // callback의 auth event와 같은 token/project key를 공유합니다. 이미 진행 중이거나
+    // 완료된 sync를 재사용해 /api/auth/session POST가 중복되지 않게 합니다.
+    return applySession(data.session, {
+      throwOnError: true,
+      projectId: getProjectIdFromInternalPath(nextPath)
+    });
   }, [applySession]);
 
   const startGoogleOAuth = useCallback(async (nextPath = "/") => {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) throw new Error("Google 로그인을 사용할 수 없습니다.");
+    const previousEditorEligible = isEditorEligible;
+    setIsEditorEligible(false);
     setStatus("syncing");
     setErrorMessage("");
     const redirectTo = buildGoogleOAuthCallbackUrl(
@@ -227,18 +262,23 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       options: { redirectTo }
     });
     if (error) {
+      setIsEditorEligible(previousEditorEligible);
       setStatus(user ? "authenticated" : "anonymous");
       setErrorMessage(GOOGLE_LOGIN_ERROR_MESSAGE);
       throw new Error(GOOGLE_LOGIN_ERROR_MESSAGE);
     }
-  }, [user]);
+  }, [isEditorEligible, user]);
 
   const signOut = useCallback(async () => {
     const supabase = getSupabaseBrowserClient();
+    // 이미 진행 중인 token sync가 DELETE 대기 중에 이전 계정 상태와 cookie를
+    // 다시 확정하지 못하게, 로그아웃 동작이 먼저 최신 operation을 소유합니다.
+    operationRef.current += 1;
+    setIsEditorEligible(false);
     setStatus("syncing");
     setErrorMessage("");
     if (!supabase) {
-      await applySession(null, true);
+      await applySession(null, { force: true });
       return;
     }
 
@@ -254,17 +294,24 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         ? error
         : new Error("서버 계정 세션을 종료하지 못했습니다.");
     }
+    // 위 DELETE 응답은 DB revoke 실패(500)여도 Set-Cookie를 만료합니다. 이후
+    // SIGNED_OUT listener와 명시적 정리는 이 marker를 보고 같은 DELETE를 반복하지 않습니다.
+    lastSynchronizedTokenRef.current = "";
+    lastSynchronizedProjectIdRef.current = null;
+    lastSyncResultRef.current = null;
+    synchronizedUserIdRef.current = "";
+    setAccountGeneration((current) => current + 1);
 
     const { error: authError } = await supabase.auth.signOut();
     if (authError) {
       const { data } = await supabase.auth.getSession();
-      if (data.session) await applySession(data.session, true);
-      else await applySession(null, true);
+      if (data.session) await applySession(data.session, { force: true });
+      else await applySession(null);
       const message = "로그아웃을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
       setErrorMessage(message);
       throw new Error(message);
     }
-    await applySession(null, true);
+    await applySession(null);
     if (serverLogoutError) {
       setErrorMessage("로그아웃은 완료됐지만 이전 서버 세션 폐기를 확인하지 못했습니다.");
       throw serverLogoutError;
@@ -304,6 +351,12 @@ export function useAuthSession() {
   const context = useContext(AuthSessionContext);
   if (!context) throw new Error("useAuthSession must be used inside AuthSessionProvider");
   return context;
+}
+
+function getCurrentCallbackProjectId() {
+  if (typeof window === "undefined" || window.location.pathname !== "/auth/callback") return null;
+  const nextPath = new URLSearchParams(window.location.search).get("next");
+  return getProjectIdFromInternalPath(nextPath);
 }
 
 function hasGoogleIdentity(user: User | null) {
