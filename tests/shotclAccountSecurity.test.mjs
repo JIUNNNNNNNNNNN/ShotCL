@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  hasLinkedGoogleIdentity,
   isShotclEditorGoogleEmail,
   normalizeTrustedGoogleIdentity,
   parseShotclEditorGoogleEmails,
   resolveEffectiveProjectRole
 } from "../lib/projectAccess/accountCore.ts";
 import { isGuestProjectApiRequestAllowed } from "../lib/projectAccess/guestApiAccess.ts";
+
+const authSessionRouteSource = readFileSync(
+  new URL("../app/api/auth/session/route.ts", import.meta.url),
+  "utf8"
+);
+const accountServerSource = readFileSync(
+  new URL("../lib/projectAccess/accountServer.ts", import.meta.url),
+  "utf8"
+);
 
 test("server editor allowlist is normalized, deduplicated, and empty means nobody", () => {
   assert.deepEqual(parseShotclEditorGoogleEmails(undefined), []);
@@ -20,20 +31,132 @@ test("server editor allowlist is normalized, deduplicated, and empty means nobod
   assert.equal(isShotclEditorGoogleEmail("editor@example.com", []), false);
 });
 
-test("only a confirmed primary Google identity is trusted", () => {
+test("a confirmed linked Google identity is trusted even when email is the primary provider", () => {
   const input = {
     id: "user-1",
     email: " Editor@Example.com ",
-    emailConfirmedAt: "2026-08-11T00:00:00.000Z"
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z",
+    provider: "email",
+    providers: ["email", "google"],
+    identities: [
+      { provider: "email" },
+      {
+        provider: "google",
+        identity_data: { email: "Editor@example.com", email_verified: true }
+      }
+    ]
   };
-  assert.deepEqual(normalizeTrustedGoogleIdentity({ ...input, provider: "google" }), {
+  assert.equal(hasLinkedGoogleIdentity(input), true);
+  assert.deepEqual(normalizeTrustedGoogleIdentity(input), {
     id: "user-1",
     email: "editor@example.com",
     provider: "google",
     emailConfirmedAt: "2026-08-11T00:00:00.000Z"
   });
-  assert.equal(normalizeTrustedGoogleIdentity({ ...input, provider: "email" }), null);
-  assert.equal(normalizeTrustedGoogleIdentity({ ...input, provider: "google", emailConfirmedAt: "" }), null);
+});
+
+test("a confirmed Google-only user is trusted", () => {
+  const confirmed = {
+    id: "user-2",
+    email: "google@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z"
+  };
+  assert.ok(normalizeTrustedGoogleIdentity({
+    ...confirmed,
+    provider: "google",
+    providers: ["google"],
+    identities: [{
+      provider: "google",
+      identity_data: { email: "google@example.com", email_verified: true }
+    }]
+  }));
+});
+
+test("Google provider metadata remains a safe fallback when identities are omitted", () => {
+  const confirmed = {
+    id: "user-2-fallback",
+    email: "fallback@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z"
+  };
+  assert.ok(normalizeTrustedGoogleIdentity({
+    ...confirmed,
+    provider: "email",
+    providers: ["email", " GOOGLE "]
+  }));
+});
+
+test("email-only or unconfirmed users are not accepted as Google identities", () => {
+  const confirmedEmailOnly = {
+    id: "user-3",
+    email: "email@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z",
+    provider: "email",
+    providers: ["email"],
+    identities: [{ provider: "email" }]
+  };
+  assert.equal(hasLinkedGoogleIdentity(confirmedEmailOnly), false);
+  assert.equal(normalizeTrustedGoogleIdentity(confirmedEmailOnly), null);
+  assert.equal(normalizeTrustedGoogleIdentity({
+    ...confirmedEmailOnly,
+    providers: ["email", "google"],
+    emailConfirmedAt: ""
+  }), null);
+});
+
+test("a mismatched or explicitly unverified Google identity is rejected", () => {
+  const confirmed = {
+    id: "user-5",
+    email: "owner@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z",
+    provider: "email",
+    providers: ["email", "google"]
+  };
+  assert.equal(normalizeTrustedGoogleIdentity({
+    ...confirmed,
+    identities: [{
+      provider: "google",
+      identity_data: { email: "other@example.com", email_verified: true }
+    }]
+  }), null);
+  assert.equal(normalizeTrustedGoogleIdentity({
+    ...confirmed,
+    identities: [{
+      provider: "google",
+      identity_data: { email: "owner@example.com", email_verified: false }
+    }]
+  }), null);
+  assert.equal(normalizeTrustedGoogleIdentity({
+    ...confirmed,
+    identities: [{ provider: "email" }]
+  }), null);
+});
+
+test("Google login eligibility remains separate from the editor allowlist", () => {
+  const linkedGoogle = normalizeTrustedGoogleIdentity({
+    id: "user-4",
+    email: "reader@example.com",
+    emailConfirmedAt: "2026-08-11T00:00:00.000Z",
+    provider: "email",
+    identities: [{ provider: "google" }]
+  });
+  assert.ok(linkedGoogle);
+  assert.equal(isShotclEditorGoogleEmail(linkedGoogle.email, ["editor@example.com"]), false);
+  assert.equal(isShotclEditorGoogleEmail(linkedGoogle.email, ["reader@example.com"]), true);
+});
+
+test("a rejected Google session clears only the app cookie and never deletes the Auth user", () => {
+  const rejectionStart = authSessionRouteSource.indexOf("if (!created)");
+  const successStart = authSessionRouteSource.indexOf("let destination", rejectionStart);
+  assert.notEqual(rejectionStart, -1);
+  assert.notEqual(successStart, -1);
+  assert.match(
+    authSessionRouteSource.slice(rejectionStart, successStart),
+    /clearShotclAccountSessionCookie\(response\)/
+  );
+  assert.doesNotMatch(
+    `${authSessionRouteSource}\n${accountServerSource}`,
+    /(?:admin\.)?deleteUser\s*\(/
+  );
 });
 
 test("admin requires an allowlisted Google owner or admin membership", () => {

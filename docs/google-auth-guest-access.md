@@ -30,7 +30,7 @@
 - Main의 compact account control에서 Supabase `signInWithOAuth({ provider: "google" })` redirect flow를 시작합니다.
 - browser client는 PKCE를 사용하고 `/auth/callback`에서 code를 한 번만 교환합니다. `next`는 앱 내부 절대 경로만 허용합니다.
 - `AuthSessionProvider`가 초기 session을 한 번 확인하고 `onAuthStateChange` 한 개를 구독합니다. 같은 access token의 중복 sync를 합칩니다.
-- server는 Supabase `auth.getUser(accessToken)`으로 uid, confirmed email, primary Google provider를 검증한 뒤 12시간짜리 opaque `shotcl_account_session` HttpOnly cookie로 교환합니다. Google access/refresh token은 앱 DB에 저장하지 않습니다.
+- server는 Supabase `auth.getUser(accessToken)`으로 uid와 confirmed email을 검증하고, `user.identities`의 Google 연결을 우선 확인합니다. identities가 생략된 응답에서는 `app_metadata.providers`와 primary provider를 보조로 확인한 뒤 12시간짜리 opaque `shotcl_account_session` HttpOnly cookie로 교환합니다. Google access/refresh token은 앱 DB에 저장하지 않습니다.
 - account cookie는 로그인·token refresh sync마다 새 opaque token으로 회전하며, 이전 hash 삭제와 새 hash 생성을 DB transaction 하나로 처리합니다.
 - Main project list는 로그인 확인 후 lazy load하며 `project_members`만 조회합니다. account switch 시 화면 state와 preference namespace가 즉시 교체됩니다.
 - Join 성공 시 현재 `auth.users.id`에 crew 또는, allowlisted 계정이 정확한 Key staff 비밀번호를 사용한 경우에만 admin membership을 upsert합니다. 기존 admin은 downgrade하지 않습니다.

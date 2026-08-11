@@ -17,6 +17,7 @@ import {
   syncAccountSession,
   type AccountSessionSyncResult
 } from "@/lib/auth/client";
+import { normalizeTrustedGoogleIdentity } from "@/lib/projectAccess/accountCore";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type AuthSessionStatus =
@@ -306,7 +307,13 @@ export function useAuthSession() {
 }
 
 function hasGoogleIdentity(user: User | null) {
-  if (!user?.id || !user.email?.trim() || !user.email_confirmed_at) return false;
-  return typeof user.app_metadata?.provider === "string"
-    && user.app_metadata.provider.trim().toLowerCase() === "google";
+  if (!user) return false;
+  return normalizeTrustedGoogleIdentity({
+    id: user.id,
+    email: user.email,
+    emailConfirmedAt: user.email_confirmed_at,
+    provider: user.app_metadata?.provider,
+    providers: user.app_metadata?.providers,
+    identities: user.identities
+  }) !== null;
 }

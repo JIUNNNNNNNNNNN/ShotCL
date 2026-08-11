@@ -49,7 +49,11 @@ export async function POST(request: NextRequest) {
       request.cookies.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null
     );
     if (!created) {
-      return sessionJson({ error: "확인된 Google 계정으로 로그인해주세요." }, 403);
+      const response = sessionJson({ error: "Google 계정으로 로그인해 주세요." }, 403);
+      // 계정 전환 중 email-only/invalid session이 거절되더라도 이전 사용자의
+      // opaque app session cookie가 브라우저에 남아 권한 원본이 되지 않게 합니다.
+      clearShotclAccountSessionCookie(response);
+      return response;
     }
 
     let destination: string | null = null;

@@ -3,6 +3,8 @@ export type ShotclGoogleIdentityInput = {
   email?: unknown;
   emailConfirmedAt?: unknown;
   provider?: unknown;
+  providers?: unknown;
+  identities?: unknown;
 };
 
 export type EffectiveProjectRoleInput = {
@@ -37,20 +39,56 @@ export function isShotclEditorGoogleEmail(
   return Boolean(normalizedEmail && allowlistedEmails.includes(normalizedEmail));
 }
 
-/** Google이 primary provider이고 이메일 확인이 끝난 Supabase 사용자만 신뢰합니다. */
+/**
+ * Supabase 사용자의 연결된 identity를 우선 확인하고, identities가 생략되는
+ * 응답 경로를 위해 app_metadata.providers와 primary provider를 보조로 봅니다.
+ */
+export function hasLinkedGoogleIdentity(
+  value: Pick<ShotclGoogleIdentityInput, "email" | "provider" | "providers" | "identities">
+) {
+  const canonicalEmail = normalizeShotclAccountEmail(value.email);
+  const linkedGoogleIdentities = Array.isArray(value.identities)
+    ? value.identities.filter((identity) => {
+      if (!identity || typeof identity !== "object" || Array.isArray(identity)) return false;
+      return normalizeAuthProvider((identity as { provider?: unknown }).provider) === "google";
+    })
+    : [];
+
+  if (linkedGoogleIdentities.length > 0) {
+    return linkedGoogleIdentities.some((identity) => {
+      const identityData = (identity as { identity_data?: unknown }).identity_data;
+      if (!identityData || typeof identityData !== "object" || Array.isArray(identityData)) {
+        return true;
+      }
+      const data = identityData as { email?: unknown; email_verified?: unknown };
+      const identityEmail = normalizeShotclAccountEmail(data.email);
+      if (data.email_verified === false) return false;
+      return !identityEmail || identityEmail === canonicalEmail;
+    });
+  }
+  if (Array.isArray(value.identities) && value.identities.length > 0) return false;
+  if (Array.isArray(value.providers)
+    && value.providers.some((provider) => normalizeAuthProvider(provider) === "google")) {
+    return true;
+  }
+  return normalizeAuthProvider(value.provider) === "google";
+}
+
+/** Google identity가 연결되고 이메일 확인이 끝난 Supabase 사용자만 신뢰합니다. */
 export function normalizeTrustedGoogleIdentity(
   value: ShotclGoogleIdentityInput
 ) {
   const id = typeof value.id === "string" ? value.id.trim() : "";
   const email = normalizeShotclAccountEmail(value.email);
-  const provider = typeof value.provider === "string"
-    ? value.provider.trim().toLowerCase()
-    : "";
   const emailConfirmedAt = typeof value.emailConfirmedAt === "string"
     ? value.emailConfirmedAt.trim()
     : "";
-  if (!id || !email || provider !== "google" || !emailConfirmedAt) return null;
+  if (!id || !email || !emailConfirmedAt || !hasLinkedGoogleIdentity(value)) return null;
   return { id, email, provider: "google" as const, emailConfirmedAt };
+}
+
+function normalizeAuthProvider(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
 /**

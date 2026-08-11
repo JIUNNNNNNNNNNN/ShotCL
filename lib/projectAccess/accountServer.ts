@@ -72,7 +72,9 @@ export async function resolveAuthenticatedGoogleAccount(accessToken: string | nu
     id: data.user.id,
     email: data.user.email,
     emailConfirmedAt: data.user.email_confirmed_at,
-    provider: data.user.app_metadata?.provider
+    provider: data.user.app_metadata?.provider,
+    providers: data.user.app_metadata?.providers,
+    identities: data.user.identities
   });
   const userId = String(data.user.id ?? "").trim();
   if (!identity) {
