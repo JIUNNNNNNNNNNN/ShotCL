@@ -104,20 +104,27 @@ test("preview fit rejects invalid geometry instead of producing clipping measure
   }
 });
 
-test("preview pagination reset runs before paint and cannot overwrite its first measurement", async () => {
+test("preview presentation resets by exact data identity before it can publish a profile", async () => {
   const editorSource = await readFile(editorPath, "utf8");
+  const scaledPreviewSource = editorSource.slice(
+    editorSource.indexOf("const ScaledDailyPlanPreview"),
+    editorSource.indexOf("function PrintDailyPlanView")
+  );
   const resetIndex = editorSource.indexOf(
-    "useLayoutEffect(() => {\n    setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);"
+    "useLayoutEffect(() => {\n    if (hasCurrentPresentation) return;"
   );
   const measurementIndex = editorSource.indexOf(
-    "const container = containerRef.current;",
+    "if (!hasCurrentPresentation) return;\n    const container = containerRef.current;",
     resetIndex
   );
   assert.ok(resetIndex >= 0);
   assert.ok(measurementIndex > resetIndex);
-  assert.doesNotMatch(
-    editorSource,
-    /useEffect\(\(\) => \{\s*setDensity\(DAILY_PLAN_DOCUMENT_DENSITY_STEPS\[0\]\);\s*setPageLayout\("single"\);/u
+  assert.match(scaledPreviewSource, /presentation\.data === data/u);
+  assert.match(scaledPreviewSource, /presentation\.snapshotId === snapshotId/u);
+  assert.match(scaledPreviewSource, /onResolvedProfile\(\{\s*data,\s*snapshotId,\s*orientation,\s*density,\s*pageLayout,/u);
+  assert.ok(
+    scaledPreviewSource.indexOf("if (!hasCurrentPresentation) return;")
+      < scaledPreviewSource.indexOf("onResolvedProfile({")
   );
 });
 

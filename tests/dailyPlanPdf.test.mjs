@@ -48,7 +48,7 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
       html2canvasLoads += 1;
       return async (page, options) => {
         events.push(["capture", page.id, options]);
-        return { width: 2970, height: 2100 };
+        return createCanonicalCanvas(options);
       };
     },
     async loadJsPdf() {
@@ -104,12 +104,19 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
 
   const captures = events.filter(([event]) => event === "capture");
   assert.deepEqual(captures.map(([, id]) => id), ["first", "second"]);
+  const landscapeGeometry = expectedCaptureGeometry("landscape");
   for (const [, , options] of captures) {
     assert.equal(options.backgroundColor, "#ffffff");
     assert.equal(options.scale, 2);
     assert.equal(options.useCORS, true);
     assert.equal(options.allowTaint, false);
     assert.equal(options.logging, false);
+    assert.equal(options.width, landscapeGeometry.cssWidth);
+    assert.equal(options.height, landscapeGeometry.cssHeight);
+    assert.equal(options.windowWidth, landscapeGeometry.cssWidth);
+    assert.equal(options.windowHeight, landscapeGeometry.cssHeight);
+    assert.equal(options.scrollX, 0);
+    assert.equal(options.scrollY, 0);
   }
   const stagingClone = { style: {}, parentElement: null };
   const pageClone = {
@@ -127,6 +134,14 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
   assert.equal(stagingClone.style.top, "0");
   assert.equal(stagingClone.style.position, "absolute");
   assert.equal(stagingClone.style.zIndex, "0");
+  assert.equal(pageClone.style.boxSizing, "border-box");
+  assert.equal(pageClone.style.width, `${landscapeGeometry.cssWidth}px`);
+  assert.equal(pageClone.style.minWidth, `${landscapeGeometry.cssWidth}px`);
+  assert.equal(pageClone.style.maxWidth, `${landscapeGeometry.cssWidth}px`);
+  assert.equal(pageClone.style.height, `${landscapeGeometry.cssHeight}px`);
+  assert.equal(pageClone.style.minHeight, `${landscapeGeometry.cssHeight}px`);
+  assert.equal(pageClone.style.maxHeight, `${landscapeGeometry.cssHeight}px`);
+  assert.equal(pageClone.style.margin, "0");
   assert.equal(pageClone.style.transform, "none");
   assert.equal(pageClone.style.opacity, "1");
   assert.deepEqual(events.slice(-3).map(([event]) => event), ["create-url", "download", "revoke"]);
@@ -144,13 +159,18 @@ test("exportDailyPlanPdf falls back to the root and keeps portrait A4 geometry",
   }, createDependencies({
     pdfInstances,
     orientation: "portrait",
-    capture(page) {
-      captured.push(page);
-      return { width: 2100, height: 2970 };
+    capture(page, options) {
+      captured.push({ page, options });
+      return createCanonicalCanvas(options);
     }
   }));
 
-  assert.deepEqual(captured, [root]);
+  assert.deepEqual(captured.map(({ page }) => page), [root]);
+  const portraitGeometry = expectedCaptureGeometry("portrait");
+  assert.equal(captured[0].options.width, portraitGeometry.cssWidth);
+  assert.equal(captured[0].options.height, portraitGeometry.cssHeight);
+  assert.equal(captured[0].options.windowWidth, portraitGeometry.cssWidth);
+  assert.equal(captured[0].options.windowHeight, portraitGeometry.cssHeight);
   assert.equal(result.filename, "portrait plan.pdf");
   assert.equal(result.pageCount, 1);
   assert.deepEqual(pdfInstances[0].addedPages, []);
@@ -170,6 +190,54 @@ test("exportDailyPlanPdf rejects a non-PDF signature before creating a download 
     createObjectUrl() {
       objectUrlCalls += 1;
       return "blob:invalid";
+    }
+  });
+
+  await assert.rejects(
+    exportDailyPlanPdf({ root, orientation: "landscape", filename: "invalid.pdf" }, dependencies),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+  assert.equal(objectUrlCalls, 0);
+});
+
+test("exportDailyPlanPdf rejects noncanonical capture dimensions before creating a download URL", async () => {
+  const root = createRoot([]);
+  const geometry = expectedCaptureGeometry("landscape");
+  for (const canvas of [
+    { width: geometry.canvasWidth + 20, height: geometry.canvasHeight },
+    { width: geometry.canvasWidth, height: geometry.canvasHeight + 20 }
+  ]) {
+    let objectUrlCalls = 0;
+    const dependencies = createDependencies({
+      capture: () => canvas,
+      createObjectUrl() {
+        objectUrlCalls += 1;
+        return "blob:invalid-canvas";
+      }
+    });
+
+    await assert.rejects(
+      exportDailyPlanPdf({ root, orientation: "landscape", filename: "invalid.pdf" }, dependencies),
+      (error) => error instanceof DailyPlanPdfExportError
+        && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+    );
+    assert.equal(objectUrlCalls, 0);
+  }
+});
+
+test("exportDailyPlanPdf enforces canvas aspect tolerance inside the dimension tolerance", async () => {
+  const root = createRoot([]);
+  const geometry = expectedCaptureGeometry("landscape");
+  let objectUrlCalls = 0;
+  const dependencies = createDependencies({
+    capture: () => ({
+      width: geometry.canvasWidth + 2,
+      height: geometry.canvasHeight - 2
+    }),
+    createObjectUrl() {
+      objectUrlCalls += 1;
+      return "blob:invalid-aspect";
     }
   });
 
@@ -213,7 +281,8 @@ test("exportDailyPlanPdf exposes only the stable error and remains retryable", a
     async capture() {
       attempts += 1;
       if (attempts === 1) throw new Error(secret);
-      return { width: 2970, height: 2100 };
+      const geometry = expectedCaptureGeometry("landscape");
+      return { width: geometry.canvasWidth, height: geometry.canvasHeight };
     }
   });
 
@@ -270,7 +339,7 @@ function createRoot(markedPages) {
 }
 
 function createDependencies({
-  capture = () => ({ width: 2970, height: 2100 }),
+  capture = (_page, options) => createCanonicalCanvas(options),
   orientation = "landscape",
   pdfInstances = [],
   outputBlob = new Blob(["%PDF-1.7 test"], { type: "application/pdf" }),
@@ -288,6 +357,26 @@ function createDependencies({
     createObjectUrl,
     triggerDownload,
     revokeObjectUrl
+  };
+}
+
+function expectedCaptureGeometry(orientation) {
+  const widthMm = orientation === "landscape" ? 297 : 210;
+  const heightMm = orientation === "landscape" ? 210 : 297;
+  const cssWidth = widthMm * 96 / 25.4;
+  const cssHeight = heightMm * 96 / 25.4;
+  return {
+    cssWidth,
+    cssHeight,
+    canvasWidth: Math.floor(cssWidth * 2),
+    canvasHeight: Math.floor(cssHeight * 2)
+  };
+}
+
+function createCanonicalCanvas(options) {
+  return {
+    width: Math.floor(options.width * options.scale),
+    height: Math.floor(options.height * options.scale)
   };
 }
 

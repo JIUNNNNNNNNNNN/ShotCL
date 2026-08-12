@@ -6,6 +6,12 @@ export const DAILY_PLAN_PDF_PAGE_SELECTOR = "[data-daily-plan-pdf-page]";
 const DAILY_PLAN_PDF_BACKGROUND = "#ffffff";
 const DAILY_PLAN_PDF_RENDER_SCALE = 2;
 const DAILY_PLAN_PDF_URL_REVOKE_DELAY_MS = 30_000;
+const CSS_PIXELS_PER_INCH = 96;
+const MILLIMETERS_PER_INCH = 25.4;
+const A4_SHORT_EDGE_MM = 210;
+const A4_LONG_EDGE_MM = 297;
+const CANVAS_DIMENSION_TOLERANCE_PX = 2;
+const CANVAS_ASPECT_RATIO_TOLERANCE = 0.002;
 
 type DailyPlanPdfCanvas = Pick<HTMLCanvasElement, "height" | "width">;
 
@@ -18,9 +24,24 @@ type DailyPlanHtml2Canvas = (
     onclone: (document: Document, element: HTMLElement) => void;
     removeContainer: boolean;
     scale: number;
+    scrollX: number;
+    scrollY: number;
     useCORS: boolean;
+    width: number;
+    height: number;
+    windowWidth: number;
+    windowHeight: number;
   }
 ) => Promise<HTMLCanvasElement>;
+
+type DailyPlanPdfPageGeometry = {
+  cssHeight: number;
+  cssWidth: number;
+  expectedCanvasHeight: number;
+  expectedCanvasWidth: number;
+  heightMm: number;
+  widthMm: number;
+};
 
 type DailyPlanJsPdfDocument = {
   addImage: (
@@ -133,6 +154,7 @@ export async function exportDailyPlanPdf(
       format: "a4",
       compress: true
     });
+    const geometry = resolvePageGeometry(input.orientation);
 
     for (let index = 0; index < pages.length; index += 1) {
       const page = pages[index];
@@ -142,7 +164,13 @@ export async function exportDailyPlanPdf(
         logging: false,
         removeContainer: true,
         scale: DAILY_PLAN_PDF_RENDER_SCALE,
+        scrollX: 0,
+        scrollY: 0,
         useCORS: true,
+        width: geometry.cssWidth,
+        height: geometry.cssHeight,
+        windowWidth: geometry.cssWidth,
+        windowHeight: geometry.cssHeight,
         onclone(_document, clonedPage) {
           // Move the isolated offscreen staging clone into the capture viewport
           // without touching the live document or its screen preview transform.
@@ -158,26 +186,34 @@ export async function exportDailyPlanPdf(
             staging.style.top = "0";
             staging.style.zIndex = "0";
           }
+          const width = `${geometry.cssWidth}px`;
+          const height = `${geometry.cssHeight}px`;
+          clonedPage.style.boxSizing = "border-box";
+          clonedPage.style.width = width;
+          clonedPage.style.minWidth = width;
+          clonedPage.style.maxWidth = width;
+          clonedPage.style.height = height;
+          clonedPage.style.minHeight = height;
+          clonedPage.style.maxHeight = height;
+          clonedPage.style.margin = "0";
           clonedPage.style.opacity = "1";
           clonedPage.style.transform = "none";
           clonedPage.style.transformOrigin = "top left";
         }
       });
-      assertCanvas(canvas);
+      assertCanvas(canvas, geometry);
 
       if (index > 0) pdf.addPage("a4", input.orientation);
-      const placement = resolveImagePlacement(
-        canvas,
-        pdf.internal.pageSize.getWidth(),
-        pdf.internal.pageSize.getHeight()
-      );
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      assertPdfPageSize(pageWidth, pageHeight, geometry);
       pdf.addImage(
         canvas,
         "PNG",
-        placement.x,
-        placement.y,
-        placement.width,
-        placement.height,
+        0,
+        0,
+        pageWidth,
+        pageHeight,
         undefined,
         "FAST"
       );
@@ -246,7 +282,27 @@ function normalizePdfFilename(filename: string) {
   return /\.pdf$/iu.test(safeFilename) ? safeFilename : `${safeFilename}.pdf`;
 }
 
-function assertCanvas(canvas: DailyPlanPdfCanvas) {
+function resolvePageGeometry(
+  orientation: DailyPlanPdfOrientation
+): DailyPlanPdfPageGeometry {
+  const widthMm = orientation === "landscape" ? A4_LONG_EDGE_MM : A4_SHORT_EDGE_MM;
+  const heightMm = orientation === "landscape" ? A4_SHORT_EDGE_MM : A4_LONG_EDGE_MM;
+  const cssWidth = widthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  const cssHeight = heightMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
+  return {
+    cssWidth,
+    cssHeight,
+    expectedCanvasWidth: Math.floor(cssWidth * DAILY_PLAN_PDF_RENDER_SCALE),
+    expectedCanvasHeight: Math.floor(cssHeight * DAILY_PLAN_PDF_RENDER_SCALE),
+    widthMm,
+    heightMm
+  };
+}
+
+function assertCanvas(
+  canvas: DailyPlanPdfCanvas,
+  geometry: DailyPlanPdfPageGeometry
+) {
   if (
     !Number.isFinite(canvas.width)
     || !Number.isFinite(canvas.height)
@@ -255,31 +311,36 @@ function assertCanvas(canvas: DailyPlanPdfCanvas) {
   ) {
     throw new Error("Invalid Daily Plan PDF canvas");
   }
+  if (
+    Math.abs(canvas.width - geometry.expectedCanvasWidth) > CANVAS_DIMENSION_TOLERANCE_PX
+    || Math.abs(canvas.height - geometry.expectedCanvasHeight) > CANVAS_DIMENSION_TOLERANCE_PX
+  ) {
+    throw new Error("Unexpected Daily Plan PDF canvas size");
+  }
+  const actualAspectRatio = canvas.width / canvas.height;
+  const expectedAspectRatio = geometry.cssWidth / geometry.cssHeight;
+  const aspectRatioError = Math.abs(actualAspectRatio / expectedAspectRatio - 1);
+  if (aspectRatioError > CANVAS_ASPECT_RATIO_TOLERANCE) {
+    throw new Error("Unexpected Daily Plan PDF canvas aspect ratio");
+  }
 }
 
-function resolveImagePlacement(
-  canvas: DailyPlanPdfCanvas,
+function assertPdfPageSize(
   pageWidth: number,
-  pageHeight: number
+  pageHeight: number,
+  geometry: DailyPlanPdfPageGeometry
 ) {
-  const availableWidth = pageWidth;
-  const availableHeight = pageHeight;
   if (
-    !Number.isFinite(availableWidth)
-    || !Number.isFinite(availableHeight)
-    || availableWidth <= 0
-    || availableHeight <= 0
+    !Number.isFinite(pageWidth)
+    || !Number.isFinite(pageHeight)
+    || pageWidth <= 0
+    || pageHeight <= 0
   ) {
     throw new Error("Invalid A4 PDF page size");
   }
-
-  const scale = Math.min(availableWidth / canvas.width, availableHeight / canvas.height);
-  const width = canvas.width * scale;
-  const height = canvas.height * scale;
-  return {
-    x: (pageWidth - width) / 2,
-    y: (pageHeight - height) / 2,
-    width,
-    height
-  };
+  const actualAspectRatio = pageWidth / pageHeight;
+  const expectedAspectRatio = geometry.widthMm / geometry.heightMm;
+  if (Math.abs(actualAspectRatio / expectedAspectRatio - 1) > CANVAS_ASPECT_RATIO_TOLERANCE) {
+    throw new Error("Unexpected A4 PDF page aspect ratio");
+  }
 }

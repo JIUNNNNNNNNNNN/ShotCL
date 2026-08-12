@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, RotateCcw, Search } from "lucide-react";
@@ -302,8 +302,14 @@ type DailyPlanPrintAction = "automatic" | "portrait";
 
 type DailyPlanPrintJob = {
   data: DailyPlanPreviewData;
+  snapshotId: string;
   orientation: DailyPlanPdfOrientation;
   density: DailyPlanDocumentDensity;
+  pageLayout: DailyPlanPageLayout;
+};
+
+type DailyPlanResolvedPreviewProfile = DailyPlanPrintJob & {
+  overflows: boolean;
 };
 
 type TimetableMutationSnapshot = {
@@ -367,21 +373,18 @@ const DAILY_PLAN_PREVIEW_PAGE_GAP_PX = DAILY_PLAN_PREVIEW_PAGE_GAP_MM
   * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
 const DAILY_PLAN_PRINT_PAGE = {
   portrait: {
-    label: "세로",
     pageWidthMm: 210,
     pageHeightMm: 297,
     printableWidthMm: 190,
     printableHeightMm: 277
   },
   landscape: {
-    label: "가로",
     pageWidthMm: 297,
     pageHeightMm: 210,
     printableWidthMm: 277,
     printableHeightMm: 190
   }
 } as const satisfies Record<DailyPlanPdfOrientation, {
-  label: string;
   pageWidthMm: number;
   pageHeightMm: number;
   printableWidthMm: number;
@@ -492,7 +495,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [message, setMessage] = useState(notice ?? "");
   const [errorMessage, setErrorMessage] = useState("");
   const [printJob, setPrintJob] = useState<DailyPlanPrintJob | null>(null);
-  const [printLayout, setPrintLayout] = useState<DailyPlanPageLayout>("single");
+  const [printProbe, setPrintProbe] = useState<DailyPlanPrintJob | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const [activePrintAction, setActivePrintAction] = useState<DailyPlanPrintAction | null>(null);
   const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
@@ -538,6 +541,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
   const sidebarPortraitPrintRequestRef = useRef<() => void>(() => {});
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
+  const resolvedPreviewProfileRef = useRef<DailyPlanResolvedPreviewProfile | null>(null);
   const editorTrashRef = useRef<HTMLDivElement | null>(null);
   const automaticStartRowIdsRef = useRef<Set<string>>(
     // Persisted IDs belonged to the retired continuously-linked behavior.
@@ -726,7 +730,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => ({ plan, locations, mealTimes, scenes, printMeta: effectivePrintMeta }),
     [effectivePrintMeta, locations, mealTimes, plan, scenes]
   );
-  const deferredPreviewSource = useDeferredValue(previewSource);
   const currentEditorFingerprint = useMemo(
     () => createDailyPlanEditorFingerprint(plan, printMeta, locations, mealTimes, scenes),
     [locations, mealTimes, plan, printMeta, scenes]
@@ -748,15 +751,35 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }, [isSaving]);
   const previewData = useMemo(() => {
     const printablePlan = buildPlanForSave(
-      deferredPreviewSource.plan,
-      deferredPreviewSource.locations,
-      deferredPreviewSource.mealTimes,
-      deferredPreviewSource.printMeta,
-      deferredPreviewSource.scenes,
+      previewSource.plan,
+      previewSource.locations,
+      previewSource.mealTimes,
+      previewSource.printMeta,
+      previewSource.scenes,
       sceneListItems
     );
-    return buildDailyPlanPreviewData(printablePlan, deferredPreviewSource.scenes, deferredPreviewSource.printMeta);
-  }, [deferredPreviewSource, sceneListItems]);
+    return buildDailyPlanPreviewData(printablePlan, previewSource.scenes, previewSource.printMeta);
+  }, [previewSource, sceneListItems]);
+  const previewSnapshotId = useMemo(
+    () => createDailyPlanPreviewSnapshotId(previewData),
+    [previewData]
+  );
+  const publishResolvedPreviewProfile = useCallback((profile: DailyPlanResolvedPreviewProfile) => {
+    resolvedPreviewProfileRef.current = profile;
+  }, []);
+  useLayoutEffect(() => {
+    const current = resolvedPreviewProfileRef.current;
+    if (
+      current
+      && (
+        current.data !== previewData
+        || current.snapshotId !== previewSnapshotId
+        || current.orientation !== documentOrientation
+      )
+    ) {
+      resolvedPreviewProfileRef.current = null;
+    }
+  }, [documentOrientation, previewData, previewSnapshotId]);
   useEffect(() => {
     const updates = getAutomaticTimetableStartUpdates(timetableRows, automaticStartRowIdsRef.current);
     if (updates.size === 0) return;
@@ -1784,28 +1807,15 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     void saveCurrentPlan();
   };
 
-  function getCurrentPreviewData() {
-    const currentMeta = deriveDailyPlanHeadcount({
-      ...printMeta,
-      timetableRowOrder: getPersistedTimetableRowOrder(timetableRows, printMeta.timetableRowOrder),
-      timetableScenes: serializeTimetableScenes(scenes, sceneListItems)
-    });
-    const currentPrintablePlan = buildPlanForSave(plan, locations, mealTimes, currentMeta, scenes, sceneListItems);
-    return buildDailyPlanPreviewData(currentPrintablePlan, scenes, currentMeta);
-  }
-
   const releasePrintView = useCallback(() => {
     setPrintJob(null);
-    setPrintLayout("single");
+    setPrintProbe(null);
     isPrintingRef.current = false;
     setIsPrinting(false);
     setActivePrintAction(null);
   }, []);
 
-  async function handlePrint(
-    action: DailyPlanPrintAction = "automatic",
-    previewDataSnapshot?: DailyPlanPreviewData
-  ) {
+  async function handlePrint(action: DailyPlanPrintAction = "automatic") {
     if (isPrintingRef.current) return;
     const orientation = action === "portrait" ? "portrait" : documentOrientation;
     if (!orientation) {
@@ -1822,39 +1832,41 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     isPrintingRef.current = true;
     setIsPrinting(true);
     setActivePrintAction(action);
-    setPrintLayout("single");
     try {
-      const currentPreviewData = previewDataSnapshot ?? getCurrentPreviewData();
+      const currentPreviewData = previewData;
+      const currentSnapshotId = previewSnapshotId;
       if (currentPreviewData.scenes.length === 0) {
         throw new Error("NO_PRINTABLE_SCENES");
       }
-      let density: DailyPlanDocumentDensity = DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
-      let shouldWaitForDocumentFonts = true;
-      let root: HTMLDivElement;
+      const resolvedProfile = orientation === documentOrientation
+        ? await waitForDailyPlanResolvedPreviewProfile(resolvedPreviewProfileRef, {
+          data: currentPreviewData,
+          snapshotId: currentSnapshotId,
+          orientation
+        })
+        : await resolveDailyPlanOffscreenPrintProfile({
+          data: currentPreviewData,
+          snapshotId: currentSnapshotId,
+          orientation,
+          rootRef: printDocumentRef,
+          renderProbe: setPrintProbe
+        });
+      if (resolvedProfile.overflows) throw new Error("PDF_LAYOUT_OVERFLOW");
 
-      while (true) {
-        setPrintJob({ data: currentPreviewData, orientation, density });
-        await waitForDailyPlanPrintDocument(printDocumentRef, shouldWaitForDocumentFonts);
-        shouldWaitForDocumentFonts = false;
-        const nextRoot = printDocumentRef.current;
-        if (!nextRoot) throw new Error("PDF 문서를 준비하지 못했습니다.");
-        root = nextRoot;
-        const pageFit = resolveDailyPlanDocumentPageFit(root, orientation);
-        const nextDensity = getNextDailyPlanDocumentDensity(density);
-        const shouldTryDenser = pageFit.overflows
-          || (orientation === "landscape" && pageFit.layout === "two");
-        if (!shouldTryDenser || !nextDensity) {
-          if (pageFit.overflows) throw new Error("PDF_LAYOUT_OVERFLOW");
-          break;
-        }
-        density = nextDensity;
-      }
-
-      const nextLayout = resolveDailyPlanPrintLayout(root, orientation);
-      setPrintLayout(nextLayout);
-      await waitForDailyPlanPrintDocument(printDocumentRef, false);
-      const exportRoot = printDocumentRef.current;
-      if (!exportRoot) throw new Error("PDF_EXPORT_ROOT_MISSING");
+      const nextPrintJob: DailyPlanPrintJob = {
+        data: currentPreviewData,
+        snapshotId: currentSnapshotId,
+        orientation,
+        density: resolvedProfile.density,
+        pageLayout: resolvedProfile.pageLayout
+      };
+      setPrintProbe(null);
+      setPrintJob(nextPrintJob);
+      const exportRoot = await waitForDailyPlanPrintDocument(
+        printDocumentRef,
+        nextPrintJob,
+        { waitForFonts: true }
+      );
       const { exportDailyPlanPdf } = await import("@/lib/client/dailyPlanPdf");
       await exportDailyPlanPdf({
         root: exportRoot,
@@ -1917,6 +1929,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const pendingDisableMultiRoundScene = pendingDisableMultiRoundSceneId
     ? scenes.find((scene) => scene.id === pendingDisableMultiRoundSceneId) ?? null
     : null;
+  const activePrintSurface = printJob ?? printProbe;
 
   return (
     <div className="print-daily-plan">
@@ -2619,16 +2632,22 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
         </div>
 
-        <DailyPlanLivePreview data={previewData} orientation={documentOrientation} />
+        <DailyPlanLivePreview
+          data={previewData}
+          snapshotId={previewSnapshotId}
+          orientation={documentOrientation}
+          onResolvedProfile={publishResolvedPreviewProfile}
+        />
 
       </div>
 
-      {printJob && typeof document !== "undefined" ? createPortal(
+      {activePrintSurface && typeof document !== "undefined" ? createPortal(
         <PrintDailyPlanView
-          data={printJob.data}
-          orientation={printJob.orientation}
-          density={printJob.density}
-          layout={printLayout}
+          data={activePrintSurface.data}
+          snapshotId={activePrintSurface.snapshotId}
+          orientation={activePrintSurface.orientation}
+          density={activePrintSurface.density}
+          layout={activePrintSurface.pageLayout}
           rootRef={printDocumentRef}
         />,
         document.body
@@ -4447,10 +4466,14 @@ function TextAreaField({ label, value, onChange, className = "" }: { label: stri
 
 const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
   data,
-  orientation
+  snapshotId,
+  orientation,
+  onResolvedProfile
 }: {
   data: DailyPlanPreviewData;
+  snapshotId: string;
   orientation: DailyPlanPdfOrientation | null;
+  onResolvedProfile: (profile: DailyPlanResolvedPreviewProfile) => void;
 }) {
   return (
     <section className="daily-plan-live-preview mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
@@ -4458,7 +4481,12 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
         <h2 className="text-lg font-black text-[#111111]">실시간 일촬표 미리보기</h2>
       </div>
       {orientation ? (
-        <ScaledDailyPlanPreview key={orientation} data={data} orientation={orientation} />
+        <ScaledDailyPlanPreview
+          data={data}
+          snapshotId={snapshotId}
+          orientation={orientation}
+          onResolvedProfile={onResolvedProfile}
+        />
       ) : (
         <SectionLoader />
       )}
@@ -4468,18 +4496,34 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
 
 const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   data,
-  orientation
+  snapshotId,
+  orientation,
+  onResolvedProfile
 }: {
   data: DailyPlanPreviewData;
+  snapshotId: string;
   orientation: DailyPlanPdfOrientation;
+  onResolvedProfile: (profile: DailyPlanResolvedPreviewProfile) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const documentRef = useRef<HTMLDivElement | null>(null);
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   const previewPageWidth = getDailyPlanPageWidthPixels(orientation);
   const previewPageHeight = getDailyPlanPageHeightPixels(orientation);
-  const [density, setDensity] = useState<DailyPlanDocumentDensity>(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
-  const [pageLayout, setPageLayout] = useState<DailyPlanPageLayout>("single");
+  const [presentation, setPresentation] = useState(() => ({
+    data,
+    snapshotId,
+    orientation,
+    density: DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0] as DailyPlanDocumentDensity,
+    pageLayout: "single" as DailyPlanPageLayout
+  }));
+  const hasCurrentPresentation = presentation.data === data
+    && presentation.snapshotId === snapshotId
+    && presentation.orientation === orientation;
+  const density = hasCurrentPresentation
+    ? presentation.density
+    : DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
+  const pageLayout = hasCurrentPresentation ? presentation.pageLayout : "single";
   const [measurement, setMeasurement] = useState(() => ({
     scale: 1,
     scaledWidth: previewPageWidth,
@@ -4487,11 +4531,23 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   }));
 
   useLayoutEffect(() => {
-    setDensity(DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0]);
-    setPageLayout("single");
-  }, [data, orientation]);
+    if (hasCurrentPresentation) return;
+    setPresentation({
+      data,
+      snapshotId,
+      orientation,
+      density: DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0],
+      pageLayout: "single"
+    });
+    setMeasurement({
+      scale: 1,
+      scaledWidth: previewPageWidth,
+      scaledHeight: previewPageHeight
+    });
+  }, [data, hasCurrentPresentation, orientation, previewPageHeight, previewPageWidth, snapshotId]);
 
   useLayoutEffect(() => {
+    if (!hasCurrentPresentation) return;
     const container = containerRef.current;
     const documentElement = documentRef.current;
     if (!container || !documentElement) return;
@@ -4507,7 +4563,6 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       if (!Number.isFinite(availableWidth) || availableWidth <= 0) return;
       const pageFit = resolveDailyPlanDocumentPageFit(currentDocument, orientation);
       const nextPageLayout = pageFit.layout;
-      setPageLayout((current) => current === nextPageLayout ? current : nextPageLayout);
       const logicalHeight = getDailyPlanPreviewStackHeight({
         pageHeight: previewPageHeight,
         pageCount: nextPageLayout === "two" ? 2 : 1,
@@ -4524,16 +4579,35 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
           : nextMeasurement
       ));
 
-      if (
-        allowDensityChange
-        && (
-          pageFit.overflows
-          || (orientation === "landscape" && nextPageLayout === "two")
-        )
-      ) {
-        const nextDensity = getNextDailyPlanDocumentDensity(density);
-        if (nextDensity) setDensity(nextDensity);
+      if (!allowDensityChange) return;
+      const shouldTryDenser = pageFit.overflows
+        || (orientation === "landscape" && nextPageLayout === "two");
+      const nextDensity = shouldTryDenser
+        ? getNextDailyPlanDocumentDensity(density)
+        : null;
+      if (nextDensity || nextPageLayout !== pageLayout) {
+        setPresentation((current) => {
+          if (
+            current.data !== data
+            || current.snapshotId !== snapshotId
+            || current.orientation !== orientation
+          ) return current;
+          return {
+            ...current,
+            density: nextDensity ?? density,
+            pageLayout: nextPageLayout
+          };
+        });
+        return;
       }
+      onResolvedProfile({
+        data,
+        snapshotId,
+        orientation,
+        density,
+        pageLayout,
+        overflows: pageFit.overflows
+      });
     }
 
     function scheduleSizeUpdate(allowDensityChange = shouldCheckDensity) {
@@ -4594,13 +4668,24 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
       window.removeEventListener("orientationchange", handleViewportResize);
       window.visualViewport?.removeEventListener("resize", handleViewportResize);
     };
-  }, [data, density, orientation, pageLayout, previewPageHeight, previewPageWidth]);
+  }, [
+    data,
+    density,
+    hasCurrentPresentation,
+    onResolvedProfile,
+    orientation,
+    pageLayout,
+    previewPageHeight,
+    previewPageWidth,
+    snapshotId
+  ]);
 
   return (
     <div
       ref={containerRef}
       data-testid="daily-plan-scaled-preview"
       data-orientation={orientation}
+      data-snapshot-id={snapshotId}
       data-density={density}
       data-page-layout={pageLayout}
       data-scale={measurement.scale.toFixed(4)}
@@ -4652,12 +4737,14 @@ function areDailyPlanPreviewMeasurementsEqual(
 
 function PrintDailyPlanView({
   data,
+  snapshotId,
   orientation,
   density,
   layout,
   rootRef
 }: {
   data: DailyPlanPreviewData;
+  snapshotId: string;
   orientation: DailyPlanPdfOrientation;
   density: DailyPlanDocumentDensity;
   layout: DailyPlanPageLayout;
@@ -4669,6 +4756,7 @@ function PrintDailyPlanView({
       className="print-daily-plan print-only daily-plan-print-staging"
       data-testid="daily-plan-export-staging"
       data-orientation={orientation}
+      data-snapshot-id={snapshotId}
       aria-hidden="true"
     >
       <div
@@ -4676,6 +4764,8 @@ function PrintDailyPlanView({
         className="daily-plan-print-layout"
         data-testid="daily-plan-export-document-root"
         data-orientation={orientation}
+        data-snapshot-id={snapshotId}
+        data-density={density}
         data-print-layout={layout}
       >
         <DailyPlanDocument
@@ -4721,39 +4811,240 @@ function hasDailyPlanDocumentOverflow(root: HTMLElement) {
   ));
 }
 
+const DAILY_PLAN_PRINT_READY_TIMEOUT_MS = 10_000;
+
+async function waitForDailyPlanResolvedPreviewProfile(
+  profileRef: React.RefObject<DailyPlanResolvedPreviewProfile | null>,
+  expected: Pick<DailyPlanPrintJob, "data" | "snapshotId" | "orientation">,
+  timeoutMs = DAILY_PLAN_PRINT_READY_TIMEOUT_MS
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const profile = profileRef.current;
+    if (
+      profile?.data === expected.data
+      && profile.snapshotId === expected.snapshotId
+      && profile.orientation === expected.orientation
+    ) {
+      return profile;
+    }
+    await waitForAnimationFrameTick(Math.min(100, Math.max(1, deadline - Date.now())));
+  }
+  throw new Error("실시간 미리보기 구성을 확인하지 못했습니다.");
+}
+
+async function resolveDailyPlanOffscreenPrintProfile({
+  data,
+  snapshotId,
+  orientation,
+  rootRef,
+  renderProbe
+}: {
+  data: DailyPlanPreviewData;
+  snapshotId: string;
+  orientation: DailyPlanPdfOrientation;
+  rootRef: React.RefObject<HTMLDivElement | null>;
+  renderProbe: React.Dispatch<React.SetStateAction<DailyPlanPrintJob | null>>;
+}): Promise<DailyPlanResolvedPreviewProfile> {
+  const deadline = Date.now() + DAILY_PLAN_PRINT_READY_TIMEOUT_MS;
+  let density: DailyPlanDocumentDensity = DAILY_PLAN_DOCUMENT_DENSITY_STEPS[0];
+  let waitForFonts = true;
+
+  while (true) {
+    const probe: DailyPlanPrintJob = {
+      data,
+      snapshotId,
+      orientation,
+      density,
+      pageLayout: "single"
+    };
+    renderProbe(probe);
+    const root = await waitForDailyPlanPrintDocument(rootRef, probe, {
+      waitForFonts,
+      timeoutMs: Math.max(1, deadline - Date.now())
+    });
+    waitForFonts = false;
+    const pageFit = resolveDailyPlanDocumentPageFit(root, orientation);
+    const shouldTryDenser = pageFit.overflows
+      || (orientation === "landscape" && pageFit.layout === "two");
+    const nextDensity: DailyPlanDocumentDensity | null = shouldTryDenser
+      ? getNextDailyPlanDocumentDensity(density)
+      : null;
+    if (nextDensity) {
+      density = nextDensity;
+      continue;
+    }
+    return {
+      data,
+      snapshotId,
+      orientation,
+      density,
+      pageLayout: pageFit.layout,
+      overflows: pageFit.overflows
+    };
+  }
+}
+
 async function waitForDailyPlanPrintDocument(
   rootRef: React.RefObject<HTMLDivElement | null>,
-  waitForFonts: boolean
+  expected: DailyPlanPrintJob,
+  {
+    waitForFonts,
+    timeoutMs = DAILY_PLAN_PRINT_READY_TIMEOUT_MS
+  }: {
+    waitForFonts: boolean;
+    timeoutMs?: number;
+  }
 ) {
-  await waitForAnimationFrames(2);
-  const root = rootRef.current;
-  if (!root) throw new Error("PDF 문서를 준비하지 못했습니다.");
+  const deadline = Date.now() + timeoutMs;
+  let root = await waitForDailyPlanPrintRootCommit(rootRef, expected, deadline);
 
   if (waitForFonts && "fonts" in document) {
-    await document.fonts.ready;
+    await waitForPromiseBeforeDeadline(
+      document.fonts.ready,
+      deadline,
+      "PDF 글꼴 로딩 시간이 초과되었습니다."
+    );
   }
 
+  root = await waitForDailyPlanPrintRootCommit(rootRef, expected, deadline);
   const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
   await Promise.all(images.map(async (image) => {
-    if (!image.complete) {
-      await new Promise<void>((resolve, reject) => {
-        const timeoutId = window.setTimeout(() => reject(new Error("PDF 이미지 로딩 시간이 초과되었습니다.")), 10_000);
-        const finish = (callback: () => void) => {
-          window.clearTimeout(timeoutId);
-          image.removeEventListener("load", handleLoad);
-          image.removeEventListener("error", handleError);
-          callback();
-        };
-        const handleLoad = () => finish(resolve);
-        const handleError = () => finish(() => reject(new Error("PDF에 포함할 이미지를 불러오지 못했습니다.")));
-        image.addEventListener("load", handleLoad, { once: true });
-        image.addEventListener("error", handleError, { once: true });
-      });
+    if (!image.complete) await waitForDailyPlanPrintImage(image, deadline);
+    if (typeof image.decode === "function") {
+      await waitForPromiseBeforeDeadline(
+        image.decode(),
+        deadline,
+        "PDF 이미지 디코딩 시간이 초과되었습니다."
+      );
     }
-    if (typeof image.decode === "function") await image.decode();
   }));
 
-  await waitForAnimationFrames(2);
+  let previousGeometry = "";
+  let stableFrameCount = 0;
+  while (Date.now() < deadline) {
+    const didPaint = await waitForAnimationFrameTick(
+      Math.min(100, Math.max(1, deadline - Date.now()))
+    );
+    if (!didPaint) continue;
+    root = rootRef.current ?? root;
+    if (!doesDailyPlanPrintRootMatch(root, expected)) {
+      previousGeometry = "";
+      stableFrameCount = 0;
+      continue;
+    }
+    const nextGeometry = getDailyPlanPrintGeometrySignature(root);
+    if (nextGeometry === previousGeometry) {
+      stableFrameCount += 1;
+    } else {
+      previousGeometry = nextGeometry;
+      stableFrameCount = 1;
+    }
+    if (stableFrameCount >= 2) return root;
+  }
+  throw new Error("PDF 문서 배치를 안정화하지 못했습니다.");
+}
+
+async function waitForDailyPlanPrintRootCommit(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  expected: DailyPlanPrintJob,
+  deadline: number
+) {
+  while (Date.now() < deadline) {
+    const root = rootRef.current;
+    if (root && doesDailyPlanPrintRootMatch(root, expected)) return root;
+    await waitForAnimationFrameTick(Math.min(100, Math.max(1, deadline - Date.now())));
+  }
+  throw new Error("PDF 문서 상태를 준비하지 못했습니다.");
+}
+
+function doesDailyPlanPrintRootMatch(root: HTMLElement, expected: DailyPlanPrintJob) {
+  return root.dataset.snapshotId === expected.snapshotId
+    && root.dataset.orientation === expected.orientation
+    && root.dataset.density === expected.density
+    && root.dataset.printLayout === expected.pageLayout;
+}
+
+function getDailyPlanPrintGeometrySignature(root: HTMLElement) {
+  const rootRect = root.getBoundingClientRect();
+  const elements = [
+    root,
+    ...root.querySelectorAll<HTMLElement>("[data-daily-plan-pdf-page]")
+  ];
+  return elements.map((element) => {
+    const rect = element.getBoundingClientRect();
+    return [
+      (rect.left - rootRect.left).toFixed(3),
+      (rect.top - rootRect.top).toFixed(3),
+      rect.width.toFixed(3),
+      rect.height.toFixed(3),
+      element.clientWidth,
+      element.clientHeight,
+      element.scrollWidth,
+      element.scrollHeight
+    ].join(":");
+  }).join("|");
+}
+
+function waitForDailyPlanPrintImage(image: HTMLImageElement, deadline: number) {
+  return new Promise<void>((resolve, reject) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      reject(new Error("PDF 이미지 로딩 시간이 초과되었습니다."));
+      return;
+    }
+    const timeoutId = window.setTimeout(
+      () => finish(() => reject(new Error("PDF 이미지 로딩 시간이 초과되었습니다."))),
+      remaining
+    );
+    const finish = (callback: () => void) => {
+      window.clearTimeout(timeoutId);
+      image.removeEventListener("load", handleLoad);
+      image.removeEventListener("error", handleError);
+      callback();
+    };
+    const handleLoad = () => finish(resolve);
+    const handleError = () => finish(() => reject(new Error("PDF에 포함할 이미지를 불러오지 못했습니다.")));
+    image.addEventListener("load", handleLoad, { once: true });
+    image.addEventListener("error", handleError, { once: true });
+  });
+}
+
+function waitForPromiseBeforeDeadline<T>(promise: PromiseLike<T>, deadline: number, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      reject(new Error(message));
+      return;
+    }
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), remaining);
+    Promise.resolve(promise).then(
+      (value) => {
+        window.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
+function waitForAnimationFrameTick(maxWaitMs: number) {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let frameId = 0;
+    const finish = (didPaint: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      window.cancelAnimationFrame(frameId);
+      resolve(didPaint);
+    };
+    const timeoutId = window.setTimeout(() => finish(false), maxWaitMs);
+    frameId = window.requestAnimationFrame(() => finish(true));
+  });
 }
 
 function resolveDailyPlanDocumentPageFit(
@@ -4782,36 +5073,12 @@ function resolveDailyPlanDocumentPageFit(
   };
 }
 
-function resolveDailyPlanPrintLayout(
-  root: HTMLDivElement,
-  orientation: DailyPlanPdfOrientation
-): DailyPlanPageLayout {
-  const pageFit = resolveDailyPlanDocumentPageFit(root, orientation);
-  if (pageFit.overflows) {
-    throw new Error(`현재 내용은 A4 ${DAILY_PLAN_PRINT_PAGE[orientation].label} 출력 범위를 초과합니다.`);
-  }
-  return pageFit.layout;
-}
-
 function getDailyPlanPageWidthPixels(orientation: DailyPlanPdfOrientation) {
   return DAILY_PLAN_PRINT_PAGE[orientation].pageWidthMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
 }
 
 function getDailyPlanPageHeightPixels(orientation: DailyPlanPdfOrientation) {
   return DAILY_PLAN_PRINT_PAGE[orientation].pageHeightMm * CSS_PIXELS_PER_INCH / MILLIMETERS_PER_INCH;
-}
-
-function waitForAnimationFrames(count: number) {
-  return new Promise<void>((resolve) => {
-    function next(remaining: number) {
-      if (remaining <= 0) {
-        resolve();
-        return;
-      }
-      window.requestAnimationFrame(() => next(remaining - 1));
-    }
-    next(count);
-  });
 }
 
 function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTimetableRow[] {
@@ -6337,6 +6604,16 @@ function createDailyPlanEditorFingerprint(
   scenes: SceneBlockInput[]
 ) {
   return JSON.stringify({ plan, printMeta, locations, mealTimes, scenes });
+}
+
+function createDailyPlanPreviewSnapshotId(data: DailyPlanPreviewData) {
+  const serialized = JSON.stringify(data);
+  let hash = 2166136261;
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash ^= serialized.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `daily-plan-${serialized.length.toString(36)}-${(hash >>> 0).toString(36)}`;
 }
 
 function loadDaumPostcodeScript() {
