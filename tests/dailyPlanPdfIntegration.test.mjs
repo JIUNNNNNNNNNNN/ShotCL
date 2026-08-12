@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const editorPath = new URL("../components/DailyPlanEditor.tsx", import.meta.url);
+const projectPageActionsPath = new URL("../components/ProjectPageActions.tsx", import.meta.url);
+const contextualGuidesPath = new URL("../lib/contextualGuides.ts", import.meta.url);
 const packagePath = new URL("../package.json", import.meta.url);
 
 test("automatic PDF freezes the exact live preview snapshot/profile and lazy-loads the real exporter", async () => {
@@ -67,6 +69,46 @@ test("PDF dependencies are production dependencies but stay out of the initial e
   assert.equal(packageJson.dependencies.html2canvas, "^1.4.1");
   assert.equal(packageJson.dependencies.jspdf, "^4.2.1");
   assert.doesNotMatch(importSection, /html2canvas|jspdf|dailyPlanPdf/u);
+});
+
+test("user-facing PDF actions consistently name the A4 Portrait output as mobile PDF", async () => {
+  const [editor, actions, guides] = await Promise.all([
+    readFile(editorPath, "utf8"),
+    readFile(projectPageActionsPath, "utf8"),
+    readFile(contextualGuidesPath, "utf8")
+  ]);
+  const handler = editor.slice(
+    editor.indexOf("async function handlePrint("),
+    editor.indexOf("sidebarPrintRequestRef.current")
+  );
+  const registration = editor.slice(
+    editor.indexOf("const dailyPlanActionMenu"),
+    editor.indexOf("useProjectPageActionMenu(dailyPlanActionMenu)")
+  );
+  const actionDefinitions = actions.slice(
+    actions.indexOf("const ACTION_DEFINITIONS"),
+    actions.indexOf("const MENU_DEFINITIONS")
+  );
+  const pdfGuide = guides.slice(
+    guides.indexOf('"daily-plan.pdf": {'),
+    guides.indexOf('"daily-plan.round-select": {')
+  );
+
+  assert.match(
+    registration,
+    /dailyPlanPdf:\s*\{\s*label: documentOrientation === "portrait" \? "모바일용 PDF" : "가로 PDF"/u
+  );
+  assert.match(actionDefinitions, /dailyPlanPortraitPdf: \{ label: "모바일용 PDF"/u);
+  assert.match(
+    handler,
+    /setMessage\(orientation === "portrait" \? "모바일용 PDF를 저장했습니다\." : "가로 PDF를 저장했습니다\."\)/u
+  );
+  assert.match(pdfGuide, /description: "가로 PDF 또는 모바일용 PDF로 저장할 수 있습니다\."/u);
+  assert.doesNotMatch(
+    `${handler}\n${registration}\n${actionDefinitions}\n${pdfGuide}`,
+    /세로\s*모드|세로형? PDF|PDF 세로|Portrait PDF/u
+  );
+  assert.match(editor, /type DailyPlanPrintAction = "automatic" \| "portrait"/u);
 });
 
 test("landscape exports the mounted live paper while portrait keeps the hidden body portal", async () => {

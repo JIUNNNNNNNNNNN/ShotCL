@@ -1890,7 +1890,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           }
           : {})
       });
-      setMessage(action === "portrait" ? "세로 PDF를 저장했습니다." : "PDF를 저장했습니다.");
+      setMessage(orientation === "portrait" ? "모바일용 PDF를 저장했습니다." : "가로 PDF를 저장했습니다.");
     } catch {
       setErrorMessage("PDF를 만들지 못했습니다. 다시 시도해 주세요.");
     } finally {
@@ -1911,6 +1911,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     scopeKey: `daily-plan:${dailyPlanId ?? "new"}`,
     actions: {
       dailyPlanPdf: {
+        label: documentOrientation === "portrait" ? "모바일용 PDF" : "가로 PDF",
         onSelect: () => sidebarPrintRequestRef.current(),
         disabled: !canPrint || !documentOrientation || isPrinting,
         pending: activePrintAction === "automatic"

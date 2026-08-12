@@ -154,6 +154,46 @@ test("offscreen export staging is capturable and delegates two-page padding to p
   );
 });
 
+test("Portrait bordered cells keep native table centering and symmetric density metrics", async () => {
+  const [documentSource, styles] = await Promise.all([
+    readFile(documentPath, "utf8"),
+    readFile(stylesPath, "utf8")
+  ]);
+  const portrait = sourceBetween(
+    documentSource,
+    "export function DailyPlanPortraitDocument",
+    "function DailyPlanWeatherTable"
+  );
+  const cellRule = cssRule(styles, ".daily-plan-template th");
+  const portraitNormal = cssRule(styles, '.daily-plan-document--portrait[data-density="normal"]');
+  const portraitCompact = cssRule(styles, '.daily-plan-document--portrait[data-density="compact"]');
+  const portraitDense = cssRule(styles, '.daily-plan-document--portrait[data-density="dense"]');
+
+  assert.match(documentSource, /const cellClass = "daily-plan-cell border border-black text-center align-middle"/u);
+  assert.match(portrait, /data-portrait-table="timetable-summary"/u);
+  assert.match(portrait, /data-portrait-table="scene-details"/u);
+  assert.match(portrait, /<TimetableCells/u);
+  assert.match(portrait, /<PortraitAdditionalScheduleSummaryCells row=\{row\} \/>/u);
+  assert.match(portrait, /총 컷수 \{totalCutCount\}컷/u);
+  assert.match(portrait, /<PortraitCallSheetTable[\s\S]*title="Starring"[\s\S]*title="Team"/u);
+  assert.match(documentSource, /daily-plan-additional-cell[^"]*items-center justify-center text-center/u);
+
+  assert.match(cellRule, /padding:\s*var\(--daily-plan-cell-padding-block\) var\(--daily-plan-cell-padding-inline\)/u);
+  assert.match(cellRule, /vertical-align:\s*middle/u);
+  assert.doesNotMatch(cellRule, /display:\s*(?:flex|grid)/u);
+  for (const densityRule of [portraitNormal, portraitCompact, portraitDense]) {
+    assert.match(densityRule, /--daily-plan-line-height:\s*[0-9.]+/u);
+    assert.match(densityRule, /--daily-plan-cell-padding-block:\s*[0-9.]+px/u);
+  }
+
+  const portraitAndCellStyles = `${portrait}\n${cellRule}\n${portraitNormal}\n${portraitCompact}\n${portraitDense}`;
+  assert.doesNotMatch(
+    portraitAndCellStyles,
+    /translateY\(|margin-top:\s*-|padding-(?:top|bottom):|align-items:\s*flex-end|justify-content:\s*flex-end|height:\s*100%/u
+  );
+  assert.match(portrait, /daily-plan-portrait-memo-cell whitespace-pre-wrap align-top/u);
+});
+
 test("landscape density steps reduce canonical vertical metrics monotonically", async () => {
   const styles = await readFile(stylesPath, "utf8");
   const baseStyles = sourceBetween(styles, ".daily-plan-template {", ".daily-plan-document--portrait {");

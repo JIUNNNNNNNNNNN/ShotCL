@@ -386,7 +386,7 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     trigger: "feature",
     priority: 100,
     title: "PDF 저장",
-    description: "기본 또는 세로형 PDF로 저장할 수 있습니다.",
+    description: "가로 PDF 또는 모바일용 PDF로 저장할 수 있습니다.",
     persistentAnchor: "daily-plan.pdf-actions",
     compactAnchor: "shell.action-toggle",
     preferredPlacement: "left",

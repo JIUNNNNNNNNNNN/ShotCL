@@ -52,6 +52,7 @@ export type ProjectPageActionId =
   | "scenarioDelete";
 
 export type ProjectPageActionOverride = {
+  label?: string;
   href?: string;
   onSelect?: () => void;
   active?: boolean;
@@ -102,7 +103,7 @@ type MenuDefinition = {
 
 const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   dailyPlanPdf: { label: "PDF 저장", icon: Printer },
-  dailyPlanPortraitPdf: { label: "PDF 세로 저장", icon: Printer },
+  dailyPlanPortraitPdf: { label: "모바일용 PDF", icon: Printer },
   dailyPlanSave: { label: "일촬표 저장", icon: Save, emphasis: "primary" },
   archiveDiagram: { label: "부감도", icon: Map },
   archiveStoryboard: { label: "콘티", icon: Clapperboard },

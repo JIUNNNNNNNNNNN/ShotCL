@@ -251,6 +251,39 @@ test("PDF capture narrowly restores html2canvas font metrics images and removes 
   );
 });
 
+test("Portrait two-page capture keeps one font-metrics fix active through both pages", async () => {
+  const styleDocument = createStyleOwnerDocument();
+  const root = createRoot(
+    [{ id: "portrait-primary" }, { id: "portrait-secondary" }],
+    styleDocument.ownerDocument
+  );
+  const captures = [];
+
+  const result = await exportDailyPlanPdf({
+    root,
+    orientation: "portrait",
+    captureMode: "paginated",
+    filename: "mobile.pdf"
+  }, createDependencies({
+    orientation: "portrait",
+    capture(page, options) {
+      assert.equal(styleDocument.mountedStyles.length, 1);
+      captures.push({
+        id: page.id,
+        rule: styleDocument.mountedStyles[0].textContent
+      });
+      return createCanonicalCanvas(options);
+    }
+  }));
+
+  assert.equal(result.pageCount, 2);
+  assert.deepEqual(captures.map(({ id }) => id), ["portrait-primary", "portrait-secondary"]);
+  assert.ok(captures.every(({ rule }) => rule === captures[0].rule));
+  assert.match(captures[0].rule, /img\[src="data:image\/gif;base64,[^"]+"\] \{ display: inline-block !important; \}/u);
+  assert.equal(styleDocument.mountedStyles.length, 0);
+  assert.equal(styleDocument.removedStyles.length, 1);
+});
+
 test("font metrics compatibility style is removed when html2canvas rejects", async () => {
   const styleDocument = createStyleOwnerDocument();
   const root = createRoot([], styleDocument.ownerDocument);
