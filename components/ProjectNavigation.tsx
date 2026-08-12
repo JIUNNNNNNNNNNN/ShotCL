@@ -698,11 +698,11 @@ function RoundNavigationLink({
       onPointerUp={cancelLongPress}
       onPointerCancel={cancelLongPress}
       onDragStart={(event) => event.preventDefault()}
-      className={`project-navigation__round-link block min-w-0 select-none rounded-[var(--ui-radius-control)] border text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
+      className={`project-navigation__round-link box-border flex min-w-0 items-center select-none rounded-[var(--ui-radius-control)] border text-xs transition-colors [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
         active ? "border-field-primary bg-field-primary-soft text-field-primary" : "border-transparent text-field-muted hover:border-field-border hover:bg-field-hover hover:text-field-text"
       }`}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
+      <span className="flex w-full min-w-0 items-center gap-1.5">
         <span className="min-w-0 flex-1 break-words font-bold leading-4 [overflow-wrap:anywhere]">{formatDailyPlanEpisodeLabel(plan.episode)}</span>
         <span className="shrink-0 text-[10px] tabular-nums opacity-75">{formatDailyPlanCardDate(plan.shootingDate)}</span>
       </span>

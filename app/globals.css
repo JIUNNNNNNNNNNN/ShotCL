@@ -2906,6 +2906,7 @@ button {
 }
 
 .project-navigation__round-link {
+  box-sizing: border-box;
   min-height: 44px;
   padding: 7px 8px;
 }
@@ -3173,12 +3174,6 @@ button {
   .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-label,
   .project-shell[data-project-shell-mode="persistent"] .project-action-menu__item {
     font-size: 0.75rem;
-  }
-
-  .project-shell[data-project-shell-mode="persistent"] .project-navigation__round-link > span {
-    flex-direction: column;
-    align-items: center;
-    gap: 1px;
   }
 
   .project-shell[data-project-shell-mode="persistent"] .project-action-menu__header .font-display {
