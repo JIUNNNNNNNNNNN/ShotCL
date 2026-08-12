@@ -13,6 +13,8 @@ export type CallSheetPerson = {
   contact?: string;
   callTime: string;
   callLocation: string;
+  /** 배우 CALL 장소가 일반 LOCATION을 선택했을 때의 안정적인 장소 ID입니다. */
+  callLocationId?: string;
   notes: string;
 };
 
@@ -603,6 +605,7 @@ function normalizePeople(rows: CallSheetPerson[] | undefined) {
       contact: formatKoreanPhoneNumber(row?.contact ?? ""),
       callTime: row?.callTime ?? "",
       callLocation: row?.callLocation ?? "",
+      callLocationId: String(row?.callLocationId ?? "").trim() || undefined,
       notes: row?.notes ?? ""
     };
   });

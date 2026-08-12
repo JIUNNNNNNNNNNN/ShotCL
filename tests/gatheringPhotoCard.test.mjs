@@ -66,7 +66,9 @@ test("editable plans without a gathering record keep the upload skeleton", () =>
   assert.match(componentSource, /gatheringPointId:\s*place\?\.persistedId \?\? null/u);
   assert.match(componentSource, /locationName:\s*place\?\.locationName \|\| "집합장소"/u);
   assert.match(componentSource, /meta\.gatheringPoints\.find\(\(item\) => item\.photos\.length > 0\)/u);
-  assert.match(componentSource, /if \(!primaryLocation && !locationName && !point\) return null/u);
+  assert.match(componentSource, /resolveEffectiveGatheringLocation\(plan\.shootingLocations\)/u);
+  assert.match(componentSource, /id: `location:\$\{effectiveLocation\.id\}`/u);
+  assert.match(componentSource, /if \(!locationName && !point\) return null/u);
 });
 
 test("meeting photo scope blocks the native iOS image callout and drag path", () => {

@@ -139,7 +139,11 @@ function cloneDailyPlanMemo(
   const starring = source.starring.map((row) => {
     const id = createNestedId("star");
     if (row.id) starringIds.set(row.id, id);
-    return { ...row, id };
+    return {
+      ...row,
+      id,
+      callLocationId: remapOptionalId(row.callLocationId, locationIds)
+    };
   });
   const sceneIds = new Map<string, string>();
   const timetableScenes = source.timetableScenes.map((scene) => {

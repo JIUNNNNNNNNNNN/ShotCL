@@ -274,6 +274,7 @@ function isMeaningfulLegacyTeam(rows: TeamCallSheetRow[]) {
   return rows.some((row) => (
     row.callTime.trim()
     || row.callLocation.trim()
+    || Boolean(row.callLocationId?.trim())
     || row.notes.trim()
     || row.name.trim()
     || (row.contact ?? "").trim()
@@ -300,6 +301,7 @@ function hasMeaningfulPeople(rows: CallSheetPerson[]) {
     || (person.contact ?? "").trim()
     || person.callTime.trim()
     || person.callLocation.trim()
+    || Boolean(person.callLocationId?.trim())
     || person.notes.trim()
   ));
 }

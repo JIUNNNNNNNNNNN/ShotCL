@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, RotateCcw, Search } from "lucide-react";
@@ -72,10 +72,16 @@ import {
   hasDailyPlanLocationSearchMetadata
 } from "@/lib/dailyPlan/location";
 import {
+  buildDailyPlanLocationOptions,
+  getDailyPlanLocationReferenceAddress,
+  resolveDailyPlanLocationReference,
+  resolveEffectiveGatheringLocation,
+  type DailyPlanLocationOption
+} from "@/lib/dailyPlan/locationReferences";
+import {
   buildSceneLocationOptions,
   createSceneLocationKey,
   formatDailyPlanTimetableLocation,
-  getDailyPlanLocationDisplayName,
   migrateLegacySceneLocationsToLocationCards,
   normalizeDailyPlanLocationAssignments
 } from "@/lib/dailyPlan/sceneLocations";
@@ -708,6 +714,14 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     () => buildSceneLocationOptions(sceneListItems),
     [sceneListItems]
   );
+  const dailyPlanLocationOptions = useMemo(
+    () => buildDailyPlanLocationOptions(locations),
+    [locations]
+  );
+  const effectiveGatheringLocation = useMemo(
+    () => resolveEffectiveGatheringLocation(locations),
+    [locations]
+  );
   const sceneLocationAssignments = useMemo(
     () => buildSceneLocationAssignments(locations),
     [locations]
@@ -1003,6 +1017,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     setLocations((current) => current.map((location, locationIndex) => ({ ...location, isPrimary: locationIndex === index })));
   }
 
+  function setMeetingLocationId(locationId: string) {
+    setLocations((current) => current.map((location) => ({
+      ...location,
+      isPrimary: Boolean(locationId) && location.id === locationId
+    })));
+  }
+
   function deleteLocation(index: number) {
     const target = locations[index];
     setLocations((current) => current.length > 1
@@ -1018,6 +1039,19 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       });
       setScenes((current) => current.map((scene) => (scene.locationId === target.id ? { ...scene, locationId: "", locationName: "" } : scene)));
       setMealTimes((current) => current.map((meal) => (meal.locationId === target.id ? { ...meal, locationId: "" } : meal)));
+      setPrintMeta((current) => ({
+        ...current,
+        starring: current.starring.map((person) => (
+          person.callLocationId === target.id
+            ? { ...person, callLocation: "", callLocationId: undefined }
+            : person
+        )),
+        teams: current.teams.map((team) => (
+          team.callLocationId === target.id
+            ? { ...team, callLocation: "", callLocationId: undefined }
+            : team
+        ))
+      }));
     }
   }
 
@@ -2107,6 +2141,20 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
           <div className="order-2 mt-3 grid gap-3 md:mt-6 md:gap-5">
             <section className="field-subsection overflow-visible p-1.5 md:p-2">
+              <label className="mb-2 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border-b border-field-border pb-2">
+                <span className="text-xs font-black text-field-subtle">집합장소</span>
+                <select
+                  className={`${centeredSelectClass} !min-h-9`}
+                  value={effectiveGatheringLocation?.id ?? ""}
+                  onChange={(event) => setMeetingLocationId(event.currentTarget.value)}
+                  aria-label="기본 집합장소"
+                >
+                  <option value="">장소 없음</option>
+                  {dailyPlanLocationOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
               <DailyPlanLocationReorderList
                 items={locations}
                 onChange={setLocations}
@@ -2218,7 +2266,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <div className="max-md:col-start-2 max-md:row-start-1">
                         <DailyPlanLocationMenu
                           label={`촬영장소 ${index + 1}`}
-                          isPrimary={Boolean(location.isPrimary)}
+                          isPrimary={effectiveGatheringLocation?.id === location.id}
                           isDetailExpanded={expandedLocationDetailId === location.id}
                           canAdd={index === locations.length - 1}
                           isOpen={openLocationMenuId === location.id}
@@ -2310,10 +2358,10 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                         <td className={`${timetableCellClass} max-md:order-3 max-md:col-span-3`}><span className={timetableFieldLabelClass}>소요</span><RuntimePicker value={getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)} onChange={(value) => updateMealTimeField(mealIndex, "runtimeMinutes", value)} showLabel={false} /></td>
                         <td className={`${timetableCellClass} max-md:order-4 max-md:col-span-6`}>
                           <span className={timetableFieldLabelClass}>장소</span>
-                          <select className={`${centeredSelectClass} ${timetableControlClass}`} value={meal.locationId ?? ""} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
-                            <option value="">빈칸</option>
-                            {locations.filter(isMeaningfulDailyPlanLocationCard).map((location, locationIndex) => (
-                              <option key={location.id} value={location.id}>{getDailyPlanLocationOptionLabel(location, locationIndex)}</option>
+                          <select className={`${centeredSelectClass} ${timetableControlClass}`} value={resolveDailyPlanLocationSelectValue(meal.locationId, "", locations)} onChange={(event) => updateMealLocation(mealIndex, event.target.value)} aria-label={`기타 일정 ${mealIndex + 1} 장소`}>
+                            <option value="">장소 없음</option>
+                            {dailyPlanLocationOptions.map((option) => (
+                              <option key={option.id} value={option.id}>{option.label}</option>
                             ))}
                           </select>
                         </td>
@@ -2549,8 +2597,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <CallLocationSelect
                         ariaLabel={`배우 ${index + 1} 집합장소`}
                         value={person.callLocation}
+                        locationId={person.callLocationId}
                         locations={locations}
-                        onChange={(value) => updateStarring(index, { callLocation: value })}
+                        options={dailyPlanLocationOptions}
+                        onChange={(value, locationId) => updateStarring(index, {
+                          callLocation: value,
+                          callLocationId: locationId || undefined
+                        })}
                       />
                       <MemoPopoverField value={person.notes} placeholder="주의사항" ariaLabel={`배우 ${index + 1} 주의사항 수정`} onChange={(value) => updateStarring(index, { notes: value })} />
                     </div>
@@ -2606,7 +2659,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                       <CallLocationSelect
                         ariaLabel={`${team.team || `부서 ${index + 1}`} 집합장소`}
                         value={team.callLocation}
+                        locationId={team.callLocationId}
                         locations={locations}
+                        options={dailyPlanLocationOptions}
                         onChange={(value, locationId) => updateTeam(index, {
                           callLocation: value,
                           callLocationId: locationId || undefined
@@ -3430,67 +3485,55 @@ function RuntimePicker({ value, onChange, showLabel = true }: { value: number | 
 function CallLocationSelect({
   ariaLabel,
   value,
+  locationId,
   locations,
+  options,
   onChange
 }: {
   ariaLabel: string;
   value: string;
+  locationId?: string;
   locations: DailyPlanLocation[];
+  options: DailyPlanLocationOption[];
   onChange: (value: string, locationId: string) => void;
 }) {
-  const listId = useId();
-  const locationOptions = locations.flatMap((location, index) => {
-    if (!isMeaningfulDailyPlanLocationCard(location)) return [];
-    const name = getDailyPlanLocationOptionLabel(location, index);
-    const duplicateCount = locations.filter((candidate, candidateIndex) => (
-      isMeaningfulDailyPlanLocationCard(candidate)
-      && normalizeGatheringLocationNameForInput(getDailyPlanLocationOptionLabel(candidate, candidateIndex))
-      === normalizeGatheringLocationNameForInput(name)
-    )).length;
-    const detail = String(location.roadAddress || location.address || location.detail || "").trim();
-    return [{
-      id: location.id,
-      name,
-      value: duplicateCount > 1
-        ? `${name} · ${detail || `장소 ${index + 1}`}`
-        : name
-    }];
-  });
+  const resolution = resolveDailyPlanLocationReference({ locations, locationId, legacyText: value });
+  const legacyOptionValue = "__daily_plan_legacy_location__";
+  const selectedValue = resolution.kind === "location"
+    ? resolution.option?.id ?? ""
+    : resolution.kind === "legacy"
+      ? legacyOptionValue
+      : "";
 
   return (
-    <>
-      <input
-        type="text"
-        className={`${compactInputClass} daily-plan-dropdown-no-indicator`}
-        value={value}
-        list={listId}
-        onChange={(event) => {
-          const nextValue = event.currentTarget.value;
-          const selectedOption = locationOptions.find((option) => option.value === nextValue);
-          if (selectedOption) {
-            onChange(selectedOption.name, selectedOption.id);
-            return;
-          }
-          const normalizedName = normalizeGatheringLocationNameForInput(nextValue);
-          const matches = locationOptions.filter((option) => (
-            normalizeGatheringLocationNameForInput(option.name) === normalizedName
-          ));
-          onChange(nextValue, matches.length === 1 ? matches[0].id : "");
-        }}
-        placeholder="집합장소"
-        aria-label={ariaLabel}
-      />
-      <datalist id={listId}>
-        {locationOptions.map((option) => (
-          <option key={option.id} value={option.value} />
-        ))}
-      </datalist>
-    </>
+    <select
+      className={`${centeredSelectClass} ${timetableControlClass}`}
+      value={selectedValue}
+      onChange={(event) => {
+        const nextId = event.currentTarget.value;
+        const selectedOption = options.find((option) => option.id === nextId);
+        onChange(selectedOption?.label ?? "", selectedOption?.id ?? "");
+      }}
+      aria-label={ariaLabel}
+    >
+      <option value="">장소 없음</option>
+      {resolution.kind === "legacy" ? (
+        <option value={legacyOptionValue}>{resolution.label}</option>
+      ) : null}
+      {options.map((option) => (
+        <option key={option.id} value={option.id}>{option.label}</option>
+      ))}
+    </select>
   );
 }
 
-function normalizeGatheringLocationNameForInput(value: string) {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("ko-KR");
+function resolveDailyPlanLocationSelectValue(
+  locationId: string | undefined,
+  legacyText: string,
+  locations: DailyPlanLocation[]
+) {
+  const resolution = resolveDailyPlanLocationReference({ locations, locationId, legacyText });
+  return resolution.kind === "location" ? resolution.option?.id ?? "" : "";
 }
 
 function ShootingOrderField({
@@ -5129,13 +5172,15 @@ function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTime
   }));
 
   const additionalScheduleRows: DailyPlanPreviewTimetableRow[] = data.mealTimes.map((meal) => {
-    const locationIndex = data.locations.findIndex((location) => location.id === meal.locationId);
     return {
       type: "additionalSchedule",
       start: meal.startTime || "",
       end: meal.endTime || "",
       runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
-      location: locationIndex >= 0 ? getDailyPlanLocationOptionLabel(data.locations[locationIndex], locationIndex) : "",
+      location: getDailyPlanLocationReferenceAddress({
+        locations: data.locations,
+        locationId: meal.locationId
+      }),
       memo: meal.memo
     };
   });
@@ -5526,10 +5571,6 @@ function isMeaningfulDailyPlanLocationCard(location: DailyPlanLocation) {
     || location.providerPlaceName?.trim()
     || location.name.trim()
   );
-}
-
-function getDailyPlanLocationOptionLabel(location: DailyPlanLocation, index: number) {
-  return getDailyPlanLocationDisplayName(location) || `촬영장소 ${index + 1}`;
 }
 
 function buildSceneLocationAssignments(locations: DailyPlanLocation[]) {
@@ -6564,8 +6605,24 @@ function buildDailyPlanPreviewData(plan: DailyPlanDraft, scenes: SceneBlockInput
       producerContact: formatKoreanPhoneNumber(derivedMeta.producerContact),
       sunrise: formatTimeDisplay(derivedMeta.sunrise),
       sunset: formatTimeDisplay(derivedMeta.sunset),
-      starring: derivedMeta.starring.map((person) => ({ ...person, callTime: formatTimeDisplay(person.callTime) })),
-      teams: derivedMeta.teams.map((team) => ({ ...team, callTime: formatTimeDisplay(team.callTime) }))
+      starring: derivedMeta.starring.map((person) => ({
+        ...person,
+        callTime: formatTimeDisplay(person.callTime),
+        callLocation: getDailyPlanLocationReferenceAddress({
+          locations,
+          locationId: person.callLocationId,
+          legacyText: person.callLocation
+        })
+      })),
+      teams: derivedMeta.teams.map((team) => ({
+        ...team,
+        callTime: formatTimeDisplay(team.callTime),
+        callLocation: getDailyPlanLocationReferenceAddress({
+          locations,
+          locationId: team.callLocationId,
+          legacyText: team.callLocation
+        })
+      }))
     }
   };
 }

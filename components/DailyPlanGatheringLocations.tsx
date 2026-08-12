@@ -45,11 +45,10 @@ import {
   normalizeGatheringLocationName,
   selectDailyPlanGatheringPoints
 } from "@/lib/dailyPlan/gatheringPoints";
-import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
-import { getDailyPlanLocationDisplayName } from "@/lib/dailyPlan/sceneLocations";
+import { resolveEffectiveGatheringLocation } from "@/lib/dailyPlan/locationReferences";
 import { decodeDailyPlanMemo, type DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
-import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
+import type { DailyPlan } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import type { AutosaveStatus as AutosaveStatusValue } from "@/lib/client/latestAutosaveQueue";
 import styles from "./DailyPlanGatheringLocations.module.css";
@@ -1512,7 +1511,57 @@ function toExistingDraftPhoto(photo: DailyPlanGatheringPhoto): ExistingDraftPhot
 }
 
 function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace | null {
-  const canonicalPoint = selectDailyPlanGatheringPoints(plan)[0] ?? null;
+  const meta = decodeDailyPlanMemo(plan.memo);
+  const canonicalPoints = selectDailyPlanGatheringPoints(plan);
+  const effectiveLocation = resolveEffectiveGatheringLocation(plan.shootingLocations);
+
+  if (effectiveLocation) {
+    const matchingPoint = canonicalPoints.find((point) => (
+      point.locationId === effectiveLocation.id
+    )) ?? null;
+    if (matchingPoint) {
+      return {
+        id: matchingPoint.id,
+        persistedId: matchingPoint.persistedId,
+        locationId: effectiveLocation.id,
+        locationName: effectiveLocation.label,
+        address: effectiveLocation.address,
+        departmentIds: matchingPoint.departments.map((department) => department.id),
+        photos: matchingPoint.photos
+      };
+    }
+
+    const storedPoint = meta.gatheringPoints.find((point) => (
+      point.locationId === effectiveLocation.id
+    )) ?? null;
+    if (storedPoint) {
+      const currentDepartmentIds = new Set(meta.teams.map((team) => team.id));
+      return {
+        id: storedPoint.id,
+        persistedId: storedPoint.id,
+        locationId: effectiveLocation.id,
+        locationName: effectiveLocation.label,
+        address: effectiveLocation.address,
+        departmentIds: storedPoint.departmentIds.filter((id) => currentDepartmentIds.has(id)),
+        photos: storedPoint.photos
+      };
+    }
+
+    // 장소1 fallback은 저장 값을 만들지 않습니다. 사진을 실제로 고른 뒤에만
+    // 이 stable location ID를 부모 point와 연결합니다.
+    return {
+      id: `location:${effectiveLocation.id}`,
+      persistedId: null,
+      locationId: effectiveLocation.id,
+      locationName: effectiveLocation.label,
+      address: effectiveLocation.address,
+      departmentIds: [],
+      photos: []
+    };
+  }
+
+  // 실제 촬영 장소가 없는 과거 일촬표에서만 부서/사진 metadata를 읽기 fallback합니다.
+  const canonicalPoint = canonicalPoints[0] ?? null;
   if (canonicalPoint) {
     return {
       id: canonicalPoint.id,
@@ -1525,40 +1574,25 @@ function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace |
     };
   }
 
-  // metadata가 생기기 전의 오래된 일촬표만 읽기 호환합니다. 새 저장은 canonical point를 생성합니다.
-  const primaryLocation = plan.shootingLocations.find((location) => location.isPrimary) ?? null;
-  const fallbackLocationName = primaryLocation
-    ? getPrimaryLocationName(primaryLocation)
-    : normalizeGatheringLocationName(plan.meetingLocation);
-  const meta = decodeDailyPlanMemo(plan.memo);
-  const pointByLocationId = primaryLocation?.id
-    ? meta.gatheringPoints.find((point) => point.locationId === primaryLocation.id)
-    : null;
+  const fallbackLocationName = normalizeGatheringLocationName(plan.meetingLocation);
   // Explicit photo upload may create a neutral canonical point for a legacy
   // plan with no location/team row. Keep that persisted point visible after
   // the local memo patch instead of falling back to the editable skeleton.
-  const point = pointByLocationId
-    ?? meta.gatheringPoints.find((item) => item.photos.length > 0)
+  const point = meta.gatheringPoints.find((item) => item.photos.length > 0)
     ?? meta.gatheringPoints[0]
     ?? null;
   const locationName = fallbackLocationName || normalizeGatheringLocationName(point?.locationName);
-  if (!primaryLocation && !locationName && !point) return null;
+  if (!locationName && !point) return null;
 
   return {
-    id: point?.id ?? `primary:${primaryLocation?.id || "legacy"}`,
+    id: point?.id ?? "legacy:gathering",
     persistedId: point?.id ?? null,
-    locationId: point?.locationId ?? primaryLocation?.id ?? null,
+    locationId: point?.locationId ?? null,
     locationName,
-    address: primaryLocation
-      ? getDailyPlanLocationAddress(primaryLocation)
-      : String(point?.address ?? "").trim(),
+    address: String(point?.address ?? "").trim(),
     departmentIds: point?.departmentIds ?? [],
     photos: point?.photos ?? []
   };
-}
-
-function getPrimaryLocationName(location: DailyPlanLocation) {
-  return normalizeGatheringLocationName(getDailyPlanLocationDisplayName(location));
 }
 
 function validateGatheringPhotoSource(file: File) {

@@ -6,7 +6,10 @@ import {
   type DailyPlanPrintMeta,
   type TeamCallSheetRow
 } from "@/lib/dailyPlan/printMeta";
-import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+import {
+  getDailyPlanLocationOutputAddress,
+  resolveDailyPlanLocationReference
+} from "@/lib/dailyPlan/locationReferences";
 import { getDailyPlanLocationDisplayName } from "@/lib/dailyPlan/sceneLocations";
 import type { DailyPlan, DailyPlanLocation } from "@/lib/types";
 
@@ -63,7 +66,7 @@ export function deriveDailyPlanGatheringPoints(
   const namesByPointId = new Map<string, Set<string>>();
 
   meta.teams.forEach((team) => {
-    const name = normalizeGatheringLocationName(team.callLocation);
+    const name = resolveTeamLocationReference(team, locations).locationName;
     if (!name || !team.gatheringPointId) return;
     const names = namesByPointId.get(team.gatheringPointId) ?? new Set<string>();
     names.add(normalizedLocationKey(name));
@@ -72,7 +75,8 @@ export function deriveDailyPlanGatheringPoints(
 
   const groups = new Map<string, DerivedDailyPlanGatheringPoint>();
   meta.teams.forEach((team) => {
-    const locationName = normalizeGatheringLocationName(team.callLocation);
+    const resolvedLocation = resolveTeamLocationReference(team, locations);
+    const locationName = resolvedLocation.locationName;
     if (!locationName) return;
     const storedPoint = team.gatheringPointId
       ? storedPoints.get(team.gatheringPointId) ?? null
@@ -84,7 +88,7 @@ export function deriveDailyPlanGatheringPoints(
       storedPoint
       && normalizedLocationKey(storedPoint.locationName) === normalizedLocationKey(locationName)
     );
-    const locationId = resolveLocationId(team, locations);
+    const locationId = resolvedLocation.locationId;
     const relationId = storedPoint && (!hasSplitNames || matchesStoredName)
       ? storedPoint.id
       : null;
@@ -93,7 +97,7 @@ export function deriveDailyPlanGatheringPoints(
       : locationId
         ? `location:${locationId}`
         : `legacy:${normalizedLocationKey(locationName)}`;
-    const location = findLocation(locations, locationId, locationName);
+    const location = resolvedLocation.location ?? findLocation(locations, locationId, locationName);
     const current = groups.get(groupKey);
     const department = {
       id: team.id,
@@ -113,7 +117,7 @@ export function deriveDailyPlanGatheringPoints(
       persistedId: relationId,
       locationId: locationId || null,
       locationName,
-      address: location ? getLocationAddress(location) : String(storedPoint?.address ?? "").trim(),
+      address: location ? getDailyPlanLocationOutputAddress(location) : String(storedPoint?.address ?? "").trim(),
       mapUrl: location?.inputMode === "manual" ? "" : location?.naverMapUrl?.trim() || "",
       note: uniqueText([department.note, storedPoint?.note]),
       departments: [department],
@@ -194,7 +198,7 @@ export function reconcileDailyPlanGatheringPoints(
       id: pointId,
       locationName: group.locationName,
       locationId: group.locationId || undefined,
-      address: (location ? getLocationAddress(location) : previous?.address) || undefined,
+      address: (location ? getDailyPlanLocationOutputAddress(location) : previous?.address) || undefined,
       note: uniqueText([...notes, previous?.note]) || undefined,
       departmentIds: group.teams.map((team) => team.id),
       departmentTimes: group.teams.map((team) => ({
@@ -357,7 +361,7 @@ function collectTeamGroups(
 
   teams.forEach((team) => {
     const pointId = String(team.gatheringPointId ?? "").trim();
-    const name = normalizedLocationKey(team.callLocation);
+    const name = normalizedLocationKey(resolveTeamLocationReference(team, locations).locationName);
     if (!pointId || !name || !existingPoints.has(pointId)) return;
     const names = currentNamesByPointId.get(pointId) ?? new Set<string>();
     names.add(name);
@@ -370,9 +374,10 @@ function collectTeamGroups(
   });
 
   teams.forEach((team) => {
-    const locationName = normalizeGatheringLocationName(team.callLocation);
+    const resolvedLocation = resolveTeamLocationReference(team, locations);
+    const locationName = resolvedLocation.locationName;
     if (!locationName) return;
-    const locationId = resolveLocationId(team, locations);
+    const locationId = resolvedLocation.locationId;
     const normalizedName = normalizedLocationKey(locationName);
     const requestedPointId = String(team.gatheringPointId ?? "").trim();
     const existingPointId = existingPoints.has(requestedPointId)
@@ -417,20 +422,22 @@ function uniqueMappedValue(map: Map<string, string[]>, key: string) {
   return values.length === 1 ? values[0] : "";
 }
 
-function resolveLocationId(team: TeamCallSheetRow, locations: DailyPlanLocation[]) {
-  const preferredId = String(team.callLocationId ?? "").trim();
-  if (preferredId && locations.some((location) => location.id === preferredId)) return preferredId;
-  const locationName = normalizedLocationKey(team.callLocation);
-  if (!locationName) return "";
-  const matches = locations.filter((location) => (
-    normalizedLocationKey(getDailyPlanLocationDisplayName(location)) === locationName
-  ));
-  if (matches.length === 1) return matches[0].id;
-  // 과거 일촬표가 provider name을 저장한 경우의 relation 복구용이며 화면 표기에는 쓰지 않습니다.
-  const legacyMatches = locations.filter((location) => (
-    normalizedLocationKey(location.providerPlaceName || location.name) === locationName
-  ));
-  return legacyMatches.length === 1 ? legacyMatches[0].id : "";
+function resolveTeamLocationReference(
+  team: TeamCallSheetRow,
+  locations: DailyPlanLocation[]
+) {
+  const resolution = resolveDailyPlanLocationReference({
+    locations,
+    locationId: team.callLocationId,
+    legacyText: team.callLocation
+  });
+  return {
+    locationId: resolution.kind === "location" ? resolution.locationId : "",
+    locationName: resolution.kind === "location" || resolution.kind === "legacy"
+      ? resolution.label
+      : "",
+    location: resolution.option?.location ?? null
+  };
 }
 
 function findLocation(locations: DailyPlanLocation[], locationId: string, locationName: string) {
@@ -447,10 +454,6 @@ function findLocation(locations: DailyPlanLocation[], locationId: string, locati
     normalizedLocationKey(location.providerPlaceName || location.name) === normalizedName
   ));
   return legacyMatches.length === 1 ? legacyMatches[0] : null;
-}
-
-function getLocationAddress(location: DailyPlanLocation) {
-  return getDailyPlanLocationAddress(location) || String(location.detail || "").trim();
 }
 
 function unique(values: Array<string | undefined>) {
