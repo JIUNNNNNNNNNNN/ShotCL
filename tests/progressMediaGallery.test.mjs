@@ -8,6 +8,7 @@ import {
   moveGalleryIndex,
   orderProgressMediaAsArchive,
   progressMediaIdentityKey,
+  progressMediaSummaryDisplayUrl,
   safeProgressThumbnailUrl
 } from "../lib/progress/mediaGallery.ts";
 
@@ -67,6 +68,21 @@ test("the list never substitutes an original URL for a missing thumbnail", () =>
   assert.equal(safeProgressThumbnailUrl("/original.jpg", "/original.jpg"), "");
   assert.equal(safeProgressThumbnailUrl("/original.jpg", ""), "");
   assert.equal(safeProgressThumbnailUrl("/original.jpg", "/thumb.jpg"), "/thumb.jpg");
+});
+
+test("summary display prefers a distinct thumbnail and safely falls back to original", () => {
+  assert.equal(
+    progressMediaSummaryDisplayUrl(" /original.jpg ", " /thumb.jpg "),
+    "/thumb.jpg"
+  );
+  assert.equal(
+    progressMediaSummaryDisplayUrl(" /original.jpg ", ""),
+    "/original.jpg"
+  );
+  assert.equal(
+    progressMediaSummaryDisplayUrl("/original.jpg", " /original.jpg "),
+    "/original.jpg"
+  );
 });
 
 test("linked thumbnail fallbacks cannot cross categories, duplicate URLs, or displace canonical media", () => {

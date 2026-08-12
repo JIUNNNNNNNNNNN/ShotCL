@@ -14,6 +14,12 @@ import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneCutMetadata } from "@/lib/archiveAssetMetadata";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
+import { progressMediaSummaryDisplayUrl } from "@/lib/progress/mediaGallery";
+import {
+  createProgressMediaPlanScope,
+  isProgressMediaAssetInPlanScope,
+  progressMediaCandidateDatabaseFilter
+} from "@/lib/progress/mediaScope";
 import type {
   ArchiveMediaAssetType,
   ArchiveSceneCutMetadata,
@@ -130,19 +136,49 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const dailyPlanId = cleanText(request.nextUrl.searchParams.get("dailyPlanId"), 500);
     const supabase = requireProjectAccessDb();
     if (progressMedia) {
-      let progressQuery = supabase
+      if (!UUID_PATTERN.test(dailyPlanId)) {
+        return NextResponse.json({ error: "진행도 회차 ID가 올바르지 않습니다." }, { status: 400 });
+      }
+      const { data: plan, error: planError } = await supabase
+        .from("daily_plans")
+        .select("id,episode,memo")
+        .eq("project_id", projectId)
+        .eq("id", dailyPlanId)
+        .maybeSingle();
+      if (planError) throw planError;
+      if (!plan) {
+        return NextResponse.json({ error: "진행도 회차를 찾을 수 없습니다." }, { status: 404 });
+      }
+      const progressPlanScope = createProgressMediaPlanScope({
+        id: String(plan.id ?? ""),
+        episode: String(plan.episode ?? ""),
+        memo: String(plan.memo ?? "")
+      });
+      if (!progressPlanScope.isWithinCandidateLimit) {
+        return NextResponse.json(
+          { error: "진행도 미디어를 조회할 씬 범위가 너무 큽니다." },
+          { status: 422 }
+        );
+      }
+      const { data, error } = await supabase
         .from("project_reference_assets")
         .select(PROGRESS_MEDIA_SELECT_COLUMNS)
         .eq("project_id", projectId)
         .in("asset_type", ["storyboard", "overhead"])
+        .or(progressMediaCandidateDatabaseFilter(progressPlanScope))
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: false });
-      if (dailyPlanId) progressQuery = progressQuery.eq("daily_plan_id", dailyPlanId);
-      const { data, error } = await progressQuery;
       if (error) throw error;
       const progressAssets = (data ?? [])
         .map(mapProgressMediaRow)
-        .filter(isProgressArchiveMediaAsset);
+        .filter(isProgressArchiveMediaAsset)
+        .filter((asset) => isProgressMediaAssetInPlanScope({
+          dailyPlanId: asset.dailyPlanId,
+          sceneId: asset.crop.sceneId ?? null,
+          sceneNumber: asset.crop.sceneNumber ?? asset.sceneNo ?? "",
+          cutNumber: nullablePositiveInteger(asset.crop.cutNumber ?? asset.cutNo),
+          episodeNumber: nullablePositiveInteger(asset.crop.episodeNumber)
+        }, progressPlanScope));
       const assets = progressMediaMode === "gallery"
         ? progressAssets
         : selectProgressMediaRepresentatives(progressAssets).map(toProgressMediaSummary);
@@ -2712,8 +2748,8 @@ function selectProgressMediaRepresentatives(
     return left.id.localeCompare(right.id);
   }).filter((asset) => {
     const crop = asset.crop;
-    const sceneKey = normalizeSceneNumber(crop.sceneNumber ?? asset.sceneNo)
-      || cleanText(crop.sceneId, 100)
+    const sceneKey = cleanText(crop.sceneId, 100)
+      || normalizeSceneNumber(crop.sceneNumber ?? asset.sceneNo)
       || "unassigned";
     const cutNumber = nullablePositiveInteger(crop.cutNumber ?? asset.cutNo) ?? 0;
     const key = `${asset.assetType}\u0000${sceneKey}\u0000${cutNumber}`;
@@ -2723,16 +2759,19 @@ function selectProgressMediaRepresentatives(
   });
 }
 
-/** Summary responses intentionally omit original URLs; cards render thumbnailUrl only. */
+/** Summary responses carry one display URL; original galleries stay click-lazy. */
 function toProgressMediaSummary(asset: ReturnType<typeof mapAssetRow>) {
   const originalUrl = asset.publicUrl.trim();
   const thumbnailUrl = cleanText(asset.crop.thumbnailUrl, 2_000);
+  const displayUrl = progressMediaSummaryDisplayUrl(originalUrl, thumbnailUrl);
   return {
     ...asset,
-    publicUrl: "",
+    // Keep the canonical identity URL so explicit shot links and Archive
+    // representatives dedupe without loading the whole gallery.
+    publicUrl: originalUrl,
     crop: {
       ...asset.crop,
-      thumbnailUrl: thumbnailUrl && thumbnailUrl !== originalUrl ? thumbnailUrl : ""
+      thumbnailUrl: displayUrl
     }
   };
 }

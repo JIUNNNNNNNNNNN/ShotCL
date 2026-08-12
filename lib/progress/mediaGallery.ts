@@ -33,6 +33,18 @@ export function safeProgressThumbnailUrl(publicUrl: string, thumbnailUrl: string
     : "";
 }
 
+/** Initial cards prefer a distinct compact variant, with legacy original fallback. */
+export function progressMediaSummaryDisplayUrl(
+  publicUrl: string,
+  thumbnailUrl: string
+) {
+  const normalizedPublicUrl = publicUrl.trim();
+  const normalizedThumbnailUrl = thumbnailUrl.trim();
+  return normalizedThumbnailUrl && normalizedThumbnailUrl !== normalizedPublicUrl
+    ? normalizedThumbnailUrl
+    : normalizedPublicUrl;
+}
+
 /** 서버가 반환한 아카이브 순서를 바꾸지 않고 한 종류의 자료만 고릅니다. */
 export function buildProgressMediaGalleryItems(
   assets: readonly ProgressMediaGallerySource[],

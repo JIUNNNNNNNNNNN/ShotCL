@@ -50,7 +50,7 @@ test("Progress preserves the server seed and releases critical UI before media",
   assert.match(source, /selectedPlanRef\.current = selectedPlanDetail;\s*commitDailyPlanPatch/u);
 });
 
-test("Progress summary media is round-scoped and gallery media loads only on demand", () => {
+test("Progress summary media and stable Cut links load in bounded background batches", () => {
   const source = readSource("app/projects/[id]/page.tsx");
   const shotCard = readSource("components/ShotCard.tsx");
 
@@ -62,7 +62,11 @@ test("Progress summary media is round-scoped and gallery media loads only on dem
     source.indexOf("const startProgressMediaLoad = useCallback"),
     source.indexOf("const refresh = useCallback")
   );
-  assert.doesNotMatch(summaryLoader, /loadShotOverheadDiagram|loadShotMediaLinks|applyShotMediaLinks/u);
+  assert.match(
+    summaryLoader,
+    /const \[archiveAssets, diagrams, linksByRef\] = await Promise\.all\([\s\S]*?loadShotOverheadDiagrams\(criticalShots\)[\s\S]*?loadShotMediaLinks\(criticalShots\)/u
+  );
+  assert.match(summaryLoader, /applyShotMediaLinks\(currentShots, linksByRef, diagrams\)/u);
   assert.match(
     source,
     /const loadShotGalleryMedia = useCallback[\s\S]*?loadProgressArchiveMediaAssets\(projectId, selectedDailyPlanId, "gallery"\)/u
@@ -149,7 +153,7 @@ test("Progress archive responses omit editor-only columns and scenario parsing s
   assert.match(route, /const key = `\$\{asset\.assetType\}\\u0000\$\{sceneKey\}\\u0000\$\{cutNumber\}`/u);
   assert.match(
     route,
-    /function toProgressMediaSummary[\s\S]*?publicUrl: ""[\s\S]*?thumbnailUrl: thumbnailUrl && thumbnailUrl !== originalUrl \? thumbnailUrl : ""/u
+    /function toProgressMediaSummary[\s\S]*?publicUrl: originalUrl[\s\S]*?thumbnailUrl: displayUrl/u
   );
   assert.match(route, /progressMediaMode === "gallery"\s*\? progressAssets/u);
   const guestShotColumns = shotRoute.match(/const guestShotListColumns = "([^"]+)"/u)?.[1] ?? "";

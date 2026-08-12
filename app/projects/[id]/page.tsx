@@ -468,11 +468,27 @@ export default function ProjectDetailPage() {
     progressMediaLoadingEntriesRef.current.set(requestedEntryKey, mediaLoadVersion);
     void (async () => {
       try {
-        const archiveAssets = await auditQuery(
-          "progress.loadArchiveMediaSummary",
-          "app/projects/[id]/page.tsx:startProgressMediaLoad",
-          () => loadProgressArchiveMediaAssets(projectId, requestedDailyPlanId, "summary")
-        ).catch(() => [] as ProgressArchiveMediaAsset[]);
+        const [archiveAssets, diagrams, linksByRef] = await Promise.all([
+          auditQuery(
+            "progress.loadArchiveMediaSummary",
+            "app/projects/[id]/page.tsx:startProgressMediaLoad",
+            () => loadProgressArchiveMediaAssets(projectId, requestedDailyPlanId, "summary")
+          ).catch(() => [] as ProgressArchiveMediaAsset[]),
+          criticalShots.length > 0
+            ? auditQuery(
+                "progress.loadOverheadDiagrams",
+                "app/projects/[id]/page.tsx:startProgressMediaLoad",
+                () => loadShotOverheadDiagrams(criticalShots)
+              ).catch(() => new Map())
+            : Promise.resolve(new Map()),
+          criticalShots.length > 0
+            ? auditQuery(
+                "progress.loadMediaLinks",
+                "app/projects/[id]/page.tsx:startProgressMediaLoad",
+                () => loadShotMediaLinks(criticalShots)
+              ).catch(() => new Map<string, ShotMediaLink[]>())
+            : Promise.resolve(new Map<string, ShotMediaLink[]>())
+        ]);
         if (
           activeProgressEntryKeyRef.current !== requestedEntryKey
           || progressMediaLoadVersionRef.current !== mediaLoadVersion
@@ -481,16 +497,47 @@ export default function ProjectDetailPage() {
         const currentSelectedPlan = selectedPlanRef.current?.id === requestedDailyPlanId
           ? selectedPlanRef.current
           : null;
+        // Media requests are intentionally non-blocking. Merge their result into
+        // the latest Shot instances so an OK/OMIT or Realtime patch that landed
+        // while the requests were in flight cannot be replaced by the older seed.
+        const currentShots = shotsRef.current;
+        const resolvedMediaByShotId = new Map(
+          applyShotMediaLinks(currentShots, linksByRef, diagrams)
+            .map((shot) => [shot.id, shot])
+        );
+        const nextShots = currentShots.map((shot) => {
+          const resolved = resolvedMediaByShotId.get(shot.id);
+          if (
+            !resolved
+            || (
+              resolved.storyboardImageUrl === shot.storyboardImageUrl
+              && resolved.overheadImageUrl === shot.overheadImageUrl
+              && resolved.overheadDiagram === shot.overheadDiagram
+            )
+          ) return shot;
+          return {
+            ...shot,
+            storyboardImageUrl: resolved.storyboardImageUrl,
+            overheadImageUrl: resolved.overheadImageUrl,
+            overheadDiagram: resolved.overheadDiagram
+          };
+        });
         archiveAssetsRef.current = archiveAssets;
+        shotsRef.current = nextShots;
+        setShots(nextShots);
         setArchiveMediaByShotId(currentSelectedPlan
           ? buildProgressArchiveMediaByShotId({
-              shots: criticalShots,
+              shots: nextShots,
               assets: archiveAssets,
               timetableScenes: decodeDailyPlanMemo(currentSelectedPlan.memo).timetableScenes,
               dailyPlanId: currentSelectedPlan.id,
               episodeNumber: parseEpisodeNumber(currentSelectedPlan.episode)
             })
           : new Map());
+        setMediaLinksByShotId(new Map(nextShots.map((shot) => [
+          shot.id,
+          linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
+        ])));
         progressMediaLoadedEntriesRef.current.add(requestedEntryKey);
       } catch {
         // Background media must never replace the already-rendered critical UI with an error state.

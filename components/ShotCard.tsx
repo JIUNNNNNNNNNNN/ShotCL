@@ -69,9 +69,7 @@ export const ShotCard = memo(function ShotCard({
       id: `${shot.id}:legacy-storyboard`,
       title: `${cutLabel} 콘티`,
       url: shot.storyboardImageUrl,
-      // Metadata가 없는 오래된 직접 연결은 원본을 목록 thumbnail로 내려받지 않습니다.
-      // Gallery에서는 원본 URL을 그대로 사용할 수 있고, 목록은 compact fallback을 표시합니다.
-      thumbnailUrl: ""
+      thumbnailUrl: shot.storyboardImageUrl
     } : null
   ), [cutLabel, effectiveArchiveMedia, shot.id, shot.storyboardImageUrl]);
   const overheadGallery = useMemo(() => buildProgressMediaGalleryItems(
@@ -81,7 +79,7 @@ export const ShotCard = memo(function ShotCard({
       id: `${shot.id}:legacy-overhead`,
       title: `${cutLabel} 부감도`,
       url: shot.overheadImageUrl,
-      thumbnailUrl: ""
+      thumbnailUrl: shot.overheadImageUrl
     } : null
   ), [cutLabel, effectiveArchiveMedia, shot.id, shot.overheadImageUrl]);
   const hasStoryboard = storyboardGallery.length > 0;
@@ -329,13 +327,17 @@ function ProgressMediaPreviewTile({
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   const firstItem = items[0] ?? null;
+  // Legacy archive rows may predate thumbnail generation. Their canonical
+  // browser URL remains a safe fallback; modern rows still prefer the compact
+  // thumbnail variant.
+  const previewUrl = firstItem?.thumbnailUrl || firstItem?.url || "";
   const hasContent = Boolean(firstItem || diagram);
   const count = items.length + (diagram ? 1 : 0);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     setImageFailed(false);
-  }, [firstItem?.thumbnailUrl]);
+  }, [previewUrl]);
 
   if (!hasContent) {
     return (
@@ -368,10 +370,10 @@ function ProgressMediaPreviewTile({
           <span className="relative z-[1] block h-full w-full">
             <ShotOverheadPreview diagram={diagram} label="부감도 미리보기" />
           </span>
-        ) : firstItem?.thumbnailUrl && !imageFailed ? (
+        ) : previewUrl && !imageFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={firstItem.thumbnailUrl}
+            src={previewUrl}
             alt=""
             loading="lazy"
             decoding="async"
