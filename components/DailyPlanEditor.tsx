@@ -1881,9 +1881,13 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       await exportDailyPlanPdf({
         root: exportRoot,
         orientation,
+        captureMode: orientation === "landscape" ? "live-root" : "paginated",
         filename: buildDailyPlanPdfFilename(currentPreviewData),
         ...(orientation === "landscape"
-          ? { validateSource: (root: HTMLElement) => doesDailyPlanPrintRootMatch(root, nextPrintJob) }
+          ? {
+            validateSource: (root: HTMLElement) => root === livePreviewPaperRef.current
+              && doesDailyPlanPrintRootMatch(root, nextPrintJob)
+          }
           : {})
       });
       setMessage(action === "portrait" ? "세로 PDF를 저장했습니다." : "PDF를 저장했습니다.");

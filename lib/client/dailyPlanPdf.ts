@@ -1,4 +1,5 @@
 export type DailyPlanPdfOrientation = "landscape" | "portrait";
+export type DailyPlanPdfCaptureMode = "live-root" | "paginated";
 
 export const DAILY_PLAN_PDF_ERROR_MESSAGE = "PDF를 만들지 못했습니다. 다시 시도해 주세요.";
 export const DAILY_PLAN_PDF_PAGE_SELECTOR = "[data-daily-plan-pdf-page]";
@@ -12,6 +13,7 @@ const A4_SHORT_EDGE_MM = 210;
 const A4_LONG_EDGE_MM = 297;
 const CANVAS_DIMENSION_TOLERANCE_PX = 2;
 const CANVAS_ASPECT_RATIO_TOLERANCE = 0.002;
+const MAX_DAILY_PLAN_PDF_CANVAS_PIXELS = 8_000_000;
 const HTML2CANVAS_FONT_METRICS_IMAGE_SOURCE =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
@@ -82,6 +84,8 @@ export type DailyPlanPdfDependencies = {
 };
 
 export type DailyPlanPdfExportInput = {
+  /** Landscape uses the one mounted white-paper root; Portrait keeps canonical pages. */
+  captureMode?: DailyPlanPdfCaptureMode;
   filename: string;
   orientation: DailyPlanPdfOrientation;
   root: HTMLElement;
@@ -136,7 +140,7 @@ const defaultDependencies: DailyPlanPdfDependencies = {
 };
 
 /**
- * 현재 편집 상태로 렌더된 canonical 문서를 A4 PDF로 만들고 즉시 다운로드합니다.
+ * 현재 편집 상태로 렌더된 문서를 고해상도 PNG로 캡처해 A4 PDF로 다운로드합니다.
  * 무거운 캡처/PDF 라이브러리는 이 함수가 호출될 때에만 불러옵니다.
  */
 export async function exportDailyPlanPdf(
@@ -146,7 +150,13 @@ export async function exportDailyPlanPdf(
   try {
     const filename = normalizePdfFilename(input.filename);
     assertExportInput(input);
-    const pages = resolvePdfPages(input.root);
+    const captureMode = input.captureMode ?? "paginated";
+    const pages = resolvePdfPages(input.root, captureMode);
+    const geometries = pages.map((page) => resolveCaptureGeometry(
+      page,
+      input.orientation,
+      captureMode
+    ));
     const dependencies = { ...defaultDependencies, ...dependencyOverrides };
     const [html2canvas, JsPdf] = await Promise.all([
       dependencies.loadHtml2Canvas(),
@@ -159,12 +169,13 @@ export async function exportDailyPlanPdf(
       format: "a4",
       compress: true
     });
-    const geometry = resolvePageGeometry(input.orientation);
     const removeFontMetricsFix = installHtml2CanvasFontMetricsFix(input.root.ownerDocument);
     try {
       for (let index = 0; index < pages.length; index += 1) {
         assertSourceIsCurrent(input);
         const page = pages[index];
+        const geometry = geometries[index];
+        assertCaptureGeometryIsCurrent(page, geometry, captureMode);
         const canvas = await html2canvas(page, {
           allowTaint: false,
           backgroundColor: DAILY_PLAN_PDF_BACKGROUND,
@@ -200,15 +211,17 @@ export async function exportDailyPlanPdf(
               livePreviewPaper.style.transform = "none";
               livePreviewPaper.style.transformOrigin = "top left";
             }
-            const width = `${geometry.cssWidth}px`;
-            const height = `${geometry.cssHeight}px`;
             clonedPage.style.boxSizing = "border-box";
-            clonedPage.style.width = width;
-            clonedPage.style.minWidth = width;
-            clonedPage.style.maxWidth = width;
-            clonedPage.style.height = height;
-            clonedPage.style.minHeight = height;
-            clonedPage.style.maxHeight = height;
+            if (captureMode === "paginated") {
+              const width = `${geometry.cssWidth}px`;
+              const height = `${geometry.cssHeight}px`;
+              clonedPage.style.width = width;
+              clonedPage.style.minWidth = width;
+              clonedPage.style.maxWidth = width;
+              clonedPage.style.height = height;
+              clonedPage.style.minHeight = height;
+              clonedPage.style.maxHeight = height;
+            }
             clonedPage.style.margin = "0";
             clonedPage.style.opacity = "1";
             clonedPage.style.transform = "none";
@@ -284,6 +297,9 @@ function assertExportInput(input: DailyPlanPdfExportInput) {
     || typeof input.root.matches !== "function"
     || typeof input.root.querySelectorAll !== "function"
     || (input.orientation !== "landscape" && input.orientation !== "portrait")
+    || (input.captureMode !== undefined
+      && input.captureMode !== "live-root"
+      && input.captureMode !== "paginated")
   ) {
     throw new Error("Invalid Daily Plan PDF input");
   }
@@ -295,7 +311,8 @@ function assertSourceIsCurrent(input: DailyPlanPdfExportInput) {
   }
 }
 
-function resolvePdfPages(root: HTMLElement) {
+function resolvePdfPages(root: HTMLElement, captureMode: DailyPlanPdfCaptureMode) {
+  if (captureMode === "live-root") return [root];
   if (root.matches(DAILY_PLAN_PDF_PAGE_SELECTOR)) return [root];
   const markedPages = Array.from(
     root.querySelectorAll<HTMLElement>(DAILY_PLAN_PDF_PAGE_SELECTOR)
@@ -333,6 +350,50 @@ function resolvePageGeometry(
     widthMm,
     heightMm
   };
+}
+
+function resolveCaptureGeometry(
+  source: HTMLElement,
+  orientation: DailyPlanPdfOrientation,
+  captureMode: DailyPlanPdfCaptureMode
+) {
+  if (captureMode === "paginated") return resolvePageGeometry(orientation);
+  const pageGeometry = resolvePageGeometry(orientation);
+  const cssWidth = source.clientWidth;
+  const cssHeight = source.clientHeight;
+  if (
+    !Number.isFinite(cssWidth)
+    || !Number.isFinite(cssHeight)
+    || cssWidth <= 0
+    || cssHeight <= 0
+  ) {
+    throw new Error("Invalid live Daily Plan PDF source geometry");
+  }
+  const expectedCanvasWidth = Math.floor(cssWidth * DAILY_PLAN_PDF_RENDER_SCALE);
+  const expectedCanvasHeight = Math.floor(cssHeight * DAILY_PLAN_PDF_RENDER_SCALE);
+  if (expectedCanvasWidth * expectedCanvasHeight > MAX_DAILY_PLAN_PDF_CANVAS_PIXELS) {
+    throw new Error("Daily Plan PDF canvas exceeds the safe memory budget");
+  }
+  return {
+    ...pageGeometry,
+    cssWidth,
+    cssHeight,
+    expectedCanvasWidth,
+    expectedCanvasHeight
+  };
+}
+
+function assertCaptureGeometryIsCurrent(
+  source: HTMLElement,
+  geometry: DailyPlanPdfPageGeometry,
+  captureMode: DailyPlanPdfCaptureMode
+) {
+  if (
+    captureMode === "live-root"
+    && (source.clientWidth !== geometry.cssWidth || source.clientHeight !== geometry.cssHeight)
+  ) {
+    throw new Error("Live Daily Plan PDF source geometry changed before capture");
+  }
 }
 
 function assertCanvas(

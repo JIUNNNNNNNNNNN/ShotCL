@@ -30,8 +30,9 @@ test("automatic PDF freezes the exact live preview snapshot/profile and lazy-loa
   assert.match(handler, /await import\("@\/lib\/client\/dailyPlanPdf"\)/u);
   assert.match(handler, /root: exportRoot/u);
   assert.match(handler, /orientation,/u);
+  assert.match(handler, /captureMode: orientation === "landscape" \? "live-root" : "paginated"/u);
   assert.match(handler, /filename: buildDailyPlanPdfFilename\(currentPreviewData\)/u);
-  assert.match(handler, /orientation === "landscape"[\s\S]*validateSource: \(root: HTMLElement\) => doesDailyPlanPrintRootMatch\(root, nextPrintJob\)/u);
+  assert.match(handler, /orientation === "landscape"[\s\S]*validateSource: \(root: HTMLElement\) => root === livePreviewPaperRef\.current\s*&& doesDailyPlanPrintRootMatch\(root, nextPrintJob\)/u);
   assert.match(handler, /finally \{\s*releasePrintView\(\);\s*\}/u);
   assert.match(handler, /PDF를 만들지 못했습니다\. 다시 시도해 주세요\./u);
   assert.doesNotMatch(handler, /window\.print|fetch\(|router\.refresh/u);

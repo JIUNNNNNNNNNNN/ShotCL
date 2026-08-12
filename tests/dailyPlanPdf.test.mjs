@@ -15,7 +15,10 @@ test("PDF capture libraries remain on-call dynamic imports", async () => {
   const source = await readFile(helperPath, "utf8");
   assert.match(source, /await import\("html2canvas"\)/u);
   assert.match(source, /await import\("jspdf"\)/u);
+  assert.match(source, /const DAILY_PLAN_PDF_RENDER_SCALE = 2;/u);
+  assert.match(source, /pdf\.addImage\([\s\S]*canvas,[\s\S]*"PNG"/u);
   assert.doesNotMatch(source, /from\s+["'](?:html2canvas|jspdf)["']/u);
+  assert.doesNotMatch(source, /devicePixelRatio|drawImage\(|"JPEG"|'JPEG'/u);
 });
 
 test("installed jsPDF emits a signed A4 PDF Blob for both orientations", async () => {
@@ -34,10 +37,14 @@ test("installed jsPDF emits a signed A4 PDF Blob for both orientations", async (
   }
 });
 
-test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscape download", async () => {
+test("Landscape lazily captures the mounted live root once into one named A4 download", async () => {
   const firstPage = { id: "first" };
   const secondPage = { id: "second" };
-  const root = createRoot([firstPage, secondPage]);
+  const root = createRoot(
+    [firstPage, secondPage],
+    undefined,
+    { clientWidth: 1123, clientHeight: 1618 }
+  );
   const events = [];
   const pdfInstances = [];
   let html2canvasLoads = 0;
@@ -72,16 +79,17 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
   const result = await exportDailyPlanPdf({
     root,
     orientation: "landscape",
+    captureMode: "live-root",
     filename: "7월 20일 일촬표.pdf"
   }, dependencies);
 
   assert.equal(html2canvasLoads, 1);
   assert.equal(jsPdfLoads, 1);
   assert.equal(result.filename, "7월 20일 일촬표.pdf");
-  assert.equal(result.pageCount, 2);
+  assert.equal(result.pageCount, 1);
   assert.equal(result.blob.type, "application/pdf");
   assert.ok(result.blob.size > 0);
-  assert.deepEqual(root.queries, [DAILY_PLAN_PDF_PAGE_SELECTOR]);
+  assert.deepEqual(root.queries, []);
 
   assert.equal(pdfInstances.length, 1);
   const pdf = pdfInstances[0];
@@ -91,8 +99,8 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
     format: "a4",
     compress: true
   });
-  assert.deepEqual(pdf.addedPages, [["a4", "landscape"]]);
-  assert.equal(pdf.images.length, 2);
+  assert.deepEqual(pdf.addedPages, []);
+  assert.equal(pdf.images.length, 1);
   for (const image of pdf.images) {
     assert.equal(image.format, "PNG");
     assertCenteredUniformPlacement(image, 297, 210);
@@ -100,8 +108,8 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
   }
 
   const captures = events.filter(([event]) => event === "capture");
-  assert.deepEqual(captures.map(([, id]) => id), ["first", "second"]);
-  const landscapeGeometry = expectedCaptureGeometry("landscape");
+  assert.deepEqual(captures.map(([, id]) => id), ["root"]);
+  const landscapeGeometry = expectedLiveRootCaptureGeometry(root);
   for (const [, , options] of captures) {
     assert.equal(options.backgroundColor, "#ffffff");
     assert.equal(options.scale, 2);
@@ -118,33 +126,23 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
   const previewViewportClone = { style: {}, parentElement: null };
   const livePreviewPaperClone = {
     style: { transform: "scale(0.42)", transformOrigin: "top left" },
-    parentElement: previewViewportClone
-  };
-  const pageClone = {
-    style: {},
-    parentElement: livePreviewPaperClone,
+    parentElement: previewViewportClone,
     closest(selector) {
       if (selector === ".daily-plan-print-staging") return null;
-      if (selector === ".daily-plan-preview-sheet") return livePreviewPaperClone;
+      if (selector === ".daily-plan-preview-sheet") return this;
       assert.fail(`unexpected closest selector: ${selector}`);
     }
   };
-  captures[0][2].onclone({}, pageClone);
-  assert.equal(pageClone.style.visibility, "visible");
+  captures[0][2].onclone({}, livePreviewPaperClone);
   assert.equal(livePreviewPaperClone.style.visibility, "visible");
   assert.equal(previewViewportClone.style.visibility, "visible");
   assert.equal(livePreviewPaperClone.style.transform, "none");
   assert.equal(livePreviewPaperClone.style.transformOrigin, "top left");
-  assert.equal(pageClone.style.boxSizing, "border-box");
-  assert.equal(pageClone.style.width, `${landscapeGeometry.cssWidth}px`);
-  assert.equal(pageClone.style.minWidth, `${landscapeGeometry.cssWidth}px`);
-  assert.equal(pageClone.style.maxWidth, `${landscapeGeometry.cssWidth}px`);
-  assert.equal(pageClone.style.height, `${landscapeGeometry.cssHeight}px`);
-  assert.equal(pageClone.style.minHeight, `${landscapeGeometry.cssHeight}px`);
-  assert.equal(pageClone.style.maxHeight, `${landscapeGeometry.cssHeight}px`);
-  assert.equal(pageClone.style.margin, "0");
-  assert.equal(pageClone.style.transform, "none");
-  assert.equal(pageClone.style.opacity, "1");
+  assert.equal(livePreviewPaperClone.style.boxSizing, "border-box");
+  assert.equal(livePreviewPaperClone.style.width, undefined);
+  assert.equal(livePreviewPaperClone.style.height, undefined);
+  assert.equal(livePreviewPaperClone.style.margin, "0");
+  assert.equal(livePreviewPaperClone.style.opacity, "1");
   assert.deepEqual(events.slice(-3).map(([event]) => event), ["create-url", "download", "revoke"]);
   assert.deepEqual(events.at(-2), ["download", "blob:daily-plan", "7월 20일 일촬표.pdf"]);
 });
@@ -194,6 +192,34 @@ test("exportDailyPlanPdf falls back to the root and keeps portrait A4 geometry",
   assert.deepEqual(pdfInstances[0].addedPages, []);
   assert.equal(pdfInstances[0].images.length, 1);
   assertCenteredUniformPlacement(pdfInstances[0].images[0], 210, 297);
+});
+
+test("Portrait keeps marked canonical pages instead of using the Landscape live-root policy", async () => {
+  const firstPage = { id: "portrait-first" };
+  const secondPage = { id: "portrait-second" };
+  const root = createRoot([firstPage, secondPage]);
+  const pdfInstances = [];
+  const captures = [];
+
+  const result = await exportDailyPlanPdf({
+    root,
+    orientation: "portrait",
+    captureMode: "paginated",
+    filename: "portrait-pages.pdf"
+  }, createDependencies({
+    pdfInstances,
+    orientation: "portrait",
+    capture(page, options) {
+      captures.push(page.id);
+      return createCanonicalCanvas(options);
+    }
+  }));
+
+  assert.deepEqual(root.queries, [DAILY_PLAN_PDF_PAGE_SELECTOR]);
+  assert.deepEqual(captures, ["portrait-first", "portrait-second"]);
+  assert.equal(result.pageCount, 2);
+  assert.deepEqual(pdfInstances[0].addedPages, [["a4", "portrait"]]);
+  assert.equal(pdfInstances[0].images.length, 2);
 });
 
 test("PDF capture narrowly restores html2canvas font metrics images and removes the style", async () => {
@@ -412,42 +438,98 @@ test("exportDailyPlanPdf revokes its object URL when the download trigger fails"
   assert.deepEqual(revoked, ["blob:test"]);
 });
 
-test("live Landscape capture aborts when its source changes during lazy loading or between pages", async () => {
-  for (const invalidateAfterValidation of [1, 2]) {
-    const root = createRoot([{ id: "first" }, { id: "second" }]);
-    let validations = 0;
-    let captures = 0;
-    let objectUrlCalls = 0;
-    await assert.rejects(
-      exportDailyPlanPdf({
-        root,
-        orientation: "landscape",
-        filename: "source-changed.pdf",
-        validateSource() {
-          validations += 1;
-          return validations <= invalidateAfterValidation;
-        }
-      }, createDependencies({
-        capture(_page, options) {
-          captures += 1;
-          return createCanonicalCanvas(options);
-        },
-        createObjectUrl() {
-          objectUrlCalls += 1;
-          return "blob:must-not-download";
-        }
-      })),
-      (error) => error instanceof DailyPlanPdfExportError
-        && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
-    );
-    assert.equal(validations, invalidateAfterValidation + 1);
-    assert.equal(captures, invalidateAfterValidation === 1 ? 0 : 1);
-    assert.equal(objectUrlCalls, 0);
-  }
+test("live Landscape capture aborts when its snapshot changes during lazy loading", async () => {
+  const root = createRoot([{ id: "ignored-page" }]);
+  let validations = 0;
+  let captures = 0;
+  let objectUrlCalls = 0;
+  await assert.rejects(
+    exportDailyPlanPdf({
+      root,
+      orientation: "landscape",
+      captureMode: "live-root",
+      filename: "source-changed.pdf",
+      validateSource() {
+        validations += 1;
+        return validations === 1;
+      }
+    }, createDependencies({
+      capture(_page, options) {
+        captures += 1;
+        return createCanonicalCanvas(options);
+      },
+      createObjectUrl() {
+        objectUrlCalls += 1;
+        return "blob:must-not-download";
+      }
+    })),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+  assert.equal(validations, 2);
+  assert.equal(captures, 0);
+  assert.equal(objectUrlCalls, 0);
 });
 
-function createRoot(markedPages, ownerDocument) {
+test("live Landscape capture rejects geometry changes and unsafe canvas sizes", async () => {
+  const changedRoot = createRoot([], undefined, { clientWidth: 1123, clientHeight: 794 });
+  let changedRootCaptureCalls = 0;
+  await assert.rejects(
+    exportDailyPlanPdf({
+      root: changedRoot,
+      orientation: "landscape",
+      captureMode: "live-root",
+      filename: "geometry-changed.pdf"
+    }, {
+      async loadHtml2Canvas() {
+        changedRoot.clientHeight += 1;
+        return async () => {
+          changedRootCaptureCalls += 1;
+          return { width: 1, height: 1 };
+        };
+      },
+      async loadJsPdf() {
+        return createFakeJsPdf([], "landscape");
+      }
+    }),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+  assert.equal(changedRootCaptureCalls, 0);
+
+  const oversizedRoot = createRoot([], undefined, { clientWidth: 2000, clientHeight: 2000 });
+  let loaderCalls = 0;
+  await assert.rejects(
+    exportDailyPlanPdf({
+      root: oversizedRoot,
+      orientation: "landscape",
+      captureMode: "live-root",
+      filename: "too-large.pdf"
+    }, {
+      async loadHtml2Canvas() {
+        loaderCalls += 1;
+        throw new Error("must not load");
+      },
+      async loadJsPdf() {
+        loaderCalls += 1;
+        throw new Error("must not load");
+      }
+    }),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+  assert.equal(loaderCalls, 0);
+});
+
+function createRoot(
+  markedPages,
+  ownerDocument,
+  { clientWidth = 1123, clientHeight = 794 } = {}
+) {
   return {
+    id: "root",
+    clientHeight,
+    clientWidth,
     ownerDocument,
     queries: [],
     matches() {
@@ -528,6 +610,15 @@ function expectedCaptureGeometry(orientation) {
     cssHeight,
     canvasWidth: Math.floor(cssWidth * 2),
     canvasHeight: Math.floor(cssHeight * 2)
+  };
+}
+
+function expectedLiveRootCaptureGeometry(root) {
+  return {
+    cssWidth: root.clientWidth,
+    cssHeight: root.clientHeight,
+    canvasWidth: root.clientWidth * 2,
+    canvasHeight: root.clientHeight * 2
   };
 }
 
