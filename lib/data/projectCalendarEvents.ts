@@ -12,6 +12,7 @@ type CalendarApiPayload = {
   events?: unknown[];
   event?: unknown;
   deletedId?: string;
+  receipt?: string;
   canEdit?: boolean;
   error?: string;
   code?: string;
@@ -175,7 +176,7 @@ export async function updateProjectCalendarEvent(
   return updated;
 }
 
-export async function deleteProjectCalendarEvent(projectId: string, eventId: string) {
+export async function deleteProjectCalendarEvent(projectId: string, eventId: string): Promise<string | null> {
   if (usesLocalCalendarStorage(projectId)) {
     const candidates = getLocalProjectIdCandidates(projectId);
     const current = readLocalEvents();
@@ -183,7 +184,7 @@ export async function deleteProjectCalendarEvent(projectId: string, eventId: str
     if (!exists) throw new ProjectCalendarEventRequestError("일정을 찾을 수 없습니다.", 404, "CALENDAR_EVENT_NOT_FOUND");
     writeLocalEvents(current.filter((candidate) => candidate.id !== eventId), projectId);
     invalidateProjectCalendarReadCache(projectId);
-    return eventId;
+    return null;
   }
   const query = new URLSearchParams({ id: eventId });
   const response = await fetchProjectCalendarApi(`${getCalendarEndpoint(projectId)}?${query}`, {
@@ -191,9 +192,63 @@ export async function deleteProjectCalendarEvent(projectId: string, eventId: str
   });
   const payload = await readPayload(response);
   if (!response.ok) throw requestError(payload, response.status, "프로젝트 일정을 삭제하지 못했습니다.");
-  const deletedId = payload.deletedId?.trim() || eventId;
+  const receipt = payload.receipt?.trim();
+  if (!receipt) {
+    throw new ProjectCalendarEventRequestError(
+      "일정 삭제 복원 정보를 받지 못했습니다.",
+      500,
+      "CALENDAR_EVENT_DELETE_RECEIPT_MISSING"
+    );
+  }
   invalidateProjectCalendarReadCache(projectId);
-  return deletedId;
+  return receipt;
+}
+
+/** 삭제 Undo는 새 ID를 만들지 않고 원래 일정 row를 그대로 복원합니다. */
+export async function restoreProjectCalendarEvent(
+  projectId: string,
+  receipt: string | null,
+  event: ProjectCalendarEvent
+) {
+  if (usesLocalCalendarStorage(projectId)) {
+    const current = readLocalEvents();
+    writeLocalEvents([
+      event,
+      ...current.filter((candidate) => candidate.id !== event.id)
+    ], projectId);
+    invalidateProjectCalendarReadCache(projectId);
+    return event;
+  }
+  if (!receipt) {
+    throw new ProjectCalendarEventRequestError(
+      "일정 삭제 복원 정보가 없습니다.",
+      400,
+      "CALENDAR_EVENT_DELETE_RECEIPT_MISSING"
+    );
+  }
+  const response = await fetchProjectCalendarApi(getCalendarEndpoint(projectId), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted", receipt })
+  });
+  const restored = await readMutationEvent(response, "프로젝트 일정을 복원하지 못했습니다.");
+  invalidateProjectCalendarReadCache(projectId);
+  return restored;
+}
+
+export async function finalizeDeletedProjectCalendarEvent(
+  projectId: string,
+  receipt: string | null
+) {
+  if (!receipt || usesLocalCalendarStorage(projectId)) return;
+  const response = await fetchProjectCalendarApi(getCalendarEndpoint(projectId), {
+    method: "POST",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt })
+  });
+  const payload = await readPayload(response);
+  if (!response.ok) throw requestError(payload, response.status, "일정 삭제를 확정하지 못했습니다.");
 }
 
 function calendarReadProjectKey(projectId: string) {

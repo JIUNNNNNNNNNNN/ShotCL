@@ -2184,9 +2184,6 @@ export function ShotOverheadEditor({
     ) {
       return;
     }
-    if (!window.confirm(`공간 · ${currentSpacePreset.location.displayName} 프리셋을 삭제할까요?`)) {
-      return;
-    }
     const presetAtRequest = currentSpacePreset;
     setSpacePresetAction("delete");
     setSpacePresetNotice(null);
@@ -2270,7 +2267,11 @@ export function ShotOverheadEditor({
   })() : null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-stretch justify-center overflow-hidden overscroll-none bg-field-bg/85 sm:p-3" onPointerDown={(event) => event.stopPropagation()}>
+    <div
+      data-local-undo-scope="active"
+      className="fixed inset-0 z-[100] flex items-stretch justify-center overflow-hidden overscroll-none bg-field-bg/85 sm:p-3"
+      onPointerDown={(event) => event.stopPropagation()}
+    >
       <section
         ref={dialogRef}
         role="dialog"

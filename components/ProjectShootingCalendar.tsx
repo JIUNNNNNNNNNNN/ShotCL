@@ -7,11 +7,14 @@ import {
 } from "@/components/project-calendar";
 import { SectionLoader } from "@/components/PixelDogLoader";
 import { useAutoContextualGuide } from "@/components/guides/ContextualGuideProvider";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { ProjectStaffInviteCard } from "@/components/project-invites/ProjectStaffInviteCard";
 import {
   createProjectCalendarEvent,
   deleteProjectCalendarEvent,
+  finalizeDeletedProjectCalendarEvent,
   listProjectCalendarEvents,
+  restoreProjectCalendarEvent,
   updateProjectCalendarEvent
 } from "@/lib/data/projectCalendarEvents";
 import { formatCalendarEpisodeLabel } from "@/lib/projectCalendar";
@@ -47,6 +50,7 @@ export function ProjectShootingCalendar({
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const loadVersionRef = useRef(0);
   const canManageEventsRef = useRef(canManageEvents);
   canManageEventsRef.current = canManageEvents;
@@ -153,19 +157,29 @@ export function ProjectShootingCalendar({
     }
   }
 
-  async function deleteEvent(eventId: string) {
-    setIsMutating(true);
-    try {
-      const deletedId = await deleteProjectCalendarEvent(projectId, eventId);
-      setEvents((current) => current.filter((event) => event.id !== deletedId));
-      setSyncMessage("");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "프로젝트 일정을 삭제하지 못했습니다.";
-      setSyncMessage(message);
-      throw error;
-    } finally {
-      setIsMutating(false);
-    }
+  function deleteEvent(eventId: string) {
+    const snapshot = events.find((event) => event.id === eventId);
+    if (!snapshot) return;
+    const originalIndex = events.findIndex((event) => event.id === eventId);
+    let deleteReceipt: string | null = null;
+    deleteWithUndo({
+      key: `calendar-event:${eventId}`,
+      label: `일정 “${snapshot.title}”`,
+      removeLocal: () => setEvents((current) => current.filter((event) => event.id !== eventId)),
+      restoreLocal: () => setEvents((current) => insertEventAt(current, snapshot, originalIndex)),
+      deleteRemote: async () => {
+        deleteReceipt = await deleteProjectCalendarEvent(projectId, eventId);
+        setSyncMessage("");
+      },
+      restoreRemote: async () => {
+        const restored = await restoreProjectCalendarEvent(projectId, deleteReceipt, snapshot);
+        setEvents((current) => upsertEvent(current, restored));
+        setSyncMessage("");
+      },
+      finalize: async () => {
+        await finalizeDeletedProjectCalendarEvent(projectId, deleteReceipt);
+      }
+    });
   }
 
   if (isLoadingEvents) {
@@ -199,4 +213,11 @@ export function ProjectShootingCalendar({
 
 function upsertEvent(current: readonly ProjectCalendarEvent[], event: ProjectCalendarEvent) {
   return [event, ...current.filter((candidate) => candidate.id !== event.id)];
+}
+
+function insertEventAt(current: readonly ProjectCalendarEvent[], event: ProjectCalendarEvent, index: number) {
+  if (current.some((candidate) => candidate.id === event.id)) return [...current];
+  const next = [...current];
+  next.splice(Math.max(0, Math.min(index, next.length)), 0, event);
+  return next;
 }

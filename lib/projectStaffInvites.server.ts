@@ -37,6 +37,15 @@ export type ProjectStaffInviteManagementState =
 export type ProjectStaffInvitePublicInfo = {
   projectId: string;
   projectName: string;
+  /** Server-only snapshot reused by the project layout after capability validation. */
+  project?: {
+    id: string;
+    name: string;
+    shoot_date: string | null;
+    description: string | null;
+    created_at: string;
+    share_enabled: boolean;
+  };
 };
 
 export type ProjectStaffInviteRedemption = ProjectStaffInvitePublicInfo & {
@@ -208,14 +217,17 @@ export async function revokeProjectStaffInviteForAccount(projectId: string, user
   }
 }
 
-/** 공개 화면에는 active token에 연결된 프로젝트 이름만 최소한으로 반환합니다. */
+/**
+ * 한 번의 active-token 검증으로 서버 layout이 재사용할 최소 프로젝트 snapshot도
+ * 가져옵니다. 공개 API는 이 객체 전체가 아니라 projectName만 선별해 반환합니다.
+ */
 export async function inspectProjectStaffInvite(rawToken: string): Promise<ProjectStaffInvitePublicInfo | null> {
   if (!isProjectStaffInviteToken(rawToken)) return null;
   try {
     const supabase = requireProjectAccessDb();
     const { data, error } = await supabase
       .from("project_staff_invites")
-      .select("project_id,revoked_at,projects!inner(id,name,share_enabled)")
+      .select("project_id,revoked_at,projects!inner(id,name,shoot_date,description,created_at,share_enabled)")
       .eq("token_hash", hashProjectStaffInviteToken(rawToken))
       .is("revoked_at", null)
       .eq("projects.share_enabled", true)
@@ -226,7 +238,18 @@ export async function inspectProjectStaffInvite(rawToken: string): Promise<Proje
     const projectId = String(data.project_id ?? "");
     const projectName = String(project?.name ?? "").trim();
     if (!projectId || !projectName || project?.share_enabled !== true) return null;
-    return { projectId, projectName };
+    return {
+      projectId,
+      projectName,
+      project: {
+        id: projectId,
+        name: projectName,
+        shoot_date: typeof project?.shoot_date === "string" ? project.shoot_date : null,
+        description: typeof project?.description === "string" ? project.description : null,
+        created_at: String(project?.created_at ?? ""),
+        share_enabled: true
+      }
+    };
   } catch (error) {
     throw normalizeInviteDatabaseError(error);
   }

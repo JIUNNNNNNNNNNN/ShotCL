@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
 import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
+import { ProjectDeleteUndoProvider } from "@/components/ProjectDeleteUndoProvider";
 import { ProjectWorkspaceProvider } from "@/components/ProjectWorkspaceContext";
 import { ProjectWorkspaceShell } from "@/components/ProjectWorkspaceShell";
 import { ContextualGuideProvider } from "@/components/guides/ContextualGuideProvider";
@@ -214,8 +215,9 @@ export function ProjectAccessGate({
             initialProjectName={projectName}
             initialWorkspace={initialWorkspace}
           >
-            <ProjectWorkspaceShell>
-              {memberRestrictedFallback ? (
+            <ProjectDeleteUndoProvider projectId={projectId}>
+              <ProjectWorkspaceShell>
+                {memberRestrictedFallback ? (
                 <section className="mx-auto flex min-h-[35dvh] w-full max-w-lg items-center justify-center px-4 py-8 text-center">
                   <div className="rounded-[var(--radius-card)] border border-field-divider bg-field-panel p-5 shadow-card">
                     <p
@@ -231,8 +233,9 @@ export function ProjectAccessGate({
                     </p>
                   </div>
                 </section>
-              ) : children}
-            </ProjectWorkspaceShell>
+                ) : children}
+              </ProjectWorkspaceShell>
+            </ProjectDeleteUndoProvider>
           </ProjectWorkspaceProvider>
         </ProjectPageActionsProvider>
       </ContextualGuideProvider>

@@ -6,6 +6,7 @@ import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   useAutoContextualGuide,
@@ -15,6 +16,15 @@ import { Button } from "@/components/ui/Button";
 import {
   getProjectCostumeSceneOverview,
   ProjectCostumeBulkSaveError,
+  deleteProjectCostume,
+  deleteProjectCostumeImage,
+  deleteProjectCostumeScene,
+  finalizeDeletedProjectCostume,
+  finalizeDeletedProjectCostumeImage,
+  finalizeDeletedProjectCostumeScene,
+  restoreDeletedProjectCostume,
+  restoreDeletedProjectCostumeImage,
+  restoreDeletedProjectCostumeScene,
   saveProjectCostumeSnapshot,
   saveProjectCostume,
   updateProjectCostumeScene,
@@ -93,6 +103,7 @@ const tempPrefix = "costume-local-";
 
 export default function ProjectCostumesPage() {
   const { role } = useProjectAccess();
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const {
     projectId,
     project,
@@ -118,6 +129,7 @@ export default function ProjectCostumesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isFiltering, setIsFiltering] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingCostumeDeleteCount, setPendingCostumeDeleteCount] = useState(0);
   const [isComposing, setIsComposing] = useState(false);
   const [saveProgress, setSaveProgress] = useState<{ scenes: number; items: number; stage: string } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -130,6 +142,7 @@ export default function ProjectCostumesPage() {
   const deletedSceneIdsRef = useRef(new Set<string>());
   const deletedItemIdsRef = useRef(new Set<string>());
   const savedCostumeEntityFingerprintsRef = useRef(new Map<string, string>());
+  const pendingCostumeDeleteKeysRef = useRef(new Set<string>());
   const activeCostumeProjectIdRef = useRef(projectId);
   const loadRequestRef = useRef(0);
   scenesRef.current = scenes;
@@ -498,17 +511,104 @@ export default function ProjectCostumesPage() {
   }
 
   function handleSceneDelete(scene: ProjectCostumeScene) {
-    if (!canEdit || saveLockRef.current || !window.confirm(`"${sceneLabel(scene)}" 씬의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
-    setScenes((current) => current.filter((item) => item.id !== scene.id));
-    if (!isTemporaryId(scene.id)) {
-      setDeletedSceneIds((current) => new Set([...current, scene.id]));
-    }
-    setDrafts((current) => {
-      const next = { ...current };
-      scene.items.forEach((item) => delete next[item.id]);
-      return next;
+    if (!projectId || !canEdit || saveLockRef.current) return;
+    const originalIndex = scenesRef.current.findIndex((item) => item.id === scene.id);
+    if (originalIndex < 0) return;
+    const beforeId = originalIndex > 0 ? scenesRef.current[originalIndex - 1].id : "";
+    const afterId = originalIndex + 1 < scenesRef.current.length
+      ? scenesRef.current[originalIndex + 1].id
+      : "";
+    const sceneDrafts = Object.fromEntries(scene.items.flatMap((item) => (
+      draftsRef.current[item.id] ? [[item.id, draftsRef.current[item.id]]] : []
+    )));
+    const wasExpanded = expandedSceneIds.has(scene.id);
+    const isPersisted = !isTemporaryId(scene.id);
+    const operationKey = `costume-scene:${scene.id}`;
+    if (pendingCostumeDeleteKeysRef.current.has(operationKey)) return;
+    const preDeleteFlush = isPersisted
+      ? costumeAutosave.flushKeys([
+          `scene:${scene.id}`,
+          ...scene.items.map((item) => `item:${item.id}`)
+        ])
+      : Promise.resolve(true);
+    let receipt = "";
+    let deleteFailed = false;
+    let restoredLocally = false;
+    let pendingReleased = false;
+    const releasePending = () => {
+      if (pendingReleased || !isPersisted) return;
+      pendingReleased = true;
+      pendingCostumeDeleteKeysRef.current.delete(operationKey);
+      setPendingCostumeDeleteCount((current) => Math.max(0, current - 1));
+    };
+    deleteWithUndo({
+      key: operationKey,
+      label: sceneLabel(scene),
+      removeLocal: () => {
+        if (!scenesRef.current.some((item) => item.id === scene.id)) return;
+        const nextScenes = scenesRef.current.filter((item) => item.id !== scene.id);
+        const nextDrafts = { ...draftsRef.current };
+        scene.items.forEach((item) => delete nextDrafts[item.id]);
+        scenesRef.current = nextScenes;
+        draftsRef.current = nextDrafts;
+        setScenes(nextScenes);
+        setDrafts(nextDrafts);
+        setExpandedSceneIds((current) => {
+          const next = new Set(current);
+          next.delete(scene.id);
+          return next;
+        });
+        if (isPersisted) {
+          pendingCostumeDeleteKeysRef.current.add(operationKey);
+          setPendingCostumeDeleteCount((current) => current + 1);
+        }
+        markDirty("의상 씬을 삭제했습니다. Command/Ctrl+Z로 되돌릴 수 있습니다.");
+      },
+      restoreLocal: () => {
+        restoredLocally = true;
+        if (!scenesRef.current.some((item) => item.id === scene.id)) {
+          const nextScenes = insertCostumeSceneByAnchors(
+            scenesRef.current,
+            scene,
+            beforeId,
+            afterId,
+            originalIndex
+          );
+          const nextDrafts = { ...draftsRef.current, ...sceneDrafts };
+          scenesRef.current = nextScenes;
+          draftsRef.current = nextDrafts;
+          setScenes(nextScenes);
+          setDrafts(nextDrafts);
+          if (wasExpanded) setExpandedSceneIds((current) => new Set([...current, scene.id]));
+          markDirty("의상 씬 삭제를 되돌렸습니다.");
+        }
+        if (deleteFailed) releasePending();
+      },
+      deleteRemote: async () => {
+        try {
+          if (isPersisted) {
+            if (!await preDeleteFlush) {
+              throw new Error("삭제할 의상 씬의 자동 저장에 실패했습니다.");
+            }
+            receipt = await deleteProjectCostumeScene(projectId, scene.id);
+            releasePending();
+          }
+          reconcileCostumeDirtyAfterDelete();
+        } catch (error) {
+          deleteFailed = true;
+          if (restoredLocally) releasePending();
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        if (isPersisted) await restoreDeletedProjectCostumeScene(projectId, receipt);
+        releasePending();
+        reconcileCostumeDirtyAfterDelete();
+      },
+      finalize: isPersisted
+        ? () => finalizeDeletedProjectCostumeScene(projectId, receipt)
+        : undefined
     });
-    markDirty("씬 삭제가 대기 중입니다. 전체 저장을 눌러 반영해주세요.");
   }
 
   function handleFiles(id: string, fieldType: ImageFieldType, event: ChangeEvent<HTMLInputElement>) {
@@ -526,22 +626,225 @@ export default function ProjectCostumesPage() {
   }
 
   function handleItemDelete(scene: ProjectCostumeScene, item: ProjectCostume) {
-    if (!canEdit || saveLockRef.current || !window.confirm(`"${item.actorRole || item.actorName}" 배역의 의상 자료를 삭제할까요? 전체 저장 전에는 DB에서 삭제되지 않습니다.`)) return;
-    setScenes((current) => current.map((entry) => entry.id === scene.id
-      ? { ...entry, items: entry.items.filter((costume) => costume.id !== item.id) }
-      : entry));
-    if (!isTemporaryId(item.id)) {
-      setDeletedItemIds((current) => new Set([...current, item.id]));
-    }
-    setDrafts((current) => {
-      const next = { ...current };
-      delete next[item.id];
-      return next;
+    if (!projectId || !canEdit || saveLockRef.current) return;
+    const currentScene = scenesRef.current.find((entry) => entry.id === scene.id);
+    const originalIndex = currentScene?.items.findIndex((candidate) => candidate.id === item.id) ?? -1;
+    if (!currentScene || originalIndex < 0) return;
+    const beforeId = originalIndex > 0 ? currentScene.items[originalIndex - 1].id : "";
+    const afterId = originalIndex + 1 < currentScene.items.length
+      ? currentScene.items[originalIndex + 1].id
+      : "";
+    const itemDraft = draftsRef.current[item.id] ?? toDraft(item);
+    const isPersisted = !isTemporaryId(item.id);
+    const operationKey = `costume-item:${item.id}`;
+    if (pendingCostumeDeleteKeysRef.current.has(operationKey)) return;
+    const preDeleteFlush = isPersisted
+      ? costumeAutosave.flushKeys([`item:${item.id}`])
+      : Promise.resolve(true);
+    let receipt = "";
+    let deleteFailed = false;
+    let restoredLocally = false;
+    let pendingReleased = false;
+    const releasePending = () => {
+      if (pendingReleased || !isPersisted) return;
+      pendingReleased = true;
+      pendingCostumeDeleteKeysRef.current.delete(operationKey);
+      setPendingCostumeDeleteCount((current) => Math.max(0, current - 1));
+    };
+    deleteWithUndo({
+      key: operationKey,
+      label: item.actorRole.trim() || item.actorName.trim() || "의상 배역",
+      removeLocal: () => {
+        const owner = scenesRef.current.find((entry) => entry.id === scene.id);
+        if (!owner?.items.some((candidate) => candidate.id === item.id)) return;
+        const nextScenes = scenesRef.current.map((entry) => entry.id === scene.id
+          ? { ...entry, items: entry.items.filter((candidate) => candidate.id !== item.id) }
+          : entry);
+        if (nextScenes === scenesRef.current) return;
+        const nextDrafts = { ...draftsRef.current };
+        delete nextDrafts[item.id];
+        scenesRef.current = nextScenes;
+        draftsRef.current = nextDrafts;
+        setScenes(nextScenes);
+        setDrafts(nextDrafts);
+        if (isPersisted) {
+          pendingCostumeDeleteKeysRef.current.add(operationKey);
+          setPendingCostumeDeleteCount((current) => current + 1);
+        }
+        markDirty("의상 배역을 삭제했습니다. Command/Ctrl+Z로 되돌릴 수 있습니다.");
+      },
+      restoreLocal: () => {
+        restoredLocally = true;
+        const owner = scenesRef.current.find((entry) => entry.id === scene.id);
+        if (owner && !owner.items.some((candidate) => candidate.id === item.id)) {
+          const restoredItems = insertCostumeItemByAnchors(
+            owner.items,
+            item,
+            beforeId,
+            afterId,
+            originalIndex
+          );
+          const nextScenes = scenesRef.current.map((entry) => entry.id === owner.id
+            ? { ...entry, items: restoredItems }
+            : entry);
+          const nextDrafts = { ...draftsRef.current, [item.id]: itemDraft };
+          scenesRef.current = nextScenes;
+          draftsRef.current = nextDrafts;
+          setScenes(nextScenes);
+          setDrafts(nextDrafts);
+          markDirty("의상 배역 삭제를 되돌렸습니다.");
+        }
+        if (deleteFailed) releasePending();
+      },
+      deleteRemote: async () => {
+        try {
+          if (isPersisted) {
+            if (!await preDeleteFlush) {
+              throw new Error("삭제할 의상 배역의 자동 저장에 실패했습니다.");
+            }
+            receipt = await deleteProjectCostume(projectId, item.id);
+            releasePending();
+          }
+          reconcileCostumeDirtyAfterDelete();
+        } catch (error) {
+          deleteFailed = true;
+          if (restoredLocally) releasePending();
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        if (isPersisted) await restoreDeletedProjectCostume(projectId, receipt);
+        releasePending();
+        reconcileCostumeDirtyAfterDelete();
+      },
+      finalize: isPersisted
+        ? () => finalizeDeletedProjectCostume(projectId, receipt)
+        : undefined
     });
-    markDirty("배역 삭제가 대기 중입니다. 전체 저장을 눌러 반영해주세요.");
+  }
+
+  function handleSavedImageDelete(item: ProjectCostume, image: CostumeImage) {
+    if (!projectId || !canEdit || saveLockRef.current || isTemporaryId(item.id)) return;
+    const originalDraft = draftsRef.current[item.id] ?? toDraft(item);
+    const field = image.fieldType === "hair" ? "hairImages" : "costumeImages";
+    const originalIndex = originalDraft[field].findIndex((candidate) => candidate.path === image.path);
+    if (originalIndex < 0) return;
+    const operationKey = `costume-image:${item.id}:${image.path}`;
+    if (pendingCostumeDeleteKeysRef.current.has(operationKey)) return;
+    // Capture and start the old-value flush before removeLocal changes any keep
+    // paths. This request can finish in the background without delaying the UI.
+    const preDeleteFlush = costumeAutosave.flushKeys([`item:${item.id}`]);
+    let receipt = "";
+    let deleteFailed = false;
+    let restoredLocally = false;
+    let pendingReleased = false;
+    const releasePending = () => {
+      if (pendingReleased) return;
+      pendingReleased = true;
+      pendingCostumeDeleteKeysRef.current.delete(operationKey);
+      setPendingCostumeDeleteCount((current) => Math.max(0, current - 1));
+    };
+    deleteWithUndo({
+      key: operationKey,
+      label: image.fieldType === "hair" ? "헤어 이미지" : "의상 이미지",
+      removeLocal: () => {
+        const current = draftsRef.current[item.id];
+        if (!current?.[field].some((candidate) => candidate.path === image.path)) return;
+        const nextDraft = {
+          ...current,
+          [field]: current[field].filter((candidate) => candidate.path !== image.path)
+        };
+        const nextDrafts = { ...draftsRef.current, [item.id]: nextDraft };
+        draftsRef.current = nextDrafts;
+        setDrafts(nextDrafts);
+        pendingCostumeDeleteKeysRef.current.add(operationKey);
+        setPendingCostumeDeleteCount((current) => current + 1);
+        markDirty("의상 이미지를 삭제했습니다. Command/Ctrl+Z로 되돌릴 수 있습니다.");
+      },
+      restoreLocal: () => {
+        restoredLocally = true;
+        const current = draftsRef.current[item.id];
+        if (current && !current[field].some((candidate) => candidate.path === image.path)) {
+          const nextImages = [...current[field]];
+          nextImages.splice(Math.max(0, Math.min(originalIndex, nextImages.length)), 0, image);
+          const nextDraft = { ...current, [field]: nextImages };
+          const nextDrafts = { ...draftsRef.current, [item.id]: nextDraft };
+          draftsRef.current = nextDrafts;
+          setDrafts(nextDrafts);
+          markDirty("의상 이미지 삭제를 되돌렸습니다.");
+        }
+        if (deleteFailed) releasePending();
+      },
+      deleteRemote: async () => {
+        try {
+          if (!await preDeleteFlush) {
+            throw new Error("삭제할 의상 이미지의 자동 저장에 실패했습니다.");
+          }
+          receipt = await deleteProjectCostumeImage(projectId, item.id, image.path);
+          const nextScenes = scenesRef.current.map((scene) => ({
+            ...scene,
+            items: scene.items.map((candidate) => candidate.id === item.id
+              ? { ...candidate, images: candidate.images.filter((entry) => entry.path !== image.path) }
+              : candidate)
+          }));
+          scenesRef.current = nextScenes;
+          setScenes(nextScenes);
+          const currentEntity = buildCostumeAutosaveEntities(nextScenes, draftsRef.current)
+            .find((entity) => entity.kind === "item" && entity.itemId === item.id);
+          if (currentEntity?.kind === "item" && currentEntity.canAutosave) {
+            savedCostumeEntityFingerprintsRef.current.set(
+              currentEntity.key,
+              costumeAutosaveEntityFingerprint(currentEntity)
+            );
+            costumeAutosave.markSaved([currentEntity]);
+          }
+          reconcileCostumeDirtyAfterDelete();
+        } catch (error) {
+          deleteFailed = true;
+          if (restoredLocally) releasePending();
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        try {
+          const restoredItem = await restoreDeletedProjectCostumeImage(projectId, receipt);
+          if (restoredItem) {
+            const nextScenes = scenesRef.current.map((scene) => ({
+              ...scene,
+              items: scene.items.map((candidate) => candidate.id === item.id ? restoredItem : candidate)
+            }));
+            scenesRef.current = nextScenes;
+            setScenes(nextScenes);
+          }
+          const currentEntity = buildCostumeAutosaveEntities(scenesRef.current, draftsRef.current)
+            .find((entity) => entity.kind === "item" && entity.itemId === item.id);
+          if (currentEntity) {
+            savedCostumeEntityFingerprintsRef.current.set(
+              currentEntity.key,
+              costumeAutosaveEntityFingerprint(currentEntity)
+            );
+            costumeAutosave.markSaved([currentEntity]);
+          }
+          reconcileCostumeDirtyAfterDelete();
+        } finally {
+          releasePending();
+        }
+      },
+      finalize: async () => {
+        try {
+          await finalizeDeletedProjectCostumeImage(projectId, receipt);
+        } finally {
+          releasePending();
+        }
+      }
+    });
   }
 
   async function handleSaveAll() {
+    if (pendingCostumeDeleteKeysRef.current.size > 0) {
+      setNoticeMessage("삭제를 반영한 뒤 전체 저장을 계속할 수 있습니다.");
+      return;
+    }
     await costumeAutosave.flush();
     // flush() can synchronously finish the metadata autosave and clear dirtyRef.
     // The render-time isDirty value is stale across this await and would double-save.
@@ -705,7 +1008,8 @@ export default function ProjectCostumesPage() {
     && Boolean(projectId)
     && !isLoading
     && !isSaving
-    && !isComposing;
+    && !isComposing
+    && pendingCostumeDeleteCount === 0;
 
   const costumeAutosave = useKeyedAutosave<CostumeAutosaveEntity, CostumeAutosaveResult>({
     values: costumeAutosaveEntities,
@@ -714,7 +1018,13 @@ export default function ProjectCostumesPage() {
     delayMs: 1_100,
     scopeKey: `costumes:${projectId ?? "unknown"}`,
     fingerprint: costumeAutosaveEntityFingerprint,
-    validate: (entity) => entity.kind === "scene" || entity.canAutosave,
+    validate: (entity) => (
+      (entity.kind === "scene" || entity.canAutosave)
+      && !(entity.kind === "item" && hasPendingCostumeImageDelete(
+        pendingCostumeDeleteKeysRef.current,
+        entity.itemId
+      ))
+    ),
     restoreDrafts: (restoredDrafts) => {
       let nextScenes = scenesRef.current;
       let nextDrafts = draftsRef.current;
@@ -893,6 +1203,28 @@ export default function ProjectCostumesPage() {
       setErrorMessage(error instanceof Error ? error.message : "의상 정보를 자동 저장하지 못했습니다.");
     }
   });
+
+  function reconcileCostumeDirtyAfterDelete() {
+    const currentEntities = buildCostumeAutosaveEntities(
+      scenesRef.current,
+      draftsRef.current
+    );
+    const hasPendingMetadata = currentEntities.some((candidate) => (
+      savedCostumeEntityFingerprintsRef.current.get(candidate.key)
+        !== costumeAutosaveEntityFingerprint(candidate)
+    ));
+    const hasExplicitPending = hasExplicitCostumePendingChanges(
+      scenesRef.current,
+      draftsRef.current,
+      deletedSceneIdsRef.current,
+      deletedItemIdsRef.current
+    );
+    const dirty = hasPendingMetadata || hasExplicitPending;
+    dirtyRef.current = dirty;
+    setIsDirty(dirty);
+    if (!dirty) setNoticeMessage("");
+  }
+
   useEffect(() => {
     if (isDirty) return;
     savedCostumeEntityFingerprintsRef.current = new Map(
@@ -947,7 +1279,7 @@ export default function ProjectCostumesPage() {
                 <Plus className="h-4 w-4" aria-hidden />
                 씬 추가
               </Button>
-              <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={() => void handleSaveAll()} disabled={!isDirty || isSaving}>
+              <Button className="min-h-9 px-3 py-1.5 text-xs" onClick={() => void handleSaveAll()} disabled={!isDirty || isSaving || pendingCostumeDeleteCount > 0}>
                 <Save className="h-4 w-4" aria-hidden />
                 {isSaving && saveProgress
                   ? `${saveProgress.stage} · 씬 ${saveProgress.scenes} / 항목 ${saveProgress.items}`
@@ -1061,6 +1393,7 @@ export default function ProjectCostumesPage() {
                             onCostumeFiles={(event) => handleFiles(item.id, "costume", event)}
                             onHairFiles={(event) => handleFiles(item.id, "hair", event)}
                             onDelete={() => handleItemDelete(scene, item)}
+                            onDeleteSavedImage={(image) => handleSavedImageDelete(item, image)}
                             onPreview={(image) => setPreview({
                               url: image.url,
                               title: `${displaySceneNumber(scene.sceneNo)} · ${item.actorRole || item.actorName || "의상"}`
@@ -1174,6 +1507,7 @@ function CostumeItemCard({
   onCostumeFiles,
   onHairFiles,
   onDelete,
+  onDeleteSavedImage,
   onPreview,
   onPreviewUrl
 }: {
@@ -1184,6 +1518,7 @@ function CostumeItemCard({
   onCostumeFiles: (event: ChangeEvent<HTMLInputElement>) => void;
   onHairFiles: (event: ChangeEvent<HTMLInputElement>) => void;
   onDelete: () => void;
+  onDeleteSavedImage: (image: CostumeImage) => void;
   onPreview: (image: CostumeImage) => void;
   onPreviewUrl: (url: string) => void;
 }) {
@@ -1270,6 +1605,7 @@ function CostumeItemCard({
         title={draft.actorRole || draft.actorName}
         onValueChange={(value) => onChange({ costumeContent: value })}
         onImagesChange={(images) => onChange({ costumeImages: images })}
+        onDeleteSavedImage={onDeleteSavedImage}
         onPendingFilesChange={(files) => onChange({ costumeFiles: files })}
         onFiles={onCostumeFiles}
         onPreview={onPreview}
@@ -1285,6 +1621,7 @@ function CostumeItemCard({
         title={draft.actorRole || draft.actorName}
         onValueChange={(value) => onChange({ hair: value })}
         onImagesChange={(images) => onChange({ hairImages: images })}
+        onDeleteSavedImage={onDeleteSavedImage}
         onPendingFilesChange={(files) => onChange({ hairFiles: files })}
         onFiles={onHairFiles}
         onPreview={onPreview}
@@ -1309,6 +1646,7 @@ function EditableMediaField({
   title,
   onValueChange,
   onImagesChange,
+  onDeleteSavedImage,
   onPendingFilesChange,
   onFiles,
   onPreview,
@@ -1322,6 +1660,7 @@ function EditableMediaField({
   title: string;
   onValueChange: (value: string) => void;
   onImagesChange: (images: CostumeImage[]) => void;
+  onDeleteSavedImage: (image: CostumeImage) => void;
   onPendingFilesChange: (files: PendingFile[]) => void;
   onFiles: (event: ChangeEvent<HTMLInputElement>) => void;
   onPreview: (image: CostumeImage) => void;
@@ -1346,9 +1685,9 @@ function EditableMediaField({
               </button>
               <button
                 type="button"
-                onClick={() => onImagesChange(images.filter((item) => item.path !== image.path))}
+                onClick={() => onDeleteSavedImage(image)}
                 className="absolute right-1 top-1 grid h-7 w-7 place-items-center border border-field-divider bg-field-elevated/95 text-field-danger"
-                aria-label={`저장 시 ${label} 이미지 삭제`}
+                aria-label={`${label} 이미지 삭제`}
               >
                 <X className="h-4 w-4" aria-hidden />
               </button>
@@ -1522,7 +1861,7 @@ function SceneSeedSummary({
   onUseBasicActors
 }: {
   selectedScene?: ProjectSceneItem;
-  presentActors: ProjectActor[];
+  presentActors: Array<Pick<ProjectActor, "role" | "name">>;
   actorCount: number;
   useBasicActors: boolean;
   onUseBasicActors: () => void;
@@ -1851,6 +2190,14 @@ function costumeAutosaveEntityFingerprint(entity: CostumeAutosaveEntity) {
       ]);
 }
 
+function hasPendingCostumeImageDelete(keys: Set<string>, itemId: string) {
+  const prefix = `costume-image:${itemId}:`;
+  for (const key of keys) {
+    if (key.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 function hasExplicitCostumePendingChanges(
   scenes: ProjectCostumeScene[],
   drafts: Record<string, CostumeDraft>,
@@ -1944,11 +2291,67 @@ function createTemporaryId(kind: "scene" | "item") {
   return `${tempPrefix}${kind}-${crypto.randomUUID()}`;
 }
 
+function insertCostumeSceneByAnchors(
+  scenes: ProjectCostumeScene[],
+  scene: ProjectCostumeScene,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  return insertCostumeEntityByAnchors(
+    scenes,
+    scene,
+    (candidate) => candidate.id,
+    beforeId,
+    afterId,
+    fallbackIndex
+  );
+}
+
+function insertCostumeItemByAnchors(
+  items: ProjectCostume[],
+  item: ProjectCostume,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  return insertCostumeEntityByAnchors(
+    items,
+    item,
+    (candidate) => candidate.id,
+    beforeId,
+    afterId,
+    fallbackIndex
+  );
+}
+
+function insertCostumeEntityByAnchors<T>(
+  items: T[],
+  item: T,
+  getId: (candidate: T) => string,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  const itemId = getId(item);
+  if (items.some((candidate) => getId(candidate) === itemId)) return items;
+  const beforeIndex = beforeId ? items.findIndex((candidate) => getId(candidate) === beforeId) : -1;
+  const afterIndex = afterId ? items.findIndex((candidate) => getId(candidate) === afterId) : -1;
+  const insertionIndex = beforeIndex >= 0
+    ? beforeIndex + 1
+    : afterIndex >= 0
+      ? afterIndex
+      : Math.max(0, Math.min(fallbackIndex, items.length));
+  const next = [...items];
+  next.splice(insertionIndex, 0, item);
+  return next;
+}
+
 function isTemporaryId(id: string) {
   return id.startsWith(tempPrefix);
 }
 
-function dedupeActors(actors: ProjectActor[]) {
+function dedupeActors(actors: Array<Pick<ProjectActor, "role" | "name">>) {
   const seen = new Set<string>();
   return actors.filter((actor) => {
     const key = normalizeActorKey(actor.role, actor.name);
@@ -1990,7 +2393,7 @@ function mergeEpisodeNumbers(current: number[], automatic?: Iterable<number>) {
 
 function getMissingSceneActors(
   scene: ProjectCostumeScene,
-  sourceActors: ProjectActor[],
+  sourceActors: Array<Pick<ProjectActor, "role" | "name">>,
   drafts: Record<string, CostumeDraft>
 ) {
   const existingKeys = new Set(scene.items.map((item) => {

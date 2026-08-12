@@ -112,5 +112,6 @@ test("preset create, update, and delete stay behind the existing admin gate", ()
   assert.match(deletePreset, /\.eq\("daily_plan_id", SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID\)/u);
   assert.match(deletePreset, /\.contains\("data", \{ kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND \}\)/u);
   assert.match(deletePreset, /expected\.value === null[\s\S]*\.eq\("updated_at", expected\.value\)/u);
-  assert.match(deletePreset, /loadSpacePresetRow[\s\S]*spacePresetConflictResponse/u);
+  assert.match(deletePreset, /select\("\*"\)[\s\S]*payload: \{ preset: presetRow \}[\s\S]*\.eq\("updated_at", expected\.value\)/u);
+  assert.match(deletePreset, /return spacePresetConflictResponse\(\)/u);
 });

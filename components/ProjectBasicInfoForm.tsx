@@ -1,13 +1,20 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, Save, Trash2, X } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { Button } from "@/components/ui/Button";
 import { useAutosave } from "@/hooks/useAutosave";
+import {
+  deleteProjectBasicInfoEntity,
+  finalizeDeletedProjectBasicInfoEntity,
+  restoreDeletedProjectBasicInfoEntity
+} from "@/lib/data/projects";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
 import {
+  createBlankProjectActor,
   createBlankProjectMainStaffMember,
   formatMainStaffEpisodeSummary,
   getDailyPlanMainStaffEpisodeViolations,
@@ -40,13 +47,19 @@ const fieldClass =
 
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
 export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onAutoSave, onComplete }: ProjectBasicInfoFormProps) {
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const [value, setValue] = useState<ProjectBasicInfo>(() => normalizeProjectBasicInfoForForm(initialValue));
   const [totalEpisodesDraft, setTotalEpisodesDraft] = useState(String(initialValue.totalEpisodes));
   const [isSaving, setIsSaving] = useState(false);
   const [isDraftHydrated, setIsDraftHydrated] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [isComposing, setIsComposing] = useState(false);
+  const [pendingEntityDeleteCount, setPendingEntityDeleteCount] = useState(0);
   const [openEpisodeStaffId, setOpenEpisodeStaffId] = useState<string | null>(null);
+  const valueRef = useRef(value);
+  const totalEpisodesDraftRef = useRef(totalEpisodesDraft);
+  valueRef.current = value;
+  totalEpisodesDraftRef.current = totalEpisodesDraft;
   const basicInfoGuideAnchor = useContextualGuideAnchor<HTMLFormElement>("basic-info.form");
   const { completeGuide } = useContextualGuide();
   const basicInfoGuideUseful = useMemo(() => {
@@ -119,7 +132,7 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
 
   const autosave = useAutosave<ProjectBasicInfoDraft>({
     value: autosaveDraft,
-    enabled: !isComposing && !isSaving,
+    enabled: !isComposing && !isSaving && pendingEntityDeleteCount === 0,
     delayMs: 700,
     scopeKey: `project-basic-info:${projectId}`,
     validate: (draft) => validateProjectBasicInfo({
@@ -177,15 +190,103 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
   }, []);
 
   const deleteStaff = useCallback((index: number) => {
+    const currentStaff = valueRef.current.mainStaff;
+    const member = currentStaff[index];
+    if (!member) return;
+    const beforeId = index > 0 ? currentStaff[index - 1].id : "";
+    const afterId = index + 1 < currentStaff.length ? currentStaff[index + 1].id : "";
+    const replacement = currentStaff.length === 1 ? createFormMainStaffMember() : null;
+    const beforeDeleteDraft: ProjectBasicInfoDraft = {
+      value: valueRef.current,
+      totalEpisodesDraft: totalEpisodesDraftRef.current
+    };
+    const afterDeleteValue = {
+      ...beforeDeleteDraft.value,
+      mainStaff: currentStaff
+        .filter((candidate) => candidate.id !== member.id)
+        .map((candidate, sortOrder) => ({ ...candidate, sortOrder }))
+    };
+    const afterDeleteDraft: ProjectBasicInfoDraft = {
+      value: {
+        ...afterDeleteValue,
+        mainStaff: afterDeleteValue.mainStaff.length > 0
+          ? afterDeleteValue.mainStaff
+          : replacement ? [replacement] : []
+      },
+      totalEpisodesDraft: beforeDeleteDraft.totalEpisodesDraft
+    };
+    const canMarkDeleteBaseline = validateProjectBasicInfo({
+      ...beforeDeleteDraft.value,
+      totalEpisodes: Number(beforeDeleteDraft.totalEpisodesDraft)
+    }).ok;
+    let receipt = "";
+    let restoredLocally = false;
+    let deleteFailed = false;
+    let pendingReleased = false;
+    const releasePending = () => {
+      if (pendingReleased) return;
+      pendingReleased = true;
+      setPendingEntityDeleteCount((current) => Math.max(0, current - 1));
+    };
     setOpenEpisodeStaffId(null);
-    setValue((current) => ({
-      ...current,
-      mainStaff: current.mainStaff.length === 1
-        ? [createFormMainStaffMember()]
-        : current.mainStaff.filter((_, memberIndex) => memberIndex !== index)
-          .map((member, sortOrder) => ({ ...member, sortOrder }))
-    }));
-  }, []);
+    deleteWithUndo({
+      key: `basic-info-main-staff:${member.id}`,
+      label: member.name.trim() || member.role.trim() || "메인 스태프",
+      removeLocal: () => {
+        const current = valueRef.current;
+        if (!current.mainStaff.some((candidate) => candidate.id === member.id)) return;
+        const remaining = current.mainStaff.filter((candidate) => candidate.id !== member.id);
+        const nextStaff = (remaining.length > 0 ? remaining : replacement ? [replacement] : [])
+          .map((candidate, sortOrder) => ({ ...candidate, sortOrder }));
+        const nextValue = { ...current, mainStaff: nextStaff };
+        valueRef.current = nextValue;
+        setValue(nextValue);
+        setPendingEntityDeleteCount((current) => current + 1);
+      },
+      restoreLocal: () => {
+        restoredLocally = true;
+        const current = valueRef.current;
+        if (!current.mainStaff.some((candidate) => candidate.id === member.id)) {
+          const staffWithoutReplacement = replacement
+            ? current.mainStaff.filter((candidate) => (
+              candidate.id !== replacement.id || !areMainStaffSnapshotsEqual(candidate, replacement)
+            ))
+            : current.mainStaff;
+          const nextStaff = insertMainStaffByAnchors(
+            staffWithoutReplacement,
+            member,
+            beforeId,
+            afterId,
+            index
+          ).map((candidate, sortOrder) => ({ ...candidate, sortOrder }));
+          const nextValue = { ...current, mainStaff: nextStaff };
+          valueRef.current = nextValue;
+          setValue(nextValue);
+        }
+        if (deleteFailed) releasePending();
+      },
+      deleteRemote: async () => {
+        try {
+          await autosave.flush();
+          receipt = await deleteProjectBasicInfoEntity(projectId, { kind: "staff", id: member.id });
+          if (canMarkDeleteBaseline) {
+            autosave.markSaved(restoredLocally ? beforeDeleteDraft : afterDeleteDraft);
+          }
+          releasePending();
+        } catch (error) {
+          deleteFailed = true;
+          if (restoredLocally) releasePending();
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        await restoreDeletedProjectBasicInfoEntity(projectId, receipt);
+        if (canMarkDeleteBaseline) autosave.markSaved(beforeDeleteDraft);
+        releasePending();
+      },
+      finalize: () => finalizeDeletedProjectBasicInfoEntity(projectId, receipt)
+    });
+  }, [autosave, deleteWithUndo, projectId]);
 
   const updateTotalEpisodes = useCallback((nextDraft: string) => {
     const digits = nextDraft.replace(/\D/g, "").slice(0, 3);
@@ -194,32 +295,6 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
       setTotalEpisodesDraft(digits);
       setOpenEpisodeStaffId(null);
       return;
-    }
-
-    const previousTotalEpisodes = value.totalEpisodes;
-    if (nextTotalEpisodes < previousTotalEpisodes) {
-      const affected = value.mainStaff
-        .map((member) => ({
-          member,
-          removedEpisodes: member.episodeNumbers?.filter((episode) => episode > nextTotalEpisodes) ?? []
-        }))
-        .filter(({ removedEpisodes }) => removedEpisodes.length > 0);
-
-      if (affected.length > 0) {
-        const affectedEpisodes = [...new Set(
-          affected.flatMap(({ removedEpisodes }) => removedEpisodes)
-        )].sort((left, right) => left - right);
-        const affectedStaff = affected
-          .map(({ member }) => member.name.trim() || member.role.trim() || "이름 미입력 스태프")
-          .join(", ");
-        const confirmed = window.confirm(
-          `총회차를 ${nextTotalEpisodes}회차로 줄이면 ${affectedStaff}의 ${affectedEpisodes.join(", ")}회차 선택이 제거됩니다. 계속할까요?`
-        );
-        if (!confirmed) {
-          setTotalEpisodesDraft(String(previousTotalEpisodes));
-          return;
-        }
-      }
     }
 
     setErrorMessage("");
@@ -240,7 +315,7 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
     }));
   }, [value.mainStaff, value.totalEpisodes]);
 
-  const updateActor = useCallback((index: number, field: keyof ProjectActor, nextValue: string) => {
+  const updateActor = useCallback((index: number, field: keyof Pick<ProjectActor, "role" | "name">, nextValue: string) => {
     setValue((current) => ({
       ...current,
       actors: current.actors.map((actor, actorIndex) => (
@@ -250,13 +325,96 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
   }, []);
 
   const deleteActor = useCallback((index: number) => {
-    setValue((current) => ({
-      ...current,
-      actors: current.actors.length === 1
-        ? [{ role: "", name: "" }]
-        : current.actors.filter((_, actorIndex) => actorIndex !== index)
-    }));
-  }, []);
+    const currentActors = valueRef.current.actors;
+    const actor = currentActors[index];
+    if (!actor) return;
+    const beforeId = index > 0 ? currentActors[index - 1].id : "";
+    const afterId = index + 1 < currentActors.length ? currentActors[index + 1].id : "";
+    const replacement = currentActors.length === 1 ? createBlankProjectActor() : null;
+    const beforeDeleteDraft: ProjectBasicInfoDraft = {
+      value: valueRef.current,
+      totalEpisodesDraft: totalEpisodesDraftRef.current
+    };
+    const remainingActors = currentActors.filter((candidate) => candidate.id !== actor.id);
+    const afterDeleteDraft: ProjectBasicInfoDraft = {
+      value: {
+        ...beforeDeleteDraft.value,
+        actors: remainingActors.length > 0 ? remainingActors : replacement ? [replacement] : []
+      },
+      totalEpisodesDraft: beforeDeleteDraft.totalEpisodesDraft
+    };
+    const canMarkDeleteBaseline = validateProjectBasicInfo({
+      ...beforeDeleteDraft.value,
+      totalEpisodes: Number(beforeDeleteDraft.totalEpisodesDraft)
+    }).ok;
+    let receipt = "";
+    let restoredLocally = false;
+    let deleteFailed = false;
+    let pendingReleased = false;
+    const releasePending = () => {
+      if (pendingReleased) return;
+      pendingReleased = true;
+      setPendingEntityDeleteCount((current) => Math.max(0, current - 1));
+    };
+    deleteWithUndo({
+      key: `basic-info-actor:${actor.id}`,
+      label: actor.role.trim() || actor.name.trim() || "배우",
+      removeLocal: () => {
+        const current = valueRef.current;
+        if (!current.actors.some((candidate) => candidate.id === actor.id)) return;
+        const remaining = current.actors.filter((candidate) => candidate.id !== actor.id);
+        const nextValue = {
+          ...current,
+          actors: remaining.length > 0 ? remaining : replacement ? [replacement] : []
+        };
+        valueRef.current = nextValue;
+        setValue(nextValue);
+        setPendingEntityDeleteCount((current) => current + 1);
+      },
+      restoreLocal: () => {
+        restoredLocally = true;
+        const current = valueRef.current;
+        if (!current.actors.some((candidate) => candidate.id === actor.id)) {
+          const actorsWithoutReplacement = replacement
+            ? current.actors.filter((candidate) => (
+              candidate.id !== replacement.id || !areActorSnapshotsEqual(candidate, replacement)
+            ))
+            : current.actors;
+          const nextActors = insertActorByAnchors(
+            actorsWithoutReplacement,
+            actor,
+            beforeId,
+            afterId,
+            index
+          );
+          const nextValue = { ...current, actors: nextActors };
+          valueRef.current = nextValue;
+          setValue(nextValue);
+        }
+        if (deleteFailed) releasePending();
+      },
+      deleteRemote: async () => {
+        try {
+          await autosave.flush();
+          receipt = await deleteProjectBasicInfoEntity(projectId, { kind: "actor", id: actor.id });
+          if (canMarkDeleteBaseline) {
+            autosave.markSaved(restoredLocally ? beforeDeleteDraft : afterDeleteDraft);
+          }
+          releasePending();
+        } catch (error) {
+          deleteFailed = true;
+          if (restoredLocally) releasePending();
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        await restoreDeletedProjectBasicInfoEntity(projectId, receipt);
+        if (canMarkDeleteBaseline) autosave.markSaved(beforeDeleteDraft);
+        releasePending();
+      },
+      finalize: () => finalizeDeletedProjectBasicInfoEntity(projectId, receipt)
+    });
+  }, [autosave, deleteWithUndo, projectId]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -403,7 +561,7 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
             type="button"
             variant="secondary"
             className="min-h-9 px-3 py-1.5 text-xs"
-            onClick={() => setValue((current) => ({ ...current, actors: [...current.actors, { role: "", name: "" }] }))}
+            onClick={() => setValue((current) => ({ ...current, actors: [...current.actors, createBlankProjectActor()] }))}
           >
             <Plus className="h-4 w-4" aria-hidden />
             배우 추가
@@ -413,7 +571,7 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
         <div className="grid gap-2">
           {value.actors.map((actor, index) => (
             <ActorFields
-              key={index}
+              key={actor.id}
               actor={actor}
               index={index}
               onChange={updateActor}
@@ -452,7 +610,7 @@ function normalizeProjectBasicInfoForForm(value: ProjectBasicInfo): ProjectBasic
       : [createFormMainStaffMember()],
     actors: value.actors.length > 0
       ? value.actors.map((actor) => ({ ...actor }))
-      : [{ role: "", name: "" }]
+      : [createBlankProjectActor()]
   };
 }
 
@@ -705,7 +863,7 @@ const ActorFields = memo(function ActorFields({
 }: {
   actor: ProjectActor;
   index: number;
-  onChange: (index: number, field: keyof ProjectActor, value: string) => void;
+  onChange: (index: number, field: keyof Pick<ProjectActor, "role" | "name">, value: string) => void;
   onDelete: (index: number) => void;
 }) {
   return (
@@ -743,6 +901,54 @@ function createFormMainStaffMember(sortOrder = 0, includeInDailyPlan = true) {
     includeInDailyPlan,
     id: `${member.id}_${Date.now()}_${Math.random().toString(16).slice(2)}`
   };
+}
+
+function insertMainStaffByAnchors(
+  members: ProjectMainStaffMember[],
+  member: ProjectMainStaffMember,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  if (members.some((candidate) => candidate.id === member.id)) return members;
+  const beforeIndex = beforeId ? members.findIndex((candidate) => candidate.id === beforeId) : -1;
+  const afterIndex = afterId ? members.findIndex((candidate) => candidate.id === afterId) : -1;
+  const insertionIndex = beforeIndex >= 0
+    ? beforeIndex + 1
+    : afterIndex >= 0
+      ? afterIndex
+      : Math.max(0, Math.min(fallbackIndex, members.length));
+  const next = [...members];
+  next.splice(insertionIndex, 0, member);
+  return next;
+}
+
+function areMainStaffSnapshotsEqual(left: ProjectMainStaffMember, right: ProjectMainStaffMember) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function insertActorByAnchors(
+  actors: ProjectActor[],
+  actor: ProjectActor,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  if (actors.some((candidate) => candidate.id === actor.id)) return actors;
+  const beforeIndex = beforeId ? actors.findIndex((candidate) => candidate.id === beforeId) : -1;
+  const afterIndex = afterId ? actors.findIndex((candidate) => candidate.id === afterId) : -1;
+  const insertionIndex = beforeIndex >= 0
+    ? beforeIndex + 1
+    : afterIndex >= 0
+      ? afterIndex
+      : Math.max(0, Math.min(fallbackIndex, actors.length));
+  const next = [...actors];
+  next.splice(insertionIndex, 0, actor);
+  return next;
+}
+
+function areActorSnapshotsEqual(left: ProjectActor, right: ProjectActor) {
+  return left.id === right.id && left.role === right.role && left.name === right.name;
 }
 
 function parseSelectableTotalEpisodes(value: string) {

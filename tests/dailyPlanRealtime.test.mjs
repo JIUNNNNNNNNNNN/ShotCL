@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const subscriptionSource = readFileSync(
-  new URL("../lib/realtime/subscribeToDailyPlan.ts", import.meta.url),
+  new URL("../lib/realtime/subscribeToProgressChanges.ts", import.meta.url),
   "utf8"
 );
 const progressPageSource = readFileSync(
@@ -19,12 +19,16 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test("selected daily-plan subscriber requests only UPDATE payloads", () => {
+test("one selected-round subscriber owns shot and daily-plan events", () => {
+  assert.equal((subscriptionSource.match(/\.channel\(/gu) ?? []).length, 1);
   assert.match(subscriptionSource, /event: "UPDATE"/u);
   assert.match(subscriptionSource, /table: "daily_plans"/u);
   assert.match(subscriptionSource, /filter: `id=eq\.\$\{dailyPlanId\}`/u);
   assert.match(subscriptionSource, /newRow\.project_id[\s\S]*!== projectId/u);
-  assert.doesNotMatch(subscriptionSource, /\bfetch\b|router\.refresh|refreshDailyPlans/u);
+  assert.match(subscriptionSource, /table: "shots"/u);
+  assert.match(subscriptionSource, /filter: `daily_plan_id=eq\.\$\{dailyPlanId\}`/u);
+  assert.match(subscriptionSource, /queueMicrotask\(flushShotChanges\)/u);
+  assert.doesNotMatch(subscriptionSource, /\bfetch\b|router\.refresh|refreshDailyPlans|setTimeout/u);
 });
 
 test("Progress normalizes delivered selected-round UPDATEs and reuses the guarded local patch", () => {
@@ -46,6 +50,6 @@ test("Progress normalizes delivered selected-round UPDATEs and reuses the guarde
   assert.match(realtimeSource, /!remotePlan\.updatedAt/u);
   assert.match(realtimeSource, /commitDailyPlanPatch\(remotePlan\.id, remotePlan\)/u);
   assert.match(guardedPatchSource, /compareUpdatedAt\(patch\.updatedAt, current\.updatedAt\) < 0/u);
-  assert.match(realtimeSource, /if \(!isProgressView \|\| isGuest \|\| !projectId \|\| !selectedDailyPlanId\)/u);
+  assert.match(progressPageSource, /if \(isGuest \|\| !projectId \|\| !selectedDailyPlanId\)[\s\S]*import\("@\/lib\/realtime\/subscribeToProgressChanges"\)/u);
   assert.doesNotMatch(realtimeSource, /\bfetch\b|router\.refresh|refreshDailyPlans/u);
 });

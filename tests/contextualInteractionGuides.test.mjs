@@ -549,11 +549,11 @@ test("Archive help text matches filename, edit, crop, selection, and delete beha
     INTERACTION_GUIDES["archive.interaction-asset-delete"],
     "coarse"
   );
-  assert.match(archiveDelete?.description ?? "", /삭제 확인/u);
-  assert.doesNotMatch(archiveDelete?.description ?? "", /바로 삭제|즉시 삭제/u);
+  assert.match(archiveDelete?.description ?? "", /바로 삭제/u);
+  assert.match(archiveDelete?.detail ?? "", /Command\/Ctrl\+Z/u);
 });
 
-test("gesture variants retain the audited long-press thresholds and safe delete wording", () => {
+test("gesture variants retain the audited long-press thresholds and immediate undoable delete wording", () => {
   const duration = (id, mode) => getInteractionGuideVariant(INTERACTION_GUIDES[id], mode)?.durationMs;
   assert.equal(duration("main.interaction-remembered-project", "coarse"), 600);
   assert.equal(duration("home.interaction-calendar-create", "fine"), 500);
@@ -585,7 +585,8 @@ test("gesture variants retain the audited long-press thresholds and safe delete 
     INTERACTION_GUIDES["staff.interaction-member-delete"],
     "fine"
   );
-  assert.match(archiveDelete?.description ?? "", /삭제 확인/u);
-  assert.match(staffDelete?.description ?? "", /삭제 확인/u);
-  assert.doesNotMatch(archiveDelete?.description ?? "", /바로 삭제|즉시 삭제/u);
+  assert.match(archiveDelete?.description ?? "", /바로 삭제/u);
+  assert.match(staffDelete?.description ?? "", /바로 삭제/u);
+  assert.match(archiveDelete?.detail ?? "", /Command\/Ctrl\+Z/u);
+  assert.match(staffDelete?.detail ?? "", /Command\/Ctrl\+Z/u);
 });

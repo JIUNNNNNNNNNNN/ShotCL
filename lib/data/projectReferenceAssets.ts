@@ -2,7 +2,6 @@ import type {
   ProjectCostume,
   ProjectCostumeScene,
   ProjectArchiveFolder,
-  ProjectArchiveFolderInspection,
   ProjectReferenceAsset,
   ProjectReferenceAssetType,
   ProjectReferenceCrop,
@@ -457,6 +456,70 @@ export async function updateProjectScenarioScenes(
   return payload.asset as ProjectScenarioScenesUpdate;
 }
 
+export async function deleteProjectScenarioScene(
+  projectId: string,
+  assetId: string,
+  sceneId: string,
+  expectedUpdatedAt: string
+): Promise<{ receipt: string; asset: ProjectScenarioScenesUpdate }> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operation: "delete_scenario_scene",
+      id: assetId,
+      sceneId,
+      expectedUpdatedAt
+    })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    receipt?: unknown;
+    asset?: ProjectScenarioScenesUpdate;
+  };
+  if (response.status === 409) {
+    throw new AutosaveConflictError<ProjectReferenceAsset>(
+      "scenario-asset",
+      [payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오가 다른 곳에서 변경되었습니다.",
+      payload.asset as ProjectReferenceAsset | null ?? null
+    );
+  }
+  if (!response.ok || typeof payload.receipt !== "string" || !payload.asset) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오 씬을 삭제하지 못했습니다.");
+  }
+  return { receipt: payload.receipt, asset: payload.asset };
+}
+
+export async function restoreDeletedProjectScenarioScene(
+  projectId: string,
+  receipt: string
+): Promise<ProjectScenarioScenesUpdate> {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted_scenario_scene", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    asset?: ProjectScenarioScenesUpdate;
+  };
+  if (!response.ok || !payload.asset) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오 씬 삭제를 되돌리지 못했습니다.");
+  }
+  return payload.asset;
+}
+
+export async function finalizeDeletedProjectScenarioScene(projectId: string, receipt: string) {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted_scenario_scene", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError;
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "시나리오 씬 삭제 정보를 정리하지 못했습니다.");
+  }
+}
+
 export type ProjectReferenceAssetOrderUpdate = {
   id: string;
   sortOrder: number;
@@ -586,13 +649,15 @@ export async function deleteProjectReferenceAsset(projectId: string, id: string)
   );
   const payload = (await response.json().catch(() => ({}))) as ApiError & {
     deleted?: number;
+    receipt?: unknown;
     storageCleanupWarning?: string;
   };
-  if (!response.ok) {
+  if (!response.ok || typeof payload.receipt !== "string") {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료를 삭제하지 못했습니다.");
   }
   return {
     deleted: payload.deleted ?? 0,
+    receipt: payload.receipt,
     storageCleanupWarning: payload.storageCleanupWarning ?? ""
   };
 }
@@ -620,19 +685,60 @@ export async function deleteProjectReferenceAssets(projectId: string, ids: strin
   });
   const payload = (await response.json().catch(() => ({}))) as ApiError & {
     deleted?: number;
+    receipt?: unknown;
     storageCleanupWarning?: string;
     orderNormalizationWarning?: string;
     orders?: ProjectReferenceAssetOrderUpdate[];
   };
-  if (!response.ok) {
+  if (!response.ok || typeof payload.receipt !== "string") {
     throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "선택한 자료를 삭제하지 못했습니다.");
   }
   return {
     deleted: payload.deleted ?? 0,
+    receipt: payload.receipt,
     storageCleanupWarning: payload.storageCleanupWarning ?? "",
     orderNormalizationWarning: payload.orderNormalizationWarning ?? "",
     orders: payload.orders ?? []
   };
+}
+
+export async function restoreDeletedProjectReferenceAssets(projectId: string, receipt: string) {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    restored?: number;
+    assets?: ProjectReferenceAsset[];
+    orders?: ProjectReferenceAssetOrderUpdate[];
+    orderNormalizationWarning?: string;
+  };
+  if (!response.ok || !Array.isArray(payload.assets) || !Array.isArray(payload.orders)) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 삭제를 되돌리지 못했습니다.");
+  }
+  return {
+    restored: payload.restored ?? payload.assets.length,
+    assets: payload.assets,
+    orders: payload.orders,
+    orderNormalizationWarning: payload.orderNormalizationWarning ?? ""
+  };
+}
+
+export async function finalizeDeletedProjectReferenceAssets(projectId: string, receipt: string) {
+  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/reference-assets`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt }),
+    // The project Undo provider finalizes during route/layout disposal. Browsers
+    // cap keepalive request bodies, so only small signed receipts can safely use it.
+    keepalive: receipt.length <= 48_000
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { finalized?: number };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "자료 파일을 정리하지 못했습니다.");
+  }
+  return payload.finalized ?? 0;
 }
 
 export async function inspectProjectReferenceAssets(
@@ -725,15 +831,6 @@ export async function renameProjectArchiveFolderTree(
   return payload.folders;
 }
 
-export async function deleteProjectArchiveFolder(projectId: string, id: string) {
-  const response = await fetchArchiveApi(
-    `/api/projects/${encodeURIComponent(projectId)}/archive-folders?id=${encodeURIComponent(id)}`,
-    { method: "DELETE" }
-  );
-  const payload = (await response.json().catch(() => ({}))) as ApiError;
-  if (!response.ok) throw new Error(payload.error || "폴더를 삭제하지 못했습니다.");
-}
-
 /**
  * 선택된 폴더와 모든 하위 폴더의 full path를 변경합니다.
  * 부모와 자식이 함께 전달돼도 서버가 최상위 선택 폴더만 이동 대상으로 정리합니다.
@@ -804,63 +901,6 @@ export async function moveProjectArchiveSelection(
     movedAssetIds: payload.movedAssetIds ?? [],
     movedRootIds: payload.movedRootIds ?? [],
     folders: payload.folders ?? []
-  };
-}
-
-/** 삭제 확인 화면에 필요한 하위 폴더·파일·진행도 연결 개수를 서버 기준으로 조회합니다. */
-export async function inspectProjectArchiveFolders(
-  projectId: string,
-  ids: string[],
-  assetIds: string[] = []
-): Promise<ProjectArchiveFolderInspection> {
-  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ operation: "inspect_delete", ids, assetIds })
-  });
-  const payload = (await response.json().catch(() => ({}))) as ApiError & {
-    inspection?: ProjectArchiveFolderInspection;
-  };
-  if (!response.ok || !payload.inspection) {
-    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "폴더 내용을 확인하지 못했습니다.");
-  }
-  return payload.inspection;
-}
-
-/**
- * inspect 결과를 사용자에게 보여준 뒤에만 호출해야 합니다.
- * 연결된 진행도 media_link도 명시적으로 정리하며 Storage 정리 경고를 함께 반환합니다.
- */
-export async function deleteProjectArchiveFolders(
-  projectId: string,
-  ids: string[],
-  confirmed: boolean,
-  assetIds: string[] = []
-): Promise<{
-  inspection: ProjectArchiveFolderInspection;
-  deletedFolderCount: number;
-  deletedAssetCount: number;
-  storageCleanupWarning: string;
-}> {
-  const response = await fetchArchiveApi(`/api/projects/${encodeURIComponent(projectId)}/archive-folders`, {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids, confirmed, assetIds })
-  });
-  const payload = (await response.json().catch(() => ({}))) as ApiError & {
-    inspection?: ProjectArchiveFolderInspection;
-    deletedFolderCount?: number;
-    deletedAssetCount?: number;
-    storageCleanupWarning?: string;
-  };
-  if (!response.ok || !payload.inspection) {
-    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "폴더를 삭제하지 못했습니다.");
-  }
-  return {
-    inspection: payload.inspection,
-    deletedFolderCount: payload.deletedFolderCount ?? 0,
-    deletedAssetCount: payload.deletedAssetCount ?? 0,
-    storageCleanupWarning: payload.storageCleanupWarning ?? ""
   };
 }
 
@@ -967,13 +1007,45 @@ export async function updateProjectCostumeScene(
   return payload.scene;
 }
 
-export async function deleteProjectCostumeScene(projectId: string, id: string) {
+export async function deleteProjectCostumeScene(projectId: string, id: string): Promise<string> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/costume-scenes?id=${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { receipt?: string };
+  if (!response.ok || !payload.receipt) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 씬을 삭제하지 못했습니다.");
+  }
+  return payload.receipt;
+}
+
+export async function restoreDeletedProjectCostumeScene(
+  projectId: string,
+  receipt: string
+): Promise<ProjectCostumeScene | null> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { scene?: ProjectCostumeScene | null };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 씬을 복원하지 못했습니다.");
+  }
+  return payload.scene ?? null;
+}
+
+export async function finalizeDeletedProjectCostumeScene(projectId: string, receipt: string): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costume-scenes`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt })
+  });
   const payload = (await response.json().catch(() => ({}))) as ApiError;
-  if (!response.ok) throw new Error(payload.error || "의상 씬을 삭제하지 못했습니다.");
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 씬 삭제를 확정하지 못했습니다.");
+  }
 }
 
 export async function saveProjectCostume(
@@ -1017,11 +1089,93 @@ export async function saveProjectCostume(
   return payload.costume;
 }
 
-export async function deleteProjectCostume(projectId: string, id: string) {
+export async function deleteProjectCostume(projectId: string, id: string): Promise<string> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/costumes?id=${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { receipt?: string };
+  if (!response.ok || !payload.receipt) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 항목을 삭제하지 못했습니다.");
+  }
+  return payload.receipt;
+}
+
+export async function restoreDeletedProjectCostume(
+  projectId: string,
+  receipt: string
+): Promise<ProjectCostume | null> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { costume?: ProjectCostume | null };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 항목을 복원하지 못했습니다.");
+  }
+  return payload.costume ?? null;
+}
+
+export async function finalizeDeletedProjectCostume(projectId: string, receipt: string): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt })
+  });
   const payload = (await response.json().catch(() => ({}))) as ApiError;
-  if (!response.ok) throw new Error(payload.error || "의상 항목을 삭제하지 못했습니다.");
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 항목 삭제를 확정하지 못했습니다.");
+  }
+}
+
+/** Persist a saved costume-image X immediately while retaining its object for global Undo. */
+export async function deleteProjectCostumeImage(
+  projectId: string,
+  itemId: string,
+  path: string
+): Promise<string> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "delete_image", itemId, path })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { receipt?: string };
+  if (!response.ok || !payload.receipt) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 이미지를 삭제하지 못했습니다.");
+  }
+  return payload.receipt;
+}
+
+export async function restoreDeletedProjectCostumeImage(
+  projectId: string,
+  receipt: string
+): Promise<ProjectCostume | null> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted_image", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { costume?: ProjectCostume | null };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 이미지를 복원하지 못했습니다.");
+  }
+  return payload.costume ?? null;
+}
+
+export async function finalizeDeletedProjectCostumeImage(
+  projectId: string,
+  receipt: string
+): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/costumes`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted_image", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError;
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "의상 이미지 삭제를 확정하지 못했습니다.");
+  }
 }

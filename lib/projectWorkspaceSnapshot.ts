@@ -5,7 +5,7 @@ import {
   buildProjectWorkspaceSummaryByPlan,
   type DailyPlanShotSummaryRow
 } from "@/lib/projectWorkspaceSummary";
-import type { Project } from "@/lib/types";
+import type { Project, Shot } from "@/lib/types";
 
 type DailyPlanRow = Record<string, unknown>;
 type ProgressShotSummaryRow = {
@@ -17,6 +17,14 @@ type ProgressShotSummaryRow = {
 export type ProjectWorkspaceSnapshot = {
   project: Project | null;
   dailyPlans: DailyPlanListItem[];
+  /**
+   * Invite landing only: a server-validated, selected-round cut snapshot lets
+   * Progress render useful text before client data and media requests start.
+   */
+  initialProgress: {
+    dailyPlanId: string;
+    shots: Shot[];
+  } | null;
   error: string;
 };
 

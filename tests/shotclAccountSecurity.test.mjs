@@ -39,8 +39,16 @@ const projectAccessRouteSource = readFileSync(
   new URL("../app/api/projects/[projectId]/access/route.ts", import.meta.url),
   "utf8"
 );
+const dailyPlanDetailRouteSource = readFileSync(
+  new URL("../app/api/projects/[projectId]/daily-plans/[dailyPlanId]/route.ts", import.meta.url),
+  "utf8"
+);
 const mainPageSource = readFileSync(
   new URL("../app/page.tsx", import.meta.url),
+  "utf8"
+);
+const projectNavigationSource = readFileSync(
+  new URL("../components/ProjectNavigation.tsx", import.meta.url),
   "utf8"
 );
 
@@ -256,6 +264,28 @@ test("current-project legacy access wins over a stale guest invite during accoun
   assert.ok(legacyCheck >= 0 && legacyBranch > legacyCheck && guestInspection > legacyBranch);
 });
 
+test("guest Google linking preserves the exact current Progress round without trusting external paths", () => {
+  const guestNavigation = projectNavigationSource.slice(
+    projectNavigationSource.indexOf("function GuestProjectNavigation"),
+    projectNavigationSource.indexOf("function GuestNavigationLink")
+  );
+  assert.match(guestNavigation, /const accountReturnTo = `\$\{pathname\}\$\{currentSearch \? `\?\$\{currentSearch\}` : ""\}`/u);
+  assert.match(guestNavigation, /<GuestAccountSaveCta nextPath=\{accountReturnTo\}/u);
+
+  const sessionReturn = authSessionRouteSource.slice(
+    authSessionRouteSource.indexOf("function resolveProgressReturnTo"),
+    authSessionRouteSource.length
+  );
+  assert.match(sessionReturn, /getSafeInternalPath\(value, "\/"\)/u);
+  assert.match(sessionReturn, /parsed\.pathname !== `\/projects\/\$\{projectId\}`/u);
+  assert.match(sessionReturn, /isValidDatabaseProjectId\(dailyPlanId\)/u);
+  assert.match(sessionReturn, /buildProgressRoundHref\(projectId, dailyPlanId\)/u);
+  assert.doesNotMatch(sessionReturn, /https?:\/\/\$\{|window\.location/u);
+
+  assert.match(authProviderSource, /returnTo:\s*nextPath/u);
+  assert.match(authProviderSource, /returnTo:\s*getCurrentCallbackReturnTo\(\)/u);
+});
+
 test("OAuth callback avoids an extra refresh and logout marks the first server clear as complete", () => {
   assert.doesNotMatch(authCallbackSource, /router\.refresh\s*\(/u);
   const signOutStart = authProviderSource.indexOf("const signOut =");
@@ -351,8 +381,13 @@ function guestRequest(pathname, query = "", method = "GET") {
 
 test("guest API access is limited to the project shell and bounded read collections", () => {
   const root = "/api/projects/11111111-1111-4111-8111-111111111111";
+  const dailyPlanId = "22222222-2222-4222-8222-222222222222";
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(root)), true);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans`)), true);
+  assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans/${dailyPlanId}`)), true);
+  assert.equal(isGuestProjectApiRequestAllowed(
+    guestRequest(`${root}/daily-plans/${dailyPlanId}`, "progress=1")
+  ), true);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/shots`, "dailyPlanId=plan-1")), true);
   assert.equal(isGuestProjectApiRequestAllowed(
     guestRequest(`${root}/reference-assets`, "media=1&dailyPlanId=plan-1")
@@ -363,8 +398,12 @@ test("guest API access is limited to the project shell and bounded read collecti
 
 test("guest API access denies mutations, private collections, and unbounded reads", () => {
   const root = "/api/projects/11111111-1111-4111-8111-111111111111";
+  const dailyPlanId = "22222222-2222-4222-8222-222222222222";
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(root, "", "POST")), false);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans/plan-1`)), false);
+  assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans/${dailyPlanId}`, "expand=all")), false);
+  assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans/${dailyPlanId}/shots`)), false);
+  assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/daily-plans/${dailyPlanId}`, "", "PATCH")), false);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/shots`)), false);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/reference-assets`)), false);
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/reference-assets`, "media=1")), false);
@@ -383,4 +422,25 @@ test("guest API access denies mutations, private collections, and unbounded read
     ...guestRequest(`${root}/daily-plans`),
     projectId: "project_22222222-2222-4222-8222-222222222222"
   }), false);
+});
+
+test("Guest daily-plan detail keeps server access and project-plus-round scope guards", () => {
+  const accessIndex = dailyPlanDetailRouteSource.indexOf("await getAccessGrant(request, projectId)");
+  const planReadIndex = dailyPlanDetailRouteSource.indexOf('supabase.from("daily_plans")');
+  assert.ok(accessIndex >= 0 && accessIndex < planReadIndex);
+  assert.match(dailyPlanDetailRouteSource, /isValidDatabaseProjectId\(dailyPlanId\)/u);
+  assert.match(
+    dailyPlanDetailRouteSource,
+    /from\("daily_plans"\)[\s\S]*\.eq\("project_id", projectId\)\.eq\("id", dailyPlanId\)/u
+  );
+  assert.match(
+    dailyPlanDetailRouteSource,
+    /from\("daily_plan_shots"\)[\s\S]*\.eq\("project_id", projectId\)\.eq\("daily_plan_id", dailyPlanId\)/u
+  );
+  const progressBranch = dailyPlanDetailRouteSource.slice(
+    dailyPlanDetailRouteSource.indexOf('if (request.nextUrl.searchParams.get("progress") === "1")'),
+    dailyPlanDetailRouteSource.indexOf("const [{ data: plan")
+  );
+  assert.match(progressBranch, /select\(PROGRESS_DAILY_PLAN_COLUMNS\)/u);
+  assert.doesNotMatch(progressBranch, /daily_plan_shots/u);
 });

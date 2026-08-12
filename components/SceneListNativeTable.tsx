@@ -61,7 +61,7 @@ type SceneEditableColumn =
 
 type CellMenuState = { left: number; top: number };
 type ConfirmState = {
-  kind: "merge" | "clear";
+  kind: "merge";
   title: string;
   description: string;
 };
@@ -572,14 +572,6 @@ export function SceneListNativeTable({
               <SceneMenuButton
                 disabled={!canEdit}
                 onClick={() => {
-                  if (valuesInSelection(resolvedSelection).length > 0) {
-                    setConfirmState({
-                      kind: "clear",
-                      title: "선택 칸을 비울까요?",
-                      description: "선택한 칸의 실제 값이 삭제됩니다. 병합 상태는 그대로 유지됩니다."
-                    });
-                    return;
-                  }
                   void executeClear();
                 }}
               >
@@ -623,8 +615,7 @@ export function SceneListNativeTable({
               onCancel={() => setConfirmState(null)}
               onConfirm={() => {
                 setConfirmState(null);
-                if (confirmState.kind === "merge") void executeMerge();
-                else void executeClear();
+                void executeMerge();
               }}
             />,
             document.body

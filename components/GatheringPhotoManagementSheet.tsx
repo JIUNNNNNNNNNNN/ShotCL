@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent
+} from "react";
 import { createPortal } from "react-dom";
 import { Camera, Trash2 } from "lucide-react";
 import { useContextualGuideBlocker } from "@/components/guides/ContextualGuideProvider";
@@ -12,7 +19,8 @@ type GatheringPhotoManagementSheetProps = {
   open: boolean;
   disabled?: boolean;
   returnFocusRef: { current: HTMLElement | null };
-  onChangePhoto: () => void;
+  photoInputId: string;
+  onChangePhoto: () => boolean;
   onDeletePhoto: () => void;
   onCancel: () => void;
 };
@@ -23,6 +31,7 @@ export function GatheringPhotoManagementSheet({
   open,
   disabled = false,
   returnFocusRef,
+  photoInputId,
   onChangePhoto,
   onDeletePhoto,
   onCancel
@@ -30,7 +39,7 @@ export function GatheringPhotoManagementSheet({
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<SheetPhase>("closed");
   const dialogRef = useRef<HTMLDivElement | null>(null);
-  const changeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const changeButtonRef = useRef<HTMLLabelElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const shouldRestoreFocusRef = useRef(false);
   const titleId = useId();
@@ -151,11 +160,22 @@ export function GatheringPhotoManagementSheet({
 
   function runAction(action: () => void) {
     if (disabled) return;
+    action();
     shouldRestoreFocusRef.current = false;
     if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = null;
     setPhase("closed");
-    action();
+  }
+
+  function activateChangeInput(event: ReactMouseEvent<HTMLLabelElement>) {
+    // Prepare the replacement intent while this click is still trusted. The
+    // label's native default action then activates the stable input owned by
+    // the card. That input closes this sheet from its own click handler, after
+    // activation has reached it; no timer, animation frame, or Promise sits
+    // between the management action and the OS picker.
+    if (disabled || !onChangePhoto()) {
+      event.preventDefault();
+    }
   }
 
   if (!mounted || !rendered) return null;
@@ -181,17 +201,24 @@ export function GatheringPhotoManagementSheet({
           <h2 id={titleId} className={styles.title}>집합장소 사진 관리</h2>
         </header>
         <div className={styles.actions}>
-          <button
+          <label
             ref={changeButtonRef}
-            type="button"
+            htmlFor={photoInputId}
             className={styles.action}
-            disabled={disabled}
-            onClick={() => runAction(onChangePhoto)}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            aria-disabled={disabled}
+            onClick={activateChangeInput}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.currentTarget.click();
+            }}
           >
             <Camera className={styles.actionIcon} aria-hidden />
             <span className={styles.actionLabel}>사진 변경</span>
             <span aria-hidden />
-          </button>
+          </label>
           <button
             type="button"
             className={`${styles.action} ${styles.danger}`}

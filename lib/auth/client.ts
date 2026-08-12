@@ -38,14 +38,19 @@ export function getProjectIdFromInternalPath(value: unknown) {
     : null;
 }
 
-export function getAccountSessionSyncKey(accessToken: string, projectId: string | null) {
-  return `${accessToken.trim()}\u0000${projectId?.trim().toLowerCase() || ""}`;
+export function getAccountSessionSyncKey(
+  accessToken: string,
+  projectId: string | null,
+  returnTo: string | null = null
+) {
+  return `${accessToken.trim()}\u0000${projectId?.trim().toLowerCase() || ""}\u0000${returnTo ? getSafeInternalPath(returnTo) : ""}`;
 }
 
 /** 유효한 Supabase JWT를 서버의 HttpOnly account session으로 교환합니다. */
 export async function syncAccountSession(
   accessToken: string,
-  projectId: string | null = null
+  projectId: string | null = null,
+  returnTo: string | null = null
 ): Promise<AccountSessionSyncResult> {
   const token = accessToken.trim();
   if (!token) throw new Error("로그인 세션을 확인할 수 없습니다.");
@@ -60,7 +65,8 @@ export async function syncAccountSession(
     },
     body: JSON.stringify({
       action: "sync",
-      ...(projectId ? { projectId } : {})
+      ...(projectId ? { projectId } : {}),
+      ...(returnTo ? { returnTo: getSafeInternalPath(returnTo) } : {})
     })
   });
   const payload = await readAccountPayload(response);

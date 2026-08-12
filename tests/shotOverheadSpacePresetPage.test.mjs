@@ -93,6 +93,10 @@ test("stable scene ids and preset mutations stay wired through save, editor, and
   assert.match(presetMutations, /saveShotOverheadSpacePreset\([\s\S]*sceneId,[\s\S]*diagram,[\s\S]*expectedUpdatedAt/u);
   assert.match(presetMutations, /item\.id !== saved\.id && item\.location\.key !== saved\.location\.key/u);
   assert.match(presetMutations, /deleteShotOverheadSpacePreset\([\s\S]*presetId: preset\.id,[\s\S]*expectedUpdatedAt: preset\.updatedAt/u);
+  assert.match(presetMutations, /deleteWithUndo\(\{/u);
+  assert.match(presetMutations, /restoreDeletedShotOverheadSpacePreset/u);
+  assert.match(presetMutations, /finalizeDeletedShotOverheadSpacePreset/u);
+  assert.doesNotMatch(presetMutations, /window\.confirm|\bconfirm\(/u);
 
   assert.match(editorRender, /sceneId: diagramDraft\.sceneId/u);
   assert.match(editorRender, /scenes=\{sceneItems\}/u);

@@ -328,13 +328,15 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "배우 카드 이동",
-        description: "배우 카드를 약 0.575초 동안 누른 뒤 끌어 순서를 바꾸거나, 휴지통에 놓아 삭제 확인을 열 수 있습니다.",
+        description: "배우 카드를 약 0.575초 동안 누른 뒤 끌어 순서를 바꾸거나, 휴지통에 놓아 바로 삭제할 수 있습니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash",
         durationMs: 575
       },
       coarse: {
         title: "배우 카드 이동",
-        description: "배우 카드를 약 0.575초 동안 누른 뒤 끌어 순서를 바꾸거나, 휴지통에 놓아 삭제 확인을 열 수 있습니다.",
+        description: "배우 카드를 약 0.575초 동안 누른 뒤 끌어 순서를 바꾸거나, 휴지통에 놓아 바로 삭제할 수 있습니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash",
         durationMs: 575
       }
@@ -539,13 +541,15 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "스탭 삭제",
-        description: "스탭 카드를 약 0.575초 동안 누른 뒤 휴지통에 놓으면 삭제 확인이 열립니다.",
+        description: "스탭 카드를 약 0.575초 동안 누른 뒤 휴지통에 놓으면 바로 삭제됩니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash",
         durationMs: 575
       },
       coarse: {
         title: "스탭 삭제",
-        description: "스탭 카드를 약 0.575초 동안 누른 뒤 휴지통에 놓으면 삭제 확인이 열립니다.",
+        description: "스탭 카드를 약 0.575초 동안 누른 뒤 휴지통에 놓으면 바로 삭제됩니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash",
         durationMs: 575
       }
@@ -732,12 +736,14 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "휴지통으로 삭제",
-        description: "자료를 화면 아래 휴지통에 끌어놓으면 삭제 확인이 열립니다.",
+        description: "자료를 화면 아래 휴지통에 끌어놓으면 바로 삭제됩니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash"
       },
       coarse: {
         title: "휴지통으로 삭제",
-        description: "자료를 약 0.55초 동안 누른 뒤 화면 아래 휴지통에 끌어놓으면 삭제 확인이 열립니다.",
+        description: "자료를 약 0.55초 동안 누른 뒤 화면 아래 휴지통에 끌어놓으면 바로 삭제됩니다.",
+        detail: "최근 삭제는 Command/Ctrl+Z로 되돌릴 수 있습니다.",
         demo: "drag-trash",
         durationMs: 550
       }

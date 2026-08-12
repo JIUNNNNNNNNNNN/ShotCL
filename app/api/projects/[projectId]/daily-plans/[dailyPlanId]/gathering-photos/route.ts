@@ -29,6 +29,11 @@ import {
   ProjectAccessUnavailableError,
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
 type RouteContext = {
@@ -41,6 +46,14 @@ const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
 const MAX_PHOTOS_PER_POINT = 100;
 const UPLOAD_CONCURRENCY = 2;
 const SAFE_ID = /^[a-zA-Z0-9_-]{8,180}$/;
+const GATHERING_PHOTO_DELETE_RECEIPT_KIND = "gathering-photo";
+
+type GatheringPhotoDeleteReceipt = {
+  dailyPlanId: string;
+  gatheringPointId: string;
+  photo: DailyPlanGatheringPhoto;
+  originalIndex: number;
+};
 
 type PendingPhotoDescriptor = {
   photoId: string;
@@ -567,6 +580,16 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const expectedPrefix = `${storageBasePath(params.projectId, params.dailyPlanId, gatheringPointId, photoId)}/`;
     const paths = [photo.storagePath, photo.thumbnailPath]
       .filter((path) => path && path.startsWith(expectedPrefix));
+    const receipt = createProjectDeleteReceipt({
+      projectId: params.projectId,
+      kind: GATHERING_PHOTO_DELETE_RECEIPT_KIND,
+      payload: {
+        dailyPlanId: params.dailyPlanId,
+        gatheringPointId,
+        photo,
+        originalIndex: point.photos.findIndex((item) => item.id === photoId)
+      } satisfies GatheringPhotoDeleteReceipt
+    });
     const nextMeta = removeGatheringPhoto(meta, gatheringPointId, photoId);
     const saved = await saveMemo(
       supabase,
@@ -575,21 +598,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       encodeDailyPlanMemo(nextMeta),
       String(planRow.updated_at ?? "")
     );
-    let cleanupWarning = "";
-    if (paths.length > 0) {
-      try {
-        const { error: removeError } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
-        if (removeError) throw removeError;
-      } catch (removeError) {
-        cleanupWarning = "사진 정보는 삭제했지만 Storage 파일 일부를 정리하지 못했습니다.";
-        console.error("[gathering-photos:delete-cleanup]", safeError(removeError));
-      }
-    }
     return NextResponse.json({
       ok: true,
       memo: String(saved.memo ?? ""),
       updatedAt: String(saved.updated_at ?? ""),
-      cleanupWarning
+      cleanupWarning: "",
+      receipt,
+      deferredStoragePaths: paths.length
     });
   } catch (error) {
     return gatheringPhotoError(error, "집합장소 사진을 삭제하지 못했습니다.");
@@ -605,10 +620,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "집합장소 사진 순서는 Key staff만 저장할 수 있습니다." }, { status: role ? 403 : 401 });
     }
     const body = (await request.json()) as {
+      action?: unknown;
+      receipt?: unknown;
       gatheringPointId?: unknown;
       orderedPhotoIds?: unknown;
       expectedUpdatedAt?: unknown;
     };
+    const action = cleanText(body.action, 40);
+    if (action === "restore-delete" || action === "finalize-delete") {
+      const snapshot = readGatheringPhotoDeleteReceipt(
+        params.projectId,
+        params.dailyPlanId,
+        body.receipt
+      );
+      return action === "restore-delete"
+        ? restoreDeletedGatheringPhoto(params, snapshot)
+        : finalizeDeletedGatheringPhoto(params, snapshot);
+    }
     const gatheringPointId = cleanId(body.gatheringPointId);
     const orderedPhotoIds = Array.isArray(body.orderedPhotoIds)
       ? body.orderedPhotoIds.map(cleanId).filter(Boolean)
@@ -658,6 +686,157 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   } catch (error) {
     return gatheringPhotoError(error, "집합장소 사진 순서를 저장하지 못했습니다.");
   }
+}
+
+function readGatheringPhotoDeleteReceipt(
+  projectId: string,
+  dailyPlanId: string,
+  receipt: unknown
+): GatheringPhotoDeleteReceipt {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: GATHERING_PHOTO_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const payload = value as Partial<GatheringPhotoDeleteReceipt>;
+  const photo = payload.photo;
+  if (
+    payload.dailyPlanId !== dailyPlanId
+    || typeof payload.gatheringPointId !== "string"
+    || !SAFE_ID.test(payload.gatheringPointId)
+    || !Number.isInteger(payload.originalIndex)
+    || Number(payload.originalIndex) < 0
+    || !photo
+    || typeof photo !== "object"
+    || !SAFE_ID.test(String(photo.id ?? ""))
+    || typeof photo.url !== "string"
+    || typeof photo.thumbnailUrl !== "string"
+    || typeof photo.storagePath !== "string"
+    || typeof photo.thumbnailPath !== "string"
+    || typeof photo.originalFilename !== "string"
+    || !Number.isFinite(photo.sortOrder)
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const expectedPrefix = `${storageBasePath(
+    projectId,
+    dailyPlanId,
+    payload.gatheringPointId,
+    photo.id
+  )}/`;
+  if (
+    (photo.storagePath && !photo.storagePath.startsWith(expectedPrefix))
+    || (photo.thumbnailPath && !photo.thumbnailPath.startsWith(expectedPrefix))
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return {
+    dailyPlanId,
+    gatheringPointId: payload.gatheringPointId,
+    photo,
+    originalIndex: Number(payload.originalIndex)
+  };
+}
+
+async function restoreDeletedGatheringPhoto(
+  params: { projectId: string; dailyPlanId: string },
+  snapshot: GatheringPhotoDeleteReceipt
+) {
+  const supabase = requireProjectAccessDb();
+  const planRow = await loadOwnedPlan(supabase, params.projectId, params.dailyPlanId);
+  if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+  const plan = dailyPlanFromRow(planRow);
+  const meta = reconcileDailyPlanGatheringPoints(
+    decodeDailyPlanMemo(plan.memo),
+    plan.shootingLocations
+  );
+  const point = meta.gatheringPoints.find((item) => item.id === snapshot.gatheringPointId);
+  if (!point) return NextResponse.json({ error: "집합장소를 찾을 수 없습니다." }, { status: 404 });
+  const existing = point.photos.find((photo) => photo.id === snapshot.photo.id);
+  if (existing) {
+    if (
+      existing.storagePath !== snapshot.photo.storagePath
+      || existing.thumbnailPath !== snapshot.photo.thumbnailPath
+    ) {
+      return NextResponse.json({ error: "같은 ID의 다른 사진이 이미 존재합니다." }, { status: 409 });
+    }
+    return NextResponse.json({
+      ok: true,
+      memo: plan.memo,
+      updatedAt: String(planRow.updated_at ?? ""),
+      idempotent: true
+    });
+  }
+
+  const restoredPhotos = [...point.photos];
+  restoredPhotos.splice(
+    Math.max(0, Math.min(snapshot.originalIndex, restoredPhotos.length)),
+    0,
+    snapshot.photo
+  );
+  const nextMeta = normalizeDailyPlanPrintMeta({
+    ...meta,
+    gatheringPoints: meta.gatheringPoints.map((item) => (
+      item.id === point.id
+        ? {
+            ...item,
+            photos: restoredPhotos.map((photo, index) => ({ ...photo, sortOrder: index }))
+          }
+        : item
+    ))
+  });
+  const saved = await saveMemo(
+    supabase,
+    params.projectId,
+    params.dailyPlanId,
+    encodeDailyPlanMemo(nextMeta),
+    String(planRow.updated_at ?? "")
+  );
+  return NextResponse.json({
+    ok: true,
+    memo: String(saved.memo ?? ""),
+    updatedAt: String(saved.updated_at ?? "")
+  });
+}
+
+async function finalizeDeletedGatheringPhoto(
+  params: { projectId: string; dailyPlanId: string },
+  snapshot: GatheringPhotoDeleteReceipt
+) {
+  const supabase = requireProjectAccessDb();
+  const planRow = await loadOwnedPlan(supabase, params.projectId, params.dailyPlanId);
+  if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+  const plan = dailyPlanFromRow(planRow);
+  const meta = reconcileDailyPlanGatheringPoints(
+    decodeDailyPlanMemo(plan.memo),
+    plan.shootingLocations
+  );
+  const photoStillReferenced = meta.gatheringPoints.some((point) => (
+    point.photos.some((photo) => (
+      photo.id === snapshot.photo.id
+      || photo.storagePath === snapshot.photo.storagePath
+      || photo.thumbnailPath === snapshot.photo.thumbnailPath
+    ))
+  ));
+  if (photoStillReferenced) {
+    return NextResponse.json({ ok: true, finalized: false, restored: true });
+  }
+
+  const expectedPrefix = `${storageBasePath(
+    params.projectId,
+    params.dailyPlanId,
+    snapshot.gatheringPointId,
+    snapshot.photo.id
+  )}/`;
+  const paths = [snapshot.photo.storagePath, snapshot.photo.thumbnailPath]
+    .filter((path) => path && path.startsWith(expectedPrefix));
+  if (paths.length > 0) {
+    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
+    if (error) throw error;
+  }
+  return NextResponse.json({ ok: true, finalized: true });
 }
 
 async function getRouteParams(context: RouteContext) {

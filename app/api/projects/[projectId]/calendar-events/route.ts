@@ -12,6 +12,11 @@ import {
 } from "@/lib/projectCalendarEvents";
 import { normalizeDateOnly } from "@/lib/projectCalendar";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -73,6 +78,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (access instanceof NextResponse) return access;
     const body = await readRequestBody(request);
     if (!body) return invalidJsonResponse();
+    if (body.operation === "restore_deleted") {
+      const restored = await restoreDeletedCalendarEvent(access, body.receipt);
+      if (restored instanceof NextResponse) return restored;
+      return NextResponse.json({ ok: true, status: "restored", event: restored });
+    }
+    if (body.operation === "finalize_deleted") {
+      parseCalendarEventDeleteReceipt(access.projectId, body.receipt);
+      return NextResponse.json({ ok: true, status: "finalized" });
+    }
     const validation = validateProjectCalendarEventInput(body.event ?? body);
     if (!validation.ok) {
       return NextResponse.json(
@@ -97,6 +111,37 @@ export async function POST(request: NextRequest, context: RouteContext) {
   } catch (error) {
     return calendarEventErrorResponse(error, "프로젝트 일정을 저장하지 못했습니다.");
   }
+}
+
+async function restoreDeletedCalendarEvent(
+  access: Awaited<ReturnType<typeof requireCalendarEditAccess>> & {
+    projectId: string;
+    supabase: ReturnType<typeof requireProjectAccessDb>;
+    accountUserId: string;
+  },
+  receipt: unknown
+) {
+  const row = parseCalendarEventDeleteReceipt(access.projectId, receipt);
+  const eventId = String(row.id);
+  const { data, error } = await access.supabase
+    .from("project_calendar_events")
+    .upsert(row, { onConflict: "id", ignoreDuplicates: true })
+    .select(SELECT_COLUMNS)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return projectCalendarEventFromRow(data);
+  const { data: existing, error: lookupError } = await access.supabase
+    .from("project_calendar_events")
+    .select(SELECT_COLUMNS)
+    .eq("project_id", access.projectId)
+    .eq("id", eventId)
+    .maybeSingle();
+  if (lookupError) throw lookupError;
+  const restored = projectCalendarEventFromRow(existing);
+  if (!restored) {
+    return NextResponse.json({ error: "일정을 복원하지 못했습니다.", code: "CALENDAR_EVENT_RESTORE_FAILED" }, { status: 409 });
+  }
+  return restored;
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -143,16 +188,36 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "일정 ID가 올바르지 않습니다.", code: "CALENDAR_EVENT_ID_INVALID" }, { status: 400 });
     }
 
+    const { data: eventRow, error: eventError } = await access.supabase
+      .from("project_calendar_events")
+      .select(SELECT_COLUMNS)
+      .eq("project_id", access.projectId)
+      .eq("id", eventId)
+      .maybeSingle();
+    if (eventError) throw eventError;
+    if (!eventRow) return NextResponse.json({ error: "일정을 찾을 수 없습니다.", code: "CALENDAR_EVENT_NOT_FOUND" }, { status: 404 });
+    const eventRecord = eventRow as unknown as Record<string, unknown>;
+    const receipt = createProjectDeleteReceipt({
+      projectId: access.projectId,
+      kind: "calendar-event",
+      payload: { event: eventRecord }
+    });
     const { data, error } = await access.supabase
       .from("project_calendar_events")
       .delete()
       .eq("project_id", access.projectId)
       .eq("id", eventId)
-      .select("id")
+      .eq("updated_at", String(eventRecord.updated_at ?? ""))
+      .select("id,updated_at")
       .maybeSingle();
     if (error) throw error;
-    if (!data) return NextResponse.json({ error: "일정을 찾을 수 없습니다.", code: "CALENDAR_EVENT_NOT_FOUND" }, { status: 404 });
-    return NextResponse.json({ ok: true, status: "deleted", deletedId: eventId });
+    if (!data) {
+      return NextResponse.json(
+        { error: "일정이 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.", code: "CALENDAR_EVENT_CONFLICT" },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ ok: true, status: "deleted", deletedId: eventId, receipt });
   } catch (error) {
     return calendarEventErrorResponse(error, "프로젝트 일정을 삭제하지 못했습니다.");
   }
@@ -211,6 +276,12 @@ async function readRequestBody(request: NextRequest): Promise<Record<string, unk
 }
 
 function calendarEventErrorResponse(error: unknown, fallbackMessage: string) {
+  if (error instanceof ProjectDeleteReceiptError) {
+    return NextResponse.json(
+      { error: error.message, code: "CALENDAR_EVENT_DELETE_RECEIPT_INVALID" },
+      { status: 400 }
+    );
+  }
   if (error instanceof ProjectAccessUnavailableError) {
     return NextResponse.json({ error: fallbackMessage, code: "CALENDAR_EVENT_UNAVAILABLE" }, { status: 503 });
   }
@@ -229,6 +300,30 @@ function calendarEventErrorResponse(error: unknown, fallbackMessage: string) {
   }
   console.error("[project-calendar-events]", databaseError ?? { message: error instanceof Error ? error.message : "Unknown error" });
   return NextResponse.json(errorBody(error, fallbackMessage, "CALENDAR_EVENT_REQUEST_FAILED"), { status: 500 });
+}
+
+function parseCalendarEventDeleteReceipt(projectId: string, receipt: unknown) {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: "calendar-event"
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const event = (value as Record<string, unknown>).event;
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const row = event as Record<string, unknown>;
+  if (
+    !isProjectCalendarEventId(String(row.id ?? ""))
+    || String(row.project_id ?? "") !== projectId
+    || !String(row.updated_at ?? "").trim()
+    || !projectCalendarEventFromRow(row)
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return row;
 }
 
 function isMissingCalendarEventsTable(error: ReturnType<typeof getDatabaseError>) {

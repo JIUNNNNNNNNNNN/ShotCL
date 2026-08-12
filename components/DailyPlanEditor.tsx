@@ -131,6 +131,7 @@ import { DailyPlanDocument } from "@/components/DailyPlanDocument";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { DailyPlanLocationMenu } from "@/components/DailyPlanLocationMenu";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { DailyPlanLocationReorderList } from "@/components/DailyPlanLocationReorderList";
 import { DailyPlanSceneLocations } from "@/components/DailyPlanSceneLocations";
 import { GatheringPhotoStrip } from "@/components/DailyPlanGatheringLocations";
@@ -406,6 +407,7 @@ let daumPostcodeScriptPromise: Promise<void> | null = null;
 export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers = [], projectStaffDepartments = emptyProjectStaffDepartments, initialPlan, initialShots = emptyInitialShots, initialDraft, initialShotDrafts, sceneListItems = emptySceneListItems, notice }: DailyPlanEditorProps) {
   const router = useRouter();
   const documentOrientation = useDailyPlanDocumentOrientation();
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const { role: projectAccessRole } = useProjectAccess();
   const { dailyPlans: projectDailyPlans, upsertDailyPlan } = useProjectWorkspace();
   // 공유 프로젝트 권한은 ProjectAccessGate가 project별로 즉시 갱신하는 role을 기준으로 합니다.
@@ -504,8 +506,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const [printProbe, setPrintProbe] = useState<DailyPlanPrintJob | null>(null);
   const [isPrinting, setIsPrinting] = useState(false);
   const [activePrintAction, setActivePrintAction] = useState<DailyPlanPrintAction | null>(null);
-  const [pendingTimetableDeleteKey, setPendingTimetableDeleteKey] = useState<string | null>(null);
-  const [pendingActorDeleteId, setPendingActorDeleteId] = useState<string | null>(null);
   const [timetableSceneContextMenu, setTimetableSceneContextMenu] = useState<TimetableSceneContextMenuState | null>(null);
   const [openCutSelectorSceneId, setOpenCutSelectorSceneId] = useState<string | null>(null);
   const [pendingDisableMultiRoundSceneId, setPendingDisableMultiRoundSceneId] = useState<string | null>(null);
@@ -526,9 +526,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   useAutoContextualGuide("daily-plan.intro", canManageTimetable);
   useContextualGuideBlocker(
     "daily-plan-overlay",
-    pendingTimetableDeleteKey !== null
-      || pendingActorDeleteId !== null
-      || timetableSceneContextMenu !== null
+    timetableSceneContextMenu !== null
       || openCutSelectorSceneId !== null
       || pendingDisableMultiRoundSceneId !== null
       || openLocationMenuId !== null
@@ -555,6 +553,16 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     // Only rows added in this mounted editor may enter the one-shot queue.
     new Set()
   );
+  const planRef = useRef(plan);
+  const printMetaRef = useRef(printMeta);
+  const locationsRef = useRef(locations);
+  const mealTimesRef = useRef(mealTimes);
+  const scenesRef = useRef(scenes);
+  planRef.current = plan;
+  printMetaRef.current = printMeta;
+  locationsRef.current = locations;
+  mealTimesRef.current = mealTimes;
+  scenesRef.current = scenes;
 
   const timetableRows = useMemo(
     () => buildEditorTimetableRows(scenes, mealTimes, printMeta.timetableRowOrder),
@@ -586,8 +594,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     rowKeys: timetableRowKeys,
     disabled: !canManageTimetable
       || isSaving
-      || pendingTimetableDeleteKey !== null
-      || pendingActorDeleteId !== null
       || timetableSceneContextMenu !== null
       || openCutSelectorSceneId !== null
       || pendingDisableMultiRoundSceneId !== null
@@ -597,7 +603,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       void persistTimetableReorder(orderedRowKeys);
     },
     onTrashDrop: (rowKey) => {
-      setPendingTimetableDeleteKey(rowKey);
+      deleteTimetableRow(rowKey);
     },
     onDragStart: () => {
       setActiveDragSource("timetable");
@@ -613,8 +619,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     rowKeys: actorRowKeys,
     disabled: !canManageTimetable
       || isSaving
-      || pendingTimetableDeleteKey !== null
-      || pendingActorDeleteId !== null
       || timetableSceneContextMenu !== null
       || openCutSelectorSceneId !== null
       || pendingDisableMultiRoundSceneId !== null
@@ -625,7 +629,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     },
     onTrashDrop: (rowKey) => {
       const actorId = getActorIdFromRowKey(rowKey);
-      if (actorId) setPendingActorDeleteId(actorId);
+      if (actorId) deleteActorRow(actorId);
     },
     onDragStart: () => {
       setActiveDragSource("actor");
@@ -1025,34 +1029,134 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   }
 
   function deleteLocation(index: number) {
-    const target = locations[index];
-    setLocations((current) => current.length > 1
-      ? current.filter((_, locationIndex) => locationIndex !== index)
-      : [createBlankLocation()]
-    );
-    if (target) {
-      setExpandedLocationDetailId((current) => current === target.id ? null : current);
-      setLocationInputModes((current) => {
-        const next = { ...current };
-        delete next[target.id];
-        return next;
-      });
-      setScenes((current) => current.map((scene) => (scene.locationId === target.id ? { ...scene, locationId: "", locationName: "" } : scene)));
-      setMealTimes((current) => current.map((meal) => (meal.locationId === target.id ? { ...meal, locationId: "" } : meal)));
-      setPrintMeta((current) => ({
-        ...current,
-        starring: current.starring.map((person) => (
-          person.callLocationId === target.id
-            ? { ...person, callLocation: "", callLocationId: undefined }
-            : person
-        )),
-        teams: current.teams.map((team) => (
-          team.callLocationId === target.id
-            ? { ...team, callLocation: "", callLocationId: undefined }
-            : team
-        ))
-      }));
-    }
+    const target = locationsRef.current[index];
+    if (!target) return;
+    const currentLocations = locationsRef.current;
+    const beforeId = index > 0 ? currentLocations[index - 1].id : "";
+    const afterId = index + 1 < currentLocations.length ? currentLocations[index + 1].id : "";
+    const replacement = currentLocations.length === 1 ? createBlankLocation() : null;
+    const inputMode = locationInputModes[target.id];
+    const wasExpanded = expandedLocationDetailId === target.id;
+    const affectedScenes = scenesRef.current.flatMap((scene) => (
+      scene.locationId === target.id
+        ? [{ id: scene.id, locationId: scene.locationId, locationName: scene.locationName }]
+        : []
+    ));
+    const affectedMeals = mealTimesRef.current.flatMap((meal) => (
+      meal.locationId === target.id ? [{ id: meal.id, locationId: meal.locationId }] : []
+    ));
+    const affectedActors = printMetaRef.current.starring.flatMap((person) => (
+      person.callLocationId === target.id
+        ? [{ id: person.id, callLocation: person.callLocation, callLocationId: person.callLocationId }]
+        : []
+    ));
+    const affectedTeams = printMetaRef.current.teams.flatMap((team) => (
+      team.callLocationId === target.id
+        ? [{ id: team.id, callLocation: team.callLocation, callLocationId: team.callLocationId }]
+        : []
+    ));
+
+    deleteWithUndo({
+      key: `daily-plan-location:${dailyPlanId ?? "draft"}:${target.id}`,
+      label: target.name.trim() || "촬영장소",
+      removeLocal: () => {
+        if (!locationsRef.current.some((location) => location.id === target.id)) return;
+        const nextLocations = locationsRef.current.filter((location) => location.id !== target.id);
+        if (nextLocations.length === 0 && replacement) nextLocations.push(replacement);
+        locationsRef.current = nextLocations;
+        setLocations(nextLocations);
+        setExpandedLocationDetailId((current) => current === target.id ? null : current);
+        setLocationInputModes((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        const nextScenes = scenesRef.current.map((scene) => (
+          scene.locationId === target.id ? { ...scene, locationId: "", locationName: "" } : scene
+        ));
+        const nextMealTimes = mealTimesRef.current.map((meal) => (
+          meal.locationId === target.id ? { ...meal, locationId: "" } : meal
+        ));
+        const nextPrintMeta = {
+          ...printMetaRef.current,
+          starring: printMetaRef.current.starring.map((person) => (
+            person.callLocationId === target.id
+              ? { ...person, callLocation: "", callLocationId: undefined }
+              : person
+          )),
+          teams: printMetaRef.current.teams.map((team) => (
+            team.callLocationId === target.id
+              ? { ...team, callLocation: "", callLocationId: undefined }
+              : team
+          ))
+        };
+        scenesRef.current = nextScenes;
+        mealTimesRef.current = nextMealTimes;
+        printMetaRef.current = nextPrintMeta;
+        setScenes(nextScenes);
+        setMealTimes(nextMealTimes);
+        setPrintMeta(nextPrintMeta);
+      },
+      restoreLocal: () => {
+        if (locationsRef.current.some((location) => location.id === target.id)) return;
+        const currentWithoutReplacement = replacement
+          ? locationsRef.current.filter((location) => (
+            location.id !== replacement.id || !areJsonSnapshotsEqual(location, replacement)
+          ))
+          : locationsRef.current;
+        const nextLocations = insertByStableAnchors(
+          currentWithoutReplacement,
+          target,
+          (location) => location.id,
+          beforeId,
+          afterId,
+          index
+        );
+        locationsRef.current = nextLocations;
+        setLocations(nextLocations);
+        if (inputMode) {
+          setLocationInputModes((current) => ({ ...current, [target.id]: inputMode }));
+        }
+        if (wasExpanded) setExpandedLocationDetailId(target.id);
+        const sceneRelations = new Map(affectedScenes.map((scene) => [scene.id, scene]));
+        const mealRelations = new Map(affectedMeals.map((meal) => [meal.id, meal]));
+        const actorRelations = new Map(affectedActors.map((person) => [person.id, person]));
+        const teamRelations = new Map(affectedTeams.map((team) => [team.id, team]));
+        const nextScenes = scenesRef.current.map((scene) => {
+          const relation = sceneRelations.get(scene.id);
+          return relation && scene.locationId === "" && scene.locationName === ""
+            ? { ...scene, ...relation }
+            : scene;
+        });
+        const nextMealTimes = mealTimesRef.current.map((meal) => {
+          const relation = mealRelations.get(meal.id);
+          return relation && meal.locationId === "" ? { ...meal, ...relation } : meal;
+        });
+        const nextPrintMeta = {
+          ...printMetaRef.current,
+          starring: printMetaRef.current.starring.map((person) => {
+            const relation = actorRelations.get(person.id);
+            return relation && !person.callLocationId && person.callLocation === ""
+              ? { ...person, ...relation }
+              : person;
+          }),
+          teams: printMetaRef.current.teams.map((team) => {
+            const relation = teamRelations.get(team.id);
+            return relation && !team.callLocationId && team.callLocation === ""
+              ? { ...team, ...relation }
+              : team;
+          })
+        };
+        scenesRef.current = nextScenes;
+        mealTimesRef.current = nextMealTimes;
+        printMetaRef.current = nextPrintMeta;
+        setScenes(nextScenes);
+        setMealTimes(nextMealTimes);
+        setPrintMeta(nextPrintMeta);
+      },
+      deleteRemote: persistCurrentDeleteState,
+      restoreRemote: persistCurrentDeleteState
+    });
   }
 
   async function openDaumAddressSearch(index: number) {
@@ -1392,15 +1496,18 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
 
   function captureTimetableMutationSnapshot(): TimetableMutationSnapshot {
     return {
-      scenes,
-      mealTimes,
-      printMeta,
+      scenes: scenesRef.current,
+      mealTimes: mealTimesRef.current,
+      printMeta: printMetaRef.current,
       automaticStartRowIds: new Set(automaticStartRowIdsRef.current)
     };
   }
 
   function applyTimetableMutationSnapshot(snapshot: TimetableMutationSnapshot) {
     automaticStartRowIdsRef.current = new Set(snapshot.automaticStartRowIds);
+    scenesRef.current = snapshot.scenes;
+    mealTimesRef.current = snapshot.mealTimes;
+    printMetaRef.current = snapshot.printMeta;
     setScenes(snapshot.scenes);
     setMealTimes(snapshot.mealTimes);
     setPrintMeta(snapshot.printMeta);
@@ -1437,6 +1544,35 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
   }
 
+  function captureCurrentAutosaveSnapshot(): DailyPlanAutosaveSnapshot {
+    const currentPlan = planRef.current;
+    const currentPrintMeta = printMetaRef.current;
+    const currentLocations = locationsRef.current;
+    const currentMealTimes = mealTimesRef.current;
+    const currentScenes = scenesRef.current;
+    return {
+      plan: currentPlan,
+      printMeta: currentPrintMeta,
+      locations: currentLocations,
+      mealTimes: currentMealTimes,
+      scenes: currentScenes,
+      automaticStartRowIds: [...automaticStartRowIdsRef.current],
+      fingerprint: createDailyPlanEditorFingerprint(
+        currentPlan,
+        currentPrintMeta,
+        currentLocations,
+        currentMealTimes,
+        currentScenes
+      )
+    };
+  }
+
+  async function persistCurrentDeleteState() {
+    if (!dailyPlanId) return;
+    const saved = await dailyPlanAutosaveSaveNowRef.current(captureCurrentAutosaveSnapshot());
+    if (!saved) throw new Error("일촬표 삭제 상태를 저장하지 못했습니다.");
+  }
+
   function persistTimetableReorder(orderedRowKeys: string[]) {
     if (!canManageTimetable || isSaving) return;
     const nextRows = orderEditorTimetableRowsByStableKeys(timetableRows, orderedRowKeys);
@@ -1448,21 +1584,64 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     persistTimetableMutation(nextSnapshot);
   }
 
-  function confirmTimetableDelete() {
-    const rowKey = pendingTimetableDeleteKey;
+  function deleteTimetableRow(rowKey: string) {
     if (!rowKey || !canManageTimetable || isSaving) return;
-    const nextRows = timetableRows.filter((row) => getEditorTimetableRowKey(row) !== rowKey);
-    if (nextRows.length === timetableRows.length) {
-      setPendingTimetableDeleteKey(null);
-      return;
-    }
-    const nextSnapshot = createTimetableMutationSnapshot(
-      nextRows,
-      printMeta
+    const currentRows = buildEditorTimetableRows(
+      scenesRef.current,
+      mealTimesRef.current,
+      printMetaRef.current.timetableRowOrder
     );
-    setPendingTimetableDeleteKey(null);
-    timetableInteraction.clearSelection();
-    persistTimetableMutation(nextSnapshot);
+    const originalIndex = currentRows.findIndex((row) => getEditorTimetableRowKey(row) === rowKey);
+    const deletedRow = currentRows[originalIndex];
+    if (!deletedRow) return;
+    const beforeKey = originalIndex > 0 ? getEditorTimetableRowKey(currentRows[originalIndex - 1]) : "";
+    const afterKey = originalIndex + 1 < currentRows.length
+      ? getEditorTimetableRowKey(currentRows[originalIndex + 1])
+      : "";
+    const wasAutomatic = automaticStartRowIdsRef.current.has(rowKey);
+
+    deleteWithUndo({
+      key: `daily-plan-row:${dailyPlanId ?? "draft"}:${rowKey}`,
+      label: getTimetableRowLabel(currentRows, rowKey),
+      removeLocal: () => {
+        const rows = buildEditorTimetableRows(
+          scenesRef.current,
+          mealTimesRef.current,
+          printMetaRef.current.timetableRowOrder
+        );
+        const nextRows = rows.filter((row) => getEditorTimetableRowKey(row) !== rowKey);
+        if (nextRows.length === rows.length) return;
+        const nextSnapshot = createTimetableMutationSnapshot(nextRows, printMetaRef.current);
+        nextSnapshot.automaticStartRowIds = new Set(
+          [...automaticStartRowIdsRef.current].filter((candidate) => candidate !== rowKey)
+        );
+        nextSnapshot.printMeta = {
+          ...nextSnapshot.printMeta,
+          automaticTimetableRowIds: [...nextSnapshot.automaticStartRowIds]
+        };
+        applyTimetableMutationSnapshot(nextSnapshot);
+        timetableInteraction.clearSelection();
+      },
+      restoreLocal: () => {
+        const rows = buildEditorTimetableRows(
+          scenesRef.current,
+          mealTimesRef.current,
+          printMetaRef.current.timetableRowOrder
+        );
+        if (rows.some((row) => getEditorTimetableRowKey(row) === rowKey)) return;
+        const nextRows = insertTimetableRowByAnchors(rows, deletedRow, beforeKey, afterKey, originalIndex);
+        const nextSnapshot = createTimetableMutationSnapshot(nextRows, printMetaRef.current);
+        nextSnapshot.automaticStartRowIds = new Set(automaticStartRowIdsRef.current);
+        if (wasAutomatic) nextSnapshot.automaticStartRowIds.add(rowKey);
+        nextSnapshot.printMeta = {
+          ...nextSnapshot.printMeta,
+          automaticTimetableRowIds: [...nextSnapshot.automaticStartRowIds]
+        };
+        applyTimetableMutationSnapshot(nextSnapshot);
+      },
+      deleteRemote: persistCurrentDeleteState,
+      restoreRemote: persistCurrentDeleteState
+    });
   }
 
   function persistActorMutation(nextSnapshot: TimetableMutationSnapshot) {
@@ -1492,36 +1671,81 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     persistActorMutation(nextSnapshot);
   }
 
-  function confirmActorDelete() {
-    const actorId = pendingActorDeleteId;
+  function deleteActorRow(actorId: string) {
     if (
       !actorId
       || !canManageTimetable
       || isSaving
     ) return;
-    const actor = printMeta.starring.find((person) => person.id === actorId);
-    if (!actor) {
-      setPendingActorDeleteId(null);
-      actorInteraction.clearSelection();
-      return;
-    }
+    const currentStarring = printMetaRef.current.starring;
+    const originalIndex = currentStarring.findIndex((person) => person.id === actorId);
+    const actor = currentStarring[originalIndex];
+    if (!actor) return;
+    const beforeId = originalIndex > 0 ? currentStarring[originalIndex - 1].id : "";
+    const afterId = originalIndex + 1 < currentStarring.length ? currentStarring[originalIndex + 1].id : "";
+    const remainingActors = currentStarring.filter((person) => person.id !== actorId);
+    const affectedScenes = scenesRef.current.flatMap((scene) => {
+      const withoutActor = removeActorFromSceneCast(scene, actor, remainingActors);
+      return withoutActor === scene ? [] : [{
+        id: scene.id,
+        before: {
+          subject: scene.subject,
+          charactersOverride: scene.charactersOverride,
+          characterIdsOverride: scene.characterIdsOverride
+        },
+        after: {
+          subject: withoutActor.subject,
+          charactersOverride: withoutActor.charactersOverride,
+          characterIdsOverride: withoutActor.characterIdsOverride
+        }
+      }];
+    });
 
-    const rollbackSnapshot = captureTimetableMutationSnapshot();
-    const nextStarring = rollbackSnapshot.printMeta.starring.filter((person) => person.id !== actorId);
-    const nextScenes = rollbackSnapshot.scenes.map((scene) => (
-      removeActorFromSceneCast(scene, actor, nextStarring)
-    ));
-    const nextSnapshot: TimetableMutationSnapshot = {
-      ...rollbackSnapshot,
-      scenes: nextScenes,
-      printMeta: {
-        ...rollbackSnapshot.printMeta,
-        starring: nextStarring
-      }
-    };
-    setPendingActorDeleteId(null);
-    actorInteraction.clearSelection();
-    persistActorMutation(nextSnapshot);
+    deleteWithUndo({
+      key: `daily-plan-actor:${dailyPlanId ?? "draft"}:${actorId}`,
+      label: getActorLabelById(currentStarring, actorId),
+      removeLocal: () => {
+        const snapshot = captureTimetableMutationSnapshot();
+        const nextStarring = snapshot.printMeta.starring.filter((person) => person.id !== actorId);
+        if (nextStarring.length === snapshot.printMeta.starring.length) return;
+        applyTimetableMutationSnapshot({
+          ...snapshot,
+          scenes: snapshot.scenes.map((scene) => removeActorFromSceneCast(scene, actor, nextStarring)),
+          printMeta: { ...snapshot.printMeta, starring: nextStarring }
+        });
+        actorInteraction.clearSelection();
+      },
+      restoreLocal: () => {
+        const snapshot = captureTimetableMutationSnapshot();
+        if (snapshot.printMeta.starring.some((person) => person.id === actorId)) return;
+        const starring = insertByStableAnchors(
+          snapshot.printMeta.starring,
+          actor,
+          (person) => person.id,
+          beforeId,
+          afterId,
+          originalIndex
+        );
+        const relations = new Map(affectedScenes.map((scene) => [scene.id, scene]));
+        applyTimetableMutationSnapshot({
+          ...snapshot,
+          scenes: snapshot.scenes.map((scene) => {
+            const relation = relations.get(scene.id);
+            if (!relation) return scene;
+            const relationIsStillDeleted = scene.subject === relation.after.subject
+              && scene.charactersOverride === relation.after.charactersOverride
+              && areStringArraySnapshotsEqual(
+                scene.characterIdsOverride,
+                relation.after.characterIdsOverride
+              );
+            return relationIsStillDeleted ? { ...scene, ...relation.before } : scene;
+          }),
+          printMeta: { ...snapshot.printMeta, starring }
+        });
+      },
+      deleteRemote: persistCurrentDeleteState,
+      restoreRemote: persistCurrentDeleteState
+    });
   }
 
   function updateSceneLocation(sceneIndex: number, locationId: string) {
@@ -1802,8 +2026,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
       && dailyPlanId
       && !isSaving
       && !isPrinting
-      && pendingTimetableDeleteKey === null
-      && pendingActorDeleteId === null
       && timetableSceneContextMenu === null
       && openCutSelectorSceneId === null
       && pendingDisableMultiRoundSceneId === null
@@ -2797,76 +3019,6 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
                 onClick={() => disableMultiRoundShooting(pendingDisableMultiRoundSceneId)}
               >
                 해제
-              </Button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      ) : null}
-      {typeof document !== "undefined" && pendingTimetableDeleteKey ? createPortal(
-        <div className="no-print fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center" role="presentation">
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="timetable-delete-title"
-            className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
-          >
-            <h2 id="timetable-delete-title" className="text-base font-black text-field-text">
-              {getTimetableRowLabel(timetableRows, pendingTimetableDeleteKey)} 삭제
-            </h2>
-            <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
-              선택한 타임테이블 카드를 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setPendingTimetableDeleteKey(null);
-                  timetableInteraction.clearSelection();
-                }}
-              >
-                취소
-              </Button>
-              <Button
-                variant="danger"
-                onClick={confirmTimetableDelete}
-              >
-                삭제
-              </Button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      ) : null}
-      {typeof document !== "undefined" && pendingActorDeleteId ? createPortal(
-        <div className="no-print fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center" role="presentation">
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="actor-delete-title"
-            className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
-          >
-            <h2 id="actor-delete-title" className="text-base font-black text-field-text">
-              {getActorLabelById(printMeta.starring, pendingActorDeleteId)} 삭제
-            </h2>
-            <p className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
-              선택한 배우 카드를 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
-            </p>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setPendingActorDeleteId(null);
-                  actorInteraction.clearSelection();
-                }}
-              >
-                취소
-              </Button>
-              <Button
-                variant="danger"
-                onClick={confirmActorDelete}
-              >
-                삭제
               </Button>
             </div>
           </div>
@@ -6296,6 +6448,55 @@ function createTimetableMutationSnapshot(
 
 function getEditorTimetableRowKey(row: EditorTimetableRow) {
   return `${row.type}:${row.item.id}`;
+}
+
+function insertTimetableRowByAnchors(
+  rows: EditorTimetableRow[],
+  row: EditorTimetableRow,
+  beforeKey: string,
+  afterKey: string,
+  fallbackIndex: number
+) {
+  return insertByStableAnchors(
+    rows,
+    row,
+    getEditorTimetableRowKey,
+    beforeKey,
+    afterKey,
+    fallbackIndex
+  );
+}
+
+function insertByStableAnchors<T>(
+  items: T[],
+  item: T,
+  getId: (candidate: T) => string,
+  beforeId: string,
+  afterId: string,
+  fallbackIndex: number
+) {
+  const itemId = getId(item);
+  if (items.some((candidate) => getId(candidate) === itemId)) return items;
+  const beforeIndex = beforeId ? items.findIndex((candidate) => getId(candidate) === beforeId) : -1;
+  const afterIndex = afterId ? items.findIndex((candidate) => getId(candidate) === afterId) : -1;
+  const insertionIndex = beforeIndex >= 0
+    ? beforeIndex + 1
+    : afterIndex >= 0
+      ? afterIndex
+      : Math.max(0, Math.min(fallbackIndex, items.length));
+  const next = [...items];
+  next.splice(insertionIndex, 0, item);
+  return next;
+}
+
+function areStringArraySnapshotsEqual(left: string[] | null, right: string[] | null) {
+  if (left === right) return true;
+  if (left === null || right === null || left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function areJsonSnapshotsEqual<T>(left: T, right: T) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function getSceneIdFromTimetableRowKey(rowKey: string) {

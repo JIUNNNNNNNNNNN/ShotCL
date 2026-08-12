@@ -7,6 +7,11 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
 import {
   areShotOverheadSpaceSnapshotsEqual,
@@ -37,6 +42,16 @@ const ARCHIVE_DATA_KIND = "overhead_archive";
 const LINK_DATA_KIND = "media_link";
 const SELECT_COLUMNS = "id,project_id,daily_plan_id,shot_ref,diagram_type,data,created_at,updated_at";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DIAGRAM_ARCHIVE_DELETE_RECEIPT_KIND = "diagram-archives";
+const SPACE_PRESET_DELETE_RECEIPT_KIND = "space-preset";
+const MAX_DIAGRAM_ARCHIVE_DELETE_ROWS = 5_000;
+const DIAGRAM_DELETE_BATCH_SIZE = 50;
+type DatabaseRow = Record<string, unknown>;
+type DeletedDiagramArchivesReceiptPayload = {
+  archives: DatabaseRow[];
+  links: DatabaseRow[];
+};
+type DeletedSpacePresetReceiptPayload = { preset: DatabaseRow };
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -75,13 +90,20 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const supabase = requireProjectAccessDb();
     if (request.nextUrl.searchParams.get("links") === "1") {
-      const { data: linkRows, error: linkError } = await supabase
+      let linkQuery = supabase
         .from("shot_diagrams")
         .select("shot_ref,diagram_type,data")
         .eq("project_id", projectId)
         .eq("daily_plan_id", dailyPlanId)
         .eq("diagram_type", DIAGRAM_TYPE)
         .like("shot_ref", `${LINK_REF_PREFIX}%`);
+      if (shotRef) {
+        linkQuery = linkQuery.in("shot_ref", [
+          toMediaLinkRef("storyboard", shotRef),
+          toMediaLinkRef("overhead", shotRef)
+        ]);
+      }
+      const { data: linkRows, error: linkError } = await linkQuery;
       if (linkError) throw linkError;
       const links = await resolveMediaLinks(supabase, projectId, linkRows ?? []);
       return NextResponse.json({ ok: true, links });
@@ -148,8 +170,33 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       mediaType?: unknown;
       assetId?: unknown;
       source?: unknown;
+      receipt?: unknown;
     };
     const operation = normalizeKeyPart(body.operation);
+    if (operation === "restore_deleted_archives" || operation === "finalize_deleted_archives") {
+      const snapshot = readDeletedDiagramArchivesReceipt(projectId, body.receipt);
+      if (operation === "finalize_deleted_archives") {
+        return NextResponse.json({ ok: true, finalized: true });
+      }
+      const supabase = requireProjectAccessDb();
+      await restoreDiagramRows(supabase, snapshot.archives);
+      await restoreDiagramRows(supabase, snapshot.links);
+      return NextResponse.json({
+        ok: true,
+        restored: true,
+        archives: snapshot.archives.flatMap(mapArchiveRow)
+      });
+    }
+    if (operation === "restore_deleted_space_preset" || operation === "finalize_deleted_space_preset") {
+      const snapshot = readDeletedSpacePresetReceipt(projectId, body.receipt);
+      if (operation === "finalize_deleted_space_preset") {
+        return NextResponse.json({ ok: true, finalized: true });
+      }
+      const supabase = requireProjectAccessDb();
+      await restoreDiagramRows(supabase, [snapshot.preset]);
+      const restored = await loadSpacePresetRow(supabase, projectId, String(snapshot.preset.shot_ref));
+      return NextResponse.json({ ok: true, restored: true, spacePreset: restored });
+    }
     if (operation === "save_space_preset") {
       return saveSpacePreset(projectId, body);
     }
@@ -338,56 +385,208 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const requestedArchiveIds = Array.isArray(body.archiveIds)
       ? body.archiveIds
       : request.nextUrl.searchParams.getAll("archiveId");
-    const archiveIds = [...new Set(requestedArchiveIds.map(normalizeKeyPart).filter(Boolean))].slice(0, 250);
+    const archiveIds = [...new Set(requestedArchiveIds.map(normalizeKeyPart).filter(Boolean))];
     if (archiveIds.length === 0) return NextResponse.json({ error: "부감도 자료 ID가 필요합니다." }, { status: 400 });
-    const archiveRefs = archiveIds.map(toArchiveRef);
-    const supabase = requireProjectAccessDb();
-    if (archiveRefs.length === 1) {
-      const { error: linkError } = await supabase
-        .from("shot_diagrams")
-        .delete()
-        .eq("project_id", projectId)
-        .eq("diagram_type", DIAGRAM_TYPE)
-        .contains("data", { kind: LINK_DATA_KIND, assetId: archiveRefs[0], source: "diagram" });
-      if (linkError) throw linkError;
-    } else {
-      const { data: linkedRows, error: linkLookupError } = await supabase
-        .from("shot_diagrams")
-        .select("id,data")
-        .eq("project_id", projectId)
-        .eq("diagram_type", DIAGRAM_TYPE)
-        .contains("data", { kind: LINK_DATA_KIND, source: "diagram" });
-      if (linkLookupError) throw linkLookupError;
-      const archiveRefSet = new Set(archiveRefs);
-      const linkedRowIds = (linkedRows ?? []).flatMap((row) => {
-        const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
-          ? row.data as Record<string, unknown>
-          : {};
-        return typeof row.id === "string" && archiveRefSet.has(normalizeKeyPart(data.assetId))
-          ? [row.id]
-          : [];
-      });
-      if (linkedRowIds.length > 0) {
-        const { error: linkError } = await supabase
-          .from("shot_diagrams")
-          .delete()
-          .eq("project_id", projectId)
-          .in("id", linkedRowIds);
-        if (linkError) throw linkError;
-      }
+    if (archiveIds.length > 250) {
+      return NextResponse.json({ error: "한 번에 삭제할 수 있는 부감도 자료 수를 초과했습니다." }, { status: 413 });
     }
-    const { error } = await supabase
-      .from("shot_diagrams")
-      .delete()
-      .eq("project_id", projectId)
-      .eq("daily_plan_id", ARCHIVE_DAILY_PLAN_ID)
-      .in("shot_ref", archiveRefs)
-      .eq("diagram_type", DIAGRAM_TYPE);
-    if (error) throw error;
-    return NextResponse.json({ ok: true, deleted: archiveIds.length });
+    const archiveRefs = archiveIds.filter((id) => !id.startsWith("legacy:")).map(toArchiveRef);
+    const legacyRowIds = archiveIds
+      .filter((id) => id.startsWith("legacy:"))
+      .map((id) => id.slice("legacy:".length))
+      .filter((id) => UUID_PATTERN.test(id));
+    const supabase = requireProjectAccessDb();
+    const [archiveResult, legacyResult, linkResult] = await Promise.all([
+      archiveRefs.length > 0
+        ? supabase
+            .from("shot_diagrams")
+            .select("*")
+            .eq("project_id", projectId)
+            .eq("daily_plan_id", ARCHIVE_DAILY_PLAN_ID)
+            .in("shot_ref", archiveRefs)
+            .eq("diagram_type", DIAGRAM_TYPE)
+        : Promise.resolve({ data: [], error: null }),
+      legacyRowIds.length > 0
+        ? supabase
+            .from("shot_diagrams")
+            .select("*")
+            .eq("project_id", projectId)
+            .eq("diagram_type", DIAGRAM_TYPE)
+            .in("id", legacyRowIds)
+        : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("shot_diagrams")
+        .select("*")
+        .eq("project_id", projectId)
+        .eq("diagram_type", DIAGRAM_TYPE)
+        .contains("data", { kind: LINK_DATA_KIND, source: "diagram" })
+    ]);
+    if (archiveResult.error) throw archiveResult.error;
+    if (legacyResult.error) throw legacyResult.error;
+    if (linkResult.error) throw linkResult.error;
+    const requestedAssetIds = new Set([
+      ...archiveRefs,
+      ...legacyRowIds.map((id) => `legacy:${id}`)
+    ]);
+    const archives = [
+      ...(archiveResult.data ?? []),
+      ...(legacyResult.data ?? []).filter((row) => requestedAssetIds.has(mapArchiveRow(row)[0]?.id ?? ""))
+    ] as DatabaseRow[];
+    const links = (linkResult.data ?? []).filter((row) => {
+      const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+        ? row.data as Record<string, unknown>
+        : {};
+      return requestedAssetIds.has(normalizeKeyPart(data.assetId));
+    }) as DatabaseRow[];
+    if (archives.length === 0) {
+      return NextResponse.json({ error: "삭제할 부감도 자료를 찾을 수 없습니다." }, { status: 404 });
+    }
+    if (archives.length + links.length > MAX_DIAGRAM_ARCHIVE_DELETE_ROWS) {
+      return NextResponse.json({ error: "복원 정보를 안전하게 만들 수 있는 부감도 연결 수를 초과했습니다." }, { status: 413 });
+    }
+    const receipt = createProjectDeleteReceipt({
+      projectId,
+      kind: DIAGRAM_ARCHIVE_DELETE_RECEIPT_KIND,
+      payload: { archives, links } satisfies DeletedDiagramArchivesReceiptPayload
+    });
+
+    const linkDelete = await deleteDiagramRowsWithVersions(supabase, projectId, links);
+    if (linkDelete.error || linkDelete.deletedRows.length !== links.length) {
+      await restoreDiagramRows(supabase, linkDelete.deletedRows);
+      if (linkDelete.error) throw linkDelete.error;
+      return diagramDeleteConflictResponse();
+    }
+    const archiveDelete = await deleteDiagramRowsWithVersions(supabase, projectId, archives);
+    if (archiveDelete.error || archiveDelete.deletedRows.length !== archives.length) {
+      await restoreDiagramRows(supabase, archiveDelete.deletedRows);
+      await restoreDiagramRows(supabase, links);
+      if (archiveDelete.error) throw archiveDelete.error;
+      return diagramDeleteConflictResponse();
+    }
+    return NextResponse.json({ ok: true, deleted: archives.length, receipt });
   } catch (error) {
     return diagramErrorResponse(error, "부감도 자료를 삭제하지 못했습니다.");
   }
+}
+
+function readDeletedDiagramArchivesReceipt(
+  projectId: string,
+  receipt: unknown
+): DeletedDiagramArchivesReceiptPayload {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: DIAGRAM_ARCHIVE_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProjectDeleteReceiptError();
+  const payload = value as Partial<DeletedDiagramArchivesReceiptPayload>;
+  if (
+    !Array.isArray(payload.archives)
+    || payload.archives.length === 0
+    || !Array.isArray(payload.links)
+    || payload.archives.length + payload.links.length > MAX_DIAGRAM_ARCHIVE_DELETE_ROWS
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const archiveAssetIds = new Set<string>();
+  const rowIds = new Set<string>();
+  for (const row of payload.archives) {
+    if (!isValidDiagramReceiptRow(row, projectId, rowIds)) throw new ProjectDeleteReceiptError();
+    const archive = mapArchiveRow(row)[0];
+    if (!archive) throw new ProjectDeleteReceiptError();
+    archiveAssetIds.add(archive.id.startsWith("legacy:") ? archive.id : toArchiveRef(archive.id));
+  }
+  for (const row of payload.links) {
+    if (!isValidDiagramReceiptRow(row, projectId, rowIds)) throw new ProjectDeleteReceiptError();
+    const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+      ? row.data as Record<string, unknown>
+      : {};
+    if (
+      data.kind !== LINK_DATA_KIND
+      || data.source !== "diagram"
+      || !archiveAssetIds.has(normalizeKeyPart(data.assetId))
+    ) {
+      throw new ProjectDeleteReceiptError();
+    }
+  }
+  return { archives: payload.archives, links: payload.links };
+}
+
+function readDeletedSpacePresetReceipt(
+  projectId: string,
+  receipt: unknown
+): DeletedSpacePresetReceiptPayload {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: SPACE_PRESET_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProjectDeleteReceiptError();
+  const payload = value as Partial<DeletedSpacePresetReceiptPayload>;
+  if (
+    !payload.preset
+    || typeof payload.preset !== "object"
+    || Array.isArray(payload.preset)
+    || !isValidDiagramReceiptRow(payload.preset, projectId, new Set())
+    || mapSpacePresetRow(payload.preset).length !== 1
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return { preset: payload.preset };
+}
+
+function isValidDiagramReceiptRow(row: unknown, projectId: string, rowIds: Set<string>) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+  const value = row as DatabaseRow;
+  const id = String(value.id ?? "");
+  if (!UUID_PATTERN.test(id) || rowIds.has(id) || value.project_id !== projectId) return false;
+  rowIds.add(id);
+  return true;
+}
+
+async function restoreDiagramRows(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  rows: DatabaseRow[]
+) {
+  for (let start = 0; start < rows.length; start += DIAGRAM_DELETE_BATCH_SIZE) {
+    const { error } = await supabase
+      .from("shot_diagrams")
+      .upsert(rows.slice(start, start + DIAGRAM_DELETE_BATCH_SIZE), {
+        onConflict: "id",
+        ignoreDuplicates: true
+      });
+    if (error) throw error;
+  }
+}
+
+async function deleteDiagramRowsWithVersions(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  rows: DatabaseRow[]
+) {
+  const deletedRows: DatabaseRow[] = [];
+  for (let start = 0; start < rows.length; start += DIAGRAM_DELETE_BATCH_SIZE) {
+    const batch = rows.slice(start, start + DIAGRAM_DELETE_BATCH_SIZE);
+    const versionFilter = batch.map((row) => (
+      `and(id.eq.${String(row.id)},updated_at.eq.${JSON.stringify(String(row.updated_at ?? ""))})`
+    )).join(",");
+    const { data, error } = await supabase
+      .from("shot_diagrams")
+      .delete()
+      .eq("project_id", projectId)
+      .in("id", batch.map((row) => String(row.id)))
+      .or(versionFilter)
+      .select("*");
+    if (error) return { deletedRows, error };
+    deletedRows.push(...((data ?? []) as DatabaseRow[]));
+    if ((data ?? []).length !== batch.length) break;
+  }
+  return { deletedRows, error: null };
+}
+
+function diagramDeleteConflictResponse() {
+  return NextResponse.json(
+    { error: "부감도 자료가 다른 화면에서 변경되었습니다. 최신 내용을 확인해주세요." },
+    { status: 409 }
+  );
 }
 
 async function saveSpacePreset(
@@ -512,23 +711,38 @@ async function deleteSpacePreset(
     );
   }
   const supabase = requireProjectAccessDb();
-  const query = supabase
+  const { data: presetRow, error: readError } = await supabase
     .from("shot_diagrams")
-    .delete()
+    .select("*")
     .eq("project_id", projectId)
     .eq("daily_plan_id", SHOT_OVERHEAD_SPACE_PRESET_DAILY_PLAN_ID)
     .eq("shot_ref", presetId)
     .eq("diagram_type", DIAGRAM_TYPE)
     .contains("data", { kind: SHOT_OVERHEAD_SPACE_PRESET_DATA_KIND })
-    .eq("updated_at", expected.value);
-  const { data, error } = await query.select(SELECT_COLUMNS).maybeSingle();
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!presetRow) {
+    return NextResponse.json({ error: "삭제할 공간 프리셋을 찾을 수 없습니다." }, { status: 404 });
+  }
+  if (String(presetRow.updated_at ?? "") !== expected.value) return spacePresetConflictResponse();
+  const receipt = createProjectDeleteReceipt({
+    projectId,
+    kind: SPACE_PRESET_DELETE_RECEIPT_KIND,
+    payload: { preset: presetRow } satisfies DeletedSpacePresetReceiptPayload
+  });
+  const { data, error } = await supabase
+    .from("shot_diagrams")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("id", presetRow.id)
+    .eq("updated_at", expected.value)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
   if (data) {
-    return NextResponse.json({ ok: true, status: "deleted", presetId });
+    return NextResponse.json({ ok: true, status: "deleted", presetId, receipt });
   }
-  const existing = await loadSpacePresetRow(supabase, projectId, presetId);
-  if (existing) return spacePresetConflictResponse();
-  return NextResponse.json({ ok: true, status: "unchanged", presetId });
+  return spacePresetConflictResponse();
 }
 
 async function resolveProjectSceneSpaceLocation(
@@ -810,6 +1024,9 @@ function toMediaLinkRef(mediaType: "overhead" | "storyboard", shotRef: string) {
 }
 
 function diagramErrorResponse(error: unknown, message: string) {
+  if (error instanceof ProjectDeleteReceiptError) {
+    return NextResponse.json({ error: error.message, code: "PROJECT_DELETE_RECEIPT_INVALID" }, { status: 400 });
+  }
   if (error instanceof ProjectAccessUnavailableError) {
     return NextResponse.json({ error: message, code: "SHOT_DIAGRAM_STORAGE_UNAVAILABLE" }, { status: 503 });
   }

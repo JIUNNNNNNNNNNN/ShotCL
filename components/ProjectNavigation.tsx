@@ -41,9 +41,16 @@ import {
   useContextualGuideAnchor
 } from "@/components/guides/ContextualGuideProvider";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { confirmUnsavedChangesNavigation } from "@/hooks/useUnsavedChangesGuard";
-import { deleteDailyPlan, duplicateDailyPlan } from "@/lib/data/dailyPlans";
+import {
+  deleteDailyPlan,
+  duplicateDailyPlan,
+  finalizeDeletedDailyPlan,
+  restoreDeletedDailyPlan,
+  type DeletedDailyPlanMutation
+} from "@/lib/data/dailyPlans";
 import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
 import { formatDailyPlanCardDate } from "@/lib/dailyPlan/dateOnly";
 import {
@@ -75,11 +82,6 @@ type PlanContextMenu = {
   plan: DailyPlan;
   x: number;
   y: number;
-};
-
-type PendingDelete = {
-  plan: DailyPlan;
-  label: string;
 };
 
 const NAVIGATION_ICONS: Record<ProjectNavigationItemId, LucideIcon> = {
@@ -120,11 +122,10 @@ export function ProjectNavigation({
     upsertDailyPlan,
     removeDailyPlan
   } = useProjectWorkspace();
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const [contextMenu, setContextMenu] = useState<PlanContextMenu | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [mutationError, setMutationError] = useState("");
   const [duplicatingId, setDuplicatingId] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<"dailyPlans" | "progress", boolean>>({
     dailyPlans: false,
     progress: false
@@ -204,17 +205,6 @@ export function ProjectNavigation({
     };
   }, [closeContextMenu, contextMenu]);
 
-  useEffect(() => {
-    if (!pendingDelete) return undefined;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || isDeleting) return;
-      setPendingDelete(null);
-      setMutationError("");
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [isDeleting, pendingDelete]);
-
   const notifyNavigation = useCallback((href: string) => {
     collapseExpandableNavigation();
     onNavigate?.(href);
@@ -229,7 +219,7 @@ export function ProjectNavigation({
   }
 
   function openContextMenu(plan: DailyPlan, clientX: number, clientY: number) {
-    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting || pendingDelete) return;
+    if (!canManageDailyPlans || duplicateLockRef.current) return;
     const maxX = Math.max(CONTEXT_MENU_EDGE, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_EDGE);
     const maxY = Math.max(CONTEXT_MENU_EDGE, window.innerHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_EDGE);
     setMutationError("");
@@ -241,7 +231,7 @@ export function ProjectNavigation({
   }
 
   async function handleDuplicate(plan: DailyPlan) {
-    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    if (!canManageDailyPlans || duplicateLockRef.current) return;
     duplicateLockRef.current = plan.id;
     setDuplicatingId(plan.id);
     closeContextMenu();
@@ -258,32 +248,47 @@ export function ProjectNavigation({
   }
 
   function requestDelete(plan: DailyPlan) {
-    if (!canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    if (!canManageDailyPlans || duplicateLockRef.current) return;
     closeContextMenu();
     setMutationError("");
-    setPendingDelete({ plan, label: formatDailyPlanEpisodeLabel(plan.episode) });
-  }
-
-  async function confirmDelete() {
-    const target = pendingDelete?.plan;
-    if (!target || !canManageDailyPlans || duplicateLockRef.current || isDeleting) return;
+    const target = dailyPlans.find((item) => item.id === plan.id);
+    if (!target) return;
     const safeHref = getSafeSelectionHrefAfterDelete(pathname, searchParams, projectId, target.id);
-    if (safeHref && !confirmUnsavedChangesNavigation()) return;
-    setIsDeleting(true);
-    setMutationError("");
-    try {
-      await deleteDailyPlan(projectId, target.id);
-      removeDailyPlan(target.id);
-      setPendingDelete(null);
-      if (safeHref) {
-        notifyNavigation(safeHref);
-        router.replace(safeHref);
-      }
-    } catch (error) {
-      setMutationError(getErrorMessage(error, "일촬표를 삭제하지 못했습니다."));
-    } finally {
-      setIsDeleting(false);
-    }
+    let mutation: DeletedDailyPlanMutation | null = null;
+    deleteWithUndo({
+      key: `daily-plan:${target.id}`,
+      label: `${formatDailyPlanEpisodeLabel(target.episode)} 일촬표`,
+      removeLocal: () => {
+        removeDailyPlan(target.id);
+        if (safeHref) {
+          notifyNavigation(safeHref);
+          router.replace(safeHref);
+        }
+      },
+      restoreLocal: () => upsertDailyPlan(target, {
+        shotCount: target.shotCount,
+        progressTotal: target.progressTotal,
+        progressCompleted: target.progressCompleted,
+        sceneNumbers: target.sceneNumbers
+      }),
+      deleteRemote: async () => {
+        try {
+          mutation = await deleteDailyPlan(projectId, target.id);
+        } catch (error) {
+          setMutationError(getErrorMessage(error, "일촬표를 삭제하지 못했습니다."));
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        try {
+          await restoreDeletedDailyPlan(projectId, target.id, mutation);
+        } catch (error) {
+          setMutationError(getErrorMessage(error, "일촬표를 복원하지 못했습니다."));
+          throw error;
+        }
+      },
+      finalize: () => finalizeDeletedDailyPlan(projectId, target.id, mutation)
+    });
   }
 
   function renderRoundContent(kind: "dailyPlans" | "progress") {
@@ -302,7 +307,7 @@ export function ProjectNavigation({
           pathname={pathname}
           searchParams={searchParams}
           canManage={canManageDailyPlans}
-          isBusy={Boolean(duplicatingId) || isDeleting}
+          isBusy={Boolean(duplicatingId)}
           onNavigate={notifyNavigation}
           onOpenContextMenu={openContextMenu}
         />
@@ -367,7 +372,7 @@ export function ProjectNavigation({
             onDailyPlansGuide={(anchor) => requestGuide("daily-plan.round-select", "feature", anchor)}
           />
 
-          {mutationError && !pendingDelete ? (
+          {mutationError ? (
             <p role="alert" className="mt-3 border border-field-danger/60 bg-field-danger/10 px-2 py-1.5 text-[11px] font-bold leading-4 text-field-danger">
               {mutationError}
             </p>
@@ -386,27 +391,13 @@ export function ProjectNavigation({
         <PlanContextMenu
           menu={contextMenu}
           menuRef={contextMenuRef}
-          disabled={Boolean(duplicatingId) || isDeleting}
+          disabled={Boolean(duplicatingId)}
           onDuplicate={() => void handleDuplicate(contextMenu.plan)}
           onDelete={() => requestDelete(contextMenu.plan)}
         />,
         document.body
       ) : null}
 
-      {pendingDelete && typeof document !== "undefined" ? createPortal(
-        <DeleteConfirmation
-          pending={pendingDelete}
-          error={mutationError}
-          isDeleting={isDeleting}
-          onCancel={() => {
-            if (isDeleting) return;
-            setPendingDelete(null);
-            setMutationError("");
-          }}
-          onConfirm={() => void confirmDelete()}
-        />,
-        document.body
-      ) : null}
     </>
   );
 }
@@ -425,13 +416,15 @@ function GuestProjectNavigation({
   projectId: string;
   projectName: string;
   pathname: string;
-  searchParams: Pick<URLSearchParams, "get">;
+  searchParams: Pick<URLSearchParams, "get" | "toString">;
   isLoading: boolean;
   error: string;
   onNavigate: (href: string) => void;
 }) {
   const progressHref = buildProjectNavigationHref(projectId, "progress");
   const scenarioHref = buildProjectNavigationHref(projectId, "scenario");
+  const currentSearch = searchParams.toString();
+  const accountReturnTo = `${pathname}${currentSearch ? `?${currentSearch}` : ""}`;
   const progressActive = resolveActiveProjectNavigationItem(pathname, searchParams, projectId) === "progress";
   const scenarioActive = pathname.replace(/\/$/u, "") === scenarioHref;
 
@@ -466,7 +459,7 @@ function GuestProjectNavigation({
         />
       </div>
 
-      <GuestAccountSaveCta nextPath={progressHref} />
+      <GuestAccountSaveCta nextPath={accountReturnTo} />
     </nav>
   );
 }
@@ -741,58 +734,6 @@ function PlanContextMenu({
         <Trash2 className="h-3.5 w-3.5" aria-hidden />
         삭제
       </button>
-    </div>
-  );
-}
-
-function DeleteConfirmation({
-  pending,
-  error,
-  isDeleting,
-  onCancel,
-  onConfirm
-}: {
-  pending: PendingDelete;
-  error: string;
-  isDeleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div data-project-shell-portal className="fixed inset-0 z-[110] grid place-items-center bg-black/70 p-4" role="presentation">
-      <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="project-nav-delete-title"
-        aria-describedby="project-nav-delete-description"
-        aria-busy={isDeleting}
-        className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto border border-field-divider bg-field-elevated p-4 shadow-dialog"
-        onKeyDown={(event) => {
-          if (event.key !== "Tab") return;
-          const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not([disabled])"));
-          if (buttons.length === 0) return;
-          const first = buttons[0];
-          const last = buttons[buttons.length - 1];
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
-      >
-        <h2 id="project-nav-delete-title" className="text-base font-black text-field-text">일촬표 삭제</h2>
-        <div id="project-nav-delete-description" className="mt-2 space-y-1 text-sm leading-6 text-field-text">
-          <p><strong>{pending.label}</strong> 일촬표를 삭제하시겠습니까?</p>
-          <p className="text-field-muted">삭제한 일촬표는 복구할 수 없습니다.</p>
-        </div>
-        {error ? <p role="alert" className="mt-3 border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{error}</p> : null}
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button type="button" autoFocus disabled={isDeleting} onClick={onCancel} className="min-h-10 border border-field-divider bg-field-panel px-3 py-2 text-sm font-bold text-field-text hover:bg-field-hover disabled:opacity-50">취소</button>
-          <button type="button" disabled={isDeleting} onClick={onConfirm} className="min-h-10 border border-field-danger bg-field-danger px-3 py-2 text-sm font-black text-field-text hover:brightness-95 disabled:opacity-50">{isDeleting ? "삭제 중" : "삭제"}</button>
-        </div>
-      </div>
     </div>
   );
 }

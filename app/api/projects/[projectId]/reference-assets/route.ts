@@ -5,11 +5,15 @@ import {
   ProjectAccessUnavailableError,
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneCutMetadata } from "@/lib/archiveAssetMetadata";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
-import { extractScenarioScenesFromPdf } from "@/lib/server/scenarioPdf";
 import type {
   ArchiveMediaAssetType,
   ArchiveSceneCutMetadata,
@@ -68,16 +72,42 @@ type ReferenceAssetPatchBody = {
   scenarioScenes?: unknown;
   scenarioParseError?: unknown;
   reanalyzeScenario?: unknown;
+  receipt?: unknown;
   expectedUpdatedAt?: unknown;
   expectedUpdatedAtById?: unknown;
 };
 
 const STORAGE_BUCKET = "storyboards";
 const SELECT_COLUMNS = "id,project_id,asset_type,filename,storage_path,public_url,mime_type,size_bytes,daily_plan_id,scene_no,cut_no,shot_ref,group_id,crop_data,scenario_scenes,scenario_parse_error,sort_order,created_at,updated_at";
+const PROGRESS_MEDIA_SELECT_COLUMNS = "id,asset_type,filename,public_url,mime_type,daily_plan_id,scene_no,cut_no,group_id,crop_data,sort_order,created_at";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const BULK_STORYBOARD_MAX_ITEMS = 8;
 const BULK_STORYBOARD_MAX_BYTES = 3 * 1024 * 1024;
 const BULK_STORYBOARD_UPLOAD_CONCURRENCY = 4;
+const REFERENCE_ASSET_DELETE_RECEIPT_KIND = "reference-assets";
+const SCENARIO_SCENE_DELETE_RECEIPT_KIND = "scenario-scene";
+
+type ReferenceAssetDeleteReceipt = {
+  assets: Record<string, unknown>[];
+  mediaLinks: Record<string, unknown>[];
+  sourceDependents: Array<{ id: string; sourceAssetId: string }>;
+};
+
+type ScenarioSceneDeleteReceipt = {
+  assetId: string;
+  scene: ProjectScenarioScene;
+  index: number;
+  previousSceneId: string | null;
+  nextSceneId: string | null;
+  scenarioParseError: string | null;
+};
+
+class ReferenceAssetDeleteConflictError extends Error {
+  constructor(message = "자료가 다른 곳에서 변경되어 삭제하지 않았습니다.") {
+    super(message);
+    this.name = "ReferenceAssetDeleteConflictError";
+  }
+}
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -88,33 +118,50 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
 
     const progressMedia = request.nextUrl.searchParams.get("media") === "1";
+    const progressMediaMode = request.nextUrl.searchParams.get("mode") === "gallery"
+      ? "gallery"
+      : "summary";
     const assetType = normalizeAssetType(request.nextUrl.searchParams.get("type"));
     const assetTypes = normalizeAssetTypes(request.nextUrl.searchParams.get("types"));
     if (!progressMedia && !assetType && assetTypes.length === 0) {
       return NextResponse.json({ error: "자료 종류가 올바르지 않습니다." }, { status: 400 });
     }
 
+    const dailyPlanId = cleanText(request.nextUrl.searchParams.get("dailyPlanId"), 500);
     const supabase = requireProjectAccessDb();
+    if (progressMedia) {
+      let progressQuery = supabase
+        .from("project_reference_assets")
+        .select(PROGRESS_MEDIA_SELECT_COLUMNS)
+        .eq("project_id", projectId)
+        .in("asset_type", ["storyboard", "overhead"])
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: false });
+      if (dailyPlanId) progressQuery = progressQuery.eq("daily_plan_id", dailyPlanId);
+      const { data, error } = await progressQuery;
+      if (error) throw error;
+      const progressAssets = (data ?? [])
+        .map(mapProgressMediaRow)
+        .filter(isProgressArchiveMediaAsset);
+      const assets = progressMediaMode === "gallery"
+        ? progressAssets
+        : selectProgressMediaRepresentatives(progressAssets).map(toProgressMediaSummary);
+      return NextResponse.json({ ok: true, assets });
+    }
+
     let query = supabase
       .from("project_reference_assets")
       .select(SELECT_COLUMNS)
       .eq("project_id", projectId)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: false });
-    query = progressMedia
-      ? query.in("asset_type", ["storyboard", "overhead"])
-      : assetTypes.length > 0
-        ? query.in("asset_type", assetTypes)
-        : query.eq("asset_type", assetType as AssetType);
-    const dailyPlanId = cleanText(request.nextUrl.searchParams.get("dailyPlanId"), 500);
+    query = assetTypes.length > 0
+      ? query.in("asset_type", assetTypes)
+      : query.eq("asset_type", assetType as AssetType);
     if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
     const { data, error } = await query;
     if (error) throw error;
-    const assets = (data ?? []).map(mapAssetRow);
-    return NextResponse.json({
-      ok: true,
-      assets: progressMedia ? assets.filter(isProgressArchiveMediaAsset) : assets
-    });
+    return NextResponse.json({ ok: true, assets: (data ?? []).map(mapAssetRow) });
   } catch (error) {
     return materialError(error, "프로젝트 자료를 불러오지 못했습니다.");
   }
@@ -248,7 +295,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const uploadedPath = `projects/${projectId}/archive/${assetType}/${storageFolder}/${Date.now()}-${randomUUID()}-${safeFilename}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const scenarioExtraction = assetType === "scenario"
-      ? extractScenarioScenesFromPdf(fileBuffer)
+      ? (await import("@/lib/server/scenarioPdf")).extractScenarioScenesFromPdf(fileBuffer)
       : null;
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -766,6 +813,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
     const body = (await request.json()) as ReferenceAssetPatchBody;
     const supabase = requireProjectAccessDb();
+    if (body.operation === "restore_deleted") {
+      const snapshot = readReferenceAssetDeleteReceipt(projectId, body.receipt);
+      return restoreDeletedReferenceAssets(supabase, projectId, snapshot);
+    }
+    if (body.operation === "finalize_deleted") {
+      const snapshot = readReferenceAssetDeleteReceipt(projectId, body.receipt);
+      return finalizeDeletedReferenceAssets(supabase, projectId, snapshot);
+    }
+    if (body.operation === "delete_scenario_scene") {
+      return deleteProjectScenarioScene(supabase, projectId, body);
+    }
+    if (body.operation === "restore_deleted_scenario_scene") {
+      const snapshot = readScenarioSceneDeleteReceipt(projectId, body.receipt);
+      return restoreDeletedProjectScenarioScene(supabase, projectId, snapshot);
+    }
+    if (body.operation === "finalize_deleted_scenario_scene") {
+      readScenarioSceneDeleteReceipt(projectId, body.receipt);
+      return NextResponse.json({ ok: true });
+    }
     if (body.operation === "move_many") {
       const ids = normalizeIds(body.ids);
       if (ids.length === 0) return NextResponse.json({ error: "이동할 자료를 선택해주세요." }, { status: 400 });
@@ -1045,7 +1111,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           .from(STORAGE_BUCKET)
           .download(String(existing.storage_path ?? ""));
         if (downloadError || !storedFile) throw downloadError ?? new Error("PDF 파일을 내려받지 못했습니다.");
-        const extraction = extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
+        const extraction = (await import("@/lib/server/scenarioPdf"))
+          .extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
         updatePayload.scenario_scenes = extraction.scenes;
         updatePayload.scenario_parse_error = extraction.error;
       } else {
@@ -1182,6 +1249,214 @@ async function updateReferenceAssetScenarioScenes(
       updatedAt: String(data.updated_at ?? "")
     }
   });
+}
+
+async function deleteProjectScenarioScene(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  body: ReferenceAssetPatchBody
+) {
+  const assetId = cleanText(body.id, 100);
+  const sceneId = cleanText(body.sceneId, 100);
+  const expectedUpdatedAt = cleanText(body.expectedUpdatedAt, 80);
+  if (!UUID_PATTERN.test(assetId) || !sceneId) {
+    return NextResponse.json({ error: "삭제할 시나리오 씬 정보가 올바르지 않습니다." }, { status: 400 });
+  }
+  if (!expectedUpdatedAt || Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    return NextResponse.json({ error: "시나리오 버전 정보가 올바르지 않습니다." }, { status: 400 });
+  }
+  const { data: current, error: currentError } = await supabase
+    .from("project_reference_assets")
+    .select("id,asset_type,scenario_scenes,scenario_parse_error,updated_at")
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (currentError) throw currentError;
+  if (!current || current.asset_type !== "scenario") {
+    return NextResponse.json({ error: "시나리오 PDF를 찾을 수 없습니다." }, { status: 404 });
+  }
+  if (String(current.updated_at ?? "") !== expectedUpdatedAt) {
+    return scenarioSceneConflictResponse(current);
+  }
+  const scenes = normalizeScenarioScenes(current.scenario_scenes);
+  const matchingIndices = scenes.flatMap((scene, index) => scene.id === sceneId ? [index] : []);
+  if (matchingIndices.length !== 1) {
+    return NextResponse.json(
+      { error: matchingIndices.length === 0 ? "삭제할 씬을 찾을 수 없습니다." : "씬 식별값이 중복되어 삭제할 수 없습니다." },
+      { status: matchingIndices.length === 0 ? 404 : 409 }
+    );
+  }
+  const index = matchingIndices[0];
+  const snapshot: ScenarioSceneDeleteReceipt = {
+    assetId,
+    scene: scenes[index],
+    index,
+    previousSceneId: scenes[index - 1]?.id ?? null,
+    nextSceneId: scenes[index + 1]?.id ?? null,
+    scenarioParseError: cleanText(current.scenario_parse_error, 1_000) || null
+  };
+  const receipt = createProjectDeleteReceipt({
+    projectId,
+    kind: SCENARIO_SCENE_DELETE_RECEIPT_KIND,
+    payload: snapshot
+  });
+  const remainingScenes = scenes.filter((_, sceneIndex) => sceneIndex !== index);
+  const { data: updated, error: updateError } = await supabase
+    .from("project_reference_assets")
+    .update({
+      scenario_scenes: remainingScenes,
+      scenario_parse_error: remainingScenes.length > 0
+        ? cleanText(current.scenario_parse_error, 1_000) || null
+        : SCENARIO_MARKER_NOT_FOUND_MESSAGE
+    })
+    .eq("id", assetId)
+    .eq("project_id", projectId)
+    .eq("asset_type", "scenario")
+    .eq("updated_at", expectedUpdatedAt)
+    .select("id,scenario_scenes,scenario_parse_error,updated_at")
+    .maybeSingle();
+  if (updateError) throw updateError;
+  if (!updated) {
+    const { data: latest, error: latestError } = await supabase
+      .from("project_reference_assets")
+      .select("id,scenario_scenes,scenario_parse_error,updated_at")
+      .eq("id", assetId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    return latest
+      ? scenarioSceneConflictResponse(latest)
+      : NextResponse.json({ error: "시나리오 PDF를 찾을 수 없습니다." }, { status: 404 });
+  }
+  return NextResponse.json({
+    ok: true,
+    deletedSceneId: sceneId,
+    receipt,
+    asset: scenarioScenesUpdatePayload(updated)
+  });
+}
+
+function readScenarioSceneDeleteReceipt(
+  projectId: string,
+  receipt: unknown
+): ScenarioSceneDeleteReceipt {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: SCENARIO_SCENE_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const payload = value as Partial<ScenarioSceneDeleteReceipt>;
+  const normalizedScene = normalizeScenarioScenes([payload.scene])[0];
+  const previousSceneId = payload.previousSceneId === null
+    ? null
+    : cleanText(payload.previousSceneId, 100);
+  const nextSceneId = payload.nextSceneId === null
+    ? null
+    : cleanText(payload.nextSceneId, 100);
+  if (
+    !UUID_PATTERN.test(cleanText(payload.assetId, 100))
+    || !normalizedScene
+    || normalizedScene.id !== cleanText(payload.scene?.id, 100)
+    || !Number.isInteger(payload.index)
+    || Number(payload.index) < 0
+    || Number(payload.index) > 1_999
+    || (payload.previousSceneId !== null && !previousSceneId)
+    || (payload.nextSceneId !== null && !nextSceneId)
+    || previousSceneId === normalizedScene.id
+    || nextSceneId === normalizedScene.id
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return {
+    assetId: cleanText(payload.assetId, 100),
+    scene: normalizedScene,
+    index: Number(payload.index),
+    previousSceneId,
+    nextSceneId,
+    scenarioParseError: cleanText(payload.scenarioParseError, 1_000) || null
+  };
+}
+
+async function restoreDeletedProjectScenarioScene(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  snapshot: ScenarioSceneDeleteReceipt
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data: current, error: currentError } = await supabase
+      .from("project_reference_assets")
+      .select("id,asset_type,scenario_scenes,scenario_parse_error,updated_at")
+      .eq("id", snapshot.assetId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (!current || current.asset_type !== "scenario") {
+      return NextResponse.json({ error: "시나리오 PDF를 찾을 수 없습니다." }, { status: 404 });
+    }
+    const scenes = normalizeScenarioScenes(current.scenario_scenes);
+    const sameIdScenes = scenes.filter((scene) => scene.id === snapshot.scene.id);
+    if (sameIdScenes.length > 0) {
+      if (sameIdScenes.length !== 1 || JSON.stringify(sameIdScenes[0]) !== JSON.stringify(snapshot.scene)) {
+        return NextResponse.json({ error: "같은 ID의 다른 시나리오 씬이 이미 존재합니다." }, { status: 409 });
+      }
+      return NextResponse.json({ ok: true, restored: false, asset: scenarioScenesUpdatePayload(current) });
+    }
+
+    let insertIndex = Math.min(snapshot.index, scenes.length);
+    const previousIndex = snapshot.previousSceneId
+      ? scenes.findIndex((scene) => scene.id === snapshot.previousSceneId)
+      : -1;
+    const nextIndex = snapshot.nextSceneId
+      ? scenes.findIndex((scene) => scene.id === snapshot.nextSceneId)
+      : -1;
+    if (previousIndex >= 0) insertIndex = previousIndex + 1;
+    else if (nextIndex >= 0) insertIndex = nextIndex;
+    const mergedScenes = [...scenes];
+    mergedScenes.splice(insertIndex, 0, snapshot.scene);
+    const { data: restored, error: restoreError } = await supabase
+      .from("project_reference_assets")
+      .update({
+        scenario_scenes: mergedScenes,
+        scenario_parse_error: scenes.length === 0
+          ? snapshot.scenarioParseError
+          : cleanText(current.scenario_parse_error, 1_000) || null
+      })
+      .eq("id", snapshot.assetId)
+      .eq("project_id", projectId)
+      .eq("asset_type", "scenario")
+      .eq("updated_at", current.updated_at)
+      .select("id,scenario_scenes,scenario_parse_error,updated_at")
+      .maybeSingle();
+    if (restoreError) throw restoreError;
+    if (restored) {
+      return NextResponse.json({ ok: true, restored: true, asset: scenarioScenesUpdatePayload(restored) });
+    }
+  }
+  return NextResponse.json(
+    { error: "시나리오가 계속 변경되어 씬 삭제를 되돌리지 못했습니다." },
+    { status: 409 }
+  );
+}
+
+function scenarioScenesUpdatePayload(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    scenarioScenes: normalizeScenarioScenes(row.scenario_scenes),
+    scenarioParseError: cleanText(row.scenario_parse_error, 1_000) || null,
+    updatedAt: String(row.updated_at ?? "")
+  };
+}
+
+function scenarioSceneConflictResponse(row: Record<string, unknown>) {
+  return NextResponse.json(
+    {
+      error: "시나리오가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요.",
+      asset: scenarioScenesUpdatePayload(row)
+    },
+    { status: 409 }
+  );
 }
 
 async function updateReferenceAssetSceneCut(
@@ -1975,44 +2250,112 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         && data.source === "reference"
         && assetIdSet.has(cleanText(data.assetId, 100));
     });
+    const { data: possibleSourceDependents, error: sourceDependentReadError } = await supabase
+      .from("project_reference_assets")
+      .select("id,project_id,crop_data,updated_at")
+      .eq("project_id", projectId);
+    if (sourceDependentReadError) throw sourceDependentReadError;
+    const sourceDependents = (possibleSourceDependents ?? []).flatMap((row) => {
+      const sourceAssetId = cleanText(normalizeCrop(row.crop_data).sourceAssetId, 100);
+      return sourceAssetId
+        && assetIdSet.has(sourceAssetId)
+        && !assetIdSet.has(String(row.id))
+        ? [{
+            row: row as Record<string, unknown>,
+            relation: { id: String(row.id), sourceAssetId }
+          }]
+        : [];
+    });
+    // Sign the exact rows and relations before any mutation. Storage bytes are
+    // deliberately excluded from this critical path and remain available
+    // until the shared project Undo stack evicts/finalizes this operation.
+    const receipt = createProjectDeleteReceipt({
+      projectId,
+      kind: REFERENCE_ASSET_DELETE_RECEIPT_KIND,
+      payload: {
+        assets: (existing ?? []) as Record<string, unknown>[],
+        mediaLinks: (affectedLinks ?? []) as Record<string, unknown>[],
+        sourceDependents: sourceDependents.map(({ relation }) => relation)
+      } satisfies ReferenceAssetDeleteReceipt
+    });
 
     const deletedLinks: Record<string, unknown>[] = [];
+    const deletedAssets: Record<string, unknown>[] = [];
+    const detachedSourceDependents: Array<{
+      row: Record<string, unknown>;
+      detachedUpdatedAt: string;
+    }> = [];
     try {
-      for (const linkBatch of chunk(affectedLinks, 100)) {
-        const byId = new Map(linkBatch.map((row) => [String(row.id), row]));
-        const { data: deletedRows, error: linkDeleteError } = await supabase
+      for (const link of affectedLinks) {
+        let query = supabase
           .from("shot_diagrams")
           .delete()
           .eq("project_id", projectId)
-          .in("id", [...byId.keys()])
-          .select("id");
+          .eq("id", link.id);
+        const linkUpdatedAt = cleanText(link.updated_at, 80);
+        if (linkUpdatedAt) query = query.eq("updated_at", linkUpdatedAt);
+        const { data: deletedRow, error: linkDeleteError } = await query
+          .select("id")
+          .maybeSingle();
         if (linkDeleteError) throw linkDeleteError;
-        for (const deletedRow of deletedRows ?? []) {
-          const snapshot = byId.get(String(deletedRow.id));
-          if (snapshot) deletedLinks.push(snapshot);
+        if (!deletedRow) {
+          throw new ReferenceAssetDeleteConflictError("자료 연결이 다른 곳에서 변경되어 삭제하지 않았습니다.");
         }
+        deletedLinks.push(link as Record<string, unknown>);
       }
-    } catch (linkDeleteError) {
-      const rollbackErrors = await restoreReferenceMediaLinks(supabase, deletedLinks);
-      throw new Error([
-        safeError(linkDeleteError).message,
-        rollbackErrors.length > 0 ? `link rollback: ${rollbackErrors.join(" / ")}` : ""
-      ].filter(Boolean).join(" · "));
-    }
-
-    try {
-      const { error: deleteError } = await supabase
-        .from("project_reference_assets")
-        .delete()
-        .eq("project_id", projectId)
-        .in("id", (existing ?? []).map((asset) => asset.id));
-      if (deleteError) throw deleteError;
+      for (const { row } of sourceDependents) {
+        const cropData = objectValue(row.crop_data);
+        const { data: detached, error: detachError } = await supabase
+          .from("project_reference_assets")
+          .update({ crop_data: { ...cropData, sourceAssetId: null } })
+          .eq("project_id", projectId)
+          .eq("id", row.id)
+          .eq("updated_at", row.updated_at)
+          .select("id,updated_at")
+          .maybeSingle();
+        if (detachError) throw detachError;
+        if (!detached) {
+          throw new ReferenceAssetDeleteConflictError("원본을 사용하는 자료가 다른 곳에서 변경되어 삭제하지 않았습니다.");
+        }
+        detachedSourceDependents.push({
+          row,
+          detachedUpdatedAt: String(detached.updated_at ?? "")
+        });
+      }
+      for (const asset of (existing ?? []) as Record<string, unknown>[]) {
+        const { data: deletedRow, error: deleteError } = await supabase
+          .from("project_reference_assets")
+          .delete()
+          .eq("project_id", projectId)
+          .eq("id", asset.id)
+          .eq("updated_at", asset.updated_at)
+          .select("id")
+          .maybeSingle();
+        if (deleteError) throw deleteError;
+        if (!deletedRow) throw new ReferenceAssetDeleteConflictError();
+        deletedAssets.push(asset);
+      }
     } catch (deleteError) {
-      const rollbackErrors = await restoreReferenceMediaLinks(supabase, deletedLinks);
-      throw new Error([
-        safeError(deleteError).message,
-        rollbackErrors.length > 0 ? `link rollback: ${rollbackErrors.join(" / ")}` : ""
-      ].filter(Boolean).join(" · "));
+      const assetRollbackErrors = await restoreReferenceAssetRows(supabase, deletedAssets);
+      const sourceDependentRollbackErrors = await restoreReferenceAssetSourceRelations(
+        supabase,
+        detachedSourceDependents
+      );
+      const linkRollbackErrors = await restoreReferenceMediaLinks(supabase, deletedLinks);
+      const rollbackDetail = [
+        assetRollbackErrors.length > 0 ? `asset rollback: ${assetRollbackErrors.join(" / ")}` : "",
+        sourceDependentRollbackErrors.length > 0
+          ? `source relation rollback: ${sourceDependentRollbackErrors.join(" / ")}`
+          : "",
+        linkRollbackErrors.length > 0 ? `link rollback: ${linkRollbackErrors.join(" / ")}` : ""
+      ].filter(Boolean).join(" · ");
+      if (deleteError instanceof ReferenceAssetDeleteConflictError) {
+        throw new ReferenceAssetDeleteConflictError([
+          deleteError.message,
+          rollbackDetail
+        ].filter(Boolean).join(" · "));
+      }
+      throw new Error([safeError(deleteError).message, rollbackDetail].filter(Boolean).join(" · "));
     }
 
     let normalizedOrders: Array<{ id: string; sortOrder: number; updatedAt: string }> = [];
@@ -2030,28 +2373,305 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       console.error("[reference-assets:delete-order-normalization]", safeError(normalizationError));
     }
 
-    const storagePaths = [...new Set((existing ?? []).flatMap((asset) => [
-      cleanText(asset.storage_path, 1_000),
-      cleanText(normalizeCrop(asset.crop_data).thumbnailPath, 1_000)
-    ]).filter(Boolean))];
-    let storageCleanupWarning = "";
-    for (const pathBatch of chunk(storagePaths, 100)) {
-      const { error: storageError } = await supabase.storage.from(STORAGE_BUCKET).remove(pathBatch);
-      if (storageError) {
-        storageCleanupWarning = "DB 삭제는 완료됐지만 일부 Storage 파일을 정리하지 못했습니다.";
-        console.error("[reference-assets:storage-delete]", safeError(storageError));
-      }
-    }
     return NextResponse.json({
       ok: true,
       deleted: uniqueIds.length,
-      storageCleanupWarning,
+      receipt,
+      storageCleanupWarning: "",
       orderNormalizationWarning,
       orders: normalizedOrders
     });
   } catch (error) {
     return materialError(error, "자료를 삭제하지 못했습니다.");
   }
+}
+
+function readReferenceAssetDeleteReceipt(
+  projectId: string,
+  receipt: unknown
+): ReferenceAssetDeleteReceipt {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: REFERENCE_ASSET_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const payload = value as Partial<ReferenceAssetDeleteReceipt>;
+  if (
+    !Array.isArray(payload.assets)
+    || payload.assets.length === 0
+    || payload.assets.length > 500
+    || !Array.isArray(payload.mediaLinks)
+    || !Array.isArray(payload.sourceDependents)
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const assetIds = new Set<string>();
+  for (const row of payload.assets) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new ProjectDeleteReceiptError();
+    }
+    const id = cleanText(row.id, 100);
+    const assetType = normalizeAssetType(row.asset_type);
+    const storagePath = cleanText(row.storage_path, 1_000);
+    const thumbnailPath = cleanText(normalizeCrop(row.crop_data).thumbnailPath, 1_000);
+    const storagePrefix = `projects/${projectId}/archive/${assetType ?? "invalid"}/`;
+    if (
+      !UUID_PATTERN.test(id)
+      || assetIds.has(id)
+      || row.project_id !== projectId
+      || !assetType
+      || !storagePath.startsWith(storagePrefix)
+      || storagePath.includes("..")
+      || (thumbnailPath && (!thumbnailPath.startsWith(storagePrefix) || thumbnailPath.includes("..")))
+    ) {
+      throw new ProjectDeleteReceiptError();
+    }
+    assetIds.add(id);
+  }
+  const linkIds = new Set<string>();
+  for (const row of payload.mediaLinks) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) {
+      throw new ProjectDeleteReceiptError();
+    }
+    const id = cleanText(row.id, 100);
+    const data = objectValue(row.data);
+    if (
+      !UUID_PATTERN.test(id)
+      || linkIds.has(id)
+      || row.project_id !== projectId
+      || row.diagram_type !== "overhead"
+      || data.kind !== "media_link"
+      || data.source !== "reference"
+      || !assetIds.has(cleanText(data.assetId, 100))
+    ) {
+      throw new ProjectDeleteReceiptError();
+    }
+    linkIds.add(id);
+  }
+  const sourceDependentIds = new Set<string>();
+  for (const relation of payload.sourceDependents) {
+    const id = cleanText(relation?.id, 100);
+    const sourceAssetId = cleanText(relation?.sourceAssetId, 100);
+    if (
+      !UUID_PATTERN.test(id)
+      || sourceDependentIds.has(id)
+      || assetIds.has(id)
+      || !assetIds.has(sourceAssetId)
+    ) {
+      throw new ProjectDeleteReceiptError();
+    }
+    sourceDependentIds.add(id);
+  }
+  return {
+    assets: payload.assets,
+    mediaLinks: payload.mediaLinks,
+    sourceDependents: payload.sourceDependents.map((relation) => ({
+      id: cleanText(relation.id, 100),
+      sourceAssetId: cleanText(relation.sourceAssetId, 100)
+    }))
+  };
+}
+
+async function restoreDeletedReferenceAssets(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  snapshot: ReferenceAssetDeleteReceipt
+) {
+  const assetIds = snapshot.assets.map((row) => String(row.id));
+  const { data: currentAssets, error: currentAssetsError } = await supabase
+    .from("project_reference_assets")
+    .select(SELECT_COLUMNS)
+    .eq("project_id", projectId)
+    .in("id", assetIds);
+  if (currentAssetsError) throw currentAssetsError;
+  const currentById = new Map((currentAssets ?? []).map((row) => [String(row.id), row]));
+  for (const snapshotRow of snapshot.assets) {
+    const current = currentById.get(String(snapshotRow.id));
+    if (
+      current
+      && (
+        current.storage_path !== snapshotRow.storage_path
+        || current.asset_type !== snapshotRow.asset_type
+      )
+    ) {
+      return NextResponse.json({ error: "같은 ID의 다른 자료가 이미 존재합니다." }, { status: 409 });
+    }
+  }
+
+  const missingAssets = snapshot.assets.filter((row) => !currentById.has(String(row.id)));
+  const linkIds = snapshot.mediaLinks.map((row) => String(row.id));
+  const { data: currentLinks, error: currentLinksError } = linkIds.length > 0
+    ? await supabase.from("shot_diagrams").select("*").eq("project_id", projectId).in("id", linkIds)
+    : { data: [] as Record<string, unknown>[], error: null };
+  if (currentLinksError && currentLinksError.code !== "42P01") throw currentLinksError;
+  const currentLinksById = new Map((currentLinks ?? []).map((row) => [String(row.id), row]));
+  for (const snapshotLink of snapshot.mediaLinks) {
+    const current = currentLinksById.get(String(snapshotLink.id));
+    const currentData = objectValue(current?.data);
+    const snapshotData = objectValue(snapshotLink.data);
+    if (current && (
+      current.shot_ref !== snapshotLink.shot_ref
+      || currentData.kind !== snapshotData.kind
+      || currentData.source !== snapshotData.source
+      || currentData.assetId !== snapshotData.assetId
+    )) {
+      return NextResponse.json({ error: "같은 ID의 다른 자료 연결이 이미 존재합니다." }, { status: 409 });
+    }
+  }
+
+  const sourceDependentIds = snapshot.sourceDependents.map(({ id }) => id);
+  const { data: currentSourceDependents, error: currentSourceDependentsError } = sourceDependentIds.length > 0
+    ? await supabase
+        .from("project_reference_assets")
+        .select("id,crop_data,updated_at")
+        .eq("project_id", projectId)
+        .in("id", sourceDependentIds)
+    : { data: [] as Record<string, unknown>[], error: null };
+  if (currentSourceDependentsError) throw currentSourceDependentsError;
+  const sourceRelationByDependentId = new Map(
+    snapshot.sourceDependents.map((relation) => [relation.id, relation])
+  );
+  const sourceDependentsToRestore: Record<string, unknown>[] = [];
+  for (const current of currentSourceDependents ?? []) {
+    const relation = sourceRelationByDependentId.get(String(current.id));
+    if (!relation) continue;
+    const currentSourceAssetId = cleanText(normalizeCrop(current.crop_data).sourceAssetId, 100);
+    if (currentSourceAssetId && currentSourceAssetId !== relation.sourceAssetId) {
+      return NextResponse.json(
+        { error: "원본 연결이 다른 자료로 변경되어 삭제를 되돌릴 수 없습니다." },
+        { status: 409 }
+      );
+    }
+    if (!currentSourceAssetId) sourceDependentsToRestore.push(current as Record<string, unknown>);
+  }
+
+  const insertedAssetIds: string[] = [];
+  const insertedLinkIds: string[] = [];
+  const restoredSourceDependents: Array<{ id: string; updatedAt: string }> = [];
+  try {
+    for (const assetBatch of chunk(missingAssets, 100)) {
+      const { data, error } = await supabase
+        .from("project_reference_assets")
+        .insert(assetBatch)
+        .select("id");
+      if (error) throw error;
+      insertedAssetIds.push(...(data ?? []).map((row) => String(row.id)));
+    }
+    const missingLinks = snapshot.mediaLinks.filter((row) => !currentLinksById.has(String(row.id)));
+    for (const linkBatch of chunk(missingLinks, 100)) {
+      const { data, error } = await supabase
+        .from("shot_diagrams")
+        .insert(linkBatch)
+        .select("id");
+      if (error && error.code !== "42P01") throw error;
+      insertedLinkIds.push(...(data ?? []).map((row) => String(row.id)));
+    }
+    for (const current of sourceDependentsToRestore) {
+      const relation = sourceRelationByDependentId.get(String(current.id));
+      if (!relation) continue;
+      const { data, error } = await supabase
+        .from("project_reference_assets")
+        .update({
+          crop_data: {
+            ...objectValue(current.crop_data),
+            sourceAssetId: relation.sourceAssetId
+          }
+        })
+        .eq("project_id", projectId)
+        .eq("id", current.id)
+        .eq("updated_at", current.updated_at)
+        .select("id,updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) throw new ReferenceAssetDeleteConflictError("원본을 사용하는 자료가 다른 곳에서 변경되었습니다.");
+      restoredSourceDependents.push({ id: String(data.id), updatedAt: String(data.updated_at ?? "") });
+    }
+  } catch (restoreError) {
+    for (const restored of restoredSourceDependents.reverse()) {
+      await supabase
+        .from("project_reference_assets")
+        .update({
+          crop_data: {
+            ...objectValue(sourceDependentsToRestore.find((row) => String(row.id) === restored.id)?.crop_data),
+            sourceAssetId: null
+          }
+        })
+        .eq("project_id", projectId)
+        .eq("id", restored.id)
+        .eq("updated_at", restored.updatedAt);
+    }
+    if (insertedLinkIds.length > 0) {
+      await supabase.from("shot_diagrams").delete().eq("project_id", projectId).in("id", insertedLinkIds);
+    }
+    if (insertedAssetIds.length > 0) {
+      await supabase.from("project_reference_assets").delete().eq("project_id", projectId).in("id", insertedAssetIds);
+    }
+    throw restoreError;
+  }
+
+  const affectedGroups = snapshot.assets
+    .filter(isOrderableArchiveRow)
+    .map(archiveOrderGroupFromRow);
+  let normalizedOrders: Array<{ id: string; sortOrder: number; updatedAt: string }> = [];
+  let orderNormalizationWarning = "";
+  try {
+    const normalized = await normalizeReferenceAssetOrdersAfterDelete(
+      supabase,
+      projectId,
+      affectedGroups
+    );
+    normalizedOrders = normalized.orders;
+    orderNormalizationWarning = normalized.warning;
+  } catch (error) {
+    orderNormalizationWarning = "자료는 복원했지만 일부 순서 번호를 정리하지 못했습니다.";
+    console.error("[reference-assets:restore-order-normalization]", safeError(error));
+  }
+  const { data: restoredAssets, error: restoredAssetsError } = await supabase
+    .from("project_reference_assets")
+    .select(SELECT_COLUMNS)
+    .eq("project_id", projectId)
+    .in("id", assetIds);
+  if (restoredAssetsError) throw restoredAssetsError;
+  return NextResponse.json({
+    ok: true,
+    restored: (restoredAssets ?? []).length,
+    assets: (restoredAssets ?? []).map(mapAssetRow),
+    orders: normalizedOrders,
+    orderNormalizationWarning
+  });
+}
+
+async function finalizeDeletedReferenceAssets(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  snapshot: ReferenceAssetDeleteReceipt
+) {
+  const { data: currentAssets, error } = await supabase
+    .from("project_reference_assets")
+    .select("id,storage_path,crop_data")
+    .eq("project_id", projectId);
+  if (error) throw error;
+  const referencedPaths = new Set((currentAssets ?? []).flatMap((row) => [
+    cleanText(row.storage_path, 1_000),
+    cleanText(normalizeCrop(row.crop_data).thumbnailPath, 1_000)
+  ]).filter(Boolean));
+  const paths = [...new Set(snapshot.assets.flatMap((row) => [
+    cleanText(row.storage_path, 1_000),
+    cleanText(normalizeCrop(row.crop_data).thumbnailPath, 1_000)
+  ]).filter((path) => path && !referencedPaths.has(path)))];
+  for (const pathBatch of chunk(paths, 100)) {
+    const { error: storageError } = await supabase.storage.from(STORAGE_BUCKET).remove(pathBatch);
+    if (storageError) throw storageError;
+  }
+  return NextResponse.json({
+    ok: true,
+    finalized: paths.length,
+    restored: snapshot.assets.filter((row) => (
+      (currentAssets ?? []).some((current) => current.id === row.id)
+    )).length
+  });
 }
 
 async function getProjectId(context: RouteContext) {
@@ -2077,6 +2697,44 @@ function isProgressArchiveMediaAsset(asset: ReturnType<typeof mapAssetRow>) {
   if (asset.assetType !== "storyboard" && asset.assetType !== "overhead") return false;
   if (asset.groupId?.startsWith("source:")) return false;
   return asset.mimeType.startsWith("image/") || /\.(?:jpe?g|png|webp)$/i.test(asset.filename);
+}
+
+/** Initial Progress cards need at most one thumbnail for each cut and media kind. */
+function selectProgressMediaRepresentatives(
+  assets: Array<ReturnType<typeof mapAssetRow>>
+) {
+  const seen = new Set<string>();
+  return [...assets].sort((left, right) => {
+    const sortOrder = Math.max(0, left.sortOrder) - Math.max(0, right.sortOrder);
+    if (sortOrder !== 0) return sortOrder;
+    const createdOrder = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+    if (Number.isFinite(createdOrder) && createdOrder !== 0) return createdOrder;
+    return left.id.localeCompare(right.id);
+  }).filter((asset) => {
+    const crop = asset.crop;
+    const sceneKey = normalizeSceneNumber(crop.sceneNumber ?? asset.sceneNo)
+      || cleanText(crop.sceneId, 100)
+      || "unassigned";
+    const cutNumber = nullablePositiveInteger(crop.cutNumber ?? asset.cutNo) ?? 0;
+    const key = `${asset.assetType}\u0000${sceneKey}\u0000${cutNumber}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Summary responses intentionally omit original URLs; cards render thumbnailUrl only. */
+function toProgressMediaSummary(asset: ReturnType<typeof mapAssetRow>) {
+  const originalUrl = asset.publicUrl.trim();
+  const thumbnailUrl = cleanText(asset.crop.thumbnailUrl, 2_000);
+  return {
+    ...asset,
+    publicUrl: "",
+    crop: {
+      ...asset.crop,
+      thumbnailUrl: thumbnailUrl && thumbnailUrl !== originalUrl ? thumbnailUrl : ""
+    }
+  };
 }
 
 function validateFile(assetType: AssetType, file: File) {
@@ -2318,6 +2976,45 @@ function mapAssetRow(row: Record<string, unknown>) {
     sortOrder: Number(row.sort_order ?? 0),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? "")
+  };
+}
+
+/** Progress 목록에 필요한 연결·대표 thumbnail metadata만 직렬화합니다. */
+function mapProgressMediaRow(row: Record<string, unknown>): ReturnType<typeof mapAssetRow> {
+  const crop = normalizeCrop(row.crop_data);
+  return {
+    id: String(row.id ?? ""),
+    projectId: "",
+    assetType: String(row.asset_type ?? ""),
+    filename: String(row.filename ?? ""),
+    storagePath: "",
+    publicUrl: String(row.public_url ?? ""),
+    mimeType: String(row.mime_type ?? ""),
+    sizeBytes: 0,
+    dailyPlanId: row.daily_plan_id ? String(row.daily_plan_id) : null,
+    sceneNo: row.scene_no ? String(row.scene_no) : null,
+    cutNo: row.cut_no ? String(row.cut_no) : null,
+    shotRef: null,
+    groupId: row.group_id ? String(row.group_id) : null,
+    crop: {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      ratio: null,
+      ...(cleanText(crop.displayName, 240) ? { displayName: cleanText(crop.displayName, 240) } : {}),
+      ...(cleanText(crop.title, 240) ? { title: cleanText(crop.title, 240) } : {}),
+      ...(cleanText(crop.thumbnailUrl, 2_000) ? { thumbnailUrl: cleanText(crop.thumbnailUrl, 2_000) } : {}),
+      ...(crop.episodeNumber ? { episodeNumber: crop.episodeNumber } : {}),
+      ...(crop.sceneId ? { sceneId: crop.sceneId } : {}),
+      ...(crop.sceneNumber ? { sceneNumber: crop.sceneNumber } : {}),
+      ...(crop.cutNumber ? { cutNumber: crop.cutNumber } : {})
+    },
+    scenarioScenes: [],
+    scenarioParseError: null,
+    sortOrder: Number(row.sort_order ?? 0),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: ""
   };
 }
 
@@ -2589,8 +3286,42 @@ async function restoreReferenceMediaLinks(
   for (const rowBatch of chunk(rows, 100)) {
     const { error } = await supabase
       .from("shot_diagrams")
-      .upsert(rowBatch, { onConflict: "id" });
+      .insert(rowBatch);
     if (error) errors.push(safeError(error).message);
+  }
+  return errors;
+}
+
+async function restoreReferenceAssetRows(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  rows: Record<string, unknown>[]
+) {
+  const errors: string[] = [];
+  for (const rowBatch of chunk(rows, 100)) {
+    const { error } = await supabase
+      .from("project_reference_assets")
+      .insert(rowBatch);
+    if (error) errors.push(safeError(error).message);
+  }
+  return errors;
+}
+
+async function restoreReferenceAssetSourceRelations(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  rows: Array<{ row: Record<string, unknown>; detachedUpdatedAt: string }>
+) {
+  const errors: string[] = [];
+  for (const { row, detachedUpdatedAt } of rows) {
+    const { data, error } = await supabase
+      .from("project_reference_assets")
+      .update({ crop_data: row.crop_data })
+      .eq("project_id", row.project_id)
+      .eq("id", row.id)
+      .eq("updated_at", detachedUpdatedAt)
+      .select("id")
+      .maybeSingle();
+    if (error) errors.push(safeError(error).message);
+    else if (!data) errors.push(`${String(row.id)} rollback skipped after concurrent change`);
   }
   return errors;
 }
@@ -3020,8 +3751,17 @@ async function cleanupUploadedPaths(
 }
 
 function materialError(error: unknown, message: string) {
+  if (error instanceof ProjectDeleteReceiptError) {
+    return NextResponse.json({ error: error.message, code: "PROJECT_REFERENCE_DELETE_RECEIPT_INVALID" }, { status: 400 });
+  }
   if (error instanceof ProjectAccessUnavailableError) {
     return NextResponse.json({ error: message, code: "PROJECT_REFERENCE_STORAGE_UNAVAILABLE" }, { status: 503 });
+  }
+  if (error instanceof ReferenceAssetDeleteConflictError) {
+    return NextResponse.json(
+      { error: error.message, code: "PROJECT_REFERENCE_DELETE_CONFLICT" },
+      { status: 409 }
+    );
   }
   console.error("[reference-assets]", safeError(error));
   const source = safeError(error);

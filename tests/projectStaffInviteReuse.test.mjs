@@ -6,7 +6,7 @@ import { isGuestProjectApiRequestAllowed } from "../lib/projectAccess/guestApiAc
 
 const inviteServerSource = readSource("../lib/projectStaffInvites.server.ts");
 const managementRouteSource = readSource("../app/api/projects/[projectId]/staff-invite/route.ts");
-const invitePageSource = readSource("../app/invite/[token]/page.tsx");
+const inviteLandingSource = readSource("../app/invite/[token]/route.ts");
 const redemptionRouteSource = readSource("../app/api/project-invites/[token]/route.ts");
 const projectDetailPageSource = readSource("../app/projects/[id]/page.tsx");
 const legacyInviteSql = readSource("../supabase/migration_project_staff_invites.sql");
@@ -167,14 +167,12 @@ test("invite management stays admin-only at both API and database boundaries", (
 test("reused project-capability links keep guest access read-only and enter the visit-time Progress resolver", () => {
   assert.match(inviteServerSource, /new URL\(`\/invite\/\$\{encodeURIComponent\(token\)\}`/u);
   assert.doesNotMatch(inviteServerSource, /dailyPlanId|roundId/u);
-  assert.match(invitePageSource, /destination: buildProjectNavigationHref\(invite\.projectId, "progress"\)/u);
-  assert.match(redemptionRouteSource, /destination: buildProjectNavigationHref\(invite\.projectId, "progress"\)/u);
+  assert.match(inviteLandingSource, /resolveInviteProgressTarget\(invite\.projectId\)/u);
+  assert.match(inviteLandingSource, /buildProgressRoundHref\(invite\.projectId, target\.dailyPlanId\)/u);
+  assert.match(inviteLandingSource, /NextResponse\.redirect\(new URL\(destination, request\.url\), 307\)/u);
+  assert.match(inviteLandingSource, /setProjectGuestInviteCookie\(response, token\)/u);
+  assert.match(redemptionRouteSource, /buildProgressRoundHref\(invite\.projectId, target\.dailyPlanId\)/u);
   assert.match(projectDetailPageSource, /const requestedDailyPlanId = searchParams\.get\("dailyPlanId"\) \?\? ""/u);
-  assert.match(projectDetailPageSource, /const isFreshProgressRoot = isProgressView && !requestedDailyPlanId/u);
-  assert.match(
-    projectDetailPageSource,
-    /getKoreaDateOnly\(\)[\s\S]*resolveRelevantProgressRound\([\s\S]*router\.replace\(buildProgressRoundHref/u
-  );
 
   const baseRequest = {
     pathname: "/api/projects/project-a/daily-plans",

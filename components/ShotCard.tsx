@@ -22,6 +22,10 @@ type ShotCardProps = {
   onOpen: (shot: Shot) => void;
   onOpenMedia: (shot: Shot, type: ShotMediaType) => void;
   archiveMedia?: ProgressArchiveMediaAsset[];
+  onLoadGalleryMedia?: (
+    shot: Shot,
+    category: ProgressMediaCategory
+  ) => Promise<ProgressArchiveMediaAsset[]>;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
   progressOnly?: boolean;
   cardOpenDisabled?: boolean;
@@ -37,6 +41,7 @@ export const ShotCard = memo(function ShotCard({
   onOpen,
   onOpenMedia,
   archiveMedia = [],
+  onLoadGalleryMedia,
   onStatusChange,
   progressOnly = false,
   cardOpenDisabled = false,
@@ -50,8 +55,15 @@ export const ShotCard = memo(function ShotCard({
   const hasOverheadDiagram = hasShotOverheadContent(shot.overheadDiagram);
   const statusLabel = isOk ? "OK" : isOmit ? "OMIT" : "대기";
   const cutLabel = formatProgressCutLabel(shot.sceneNumber, shot.cutNumber);
+  const [loadedGalleryMedia, setLoadedGalleryMedia] = useState<{
+    shotId: string;
+    assets: ProgressArchiveMediaAsset[];
+  } | null>(null);
+  const effectiveArchiveMedia = loadedGalleryMedia?.shotId === shot.id
+    ? loadedGalleryMedia.assets
+    : archiveMedia;
   const storyboardGallery = useMemo(() => buildProgressMediaGalleryItems(
-    archiveMedia,
+    effectiveArchiveMedia,
     "storyboard",
     shot.storyboardImageUrl ? {
       id: `${shot.id}:legacy-storyboard`,
@@ -61,9 +73,9 @@ export const ShotCard = memo(function ShotCard({
       // Gallery에서는 원본 URL을 그대로 사용할 수 있고, 목록은 compact fallback을 표시합니다.
       thumbnailUrl: ""
     } : null
-  ), [archiveMedia, cutLabel, shot.id, shot.storyboardImageUrl]);
+  ), [cutLabel, effectiveArchiveMedia, shot.id, shot.storyboardImageUrl]);
   const overheadGallery = useMemo(() => buildProgressMediaGalleryItems(
-    archiveMedia,
+    effectiveArchiveMedia,
     "overhead",
     shot.overheadImageUrl ? {
       id: `${shot.id}:legacy-overhead`,
@@ -71,7 +83,7 @@ export const ShotCard = memo(function ShotCard({
       url: shot.overheadImageUrl,
       thumbnailUrl: ""
     } : null
-  ), [archiveMedia, cutLabel, shot.id, shot.overheadImageUrl]);
+  ), [cutLabel, effectiveArchiveMedia, shot.id, shot.overheadImageUrl]);
   const hasStoryboard = storyboardGallery.length > 0;
   const hasOverhead = overheadGallery.length > 0 || hasOverheadDiagram;
   const hasAnyMedia = hasStoryboard || hasOverhead;
@@ -87,6 +99,7 @@ export const ShotCard = memo(function ShotCard({
   );
   const [activeGallery, setActiveGallery] = useState<ProgressMediaCategory | null>(null);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [loadingGallery, setLoadingGallery] = useState<ProgressMediaCategory | null>(null);
   const storyboardGalleryImages = useMemo(
     () => storyboardGallery.map((item) => ({ url: item.url, title: item.title })),
     [storyboardGallery]
@@ -136,8 +149,19 @@ export const ShotCard = memo(function ShotCard({
     onStatusChange(shot, shot.status === status ? "pending" : status);
   }
 
-  function openGallery(event: React.MouseEvent<HTMLButtonElement>, category: ProgressMediaCategory) {
+  async function openGallery(event: React.MouseEvent<HTMLButtonElement>, category: ProgressMediaCategory) {
     event.stopPropagation();
+    if (onLoadGalleryMedia && loadedGalleryMedia?.shotId !== shot.id) {
+      setLoadingGallery(category);
+      try {
+        const assets = await onLoadGalleryMedia(shot, category);
+        setLoadedGalleryMedia({ shotId: shot.id, assets });
+      } catch {
+        return;
+      } finally {
+        setLoadingGallery(null);
+      }
+    }
     setGalleryIndex(0);
     setActiveGallery(category);
   }
@@ -209,24 +233,33 @@ export const ShotCard = memo(function ShotCard({
           </div>
 
           {hasAnyMedia ? (
-            <div className="grid min-w-0 grid-cols-2 gap-1.5 border-t border-field-divider/80 pt-2 sm:gap-2">
-              <ProgressMediaPreviewTile
-                label="콘티"
-                items={storyboardGallery}
-                guideAnchorRef={interactionMediaGuideCategory === "storyboard"
-                  ? mediaGalleryGuideAnchorRef
-                  : undefined}
-                onOpen={(event) => openGallery(event, "storyboard")}
-              />
-              <ProgressMediaPreviewTile
-                label="부감도"
-                items={overheadGallery}
-                diagram={hasOverheadDiagram ? shot.overheadDiagram : null}
-                guideAnchorRef={interactionMediaGuideCategory === "overhead"
-                  ? mediaGalleryGuideAnchorRef
-                  : undefined}
-                onOpen={(event) => openGallery(event, "overhead")}
-              />
+            <div className={cn(
+              "grid min-w-0 gap-1.5 border-t border-field-divider/80 pt-2 sm:gap-2",
+              hasStoryboard && hasOverhead ? "grid-cols-2" : "grid-cols-1"
+            )}>
+              {hasStoryboard ? (
+                <ProgressMediaPreviewTile
+                  label="콘티"
+                  items={storyboardGallery}
+                  loading={loadingGallery === "storyboard"}
+                  guideAnchorRef={interactionMediaGuideCategory === "storyboard"
+                    ? mediaGalleryGuideAnchorRef
+                    : undefined}
+                  onOpen={(event) => openGallery(event, "storyboard")}
+                />
+              ) : null}
+              {hasOverhead ? (
+                <ProgressMediaPreviewTile
+                  label="부감도"
+                  items={overheadGallery}
+                  diagram={hasOverheadDiagram ? shot.overheadDiagram : null}
+                  loading={loadingGallery === "overhead"}
+                  guideAnchorRef={interactionMediaGuideCategory === "overhead"
+                    ? mediaGalleryGuideAnchorRef
+                    : undefined}
+                  onOpen={(event) => openGallery(event, "overhead")}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -284,12 +317,14 @@ function ProgressMediaPreviewTile({
   label,
   items,
   diagram,
+  loading = false,
   guideAnchorRef,
   onOpen
 }: {
   label: "콘티" | "부감도";
   items: ProgressMediaGalleryItem[];
   diagram?: Shot["overheadDiagram"] | null;
+  loading?: boolean;
   guideAnchorRef?: RefCallback<HTMLButtonElement>;
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
@@ -316,9 +351,10 @@ function ProgressMediaPreviewTile({
       ref={guideAnchorRef}
       type="button"
       data-no-drag="true"
+      disabled={loading}
       onClick={onOpen}
       className="group grid min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[var(--radius-control)] border border-field-divider bg-field-input p-0 text-field-text transition-[border-color,background-color,opacity] hover:border-field-primary/70 hover:bg-field-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-      aria-label={`${label} ${count}장 보기`}
+      aria-label={loading ? `${label} 불러오는 중` : `${label} ${count}장 보기`}
       title={`${label} ${count}장 보기`}
     >
       <span className="truncate whitespace-nowrap border-b border-field-divider/70 px-2 py-1.5 text-[10px] font-bold">

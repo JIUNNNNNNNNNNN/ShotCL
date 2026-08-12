@@ -8,6 +8,7 @@ import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLo
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
 import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
 import {
@@ -26,6 +27,10 @@ import {
   createBlankProjectSceneItem,
   getProjectSceneList,
   reorderProjectSceneItems,
+  deleteProjectSceneItem,
+  finalizeDeletedProjectSceneItem,
+  restoreProjectSceneItem,
+  restoreProjectSceneCells,
   saveProjectSceneItemDraft,
   saveProjectSceneReferenceDraft,
   saveProjectSceneCellMerges,
@@ -92,6 +97,7 @@ export default function ProjectSceneListPage() {
   const { project, projectId } = useProjectWorkspace();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const viewportMode = useSceneListViewportMode();
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [items, setItems] = useState<ProjectSceneItem[]>([]);
@@ -486,39 +492,92 @@ export default function ProjectSceneListPage() {
     setErrorMessage("");
   }, [canEdit, projectId]);
 
-  const deleteItem = useCallback(async (item: ProjectSceneItem) => {
+  const deleteItem = useCallback((item: ProjectSceneItem) => {
     if (!canEdit || !projectId) return;
-    if (
-      persistedItemIdsRef.current.has(item.id)
-      && !await sceneAutosave.flushKeys([sceneItemAutosaveKey(item.id)])
-    ) {
-      setErrorMessage("삭제할 씬의 자동 저장에 실패했습니다. 다시 시도해주세요.");
-      return;
-    }
-    if (activeProjectIdRef.current !== projectId) return;
-    setItems((current) => {
-      const next = current
+    const persisted = persistedItemIdsRef.current.has(item.id);
+    let deleteReceipt: string | null = null;
+    const originalIndex = itemsRef.current.findIndex((candidate) => candidate.id === item.id);
+    const removedMerges = cellMergesRef.current.filter((merge) => merge.sceneIds.includes(item.id));
+    const removeLocal = () => {
+      if (activeProjectIdRef.current !== projectId) return;
+      const next = itemsRef.current
         .filter((candidate) => candidate.id !== item.id)
         .map((candidate, index) => ({ ...candidate, sortOrder: index + 1 }));
       itemsRef.current = next;
-      return next;
-    });
-    const remainingMerges = cellMergesRef.current.filter((merge) => !merge.sceneIds.includes(item.id));
-    if (remainingMerges.length !== cellMergesRef.current.length) {
+      setItems(next);
+      const remainingMerges = cellMergesRef.current.filter((merge) => !merge.sceneIds.includes(item.id));
       cellMergesRef.current = remainingMerges;
       cellMergesMaterializedRef.current = true;
       setCellMerges(remainingMerges);
       setCellMergesMaterialized(true);
-      setMergeMetadataDirty(true);
-    }
-    setCutInputErrors((current) => {
-      const next = { ...current };
-      delete next[item.id];
-      return next;
+      setCutInputErrors((current) => {
+        const nextErrors = { ...current };
+        delete nextErrors[item.id];
+        return nextErrors;
+      });
+      if (!persisted) setIsDirty(true);
+      setErrorMessage("");
+    };
+    const restoreLocal = () => {
+      if (activeProjectIdRef.current !== projectId || itemsRef.current.some((candidate) => candidate.id === item.id)) return;
+      const next = [...itemsRef.current];
+      next.splice(Math.max(0, Math.min(originalIndex, next.length)), 0, item);
+      const reordered = next.map((candidate, index) => ({ ...candidate, sortOrder: index + 1 }));
+      itemsRef.current = reordered;
+      setItems(reordered);
+      const mergeById = new Map([...cellMergesRef.current, ...removedMerges].map((merge) => [merge.id, merge]));
+      const restoredMerges = [...mergeById.values()];
+      cellMergesRef.current = restoredMerges;
+      setCellMerges(restoredMerges);
+      if (!persisted) setIsDirty(true);
+    };
+    deleteWithUndo({
+      key: `scene:${item.id}`,
+      label: `씬 ${item.sceneNo || originalIndex + 1}`,
+      removeLocal,
+      restoreLocal,
+      deleteRemote: async () => {
+        if (!persisted) return;
+        if (!await sceneAutosave.flushKeys([sceneItemAutosaveKey(item.id)])) {
+          throw new Error("삭제할 씬의 자동 저장에 실패했습니다.");
+        }
+        const result = await deleteProjectSceneItem(projectId, item.id);
+        deleteReceipt = result?.receipt ?? null;
+        if (result && activeProjectIdRef.current === projectId) {
+          cellMergesUpdatedAtRef.current = result.cellMergesUpdatedAt;
+          setCellMergesUpdatedAt(result.cellMergesUpdatedAt);
+          autosaveReferenceVersionsRef.current.set(projectId, result.cellMergesUpdatedAt);
+          persistedMergeSnapshotRef.current = {
+            ...persistedMergeSnapshotRef.current,
+            updatedAt: result.cellMergesUpdatedAt
+          };
+        }
+      },
+      restoreRemote: async () => {
+        if (!persisted) return;
+        const result = await restoreProjectSceneItem(projectId, deleteReceipt, item, removedMerges);
+        if (activeProjectIdRef.current !== projectId) return;
+        autosaveItemVersionsRef.current.set(item.id, result.item.updatedAt);
+        autosaveItemSnapshotsRef.current.set(item.id, result.item);
+        cellMergesUpdatedAtRef.current = result.cellMergesUpdatedAt;
+        setCellMergesUpdatedAt(result.cellMergesUpdatedAt);
+        autosaveReferenceVersionsRef.current.set(projectId, result.cellMergesUpdatedAt);
+        persistedMergeSnapshotRef.current = {
+          ...persistedMergeSnapshotRef.current,
+          updatedAt: result.cellMergesUpdatedAt
+        };
+        const nextItems = itemsRef.current.map((candidate) => (
+          candidate.id === item.id ? result.item : candidate
+        ));
+        itemsRef.current = nextItems;
+        setItems(nextItems);
+      },
+      finalize: async () => {
+        if (!persisted) return;
+        await finalizeDeletedProjectSceneItem(projectId, deleteReceipt);
+      }
     });
-    setIsDirty(true);
-    setErrorMessage("");
-  }, [canEdit, projectId, sceneAutosave.flushKeys]);
+  }, [canEdit, deleteWithUndo, projectId, sceneAutosave.flushKeys]);
 
   const drainMergeSaveQueue = useCallback(async () => {
     if (mergeSaveRunningRef.current) return;
@@ -745,7 +804,10 @@ export default function ProjectSceneListPage() {
     }
   }, [sceneAutosave.markSaved]);
 
-  const clearCells = useCallback((cells: SceneListMergeCell[]) => {
+  const persistClearCells = useCallback((
+    cells: SceneListMergeCell[],
+    preparedBeforeSave?: Promise<boolean>
+  ) => {
     if (!projectId) return Promise.reject(new Error("프로젝트 ID를 확인할 수 없습니다."));
     const previous = itemsRef.current;
     const columnsById = new Map<string, Set<ProjectSceneMergeColumn>>();
@@ -755,7 +817,7 @@ export default function ProjectSceneListPage() {
       columnsById.set(cell.sceneId, columns);
     }
     const nextItems = previous.map((item) => clearSceneItemColumns(item, columnsById.get(item.id)));
-    const beforeSave = sceneAutosave.flushKeys(
+    const beforeSave = preparedBeforeSave ?? sceneAutosave.flushKeys(
       [...columnsById.keys()].map(sceneItemAutosaveKey)
     );
     const version = ++sceneCellMutationVersionRef.current;
@@ -797,6 +859,63 @@ export default function ProjectSceneListPage() {
     void drainClearSaveQueue();
     return promise;
   }, [drainClearSaveQueue, projectId, sceneAutosave.flushKeys]);
+
+  const clearCells = useCallback((cells: SceneListMergeCell[]) => {
+    if (!projectId || cells.length === 0) return Promise.resolve();
+    const snapshot = cells.map((cell) => ({
+      ...cell,
+      value: readSceneCellValue(
+        itemsRef.current.find((item) => item.id === cell.sceneId),
+        cell.column
+      )
+    }));
+    const preparedBeforeSave = sceneAutosave.flushKeys(
+      [...new Set(cells.map((cell) => cell.sceneId))].map(sceneItemAutosaveKey)
+    );
+    const removeLocal = () => {
+      const columnsById = new Map<string, Set<ProjectSceneMergeColumn>>();
+      for (const cell of cells) {
+        const columns = columnsById.get(cell.sceneId) ?? new Set<ProjectSceneMergeColumn>();
+        columns.add(cell.column);
+        columnsById.set(cell.sceneId, columns);
+      }
+      const next = itemsRef.current.map((item) => clearSceneItemColumns(item, columnsById.get(item.id)));
+      itemsRef.current = next;
+      setItems(next);
+    };
+    const restoreLocal = () => {
+      const byScene = new Map<string, Map<ProjectSceneMergeColumn, string>>();
+      for (const cell of snapshot) {
+        const values = byScene.get(cell.sceneId) ?? new Map<ProjectSceneMergeColumn, string>();
+        values.set(cell.column, cell.value);
+        byScene.set(cell.sceneId, values);
+      }
+      const next = itemsRef.current.map((item) => {
+        const values = byScene.get(item.id);
+        if (!values) return item;
+        const restored = { ...item };
+        for (const [column, value] of values) writeSceneCellValue(restored, column, value);
+        return restored;
+      });
+      itemsRef.current = next;
+      setItems(next);
+    };
+    deleteWithUndo({
+      key: `scene-cells:${snapshot.map((cell) => `${cell.sceneId}:${cell.column}`).join("|")}`,
+      label: "선택한 씬 셀",
+      removeLocal,
+      restoreLocal,
+      deleteRemote: () => persistClearCells(cells, preparedBeforeSave),
+      restoreRemote: async () => {
+        const restored = await restoreProjectSceneCells(projectId, snapshot);
+        restored.items.forEach((item) => {
+          autosaveItemVersionsRef.current.set(item.id, item.updatedAt);
+          autosaveItemSnapshotsRef.current.set(item.id, item);
+        });
+      }
+    });
+    return Promise.resolve();
+  }, [deleteWithUndo, persistClearCells, projectId, sceneAutosave.flushKeys]);
 
   const reorderLocal = useCallback((nextItems: ProjectSceneItem[]) => {
     const ordered = nextItems.map((item, index) => ({ ...item, sortOrder: index + 1 }));

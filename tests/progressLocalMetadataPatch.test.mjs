@@ -22,10 +22,10 @@ function sourceBetween(startMarker, endMarker) {
 test("local daily-plan metadata patches do not re-key the Progress detail fetch", () => {
   const refreshSource = sourceBetween(
     "const refresh = useCallback(async () => {",
-    "useEffect(() => {\n    selectedShotsRefreshVersionRef.current += 1;"
+    "useEffect(() => {\n    if (resetProgressEntryRef.current === progressEntryKey) return;"
   );
 
-  assert.match(refreshSource, /selectedPlanRef\.current/);
+  assert.match(refreshSource, /selectedDailyPlanId/);
   assert.match(refreshSource, /hasCurrentProject/);
   assert.doesNotMatch(refreshSource, /\bselectedPlan\b/);
   assert.doesNotMatch(refreshSource, /\bproject\b/);

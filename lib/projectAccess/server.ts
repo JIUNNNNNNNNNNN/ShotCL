@@ -3,8 +3,9 @@ import "server-only";
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import type { NextRequest, NextResponse } from "next/server";
+import { PROJECT_GUEST_MODE_COOKIE } from "@/lib/auth/guestMode";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
-import { normalizeProjectId } from "@/lib/projectId";
+import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { ProjectAccessGrant, SharedProjectRole } from "@/lib/projectAccess/core";
 import { resolveEffectiveProjectRole } from "@/lib/projectAccess/accountCore";
 import {
@@ -18,7 +19,10 @@ import { isGuestProjectApiRequestAllowed } from "@/lib/projectAccess/guestApiAcc
 const scrypt = promisify(scryptCallback);
 export const PROJECT_SESSION_COOKIE = "shotcl_project_session";
 export const PROJECT_GUEST_INVITE_COOKIE = "shotcl_guest_invite";
+export const PROJECT_GUEST_PROGRESS_TARGET_COOKIE = "shotcl_guest_progress_target";
+export { PROJECT_GUEST_MODE_COOKIE } from "@/lib/auth/guestMode";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const GUEST_PROGRESS_TARGET_MAX_AGE_SECONDS = 60 * 5;
 const STAFF_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export class ProjectAccessUnavailableError extends Error {}
@@ -172,6 +176,7 @@ export function setProjectGuestInviteCookie(response: NextResponse, rawInviteTok
     path: "/",
     maxAge: SESSION_MAX_AGE_SECONDS
   });
+  setProjectGuestModeCookie(response);
 }
 
 export function clearProjectGuestInviteCookie(response: NextResponse) {
@@ -182,6 +187,81 @@ export function clearProjectGuestInviteCookie(response: NextResponse) {
     path: "/",
     maxAge: 0
   });
+  clearProjectGuestModeCookie(response);
+  clearProjectGuestProgressTargetCookie(response);
+}
+
+/** Non-authoritative browser UX hint; the HttpOnly invite remains the access source. */
+export function setProjectGuestModeCookie(response: NextResponse) {
+  response.cookies.set(PROJECT_GUEST_MODE_COOKIE, "1", {
+    httpOnly: false,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS
+  });
+}
+
+export function clearProjectGuestModeCookie(response: NextResponse) {
+  response.cookies.set(PROJECT_GUEST_MODE_COOKIE, "", {
+    httpOnly: false,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0
+  });
+}
+
+/**
+ * Selected-round SSR hint only. This value never grants access: every consumer
+ * must first validate the active invite and scope all reads to that project.
+ */
+export function setProjectGuestProgressTargetCookie(
+  response: NextResponse,
+  projectId: string,
+  dailyPlanId: string
+) {
+  const normalizedProjectId = normalizeProjectId(projectId);
+  const normalizedDailyPlanId = dailyPlanId.trim().toLowerCase();
+  if (
+    !isValidDatabaseProjectId(normalizedProjectId)
+    || !isValidDatabaseProjectId(normalizedDailyPlanId)
+  ) {
+    throw new Error("진행도 회차 식별값이 올바르지 않습니다.");
+  }
+  response.cookies.set(
+    PROJECT_GUEST_PROGRESS_TARGET_COOKIE,
+    `${normalizedProjectId}:${normalizedDailyPlanId}`,
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: GUEST_PROGRESS_TARGET_MAX_AGE_SECONDS
+    }
+  );
+}
+
+export function clearProjectGuestProgressTargetCookie(response: NextResponse) {
+  response.cookies.set(PROJECT_GUEST_PROGRESS_TARGET_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0
+  });
+}
+
+export function parseProjectGuestProgressTargetCookie(value: string | null | undefined) {
+  const [projectId = "", dailyPlanId = "", ...extra] = String(value ?? "").split(":");
+  const normalizedProjectId = normalizeProjectId(projectId);
+  const normalizedDailyPlanId = dailyPlanId.trim().toLowerCase();
+  if (
+    extra.length > 0
+    || !isValidDatabaseProjectId(normalizedProjectId)
+    || !isValidDatabaseProjectId(normalizedDailyPlanId)
+  ) return null;
+  return { projectId: normalizedProjectId, dailyPlanId: normalizedDailyPlanId };
 }
 
 export function getProjectGuestInviteToken(request: NextRequest) {
@@ -461,6 +541,7 @@ async function resolveProjectRequestAccess(
       return {
         mode: "guest",
         editorEligible: false,
+        project: invite.project,
         grant: {
           projectId: invite.projectId,
           projectName: invite.projectName,

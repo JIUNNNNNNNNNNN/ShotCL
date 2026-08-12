@@ -21,6 +21,7 @@ type ProjectWorkspaceValue = {
   project: Project | null;
   projectName: string;
   dailyPlans: DailyPlanListItem[];
+  initialProgress: ProjectWorkspaceSnapshot["initialProgress"];
   isLoading: boolean;
   error: string;
   refreshDailyPlans: () => Promise<DailyPlanListItem[]>;
@@ -93,6 +94,7 @@ export function ProjectWorkspaceProvider({
     project,
     projectName: project?.name || initialProjectName || "프로젝트",
     dailyPlans,
+    initialProgress: initialWorkspace.initialProgress,
     isLoading,
     error,
     refreshDailyPlans,
@@ -103,6 +105,7 @@ export function ProjectWorkspaceProvider({
     dailyPlans,
     error,
     initialProjectName,
+    initialWorkspace.initialProgress,
     isLoading,
     project,
     projectId,

@@ -24,8 +24,13 @@ export type GatheringPhotoMutationResult = {
   updatedAt: string;
   gatheringPointId?: string;
   cleanupWarning?: string;
+  receipt?: string;
   appliedPhotoIds: string[];
   failedPhotos: GatheringPhotoFailure[];
+};
+
+export type GatheringPhotoDeleteResult = GatheringPhotoMutationResult & {
+  receipt: string;
 };
 
 export type UploadGatheringPhotoInput = {
@@ -141,7 +146,7 @@ export async function replaceDailyPlanGatheringPhoto(
 
 export async function deleteDailyPlanGatheringPhoto(
   input: DeleteGatheringPhotoInput
-): Promise<GatheringPhotoMutationResult> {
+): Promise<GatheringPhotoDeleteResult> {
   requireDatabaseProject(input.projectId);
   const response = await fetchGatheringApi(input.projectId, input.dailyPlanId, {
     method: "DELETE",
@@ -152,7 +157,40 @@ export async function deleteDailyPlanGatheringPhoto(
       expectedUpdatedAt: input.expectedUpdatedAt
     })
   });
-  return readMutationResponse(response, "집합장소 사진을 삭제하지 못했습니다.");
+  const result = await readMutationResponse(response, "집합장소 사진을 삭제하지 못했습니다.");
+  if (!result.receipt) throw new Error("집합장소 사진 복원 정보를 받지 못했습니다.");
+  return { ...result, receipt: result.receipt };
+}
+
+export async function restoreDailyPlanGatheringPhoto(
+  projectId: string,
+  dailyPlanId: string,
+  receipt: string
+): Promise<GatheringPhotoMutationResult> {
+  requireDatabaseProject(projectId);
+  const response = await fetchGatheringApi(projectId, dailyPlanId, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "restore-delete", receipt })
+  });
+  return readMutationResponse(response, "집합장소 사진 삭제를 되돌리지 못했습니다.");
+}
+
+export async function finalizeDailyPlanGatheringPhotoDelete(
+  projectId: string,
+  dailyPlanId: string,
+  receipt: string
+): Promise<void> {
+  requireDatabaseProject(projectId);
+  const response = await fetchGatheringApi(projectId, dailyPlanId, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "finalize-delete", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(payload.error || "집합장소 사진 파일을 정리하지 못했습니다.");
 }
 
 export async function saveDailyPlanGatheringPhotoOrder(
@@ -205,6 +243,7 @@ async function readMutationResponse(response: Response, fallbackMessage: string)
     updatedAt?: string;
     gatheringPointId?: string;
     cleanupWarning?: string;
+    receipt?: unknown;
     appliedPhotoIds?: unknown;
     failedPhotos?: unknown;
     error?: string;
@@ -225,6 +264,7 @@ async function readMutationResponse(response: Response, fallbackMessage: string)
     updatedAt: payload.updatedAt,
     gatheringPointId: payload.gatheringPointId,
     cleanupWarning: payload.cleanupWarning,
+    receipt: typeof payload.receipt === "string" ? payload.receipt : undefined,
     appliedPhotoIds: normalizeAppliedPhotoIds(payload.appliedPhotoIds),
     failedPhotos: normalizePhotoFailures(payload.failedPhotos)
   };

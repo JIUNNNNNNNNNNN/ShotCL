@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -15,10 +15,7 @@ import {
 } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { GatheringPhotoManagementSheet } from "@/components/GatheringPhotoManagementSheet";
-import {
-  GatheringPhotoSourceChooser,
-  type GatheringPhotoSourceChooserHandle
-} from "@/components/GatheringPhotoSourceChooser";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
 import { Button } from "@/components/ui/Button";
 import { MotionPresence } from "@/components/ui/MotionPresence";
@@ -33,20 +30,23 @@ import {
 } from "@/lib/client/gatheringPhotoCard";
 import {
   deleteDailyPlanGatheringPhoto,
+  finalizeDailyPlanGatheringPhotoDelete,
   GatheringPhotoMutationError,
   replaceDailyPlanGatheringPhoto,
+  restoreDailyPlanGatheringPhoto,
   saveDailyPlanGatheringPhotoDraft,
   uploadDailyPlanGatheringPhoto
 } from "@/lib/data/dailyPlanGatheringPhotos";
 import { updateDailyPlanGatheringAddress } from "@/lib/data/dailyPlans";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import {
-  createGatheringPhotoId,
-  normalizeGatheringLocationName,
-  selectDailyPlanGatheringPoints
+  createGatheringPhotoId
 } from "@/lib/dailyPlan/gatheringPoints";
-import { resolveEffectiveGatheringLocation } from "@/lib/dailyPlan/locationReferences";
-import { decodeDailyPlanMemo, type DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
+import type { DailyPlanGatheringPhoto } from "@/lib/dailyPlan/printMeta";
+import {
+  selectProgressGatheringPlace,
+  type ProgressGatheringPlace
+} from "@/lib/progress/gatheringPlace";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import type { DailyPlan } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -107,16 +107,6 @@ type GatheringPhotoLongPress = {
   timer: number;
 };
 
-type ProgressGatheringPlace = {
-  id: string;
-  persistedId: string | null;
-  locationId: string | null;
-  locationName: string;
-  address: string;
-  departmentIds: string[];
-  photos: DailyPlanGatheringPhoto[];
-};
-
 const MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
 const ADDRESS_COPY_FEEDBACK_MS = 1300;
 
@@ -136,7 +126,7 @@ export function DailyPlanGatheringLocations({
   const [isPhotoManagementOpen, setIsPhotoManagementOpen] = useState(false);
   const [managedPhotoId, setManagedPhotoId] = useState<string | null>(null);
   const [optimisticallyDeletedPhotoId, setOptimisticallyDeletedPhotoId] = useState<string | null>(null);
-  const [isDeletingPhoto, setIsDeletingPhoto] = useState(false);
+  const [optimisticallyRestoredPhoto, setOptimisticallyRestoredPhoto] = useState<DailyPlanGatheringPhoto | null>(null);
   const [addressDraft, setAddressDraft] = useState("");
   const [isComposingAddress, setIsComposingAddress] = useState(false);
   const [addressError, setAddressError] = useState("");
@@ -145,7 +135,9 @@ export function DailyPlanGatheringLocations({
   const [pendingPhotos, setPendingPhotos] = useState<InlinePendingPhoto[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
   const [uploadError, setUploadError] = useState("");
-  const photoSourceChooserRef = useRef<GatheringPhotoSourceChooserHandle | null>(null);
+  const photoInputId = useId();
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const pickerPlanIdRef = useRef("");
   const photoIntentRef = useRef<GatheringPhotoIntent>({ mode: "add" });
   const uploadLockRef = useRef(false);
   const uploadGenerationRef = useRef(0);
@@ -159,24 +151,28 @@ export function DailyPlanGatheringLocations({
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const copyRequestRef = useRef(0);
   const addressExpectedUpdatedAtRef = useRef(plan.updatedAt);
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const callTime = plan.callTime.trim();
   const hasPersistentProject = isValidDatabaseProjectId(projectId);
   const storedActivePhoto = selectActiveGatheringPhoto(place?.photos ?? []);
-  const activePhoto = shouldHideActiveGatheringPhoto(
+  const storedPhotoIsHidden = shouldHideActiveGatheringPhoto(
     storedActivePhoto?.id,
     optimisticallyDeletedPhotoId
-  ) ? null : storedActivePhoto;
+  );
+  const activePhoto = storedPhotoIsHidden
+    ? null
+    : storedActivePhoto ?? optimisticallyRestoredPhoto;
   // The editable card is also the explicit creation surface for a plan that
   // does not have a gathering-point record yet. Rendering it is read-only;
   // the canonical photo POST creates the parent only after a file is picked.
   const canMutatePhotos = Boolean(canEdit && hasPersistentProject);
-  const canAddPhotos = Boolean(canMutatePhotos && !storedActivePhoto);
+  const canAddPhotos = Boolean(canMutatePhotos && !activePhoto && !optimisticallyDeletedPhotoId);
   const canManagePhotos = Boolean(
-    canEdit && place?.persistedId && place.photos.length > 0 && hasPersistentProject
+    canEdit && place?.persistedId && activePhoto && hasPersistentProject
   );
   const isUploadBusy = pendingPhotos.some((photo) => photo.status !== "failed");
-  const isPhotoBusy = isUploadBusy || isDeletingPhoto;
-  const isPhotoSourceDisabled = !canMutatePhotos || isPhotoBusy || isEditingAddress || isEditingPhotos;
+  const isPhotoBusy = isUploadBusy;
+  const isPhotoInputDisabled = !canMutatePhotos || isPhotoBusy || isEditingAddress || isEditingPhotos;
   const gatheringPhotoContextRef = useContextualGuideAnchor<HTMLElement>(
     (place || canMutatePhotos) && !isPhotoBusy && !isEditingAddress && !isEditingPhotos && !isPhotoManagementOpen
       ? "progress.gathering-photo-context"
@@ -232,20 +228,25 @@ export function DailyPlanGatheringLocations({
   });
   const isSavingAddress = addressAutosave.isPending;
 
-  const openAddPhotoChooser = useCallback(() => {
-    if (!canAddPhotos || isPhotoSourceDisabled || uploadLockRef.current) return;
+  const prepareAddPhoto = useCallback(() => {
+    if (!canAddPhotos || isPhotoInputDisabled || uploadLockRef.current) return false;
     setMessage("");
     setUploadError("");
     photoIntentRef.current = { mode: "add" };
-    photoSourceChooserRef.current?.open({
-      origin: "card",
-      title: "집합장소 사진 추가"
-    });
-  }, [canAddPhotos, isPhotoSourceDisabled]);
+    return true;
+  }, [canAddPhotos, isPhotoInputDisabled]);
+
+  const openAddPhotoPicker = useCallback(() => {
+    if (!prepareAddPhoto()) return;
+    // The persistent project action panel keeps its existing fallback. Keep
+    // activation synchronous in the trusted click handler and reuse the same
+    // stable generic input as the canonical card label.
+    photoInputRef.current?.click();
+  }, [prepareAddPhoto]);
 
   const actionControls = useMemo<GatheringLocationActions>(() => ({
     visible: Boolean(canEdit && place),
-    addPhotos: openAddPhotoChooser,
+    addPhotos: openAddPhotoPicker,
     managePhotos: () => {
       if (!canManagePhotos || isPhotoBusy || uploadLockRef.current || isEditingAddress) return;
       setMessage("");
@@ -270,7 +271,7 @@ export function DailyPlanGatheringLocations({
       rememberDialogTrigger();
       setIsEditingAddress(true);
     },
-    addPhotosDisabled: !canAddPhotos || isPhotoSourceDisabled,
+    addPhotosDisabled: !canAddPhotos || isPhotoInputDisabled,
     addPhotosPending: isPhotoBusy,
     managePhotosDisabled: !canManagePhotos || isPhotoBusy || isEditingAddress,
     editAddressDisabled: !canEdit || !place || isPhotoBusy || isEditingPhotos,
@@ -284,8 +285,8 @@ export function DailyPlanGatheringLocations({
     isSavingAddress,
     isPhotoBusy,
     isUploadBusy,
-    isPhotoSourceDisabled,
-    openAddPhotoChooser,
+    isPhotoInputDisabled,
+    openAddPhotoPicker,
     place,
     plan.updatedAt,
     addressAutosave.markSaved
@@ -309,13 +310,14 @@ export function DailyPlanGatheringLocations({
     setIsPhotoManagementOpen(false);
     setManagedPhotoId(null);
     setOptimisticallyDeletedPhotoId(null);
-    setIsDeletingPhoto(false);
+    setOptimisticallyRestoredPhoto(null);
     setAddressCopyStatus("idle");
     copyRequestRef.current += 1;
     setPendingPhotos([]);
     setUploadProgress("");
     setUploadError("");
     setMessage("");
+    pickerPlanIdRef.current = "";
     photoIntentRef.current = { mode: "add" };
     photoManagementReturnFocusRef.current = null;
     if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current);
@@ -323,6 +325,21 @@ export function DailyPlanGatheringLocations({
     inlineObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     inlineObjectUrlsRef.current.clear();
   }, [cancelPhotoLongPress, plan.id]);
+
+  useEffect(() => {
+    if (
+      optimisticallyDeletedPhotoId
+      && !place?.photos.some((photo) => photo.id === optimisticallyDeletedPhotoId)
+    ) {
+      setOptimisticallyDeletedPhotoId(null);
+    }
+    if (
+      optimisticallyRestoredPhoto
+      && place?.photos.some((photo) => photo.id === optimisticallyRestoredPhoto.id)
+    ) {
+      setOptimisticallyRestoredPhoto(null);
+    }
+  }, [optimisticallyDeletedPhotoId, optimisticallyRestoredPhoto, place?.photos]);
 
   useEffect(() => {
     if (canMutatePhotos) return;
@@ -517,7 +534,7 @@ export function DailyPlanGatheringLocations({
     }
   }
 
-  async function deleteActivePhoto(photoId: string) {
+  function deleteActivePhoto(photoId: string) {
     if (
       !canMutatePhotos
       || !place?.persistedId
@@ -526,43 +543,59 @@ export function DailyPlanGatheringLocations({
       || isEditingAddress
       || isEditingPhotos
     ) return;
-    const generation = uploadGenerationRef.current + 1;
-    uploadGenerationRef.current = generation;
-    uploadLockRef.current = true;
-    setOptimisticallyDeletedPhotoId(photoId);
-    setIsDeletingPhoto(true);
-    setUploadError("");
-    setMessage("");
-    try {
-      const result = await deleteDailyPlanGatheringPhoto({
-        projectId,
-        dailyPlanId: plan.id,
-        gatheringPointId: place.persistedId,
-        photoId,
-        expectedUpdatedAt: plan.updatedAt
-      });
-      if (!isCurrentUpload(plan.id, generation)) return;
-      onPlanMetadataChange({ memo: result.memo, updatedAt: result.updatedAt });
-      setMessage("집합장소 사진을 삭제했습니다.");
-      setUploadError(result.cleanupWarning ?? "");
-    } catch (error) {
-      if (isCurrentUpload(plan.id, generation)) {
-        applyLatestPhotoMetadataFromConflict(error);
+    const photo = place.photos.find((item) => item.id === photoId);
+    if (!photo) return;
+    const gatheringPointId = place.persistedId;
+    const dailyPlanId = plan.id;
+    const expectedUpdatedAt = plan.updatedAt;
+    let receipt = "";
+    let locallyRestored = false;
+    deleteWithUndo({
+      key: `gathering-photo:${dailyPlanId}:${photoId}`,
+      label: "집합장소 사진",
+      removeLocal: () => {
+        locallyRestored = false;
+        setOptimisticallyRestoredPhoto(null);
+        setOptimisticallyDeletedPhotoId(photoId);
+        setUploadError("");
+        setMessage("");
+      },
+      restoreLocal: () => {
+        locallyRestored = true;
         setOptimisticallyDeletedPhotoId(null);
-        setUploadError(error instanceof Error ? error.message : "집합장소 사진을 삭제하지 못했습니다.");
-      }
-    } finally {
-      if (isCurrentUpload(plan.id, generation)) {
-        setIsDeletingPhoto(false);
-        uploadLockRef.current = false;
-        // Success exposes the new empty add button; failure restores the
-        // original manageable photo. Keep keyboard focus in this card after
-        // the async mutation settles in either case.
-        window.requestAnimationFrame(() => {
-          photoMediaRef.current?.focus({ preventScroll: true });
-        });
-      }
-    }
+        setOptimisticallyRestoredPhoto(photo);
+      },
+      deleteRemote: async () => {
+        try {
+          const result = await deleteDailyPlanGatheringPhoto({
+            projectId,
+            dailyPlanId,
+            gatheringPointId,
+            photoId,
+            expectedUpdatedAt
+          });
+          receipt = result.receipt;
+          if (!locallyRestored) {
+            onPlanMetadataChange({ memo: result.memo, updatedAt: result.updatedAt });
+          }
+        } catch (error) {
+          applyLatestPhotoMetadataFromConflict(error);
+          setUploadError(error instanceof Error ? error.message : "집합장소 사진을 삭제하지 못했습니다.");
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        try {
+          const result = await restoreDailyPlanGatheringPhoto(projectId, dailyPlanId, receipt);
+          onPlanMetadataChange({ memo: result.memo, updatedAt: result.updatedAt });
+          setUploadError("");
+        } catch (error) {
+          setUploadError(error instanceof Error ? error.message : "집합장소 사진 삭제를 되돌리지 못했습니다.");
+          throw error;
+        }
+      },
+      finalize: () => finalizeDailyPlanGatheringPhotoDelete(projectId, dailyPlanId, receipt)
+    });
   }
 
   function startPhotoLongPress(pointer: {
@@ -608,10 +641,8 @@ export function DailyPlanGatheringLocations({
     setIsPhotoManagementOpen(true);
   }
 
-  function changeManagedPhoto() {
+  function prepareManagedPhotoChange() {
     const currentPhoto = selectActiveGatheringPhoto(place?.photos ?? []);
-    setIsPhotoManagementOpen(false);
-    setManagedPhotoId(null);
     if (
       !canMutatePhotos
       || !managedPhotoId
@@ -619,15 +650,12 @@ export function DailyPlanGatheringLocations({
       || isPhotoBusy
     ) {
       setUploadError("사진이 다른 화면에서 변경되었습니다. 최신 사진을 확인한 뒤 다시 시도해주세요.");
-      return;
+      return false;
     }
+    setMessage("");
+    setUploadError("");
     photoIntentRef.current = { mode: "replace", replacedPhotoId: managedPhotoId };
-    photoMediaRef.current?.focus({ preventScroll: true });
-    photoSourceChooserRef.current?.open({
-      origin: "card",
-      title: "집합장소 사진 변경"
-    });
-    photoManagementReturnFocusRef.current = null;
+    return true;
   }
 
   function deleteManagedPhoto() {
@@ -635,7 +663,7 @@ export function DailyPlanGatheringLocations({
     setIsPhotoManagementOpen(false);
     setManagedPhotoId(null);
     if (!photoId) return;
-    void deleteActivePhoto(photoId);
+    deleteActivePhoto(photoId);
     // The destructive sheet disappears immediately. Move focus to the
     // optimistic empty slot instead of letting it fall back to document.body.
     window.requestAnimationFrame(() => {
@@ -690,6 +718,41 @@ export function DailyPlanGatheringLocations({
         </div>
       </div>
 
+      <input
+        ref={photoInputRef}
+        id={photoInputId}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        disabled={isPhotoInputDisabled}
+        aria-label="집합장소 사진 선택"
+        data-gathering-photo-input="native"
+        onClick={(event) => {
+          // Clear before the OS picker opens so selecting the same file again
+          // still produces a change event in Safari and embedded WebViews.
+          event.currentTarget.value = "";
+          pickerPlanIdRef.current = activePlanIdRef.current;
+          if (photoIntentRef.current.mode === "replace") {
+            // Label activation has reached the stable native input. Only now
+            // dismiss the management sheet; the picker was not deferred
+            // behind a close animation or another render.
+            setIsPhotoManagementOpen(false);
+            setManagedPhotoId(null);
+            photoManagementReturnFocusRef.current = null;
+          }
+        }}
+        onChange={(event) => {
+          const input = event.currentTarget;
+          const files = Array.from(input.files ?? []);
+          input.value = "";
+          if (
+            files.length === 0
+            || pickerPlanIdRef.current !== activePlanIdRef.current
+          ) return;
+          void handlePhotoFiles(files);
+        }}
+      />
+
       {!place && !canEdit ? (
         <p className="px-3 py-3 text-xs font-normal leading-5 text-field-muted">집합장소 정보가 없습니다.</p>
       ) : (
@@ -700,11 +763,11 @@ export function DailyPlanGatheringLocations({
           pendingPhoto={pendingPhotos[0] ?? null}
           uploadProgress={uploadProgress}
           uploadError={uploadError}
-          isDeletingPhoto={isDeletingPhoto}
           canAddPhoto={canAddPhotos && !isPhotoBusy && !isEditingAddress && !isEditingPhotos}
           canManagePhoto={Boolean(canMutatePhotos && activePhoto && !isPhotoBusy)}
           mediaRef={setPhotoMediaRef}
-          onAddPhoto={openAddPhotoChooser}
+          photoInputId={photoInputId}
+          onPrepareAddPhoto={prepareAddPhoto}
           onPhotoPointerDown={startPhotoLongPress}
           onOpenPhotoManagement={openPhotoManagementFromKeyboard}
           onCancelLongPress={cancelPhotoLongPress}
@@ -713,19 +776,12 @@ export function DailyPlanGatheringLocations({
         />
       )}
 
-      <GatheringPhotoSourceChooser
-        ref={photoSourceChooserRef}
-        resetKey={`${plan.id}:${canMutatePhotos ? "write" : "read"}`}
-        disabled={isPhotoSourceDisabled}
-        allowMultipleAlbum={false}
-        onFilesSelected={handlePhotoFiles}
-      />
-
       <GatheringPhotoManagementSheet
         open={Boolean(isPhotoManagementOpen && canMutatePhotos && activePhoto)}
         disabled={!canMutatePhotos || isPhotoBusy}
         returnFocusRef={photoManagementReturnFocusRef}
-        onChangePhoto={changeManagedPhoto}
+        photoInputId={photoInputId}
+        onChangePhoto={prepareManagedPhotoChange}
         onDeletePhoto={deleteManagedPhoto}
         onCancel={() => {
           setIsPhotoManagementOpen(false);
@@ -782,11 +838,11 @@ function GatheringPlaceRow({
   pendingPhoto,
   uploadProgress,
   uploadError,
-  isDeletingPhoto,
   canAddPhoto,
   canManagePhoto,
   mediaRef,
-  onAddPhoto,
+  photoInputId,
+  onPrepareAddPhoto,
   onPhotoPointerDown,
   onOpenPhotoManagement,
   onCancelLongPress,
@@ -799,11 +855,11 @@ function GatheringPlaceRow({
   pendingPhoto: InlinePendingPhoto | null;
   uploadProgress: string;
   uploadError: string;
-  isDeletingPhoto: boolean;
   canAddPhoto: boolean;
   canManagePhoto: boolean;
   mediaRef: (element: HTMLElement | null) => void;
-  onAddPhoto: () => void;
+  photoInputId: string;
+  onPrepareAddPhoto: () => boolean;
   onPhotoPointerDown: (pointer: {
     pointerId: number;
     pointerType: string;
@@ -830,10 +886,10 @@ function GatheringPlaceRow({
             activePhoto={activePhoto}
             pendingPhoto={pendingPhoto}
             uploadProgress={uploadProgress}
-            isDeletingPhoto={isDeletingPhoto}
             canAddPhoto={canAddPhoto}
             canManagePhoto={canManagePhoto}
-            onAddPhoto={onAddPhoto}
+            photoInputId={photoInputId}
+            onPrepareAddPhoto={onPrepareAddPhoto}
             onPhotoPointerDown={onPhotoPointerDown}
             onOpenPhotoManagement={onOpenPhotoManagement}
             onCancelLongPress={onCancelLongPress}
@@ -863,10 +919,10 @@ function GatheringPlaceMedia({
   activePhoto,
   pendingPhoto,
   uploadProgress,
-  isDeletingPhoto,
   canAddPhoto,
   canManagePhoto,
-  onAddPhoto,
+  photoInputId,
+  onPrepareAddPhoto,
   onPhotoPointerDown,
   onOpenPhotoManagement,
   onCancelLongPress
@@ -876,10 +932,10 @@ function GatheringPlaceMedia({
   activePhoto: DailyPlanGatheringPhoto | null;
   pendingPhoto: InlinePendingPhoto | null;
   uploadProgress: string;
-  isDeletingPhoto: boolean;
   canAddPhoto: boolean;
   canManagePhoto: boolean;
-  onAddPhoto: () => void;
+  photoInputId: string;
+  onPrepareAddPhoto: () => boolean;
   onPhotoPointerDown: (pointer: {
     pointerId: number;
     pointerType: string;
@@ -972,6 +1028,7 @@ function GatheringPlaceMedia({
           width={960}
           height={540}
           loading="lazy"
+          decoding="async"
           draggable={false}
           className={cn("block h-full w-full object-cover", styles.photoImage)}
           onDragStart={(event) => event.preventDefault()}
@@ -980,44 +1037,31 @@ function GatheringPlaceMedia({
     );
   }
 
-  if (isDeletingPhoto) {
-    return (
-      <div
-        ref={mediaRef as (element: HTMLDivElement | null) => void}
-        className={cn(mediaClassName, styles.emptyMedia)}
-        data-gathering-photo-action="pending"
-        role="status"
-        tabIndex={-1}
-        aria-label="집합장소 사진 삭제 중. 완료되면 사진을 추가할 수 있습니다."
-      >
-        <div className={styles.emptyMediaContent}>
-          <ImageIcon className="h-8 w-8" aria-hidden />
-          <span className={styles.addMediaLabel}>사진 추가</span>
-          <span className={cn(styles.addMediaDescription, "flex items-center gap-1.5")}>
-            <LoaderCircle className={styles.spinner} aria-hidden />
-            삭제 중
-          </span>
-        </div>
-      </div>
-    );
-  }
-
   if (canAddPhoto) {
     return (
-      <button
-        ref={mediaRef as (element: HTMLButtonElement | null) => void}
-        type="button"
+      <label
+        ref={mediaRef as (element: HTMLLabelElement | null) => void}
+        htmlFor={photoInputId}
         className={cn(mediaClassName, styles.emptyMedia, styles.addMedia)}
         data-gathering-photo-action="empty"
-        onClick={onAddPhoto}
-        aria-label="집합장소 사진 추가. 촬영하거나 앨범에서 선택"
+        role="button"
+        tabIndex={0}
+        onClick={(event) => {
+          if (!onPrepareAddPhoto()) event.preventDefault();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          event.currentTarget.click();
+        }}
+        aria-label="집합장소 사진 추가. 기기의 사진 선택기 열기"
       >
         <div className={styles.emptyMediaContent}>
           <ImageIcon className="h-8 w-8" aria-hidden />
           <span className={styles.addMediaLabel}>사진 추가</span>
-          <span className={styles.addMediaDescription}>촬영하거나 앨범에서 선택</span>
+          <span className={styles.addMediaDescription}>기기에서 사진 선택</span>
         </div>
-      </button>
+      </label>
     );
   }
 
@@ -1027,6 +1071,7 @@ function GatheringPlaceMedia({
       className={cn(mediaClassName, styles.emptyMedia)}
       data-gathering-photo-action="empty"
       role="img"
+      tabIndex={-1}
       aria-label={`${locationName} 집합장소 사진 없음`}
     >
       <div className={styles.emptyMediaContent}>
@@ -1266,13 +1311,13 @@ function GatheringPhotoEditor({
   onConflict: (patch: Pick<DailyPlan, "memo" | "updatedAt">) => void;
 }) {
   const [draftPhotos, setDraftPhotos] = useState<ExistingDraftPhoto[]>(() => point.photos.map(toExistingDraftPhoto));
-  const [deletedPhotoIds, setDeletedPhotoIds] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [progress, setProgress] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const savingRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const initialOrder = point.photos.map((photo) => photo.id).join("|");
   useAccessibleGatheringDialog({
     dialogRef,
@@ -1282,11 +1327,54 @@ function GatheringPhotoEditor({
   });
 
   function removeDraftPhoto(index: number) {
-    setDraftPhotos((current) => {
-      const target = current[index];
-      if (!target) return current;
-      setDeletedPhotoIds((ids) => ids.includes(target.id) ? ids : [...ids, target.id]);
-      return current.filter((_, itemIndex) => itemIndex !== index);
+    const target = draftPhotos[index];
+    const photo = target ? point.photos.find((item) => item.id === target.id) : null;
+    if (!target || !photo || !point.persistedId) return;
+    let receipt = "";
+    let locallyRestored = false;
+    deleteWithUndo({
+      key: `gathering-photo:${plan.id}:${photo.id}`,
+      label: "집합장소 사진",
+      removeLocal: () => {
+        locallyRestored = false;
+        setDraftPhotos((current) => current.filter((item) => item.id !== target.id));
+        setErrorMessage("");
+      },
+      restoreLocal: () => {
+        locallyRestored = true;
+        setDraftPhotos((current) => {
+          if (current.some((item) => item.id === target.id)) return current;
+          const next = [...current];
+          next.splice(Math.max(0, Math.min(index, next.length)), 0, target);
+          return next;
+        });
+      },
+      deleteRemote: async () => {
+        try {
+          const result = await deleteDailyPlanGatheringPhoto({
+            projectId,
+            dailyPlanId: plan.id,
+            gatheringPointId: point.persistedId!,
+            photoId: photo.id,
+            expectedUpdatedAt: plan.updatedAt
+          });
+          receipt = result.receipt;
+          if (!locallyRestored) onConflict({ memo: result.memo, updatedAt: result.updatedAt });
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "집합장소 사진을 삭제하지 못했습니다.");
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        try {
+          const result = await restoreDailyPlanGatheringPhoto(projectId, plan.id, receipt);
+          onConflict({ memo: result.memo, updatedAt: result.updatedAt });
+        } catch (error) {
+          setErrorMessage(error instanceof Error ? error.message : "집합장소 사진 삭제를 되돌리지 못했습니다.");
+          throw error;
+        }
+      },
+      finalize: () => finalizeDailyPlanGatheringPhotoDelete(projectId, plan.id, receipt)
     });
   }
 
@@ -1304,7 +1392,7 @@ function GatheringPhotoEditor({
     if (savingRef.current) return;
     const finalOrder = draftPhotos.map((photo) => photo.id);
     const hasOrderChange = finalOrder.join("|") !== initialOrder;
-    if (deletedPhotoIds.length === 0 && !hasOrderChange) {
+    if (!hasOrderChange) {
       onClose();
       return;
     }
@@ -1322,7 +1410,7 @@ function GatheringPhotoEditor({
         locationName: point.locationName,
         address: point.address,
         departmentIds: point.departmentIds,
-        deletedPhotoIds,
+        deletedPhotoIds: [],
         orderedPhotoIds: finalOrder,
         pendingPhotos: [],
         expectedUpdatedAt: plan.updatedAt
@@ -1507,91 +1595,6 @@ function toExistingDraftPhoto(photo: DailyPlanGatheringPhoto): ExistingDraftPhot
     id: photo.id,
     previewUrl: photo.thumbnailUrl || photo.url,
     originalFilename: photo.originalFilename
-  };
-}
-
-function selectProgressGatheringPlace(plan: DailyPlan): ProgressGatheringPlace | null {
-  const meta = decodeDailyPlanMemo(plan.memo);
-  const canonicalPoints = selectDailyPlanGatheringPoints(plan);
-  const effectiveLocation = resolveEffectiveGatheringLocation(plan.shootingLocations);
-
-  if (effectiveLocation) {
-    const matchingPoint = canonicalPoints.find((point) => (
-      point.locationId === effectiveLocation.id
-    )) ?? null;
-    if (matchingPoint) {
-      return {
-        id: matchingPoint.id,
-        persistedId: matchingPoint.persistedId,
-        locationId: effectiveLocation.id,
-        locationName: effectiveLocation.label,
-        address: effectiveLocation.address,
-        departmentIds: matchingPoint.departments.map((department) => department.id),
-        photos: matchingPoint.photos
-      };
-    }
-
-    const storedPoint = meta.gatheringPoints.find((point) => (
-      point.locationId === effectiveLocation.id
-    )) ?? null;
-    if (storedPoint) {
-      const currentDepartmentIds = new Set(meta.teams.map((team) => team.id));
-      return {
-        id: storedPoint.id,
-        persistedId: storedPoint.id,
-        locationId: effectiveLocation.id,
-        locationName: effectiveLocation.label,
-        address: effectiveLocation.address,
-        departmentIds: storedPoint.departmentIds.filter((id) => currentDepartmentIds.has(id)),
-        photos: storedPoint.photos
-      };
-    }
-
-    // 장소1 fallback은 저장 값을 만들지 않습니다. 사진을 실제로 고른 뒤에만
-    // 이 stable location ID를 부모 point와 연결합니다.
-    return {
-      id: `location:${effectiveLocation.id}`,
-      persistedId: null,
-      locationId: effectiveLocation.id,
-      locationName: effectiveLocation.label,
-      address: effectiveLocation.address,
-      departmentIds: [],
-      photos: []
-    };
-  }
-
-  // 실제 촬영 장소가 없는 과거 일촬표에서만 부서/사진 metadata를 읽기 fallback합니다.
-  const canonicalPoint = canonicalPoints[0] ?? null;
-  if (canonicalPoint) {
-    return {
-      id: canonicalPoint.id,
-      persistedId: canonicalPoint.persistedId,
-      locationId: canonicalPoint.locationId,
-      locationName: canonicalPoint.locationName,
-      address: canonicalPoint.address,
-      departmentIds: canonicalPoint.departments.map((department) => department.id),
-      photos: canonicalPoint.photos
-    };
-  }
-
-  const fallbackLocationName = normalizeGatheringLocationName(plan.meetingLocation);
-  // Explicit photo upload may create a neutral canonical point for a legacy
-  // plan with no location/team row. Keep that persisted point visible after
-  // the local memo patch instead of falling back to the editable skeleton.
-  const point = meta.gatheringPoints.find((item) => item.photos.length > 0)
-    ?? meta.gatheringPoints[0]
-    ?? null;
-  const locationName = fallbackLocationName || normalizeGatheringLocationName(point?.locationName);
-  if (!locationName && !point) return null;
-
-  return {
-    id: point?.id ?? "legacy:gathering",
-    persistedId: point?.id ?? null,
-    locationId: point?.locationId ?? null,
-    locationName,
-    address: String(point?.address ?? "").trim(),
-    departmentIds: point?.departmentIds ?? [],
-    photos: point?.photos ?? []
   };
 }
 

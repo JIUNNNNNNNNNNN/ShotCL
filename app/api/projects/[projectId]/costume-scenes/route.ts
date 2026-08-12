@@ -7,6 +7,11 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 type ActorSeed = { role: string; name: string };
@@ -51,6 +56,16 @@ type NormalizedBulkScene = {
 
 const SCENE_COLUMNS = "id,project_id,scene_no,scene_title,episode_numbers,sort_order,created_at,updated_at";
 const ITEM_COLUMNS = "id,project_id,costume_scene_id,scene_no,actor_role,actor_name,costume_content,provider,hair,image_paths,sort_order,created_at,updated_at";
+const COSTUME_SCENE_DELETE_RECEIPT_KIND = "costume-scene";
+const MAX_COSTUME_SCENE_ITEMS = 5_000;
+const COSTUME_DELETE_BATCH_SIZE = 50;
+const COSTUME_STORAGE_SCAN_PAGE_SIZE = 1_000;
+const MAX_COSTUME_STORAGE_SCAN_ROWS = 50_000;
+type DatabaseRow = Record<string, unknown>;
+type DeletedCostumeSceneReceiptPayload = {
+  scene: DatabaseRow;
+  items: DatabaseRow[];
+};
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -393,6 +408,30 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    const operation = cleanText(body.operation, 40);
+    if (operation === "restore_deleted" || operation === "finalize_deleted") {
+      const snapshot = readDeletedCostumeSceneReceipt(projectId, body.receipt);
+      if (operation === "finalize_deleted") {
+        const storageCleanupWarning = await finalizeDeletedCostumeImages(
+          projectId,
+          snapshot.items.flatMap((item) => normalizeImages(item.image_paths).map((image) => image.path))
+        );
+        return NextResponse.json({ ok: true, finalized: true, storageCleanupWarning });
+      }
+
+      const supabase = requireProjectAccessDb();
+      const { error: sceneError } = await supabase
+        .from("project_costume_scenes")
+        .upsert([snapshot.scene], { onConflict: "id", ignoreDuplicates: true });
+      if (sceneError) throw sceneError;
+      await restoreDeletedCostumeItemRows(supabase, snapshot.items);
+      const scenes = await readScenes(projectId);
+      return NextResponse.json({
+        ok: true,
+        restored: true,
+        scene: scenes.find((scene) => scene.id === String(snapshot.scene.id)) ?? null
+      });
+    }
     const id = cleanText(body.id, 100);
     const sceneNo = cleanText(body.sceneNo, 80);
     const sceneTitle = cleanText(body.sceneTitle, 300);
@@ -451,32 +490,222 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const id = cleanText(request.nextUrl.searchParams.get("id"), 100);
     if (!id) return NextResponse.json({ error: "씬 ID가 필요합니다." }, { status: 400 });
     const supabase = requireProjectAccessDb();
-    const { data: items, error: readError } = await supabase
+    const [{ data: scene, error: sceneReadError }, { data: items, error: itemReadError }] = await Promise.all([
+      supabase
+        .from("project_costume_scenes")
+        .select("*")
+        .eq("id", id)
+        .eq("project_id", projectId)
+        .maybeSingle(),
+      supabase
       .from("project_costumes")
-      .select("image_paths")
+      .select("*")
       .eq("project_id", projectId)
-      .eq("costume_scene_id", id);
-    if (readError) throw readError;
+      .eq("costume_scene_id", id)
+      .order("sort_order")
+      .order("created_at")
+    ]);
+    if (sceneReadError) throw sceneReadError;
+    if (itemReadError) throw itemReadError;
+    if (!scene) return NextResponse.json({ error: "의상 씬을 찾을 수 없습니다." }, { status: 404 });
+    if ((items ?? []).length > MAX_COSTUME_SCENE_ITEMS) {
+      return NextResponse.json({ error: "복원 정보를 안전하게 만들 수 있는 의상 항목 수를 초과했습니다." }, { status: 413 });
+    }
+    const snapshotItems = (items ?? []) as DatabaseRow[];
+    const receipt = createProjectDeleteReceipt({
+      projectId,
+      kind: COSTUME_SCENE_DELETE_RECEIPT_KIND,
+      payload: { scene, items: snapshotItems } satisfies DeletedCostumeSceneReceiptPayload
+    });
 
-    const { data, error } = await supabase
+    // Child rows are version-guarded before deleting the parent. If another
+    // editor changed an item after the snapshot, restore the rows already
+    // removed in earlier bounded batches and leave the scene intact.
+    const deletedItemIds = new Set<string>();
+    let itemDeleteFailure: unknown = null;
+    for (let start = 0; start < snapshotItems.length; start += COSTUME_DELETE_BATCH_SIZE) {
+      const batch = snapshotItems.slice(start, start + COSTUME_DELETE_BATCH_SIZE);
+      const versionFilter = batch.map((row) => (
+        `and(id.eq.${String(row.id)},updated_at.eq.${JSON.stringify(String(row.updated_at ?? ""))})`
+      )).join(",");
+      const { data: deletedItems, error } = await supabase
+        .from("project_costumes")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("costume_scene_id", id)
+        .in("id", batch.map((row) => String(row.id)))
+        .or(versionFilter)
+        .select("id");
+      if (error) {
+        itemDeleteFailure = error;
+        break;
+      }
+      (deletedItems ?? []).forEach((row) => deletedItemIds.add(String(row.id)));
+      if ((deletedItems ?? []).length !== batch.length) break;
+    }
+    if (itemDeleteFailure || deletedItemIds.size !== snapshotItems.length) {
+      await restoreDeletedCostumeItemRows(
+        supabase,
+        snapshotItems.filter((row) => deletedItemIds.has(String(row.id)))
+      );
+      if (itemDeleteFailure) throw itemDeleteFailure;
+      return NextResponse.json(
+        { error: "의상 씬의 항목이 다른 화면에서 변경되었습니다. 최신 내용을 확인해주세요." },
+        { status: 409 }
+      );
+    }
+
+    // A child inserted after the snapshot is not part of the receipt and must
+    // not be silently lost through the parent's ON DELETE CASCADE.
+    const { data: unexpectedChildren, error: childRecheckError } = await supabase
+      .from("project_costumes")
+      .select("id")
+      .eq("project_id", projectId)
+      .eq("costume_scene_id", id)
+      .limit(1);
+    if (childRecheckError) {
+      await restoreDeletedCostumeItemRows(supabase, snapshotItems);
+      throw childRecheckError;
+    }
+    if ((unexpectedChildren ?? []).length > 0) {
+      await restoreDeletedCostumeItemRows(supabase, snapshotItems);
+      return NextResponse.json(
+        { error: "의상 씬에 다른 화면에서 새 항목이 추가되었습니다. 최신 내용을 확인해주세요." },
+        { status: 409 }
+      );
+    }
+
+    const { data: deletedScene, error: deleteError } = await supabase
       .from("project_costume_scenes")
       .delete()
       .eq("id", id)
       .eq("project_id", projectId)
+      .eq("updated_at", scene.updated_at)
       .select("id")
       .maybeSingle();
-    if (error) throw error;
-    if (!data) return NextResponse.json({ error: "의상 씬을 찾을 수 없습니다." }, { status: 404 });
-
-    const paths = (items ?? []).flatMap((item) => normalizeImages(item.image_paths).map((image) => image.path));
-    if (paths.length > 0) {
-      const { error: storageError } = await supabase.storage.from("storyboards").remove(paths);
-      if (storageError) console.error("[costume-scenes:storage-delete]", safeError(storageError));
+    if (deleteError || !deletedScene) {
+      await restoreDeletedCostumeItemRows(supabase, snapshotItems);
+      if (deleteError) throw deleteError;
+      return NextResponse.json(
+        { error: "의상 씬이 다른 화면에서 변경되었습니다. 최신 내용을 확인해주세요." },
+        { status: 409 }
+      );
     }
-    return NextResponse.json({ ok: true });
+    // Image objects intentionally remain until this receipt is finalized.
+    return NextResponse.json({ ok: true, receipt });
   } catch (error) {
     return costumeSceneError(error, "의상 씬을 삭제하지 못했습니다.");
   }
+}
+
+function readDeletedCostumeSceneReceipt(
+  projectId: string,
+  receipt: unknown
+): DeletedCostumeSceneReceiptPayload {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: COSTUME_SCENE_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProjectDeleteReceiptError();
+  const payload = value as Partial<DeletedCostumeSceneReceiptPayload>;
+  if (
+    !payload.scene
+    || typeof payload.scene !== "object"
+    || Array.isArray(payload.scene)
+    || payload.scene.project_id !== projectId
+    || !isUuid(String(payload.scene.id ?? ""))
+    || !Array.isArray(payload.items)
+    || payload.items.length > MAX_COSTUME_SCENE_ITEMS
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const sceneId = String(payload.scene.id);
+  const itemIds = new Set<string>();
+  for (const item of payload.items) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new ProjectDeleteReceiptError();
+    const itemId = String(item.id ?? "");
+    if (
+      !isUuid(itemId)
+      || itemIds.has(itemId)
+      || item.project_id !== projectId
+      || item.costume_scene_id !== sceneId
+    ) {
+      throw new ProjectDeleteReceiptError();
+    }
+    itemIds.add(itemId);
+  }
+  return { scene: payload.scene, items: payload.items };
+}
+
+async function restoreDeletedCostumeItemRows(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  rows: DatabaseRow[]
+) {
+  for (let start = 0; start < rows.length; start += COSTUME_DELETE_BATCH_SIZE) {
+    const { error } = await supabase
+      .from("project_costumes")
+      .upsert(rows.slice(start, start + COSTUME_DELETE_BATCH_SIZE), {
+        onConflict: "id",
+        ignoreDuplicates: true
+      });
+    if (error) throw error;
+  }
+}
+
+async function finalizeDeletedCostumeImages(projectId: string, candidatePaths: string[]) {
+  const candidates = new Set(candidatePaths.filter((path) => isProjectCostumeStoragePath(projectId, path)));
+  if (candidates.size === 0) return "";
+
+  const supabase = requireProjectAccessDb();
+  const referencedPaths = new Set<string>();
+  let scannedRows = 0;
+  while (scannedRows < MAX_COSTUME_STORAGE_SCAN_ROWS) {
+    const { data, error } = await supabase
+      .from("project_costumes")
+      .select("image_paths")
+      .eq("project_id", projectId)
+      .order("id")
+      .range(scannedRows, scannedRows + COSTUME_STORAGE_SCAN_PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = data ?? [];
+    rows.forEach((row) => {
+      readCostumeImagePaths(row.image_paths).forEach((path) => referencedPaths.add(path));
+    });
+    scannedRows += rows.length;
+    if (rows.length < COSTUME_STORAGE_SCAN_PAGE_SIZE) break;
+  }
+  if (scannedRows >= MAX_COSTUME_STORAGE_SCAN_ROWS) {
+    // An incomplete reference scan must never make a storage deletion decision.
+    return "의상 이미지 참조가 너무 많아 안전을 위해 저장소 정리를 건너뛰었습니다.";
+  }
+
+  const paths = [...candidates].filter((path) => !referencedPaths.has(path));
+  const warnings: string[] = [];
+  for (let start = 0; start < paths.length; start += 100) {
+    const { error } = await supabase.storage
+      .from("storyboards")
+      .remove(paths.slice(start, start + 100));
+    if (error) warnings.push(safeError(error).message);
+  }
+  return warnings.length > 0
+    ? `일부 의상 이미지를 정리하지 못했습니다: ${warnings.join(" · ")}`
+    : "";
+}
+
+function readCostumeImagePaths(value: unknown) {
+  if (!Array.isArray(value)) return [] as string[];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const path = String((item as Record<string, unknown>).path ?? "").trim();
+    return path ? [path] : [];
+  });
+}
+
+function isProjectCostumeStoragePath(projectId: string, path: string) {
+  return path.length <= 1_000
+    && path.startsWith(`projects/${projectId}/costumes/`)
+    && !path.includes("../")
+    && !path.includes("\\");
 }
 
 async function readScenes(projectId: string) {
@@ -739,6 +968,9 @@ function mapCostumeRow(row: Record<string, unknown>) {
 }
 
 function costumeSceneError(error: unknown, message: string) {
+  if (error instanceof ProjectDeleteReceiptError) {
+    return NextResponse.json({ error: error.message, code: "PROJECT_DELETE_RECEIPT_INVALID" }, { status: 400 });
+  }
   if (error instanceof ProjectAccessUnavailableError) {
     return NextResponse.json({ error: message, code: "PROJECT_COSTUME_STORAGE_UNAVAILABLE" }, { status: 503 });
   }
@@ -757,6 +989,13 @@ function costumeSceneError(error: unknown, message: string) {
   const missingTable = source.code === "42P01"
     || /project_costume_scenes|costume_scene_id|actor_role|costume_content/i.test(source.message)
       && /does not exist|schema cache|could not find/i.test(source.message);
+  if (source.code === "23505") {
+    return NextResponse.json({
+      error: "같은 씬 번호가 이미 사용 중이어서 의상 씬을 복원하지 못했습니다.",
+      code: "PROJECT_COSTUME_SCENE_RESTORE_CONFLICT",
+      detail: source.message
+    }, { status: 409 });
+  }
   return NextResponse.json({
     error: missingTable ? "프로젝트 자료 migration을 먼저 적용해주세요." : message,
     code: missingTable ? "PROJECT_REFERENCE_MIGRATION_REQUIRED" : "PROJECT_COSTUME_SCENE_ERROR",

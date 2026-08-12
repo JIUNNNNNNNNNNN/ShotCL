@@ -11,12 +11,15 @@ import {
 } from "@/lib/projectAccess/accountServer";
 import {
   clearProjectGuestInviteCookie,
+  clearProjectGuestModeCookie,
+  clearProjectGuestProgressTargetCookie,
   getLegacyAccessGrant,
   getProjectGuestInviteToken
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { inspectProjectStaffInvite } from "@/lib/projectStaffInvites.server";
-import { buildProjectNavigationHref } from "@/lib/projectNavigation";
+import { getSafeInternalPath } from "@/lib/auth/client";
+import { buildProgressRoundHref, buildProjectNavigationHref } from "@/lib/projectNavigation";
 
 const NO_STORE_HEADERS = { "Cache-Control": "private, no-store", Vary: "Cookie" } as const;
 
@@ -49,6 +52,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => null) as {
       action?: unknown;
       projectId?: unknown;
+      returnTo?: unknown;
     } | null;
     if (body?.action !== "sync") {
       return sessionJson({ error: "로그인 동기화 요청이 올바르지 않습니다." }, 400);
@@ -73,6 +77,10 @@ export async function POST(request: NextRequest) {
     const requestedProjectId = typeof body?.projectId === "string"
       ? normalizeProjectId(body.projectId)
       : "";
+    const requestedProgressReturnTo = resolveProgressReturnTo(
+      body?.returnTo,
+      requestedProjectId
+    );
     const legacyGrant = isValidDatabaseProjectId(requestedProjectId)
       ? await getLegacyAccessGrant(request, requestedProjectId)
       : null;
@@ -90,7 +98,9 @@ export async function POST(request: NextRequest) {
       if (guestInvite) {
         await linkShotclAccountProjectMembership(created.account.userId, guestInvite.projectId);
         joinedProjectId = guestInvite.projectId;
-        destination = buildProjectNavigationHref(guestInvite.projectId, "progress");
+        destination = requestedProjectId === guestInvite.projectId && requestedProgressReturnTo
+          ? requestedProgressReturnTo
+          : buildProjectNavigationHref(guestInvite.projectId, "progress");
       }
     }
 
@@ -103,7 +113,14 @@ export async function POST(request: NextRequest) {
       destination
     });
     setShotclAccountSessionCookie(response, created.token);
-    if (guestInviteToken) clearProjectGuestInviteCookie(response);
+    if (guestInviteToken) {
+      clearProjectGuestInviteCookie(response);
+    } else {
+      // Also clear forged/stale non-authoritative hints when no invite cookie
+      // exists, without emitting duplicate Set-Cookie headers.
+      clearProjectGuestModeCookie(response);
+      clearProjectGuestProgressTargetCookie(response);
+    }
     return response;
   } catch (error) {
     console.error("[shotcl-auth-session:post]", safeErrorMessage(error));
@@ -128,12 +145,16 @@ export async function DELETE(request: NextRequest) {
       editorAllowed: false
     });
     clearShotclAccountSessionCookie(response);
+    clearProjectGuestModeCookie(response);
+    clearProjectGuestProgressTargetCookie(response);
     return response;
   } catch (error) {
     console.error("[shotcl-auth-session:delete]", safeErrorMessage(error));
     const response = sessionJson({ error: "로그아웃하지 못했습니다." }, 500);
     // DB revoke 실패가 브라우저의 raw capability까지 보존하게 두지 않습니다.
     clearShotclAccountSessionCookie(response);
+    clearProjectGuestModeCookie(response);
+    clearProjectGuestProgressTargetCookie(response);
     return response;
   }
 }
@@ -166,4 +187,19 @@ function isSameOriginRequest(request: NextRequest, requireJson: boolean) {
 
 function safeErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Unknown error";
+}
+
+function resolveProgressReturnTo(value: unknown, projectId: string) {
+  if (!isValidDatabaseProjectId(projectId) || typeof value !== "string") return null;
+  const safePath = getSafeInternalPath(value, "/");
+  const parsed = new URL(safePath, "https://shotcl.local");
+  if (parsed.pathname !== `/projects/${projectId}`) return null;
+  const requestedDailyPlanId = parsed.searchParams.get("dailyPlanId");
+  const dailyPlanId = requestedDailyPlanId ? normalizeProjectId(requestedDailyPlanId) : "";
+  if (isValidDatabaseProjectId(dailyPlanId)) {
+    return buildProgressRoundHref(projectId, dailyPlanId);
+  }
+  return parsed.searchParams.get("view") === "progress"
+    ? buildProjectNavigationHref(projectId, "progress")
+    : null;
 }

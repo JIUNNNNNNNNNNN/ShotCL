@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const componentPath = new URL("../components/DailyPlanGatheringLocations.tsx", import.meta.url);
 const helperPath = new URL("../lib/dailyPlan/locationReferences.ts", import.meta.url);
+const progressSelectorPath = new URL("../lib/progress/gatheringPlace.ts", import.meta.url);
 
 test("effective gathering preserves a valid explicit stable ID and otherwise derives current location 1", async () => {
   const source = await readFile(helperPath, "utf8");
@@ -23,10 +23,10 @@ test("effective gathering preserves a valid explicit stable ID and otherwise der
 });
 
 test("progress gathering uses only the effective location's point and keeps legacy fallback behind modern locations", async () => {
-  const source = await readFile(componentPath, "utf8");
+  const source = await readFile(progressSelectorPath, "utf8");
   const selector = source.slice(
-    source.indexOf("function selectProgressGatheringPlace("),
-    source.indexOf("function validateGatheringPhotoSource(")
+    source.indexOf("export function selectProgressGatheringPlace("),
+    source.length
   );
   const effectiveBranch = selector.slice(
     selector.indexOf("if (effectiveLocation)"),
@@ -47,10 +47,10 @@ test("progress gathering uses only the effective location's point and keeps lega
 });
 
 test("modern location shell stays read-only until a photo or address mutation creates its stable point", async () => {
-  const source = await readFile(componentPath, "utf8");
+  const source = await readFile(progressSelectorPath, "utf8");
   const selector = source.slice(
-    source.indexOf("function selectProgressGatheringPlace("),
-    source.indexOf("function validateGatheringPhotoSource(")
+    source.indexOf("export function selectProgressGatheringPlace("),
+    source.length
   );
   const modernBranch = selector.slice(
     selector.indexOf("if (effectiveLocation)"),

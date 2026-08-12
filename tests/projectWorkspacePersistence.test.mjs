@@ -86,12 +86,13 @@ test("project child pages reuse the layout project while keeping page-specific l
   assert.match(readSource(projectPages[7]), /loadOverheadArchiveWorkspace/u);
 });
 
-test("remembered and invite navigation rely on the destination layout guard without hard reload", () => {
+test("remembered navigation and anonymous invite redemption avoid client router hops", () => {
   const main = readSource("app/page.tsx");
-  const invite = readSource("components/project-invites/ProjectInviteRedeemer.tsx");
+  const invite = readSource("app/invite/[token]/route.ts");
 
   assert.doesNotMatch(main, /\bverifyProjectAccess\b/u);
   assert.match(main, /pushProjectRoute\(/u);
-  assert.match(invite, /router\.replace\(destination\)/u);
-  assert.doesNotMatch(invite, /window\.location\.replace/u);
+  assert.match(invite, /NextResponse\.redirect\(new URL\(destination, request\.url\), 307\)/u);
+  assert.match(invite, /setProjectGuestInviteCookie\(response, token\)/u);
+  assert.doesNotMatch(invite, /\buseEffect\b|\buseRouter\b|router\.replace/u);
 });

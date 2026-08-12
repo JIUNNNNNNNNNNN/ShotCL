@@ -14,26 +14,33 @@ export function subscribeToShotChanges(
   dailyPlanId?: string
 ) {
   const supabase = getSupabaseBrowserClient();
-  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushScheduled = false;
+  let active = true;
   let pendingChanges: ShotRealtimeChange[] = [];
   let requiresFullRefresh = false;
+  const flushChanges = () => {
+    flushScheduled = false;
+    if (!active) return;
+    const changes = requiresFullRefresh ? null : pendingChanges;
+    pendingChanges = [];
+    requiresFullRefresh = false;
+    onChange(changes);
+  };
   const scheduleChange = (change?: ShotRealtimeChange) => {
     if (change) pendingChanges.push(change);
     else requiresFullRefresh = true;
-    if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => {
-      refreshTimer = null;
-      const changes = requiresFullRefresh ? null : pendingChanges;
-      pendingChanges = [];
-      requiresFullRefresh = false;
-      onChange(changes);
-    }, 80);
+    if (flushScheduled) return;
+    flushScheduled = true;
+    // Coalesce only payloads delivered in the same task. There is no visible
+    // debounce delay for remote status changes.
+    queueMicrotask(flushChanges);
   };
 
   if (!supabase) {
     const unsubscribe = subscribeToLocalProjectChanges(projectId, scheduleChange);
     return () => {
-      if (refreshTimer) clearTimeout(refreshTimer);
+      active = false;
+      pendingChanges = [];
       unsubscribe();
     };
   }
@@ -59,7 +66,8 @@ export function subscribeToShotChanges(
     .subscribe();
 
   return () => {
-    if (refreshTimer) clearTimeout(refreshTimer);
+    active = false;
+    pendingChanges = [];
     supabase.removeChannel(channel);
   };
 }

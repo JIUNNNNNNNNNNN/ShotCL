@@ -1,4 +1,3 @@
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeProjectId } from "@/lib/projectId";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
 import type { Shot, ShotOverheadDiagram } from "@/lib/types";
@@ -16,6 +15,11 @@ type LocalDiagramEntry = ShotDiagramKey & {
   diagramType: typeof DIAGRAM_TYPE;
   data: ShotOverheadDiagram;
 };
+
+async function loadFallbackSupabaseClient() {
+  const { getSupabaseBrowserClient } = await import("@/lib/supabase/client");
+  return getSupabaseBrowserClient();
+}
 
 /** shot id를 우선 쓰고, 없을 때만 회차/씬/컷 조합으로 안정적인 참조값을 만듭니다. */
 export function getShotDiagramKey(shot: Pick<Shot, "id" | "projectId" | "dailyPlanId" | "sceneNumber" | "cutNumber">): ShotDiagramKey {
@@ -48,7 +52,7 @@ export async function loadShotOverheadDiagram(shot: Shot): Promise<ShotOverheadD
     if (error instanceof Error && !error.message.includes("fetch")) throw error;
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase
       .from("shot_diagrams")
@@ -98,7 +102,7 @@ export async function loadShotOverheadDiagrams(shots: Shot[]): Promise<Map<strin
     if (error instanceof Error && !error.message.includes("fetch")) throw error;
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (supabase) {
     const shotRefs = keys.map(({ key }) => key.shotRef);
     const { data, error } = await supabase
@@ -153,7 +157,7 @@ export async function saveShotOverheadDiagram(shot: Shot, value: ShotOverheadDia
     if (error instanceof Error && !error.message.includes("fetch")) throw error;
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (supabase) {
     const { data, error } = await supabase
       .from("shot_diagrams")

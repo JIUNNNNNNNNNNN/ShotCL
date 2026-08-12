@@ -18,6 +18,7 @@ type StaffListPayload = {
   orders?: Record<string, unknown>[];
   memberId?: unknown;
   deleted?: unknown;
+  receipt?: unknown;
   warnings?: string[];
   totalEpisodes?: unknown;
   error?: string;
@@ -35,6 +36,7 @@ export type ProjectStaffOrderUpdate = Pick<ProjectStaffMember, "id" | "sortOrder
 export type ProjectStaffDeleteResult = {
   memberId: string;
   deleted: boolean;
+  receipt: string | null;
 };
 
 export type ProjectStaffMemberDraftPatch = Partial<Pick<
@@ -401,7 +403,8 @@ export async function deleteProjectStaffMember(
     if (response.ok) {
       return {
         memberId: String(payload.memberId ?? normalizedMemberId),
-        deleted: payload.deleted === true
+        deleted: payload.deleted === true,
+        receipt: typeof payload.receipt === "string" && payload.receipt ? payload.receipt : null
       };
     }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
@@ -412,6 +415,119 @@ export async function deleteProjectStaffMember(
   }
 
   return deleteLocalStaffMember(projectId, normalizedMemberId);
+}
+
+export async function restoreProjectStaffMember(
+  projectId: string,
+  receipt: string | null,
+  member: ProjectStaffMember
+): Promise<ProjectStaffMember> {
+  try {
+    if (isValidDatabaseProjectId(projectId) && !receipt) {
+      throw new Error("스탭 삭제 복원 정보가 없습니다.");
+    }
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/staff-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore-deleted-member", receipt })
+    });
+    const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+    if (response.ok && payload.member) return staffMemberFromRow(payload.member);
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "스탭을 복원하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+  const buckets = readLocalBuckets();
+  if (!buckets.projectStaffMembers.some((row) => row.projectId === projectId && row.id === member.id)) {
+    writeLocalBuckets({ projectStaffMembers: [...buckets.projectStaffMembers, member] }, projectId);
+  }
+  return member;
+}
+
+export async function finalizeDeletedProjectStaffMember(
+  projectId: string,
+  receipt: string | null
+) {
+  if (!receipt || !isValidDatabaseProjectId(projectId)) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/staff-list`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "finalize-deleted-member", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+  if (!response.ok) throw new Error(payload.error || "스탭 삭제를 확정하지 못했습니다.");
+}
+
+export async function deleteProjectStaffDepartment(projectId: string, departmentId: string) {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/staff-list`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ departmentId })
+    });
+    const payload = (await response.json().catch(() => ({}))) as StaffListPayload & { departmentId?: unknown };
+    if (response.ok) return {
+      departmentId: String(payload.departmentId ?? departmentId),
+      deleted: payload.deleted === true,
+      receipt: typeof payload.receipt === "string" && payload.receipt ? payload.receipt : null
+    };
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "부서를 삭제하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+  const buckets = readLocalBuckets();
+  const deleted = buckets.projectStaffDepartments.some((row) => row.projectId === projectId && row.id === departmentId);
+  writeLocalBuckets({ projectStaffDepartments: buckets.projectStaffDepartments.filter((row) => row.projectId !== projectId || row.id !== departmentId) }, projectId);
+  return { departmentId, deleted, receipt: null };
+}
+
+export async function restoreProjectStaffDepartment(
+  projectId: string,
+  receipt: string | null,
+  department: ProjectStaffDepartment
+): Promise<ProjectStaffDepartment> {
+  try {
+    if (isValidDatabaseProjectId(projectId) && !receipt) {
+      throw new Error("부서 삭제 복원 정보가 없습니다.");
+    }
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/staff-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore-deleted-department", receipt })
+    });
+    const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+    if (response.ok && payload.department) return staffDepartmentFromRow(payload.department);
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "부서를 복원하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+  const buckets = readLocalBuckets();
+  if (!buckets.projectStaffDepartments.some((row) => row.projectId === projectId && row.id === department.id)) {
+    writeLocalBuckets({ projectStaffDepartments: [...buckets.projectStaffDepartments, department] }, projectId);
+  }
+  return department;
+}
+
+export async function finalizeDeletedProjectStaffDepartment(
+  projectId: string,
+  receipt: string | null
+) {
+  if (!receipt || !isValidDatabaseProjectId(projectId)) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/staff-list`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "finalize-deleted-department", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as StaffListPayload;
+  if (!response.ok) throw new Error(payload.error || "부서 삭제를 확정하지 못했습니다.");
 }
 
 function listLocalStaffMembers(projectId: string): ProjectStaffListResult {
@@ -541,7 +657,7 @@ function deleteLocalStaffMember(
       member.projectId !== projectId || member.id !== memberId
     ))
   }, projectId);
-  return { memberId, deleted };
+  return { memberId, deleted, receipt: null };
 }
 
 function normalizeMember(

@@ -18,11 +18,11 @@ import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { InlineLoader, PageLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import {
   StaffEpisodeParticipation,
   isStaffParticipationControlTarget
 } from "@/components/StaffEpisodeParticipation";
-import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
 import {
   useAutoContextualGuide,
@@ -32,9 +32,14 @@ import {
   createBlankProjectStaffDepartment,
   createBlankProjectStaffMember,
   createProjectStaffMemberDraftPatch,
+  deleteProjectStaffDepartment,
   deleteProjectStaffMember,
+  finalizeDeletedProjectStaffDepartment,
+  finalizeDeletedProjectStaffMember,
   listProjectStaffMembers,
   reorderProjectStaffMembers,
+  restoreProjectStaffDepartment,
+  restoreProjectStaffMember,
   saveProjectStaffDepartmentDraft,
   saveProjectStaffMemberDraft,
   saveProjectStaffMembers,
@@ -61,12 +66,6 @@ type StaffDisplaySection = ReturnType<typeof groupStaffMembersForDisplay>[number
   sectionKey: string;
 };
 
-type PendingStaffDelete = {
-  member: ProjectStaffMember;
-  sectionKey: string;
-  sectionLabel: string;
-};
-
 type StaffAutosaveEntity =
   | { key: string; kind: "member"; member: ProjectStaffMember }
   | { key: string; kind: "department"; department: ProjectStaffDepartment };
@@ -79,6 +78,7 @@ type StaffAutosaveResult =
 export default function StaffListPage() {
   const { role } = useProjectAccess();
   const { project, projectId } = useProjectWorkspace();
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const [members, setMembers] = useState<ProjectStaffMember[]>([]);
   const [departments, setDepartments] = useState<ProjectStaffDepartment[]>([]);
   const [totalEpisodes, setTotalEpisodes] = useState(0);
@@ -92,11 +92,9 @@ export default function StaffListPage() {
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [isNotesSummaryOpen, setIsNotesSummaryOpen] = useState(false);
-  const [pendingMemberDelete, setPendingMemberDelete] = useState<PendingStaffDelete | null>(null);
   const [openParticipationMemberId, setOpenParticipationMemberId] = useState<string | null>(null);
   const [participationSupportsHover, setParticipationSupportsHover] = useState(false);
   const [participationUsesBottomSheet, setParticipationUsesBottomSheet] = useState(false);
-  const [isDeletingMember, setIsDeletingMember] = useState(false);
   const [pendingSectionKeys, setPendingSectionKeys] = useState<Set<string>>(() => new Set());
   const [pendingMemberFocusId, setPendingMemberFocusId] = useState<string | null>(null);
   const editVersionRef = useRef(0);
@@ -568,16 +566,62 @@ export default function StaffListPage() {
     return true;
   }
 
-  async function deleteDepartment(id: string) {
-    if (
-      persistedDepartmentIdsRef.current.has(id)
-      && !await staffAutosave.flushKeys([staffDepartmentAutosaveKey(id)])
-    ) {
-      setErrorMessage("삭제할 부서의 자동 저장에 실패했습니다. 다시 시도해주세요.");
-      return;
-    }
-    if (activeProjectIdRef.current !== projectId) return;
-    commitDepartments((current) => current.filter((department) => department.id !== id));
+  function deleteDepartment(id: string) {
+    const department = departmentsRef.current.find((item) => item.id === id);
+    if (!department || !canEdit) return;
+    const originalIndex = departmentsRef.current.findIndex((item) => item.id === id);
+    const isPersisted = persistedDepartmentIdsRef.current.has(id);
+    let deleteReceipt: string | null = null;
+    const removeLocal = () => {
+      const next = departmentsRef.current
+        .filter((item) => item.id !== id)
+        .map((item, index) => ({ ...item, sortOrder: index + 1 }));
+      departmentsRef.current = next;
+      setDepartments(next);
+      if (!isPersisted) setIsDirty(true);
+      setMessage("");
+      setErrorMessage("");
+    };
+    const restoreLocal = () => {
+      if (departmentsRef.current.some((item) => item.id === id)) return;
+      const next = [...departmentsRef.current];
+      next.splice(Math.min(originalIndex, next.length), 0, department);
+      const ordered = next.map((item, index) => ({ ...item, sortOrder: index + 1 }));
+      departmentsRef.current = ordered;
+      setDepartments(ordered);
+    };
+    deleteWithUndo({
+      key: `staff-department:${id}`,
+      label: department.name || "부서",
+      removeLocal,
+      restoreLocal,
+      deleteRemote: async () => {
+        if (!isPersisted) return;
+        if (!await staffAutosave.flushKeys([staffDepartmentAutosaveKey(id)])) {
+          throw new Error("삭제할 부서의 자동 저장에 실패했습니다.");
+        }
+        const result = await deleteProjectStaffDepartment(projectId, id);
+        deleteReceipt = result.receipt;
+      },
+      restoreRemote: async () => {
+        if (!isPersisted) return;
+        const saved = await restoreProjectStaffDepartment(projectId, deleteReceipt, department);
+        persistedDepartmentIdsRef.current.add(id);
+        autosaveDepartmentVersionsRef.current.set(id, saved.updatedAt);
+        autosaveDepartmentSnapshotsRef.current.set(id, saved);
+        if (activeProjectIdRef.current === projectId) {
+          const next = departmentsRef.current.map((candidate) => (
+            candidate.id === id ? saved : candidate
+          ));
+          departmentsRef.current = next;
+          setDepartments(next);
+        }
+      },
+      finalize: async () => {
+        if (!isPersisted) return;
+        await finalizeDeletedProjectStaffDepartment(projectId, deleteReceipt);
+      }
+    });
   }
 
   const addMember = useCallback((department: string, afterMemberId?: string) => {
@@ -724,90 +768,79 @@ export default function StaffListPage() {
   }, [canEdit, finishSectionMutation, projectId, setSectionPending, staffAutosave.flushKeys]);
 
   const requestMemberDelete = useCallback((member: ProjectStaffMember) => {
-    if (!canEdit) return;
+    if (!canEdit || !projectId) return;
     const sectionKey = getStaffSectionKey(member.department);
     if (sectionMutationLocksRef.current.has(sectionKey)) return;
-    setPendingMemberDelete({
-      member,
-      sectionKey,
-      sectionLabel: normalizeStaffDepartment(member.department) || "미분류"
-    });
-  }, [canEdit]);
-
-  const confirmMemberDelete = useCallback(async () => {
-    const pending = pendingMemberDelete;
-    if (!pending || !projectId || !canEdit) return;
-    if (sectionMutationLocksRef.current.has(pending.sectionKey)) return;
-
-    const currentMember = membersRef.current.find((member) => member.id === pending.member.id);
-    if (!currentMember) {
-      setPendingMemberDelete(null);
-      return;
-    }
-    const mutationVersion = (sectionMutationVersionsRef.current.get(pending.sectionKey) ?? 0) + 1;
-    sectionMutationVersionsRef.current.set(pending.sectionKey, mutationVersion);
-    sectionMutationLocksRef.current.add(pending.sectionKey);
-    setSectionPending(pending.sectionKey, true);
-    setIsDeletingMember(true);
+    const currentMember = membersRef.current.find((item) => item.id === member.id);
+    if (!currentMember) return;
+    const originalIndex = membersRef.current.findIndex((item) => item.id === currentMember.id);
+    const isPersisted = persistedMemberIdsRef.current.has(currentMember.id);
+    let deleteReceipt: string | null = null;
     setMessage("");
     setErrorMessage("");
-
-    const originalSectionMemberIds = sortStaffMembers(membersRef.current.filter((member) => (
-      getStaffSectionKey(member.department) === pending.sectionKey
-    ))).map((member) => member.id);
-    const beforeDelete = staffAutosave.flushKeys([
-      staffMemberAutosaveKey(currentMember.id)
-    ]);
-    const optimisticMembers = membersRef.current.filter((member) => member.id !== currentMember.id);
-    editVersionRef.current += 1;
-    membersRef.current = optimisticMembers;
-    setMembers(optimisticMembers);
-
-    const isPersisted = persistedMemberIdsRef.current.has(currentMember.id);
-    try {
-      if (!await beforeDelete) {
-        throw new Error("삭제할 스탭의 자동 저장에 실패했습니다. 다시 시도해주세요.");
-      }
-      if (isPersisted) {
+    const removeLocal = () => {
+      const next = membersRef.current.filter((item) => item.id !== currentMember.id);
+      editVersionRef.current += 1;
+      membersRef.current = next;
+      setMembers(next);
+      if (!isPersisted) setIsDirty(true);
+    };
+    const restoreLocal = () => {
+      if (membersRef.current.some((item) => item.id === currentMember.id)) return;
+      const next = [...membersRef.current];
+      next.splice(Math.min(originalIndex, next.length), 0, currentMember);
+      membersRef.current = next;
+      setMembers(next);
+    };
+    deleteWithUndo({
+      key: `staff-member:${currentMember.id}`,
+      label: currentMember.name.trim() || currentMember.role.trim() || "스탭",
+      removeLocal,
+      restoreLocal,
+      deleteRemote: async () => {
+        if (!await staffAutosave.flushKeys([staffMemberAutosaveKey(currentMember.id)])) {
+          throw new Error("삭제할 스탭의 자동 저장에 실패했습니다.");
+        }
+        if (isPersisted) {
         const deletePromise = deleteProjectStaffMember(projectId, currentMember.id);
         trackEntityMutationTail(
           staffMemberMutationTailsRef.current,
           currentMember.id,
           deletePromise.then(() => undefined, () => undefined)
         );
-        await deletePromise;
+        const result = await deletePromise;
+        deleteReceipt = result.receipt;
+        }
+      },
+      restoreRemote: async () => {
+        if (!isPersisted) return;
+        const restorePromise = restoreProjectStaffMember(projectId, deleteReceipt, currentMember);
+        trackEntityMutationTail(
+          staffMemberMutationTailsRef.current,
+          currentMember.id,
+          restorePromise.then(() => undefined, () => undefined)
+        );
+        const restored = await restorePromise;
+        persistedMemberIdsRef.current.add(currentMember.id);
+        autosaveMemberVersionsRef.current.set(currentMember.id, restored.updatedAt);
+        autosaveMemberSnapshotsRef.current.set(currentMember.id, restored);
+        if (activeProjectIdRef.current === projectId) {
+          const next = membersRef.current.map((candidate) => (
+            candidate.id === currentMember.id ? restored : candidate
+          ));
+          membersRef.current = next;
+          setMembers(next);
+        }
+      },
+      finalize: async () => {
+        if (!isPersisted) return;
+        await finalizeDeletedProjectStaffMember(projectId, deleteReceipt);
       }
-      if (sectionMutationVersionsRef.current.get(pending.sectionKey) !== mutationVersion) return;
-      persistedMemberIdsRef.current.delete(currentMember.id);
-      autosaveMemberVersionsRef.current.delete(currentMember.id);
-      autosaveMemberSnapshotsRef.current.delete(currentMember.id);
-      autosaveMemberIntentFieldsRef.current.delete(currentMember.id);
-      if (!isPersisted) setIsDirty(true);
-      setPendingMemberDelete(null);
-      setMessage(`${currentMember.name.trim() || "스탭"}을 삭제했습니다.`);
-    } catch (error) {
-      if (sectionMutationVersionsRef.current.get(pending.sectionKey) !== mutationVersion) return;
-      const restoredMemberSet = membersRef.current.some((member) => member.id === currentMember.id)
-        ? membersRef.current
-        : [...membersRef.current, currentMember];
-      const rolledBackMembers = applyStaffSectionOrder(
-        restoredMemberSet,
-        pending.sectionKey,
-        originalSectionMemberIds
-      ) ?? restoredMemberSet;
-      membersRef.current = rolledBackMembers;
-      setMembers(rolledBackMembers);
-      setErrorMessage(error instanceof Error ? error.message : "스탭을 삭제하지 못했습니다.");
-    } finally {
-      setIsDeletingMember(false);
-      finishSectionMutation(pending.sectionKey, mutationVersion);
-    }
+    });
   }, [
     canEdit,
-    finishSectionMutation,
-    pendingMemberDelete,
+    deleteWithUndo,
     projectId,
-    setSectionPending,
     staffAutosave.flushKeys
   ]);
 
@@ -1038,7 +1071,7 @@ export default function StaffListPage() {
             canEdit={canEdit}
             totalEpisodes={totalEpisodes}
             isSaving={isSaving}
-            pendingDeleteMemberId={pendingMemberDelete?.member.id ?? null}
+            pendingDeleteMemberId={null}
             pendingSectionKeys={pendingSectionKeys}
             openParticipationMemberId={openParticipationMemberId}
             participationSupportsHover={participationSupportsHover}
@@ -1057,16 +1090,6 @@ export default function StaffListPage() {
           </p>
         ) : null}
       </section>
-      {pendingMemberDelete ? (
-        <StaffDeleteConfirmationDialog
-          pending={pendingMemberDelete}
-          isDeleting={isDeletingMember}
-          onCancel={() => {
-            if (!isDeletingMember) setPendingMemberDelete(null);
-          }}
-          onConfirm={() => void confirmMemberDelete()}
-        />
-      ) : null}
     </section>
   );
 }
@@ -1466,110 +1489,6 @@ const StaffMemberRow = memo(function StaffMemberRow({
     </article>
   );
 });
-
-function StaffDeleteConfirmationDialog({
-  pending,
-  isDeleting,
-  onCancel,
-  onConfirm
-}: {
-  pending: PendingStaffDelete;
-  isDeleting: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const isDeletingRef = useRef(isDeleting);
-  const onCancelRef = useRef(onCancel);
-  isDeletingRef.current = isDeleting;
-  onCancelRef.current = onCancel;
-
-  useEffect(() => {
-    previousFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const focusFrame = window.requestAnimationFrame(() => {
-      dialogRef.current?.querySelector<HTMLButtonElement>("[data-staff-delete-cancel]")?.focus();
-    });
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !isDeletingRef.current) {
-        event.preventDefault();
-        onCancelRef.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []
-      );
-      if (focusable.length === 0) {
-        event.preventDefault();
-        return;
-      }
-      const currentIndex = focusable.indexOf(document.activeElement as HTMLButtonElement);
-      const nextIndex = event.shiftKey
-        ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
-        : (currentIndex < 0 || currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
-      event.preventDefault();
-      focusable[nextIndex]?.focus();
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.cancelAnimationFrame(focusFrame);
-      window.removeEventListener("keydown", handleKeyDown);
-      if (previousFocusRef.current?.isConnected) previousFocusRef.current.focus();
-    };
-  }, []);
-
-  if (typeof document === "undefined") return null;
-  const staffLabel = pending.member.name.trim() || pending.member.role.trim() || "스탭";
-
-  return createPortal(
-    <div
-      className="no-print fixed inset-0 z-[150] flex items-end justify-center bg-black/70 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center"
-      role="presentation"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget && !isDeleting) onCancel();
-      }}
-    >
-      <div
-        ref={dialogRef}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="staff-delete-title"
-        aria-describedby="staff-delete-description"
-        className="w-full max-w-sm border border-field-divider bg-field-dialog p-4 text-center shadow-dialog"
-      >
-        <h2 id="staff-delete-title" className="text-base font-black text-field-text">
-          {staffLabel} 삭제
-        </h2>
-        <p id="staff-delete-description" className="mt-2 text-sm font-normal leading-[1.45] text-field-muted">
-          {pending.sectionLabel} 소속 스탭을 삭제할까요? 확인 전에는 데이터가 변경되지 않습니다.
-        </p>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button
-            data-staff-delete-cancel
-            variant="secondary"
-            disabled={isDeleting}
-            onClick={onCancel}
-          >
-            취소
-          </Button>
-          <Button
-            variant="danger"
-            disabled={isDeleting}
-            onClick={onConfirm}
-          >
-            {isDeleting ? "삭제 중…" : "삭제"}
-          </Button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
 
 function DepartmentChip({
   department,

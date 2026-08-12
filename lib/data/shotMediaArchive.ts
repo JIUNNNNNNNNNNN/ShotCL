@@ -67,9 +67,10 @@ export type BuildProgressArchiveMediaMapInput = {
 /** 콘티·부감도 아카이브 이미지를 한 요청으로 불러옵니다. */
 export async function loadProgressArchiveMediaAssets(
   projectId: string,
-  dailyPlanId?: string
+  dailyPlanId?: string,
+  mode: "summary" | "gallery" = "summary"
 ): Promise<ProgressArchiveMediaAsset[]> {
-  const query = new URLSearchParams({ media: "1" });
+  const query = new URLSearchParams({ media: "1", mode });
   if (dailyPlanId?.trim()) query.set("dailyPlanId", dailyPlanId.trim());
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/reference-assets?${query}`,
@@ -265,7 +266,7 @@ export async function saveShotOverheadSpacePreset(
 export async function deleteShotOverheadSpacePreset(
   projectId: string,
   input: DeleteShotOverheadSpacePresetInput
-) {
+): Promise<string> {
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`,
     {
@@ -278,9 +279,43 @@ export async function deleteShotOverheadSpacePreset(
       })
     }
   );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { receipt?: string };
+  if (!response.ok || !payload.receipt) {
+    throw new Error(payload.error || "공간 프리셋을 삭제하지 못했습니다.");
+  }
+  return payload.receipt;
+}
+
+export async function restoreDeletedShotOverheadSpacePreset(
+  projectId: string,
+  receipt: string
+): Promise<ShotOverheadSpacePreset | null> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted_space_preset", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & { spacePreset?: unknown };
+  const preset = normalizeShotOverheadSpacePreset(payload.spacePreset);
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "공간 프리셋을 복원하지 못했습니다.");
+  }
+  return preset;
+}
+
+export async function finalizeDeletedShotOverheadSpacePreset(
+  projectId: string,
+  receipt: string
+): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`, {
+    method: "PUT",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted_space_preset", receipt })
+  });
   const payload = (await response.json().catch(() => ({}))) as ApiError;
   if (!response.ok) {
-    throw new Error(payload.error || "공간 프리셋을 삭제하지 못했습니다.");
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "공간 프리셋 삭제를 확정하지 못했습니다.");
   }
 }
 
@@ -289,9 +324,12 @@ export async function deleteOverheadDiagramArchive(projectId: string, archiveId:
 }
 
 /** 선택한 직접 제작 부감도를 한 요청으로 삭제합니다. */
-export async function deleteOverheadDiagramArchives(projectId: string, archiveIds: string[]) {
+export async function deleteOverheadDiagramArchives(
+  projectId: string,
+  archiveIds: string[]
+): Promise<{ receipt: string; deleted: number }> {
   const ids = [...new Set(archiveIds.map((id) => id.trim()).filter(Boolean))];
-  if (ids.length === 0) return;
+  if (ids.length === 0) return { receipt: "", deleted: 0 };
   const response = await fetch(
     `/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`,
     {
@@ -300,8 +338,49 @@ export async function deleteOverheadDiagramArchives(projectId: string, archiveId
       body: JSON.stringify({ archiveIds: ids })
     }
   );
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    receipt?: string;
+    deleted?: number;
+  };
+  if (!response.ok || !payload.receipt) throw new Error(payload.error || "부감도 자료를 삭제하지 못했습니다.");
+  return { receipt: payload.receipt, deleted: Math.max(0, Number(payload.deleted ?? 0)) };
+}
+
+export async function restoreDeletedOverheadDiagramArchives(
+  projectId: string,
+  receipt: string
+): Promise<OverheadDiagramArchiveItem[]> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted_archives", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ApiError & {
+    archives?: OverheadDiagramArchiveItem[];
+  };
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "부감도 자료를 복원하지 못했습니다.");
+  }
+  return (payload.archives ?? []).flatMap((item) => {
+    const diagram = normalizeShotOverheadDiagram(item.diagram);
+    return diagram ? [{ ...item, sceneId: normalizeArchiveSceneId(item.sceneId), diagram }] : [];
+  });
+}
+
+export async function finalizeDeletedOverheadDiagramArchives(
+  projectId: string,
+  receipt: string
+): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shot-diagrams`, {
+    method: "PUT",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted_archives", receipt })
+  });
   const payload = (await response.json().catch(() => ({}))) as ApiError;
-  if (!response.ok) throw new Error(payload.error || "부감도 자료를 삭제하지 못했습니다.");
+  if (!response.ok) {
+    throw new Error([payload.error, payload.detail].filter(Boolean).join(" · ") || "부감도 자료 삭제를 확정하지 못했습니다.");
+  }
 }
 
 export async function loadShotMediaLinks(shots: Shot[]): Promise<Map<string, ShotMediaLink[]>> {
@@ -313,6 +392,7 @@ export async function loadShotMediaLinks(shots: Shot[]): Promise<Map<string, Sho
     links: "1",
     dailyPlanId: firstKey.dailyPlanId
   });
+  if (shots.length === 1) query.set("shotRef", firstKey.shotRef);
   const response = await fetch(
     `/api/projects/${encodeURIComponent(firstKey.projectId)}/shot-diagrams?${query}`,
     { cache: "no-store" }
@@ -378,17 +458,18 @@ function normalizeProgressArchiveMediaAsset(
   if (asset.assetType !== "storyboard" && asset.assetType !== "overhead") return [];
   if (asset.groupId?.startsWith("source:")) return [];
   const publicUrl = asset.publicUrl.trim();
+  const thumbnailUrl = cleanText(asset.crop.thumbnailUrl);
   const cutNumber = positiveInteger(asset.crop.cutNumber ?? asset.cutNo);
   const sceneId = cleanText(asset.crop.sceneId);
   const sceneNumber = normalizeSceneNumber(asset.crop.sceneNumber ?? asset.sceneNo);
-  if (!publicUrl) return [];
+  if (!publicUrl && !thumbnailUrl) return [];
 
   return [{
     id: asset.id,
     mediaType: asset.assetType,
     title: cleanText(asset.crop.displayName) || cleanText(asset.crop.title) || asset.filename,
     publicUrl,
-    thumbnailUrl: safeProgressThumbnailUrl(publicUrl, cleanText(asset.crop.thumbnailUrl)),
+    thumbnailUrl: safeProgressThumbnailUrl(publicUrl, thumbnailUrl),
     dailyPlanId: cleanText(asset.dailyPlanId) || null,
     episodeNumber: positiveInteger(asset.crop.episodeNumber),
     sceneId,

@@ -43,16 +43,21 @@ test("account sync dedupe key includes the current project hint", () => {
   const projectId = "11111111-1111-4111-8111-111111111111";
   assert.equal(
     getAccountSessionSyncKey(" token ", projectId.toUpperCase()),
-    `token\u0000${projectId}`
+    `token\u0000${projectId}\u0000`
   );
   assert.notEqual(
     getAccountSessionSyncKey("token", projectId),
     getAccountSessionSyncKey("token", null)
   );
+  assert.notEqual(
+    getAccountSessionSyncKey("token", projectId, `/projects/${projectId}?view=progress`),
+    getAccountSessionSyncKey("token", projectId, `/projects/${projectId}?view=progress&dailyPlanId=11111111-1111-4111-8111-111111111112`)
+  );
 });
 
-test("account sync sends only the validated current project id in the JSON body", async () => {
+test("account sync sends the validated current project and exact internal return path", async () => {
   const projectId = "11111111-1111-4111-8111-111111111111";
+  const returnTo = `/projects/${projectId}?view=progress&dailyPlanId=22222222-2222-4222-8222-222222222222`;
   const originalFetch = globalThis.fetch;
   let captured = null;
   globalThis.fetch = async (input, init) => {
@@ -63,10 +68,10 @@ test("account sync sends only the validated current project id in the JSON body"
     });
   };
   try {
-    const result = await syncAccountSession("token", projectId);
+    const result = await syncAccountSession("token", projectId, returnTo);
     assert.deepEqual(result, { editorEligible: true, destination: null });
     assert.equal(captured.input, "/api/auth/session");
-    assert.deepEqual(JSON.parse(captured.init.body), { action: "sync", projectId });
+    assert.deepEqual(JSON.parse(captured.init.body), { action: "sync", projectId, returnTo });
     assert.equal(captured.init.headers.Authorization, "Bearer token");
   } finally {
     globalThis.fetch = originalFetch;

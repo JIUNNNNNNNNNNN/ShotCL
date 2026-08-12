@@ -5,7 +5,6 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
-import type { ProjectArchiveFolderInspection } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 type DbClient = ReturnType<typeof requireProjectAccessDb>;
@@ -17,7 +16,6 @@ type FolderRow = Record<string, unknown> & {
 };
 
 const SELECT_COLUMNS = "id,project_id,name,sort_order,created_at,updated_at";
-const STORAGE_BUCKET = "storyboards";
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
@@ -47,27 +45,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "폴더 작업은 Key staff만 할 수 있습니다." }, { status: 403 });
     }
     const body = (await request.json()) as {
-      operation?: unknown;
-      ids?: unknown;
-      assetIds?: unknown;
       name?: unknown;
       sortOrder?: unknown;
     };
     const supabase = requireProjectAccessDb();
-    if (body.operation === "inspect_delete") {
-      const ids = normalizeIds(body.ids);
-      if (ids.length === 0) {
-        return NextResponse.json({ error: "확인할 폴더를 선택해주세요." }, { status: 400 });
-      }
-      const inspection = await inspectFolderSelection(
-        supabase,
-        projectId,
-        ids,
-        normalizeIds(body.assetIds)
-      );
-      return NextResponse.json({ ok: true, inspection });
-    }
-
     const name = normalizeFolderPath(body.name);
     if (!name) return NextResponse.json({ error: "폴더 이름을 입력해주세요." }, { status: 400 });
     const { data, error } = await supabase
@@ -156,69 +137,6 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return NextResponse.json({ ok: true, folder: mapFolder(data) });
   } catch (error) {
     return folderError(error, "폴더를 변경하지 못했습니다.");
-  }
-}
-
-export async function DELETE(request: NextRequest, context: RouteContext) {
-  try {
-    const projectId = await getProjectId(context);
-    if (!projectId) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
-    if ((await getMaterialRole(request, projectId)) !== "admin") {
-      return NextResponse.json({ error: "폴더 삭제는 Key staff만 할 수 있습니다." }, { status: 403 });
-    }
-    const body = await request.json().catch(() => ({})) as {
-      ids?: unknown;
-      assetIds?: unknown;
-      confirmed?: unknown;
-    };
-    const ids = normalizeIds(body.ids);
-    const queryId = cleanText(request.nextUrl.searchParams.get("id"), 100);
-    const supabase = requireProjectAccessDb();
-
-    // 기존 단일 빈 폴더 삭제 계약을 유지합니다.
-    if (ids.length === 0 && queryId) {
-      const inspection = await inspectFolderSelection(supabase, projectId, [queryId]);
-      if (inspection.assetCount > 0 || inspection.descendantFolderCount > 0) {
-        return NextResponse.json(
-          { error: "폴더 안의 자료와 하위 폴더를 먼저 다른 위치로 이동해주세요.", inspection },
-          { status: 409 }
-        );
-      }
-      const { error } = await supabase
-        .from("project_archive_folders")
-        .delete()
-        .eq("id", queryId)
-        .eq("project_id", projectId);
-      if (error) throw error;
-      return NextResponse.json({ ok: true });
-    }
-
-    if (ids.length === 0) {
-      return NextResponse.json({ error: "삭제할 폴더를 선택해주세요." }, { status: 400 });
-    }
-    const inspection = await inspectFolderSelection(
-      supabase,
-      projectId,
-      ids,
-      normalizeIds(body.assetIds)
-    );
-    if (body.confirmed !== true) {
-      return NextResponse.json({
-        error: [
-          `하위 폴더 ${inspection.descendantFolderCount}개`,
-          `파일 ${inspection.assetCount}개가 함께 삭제됩니다.`,
-          inspection.linkedAssetCount > 0
-            ? `진행도에 연결된 파일 ${inspection.linkedAssetCount}개도 연결 해제됩니다.`
-            : ""
-        ].filter(Boolean).join(" "),
-        inspection
-      }, { status: 409 });
-    }
-
-    const deletion = await deleteFolderTrees(supabase, projectId, inspection);
-    return NextResponse.json({ ok: true, inspection, ...deletion });
-  } catch (error) {
-    return folderError(error, "폴더를 삭제하지 못했습니다.");
   }
 }
 
@@ -518,164 +436,6 @@ async function moveFolderTrees(
   };
 }
 
-async function inspectFolderSelection(
-  supabase: DbClient,
-  projectId: string,
-  ids: string[],
-  additionalAssetIds: string[] = []
-): Promise<ProjectArchiveFolderInspection> {
-  const folders = await readFolders(supabase, projectId);
-  const byId = new Map(folders.map((folder) => [String(folder.id), folder]));
-  const selected = ids.map((id) => byId.get(id)).filter((folder): folder is FolderRow => Boolean(folder));
-  if (selected.length !== ids.length) {
-    throw new FolderOperationError("선택한 폴더 중 일부를 찾을 수 없습니다.", 404);
-  }
-  const roots = dedupeSelectedRoots(selected);
-  const rootPaths = roots.map((folder) => normalizeFolderPath(folder.name));
-  const affectedFolders = folders.filter((folder) => {
-    const path = normalizeFolderPath(folder.name);
-    return rootPaths.some((rootPath) => isPathWithin(path, rootPath));
-  });
-  const folderIds = affectedFolders.map((folder) => String(folder.id));
-  const { data: assetRows, error: assetError } = await supabase
-    .from("project_reference_assets")
-    .select("id,crop_data")
-    .eq("project_id", projectId);
-  if (assetError) throw assetError;
-  const folderIdSet = new Set(folderIds);
-  const projectAssetIds = new Set((assetRows ?? []).map((asset) => String(asset.id)));
-  const invalidAdditionalAsset = additionalAssetIds.find((id) => !projectAssetIds.has(id));
-  if (invalidAdditionalAsset) {
-    throw new FolderOperationError("선택한 파일 중 일부를 찾을 수 없습니다.", 404);
-  }
-  const assetIds = [...new Set([
-    ...(assetRows ?? []).flatMap((asset) => {
-    const crop = objectValue(asset.crop_data);
-    return folderIdSet.has(cleanText(crop.folderId, 100)) ? [String(asset.id)] : [];
-    }),
-    ...additionalAssetIds
-  ])];
-  const linkedAssetIds = await readLinkedReferenceAssetIds(supabase, projectId);
-  return {
-    selectedRootIds: roots.map((folder) => String(folder.id)),
-    folderIds,
-    assetIds,
-    selectedFolderCount: roots.length,
-    descendantFolderCount: Math.max(0, affectedFolders.length - roots.length),
-    assetCount: assetIds.length,
-    linkedAssetCount: assetIds.filter((id) => linkedAssetIds.has(id)).length
-  };
-}
-
-async function deleteFolderTrees(
-  supabase: DbClient,
-  projectId: string,
-  inspection: ProjectArchiveFolderInspection
-) {
-  const { data: assetRows, error: assetReadError } = inspection.assetIds.length > 0
-    ? await supabase
-      .from("project_reference_assets")
-      .select("*")
-      .eq("project_id", projectId)
-      .in("id", inspection.assetIds)
-    : { data: [], error: null };
-  if (assetReadError) throw assetReadError;
-  if ((assetRows ?? []).length !== inspection.assetIds.length) {
-    throw new FolderOperationError(
-      "삭제 대상 자료가 변경되었습니다. 삭제 내용을 다시 확인해주세요.",
-      409
-    );
-  }
-  const { data: folderRows, error: folderReadError } = inspection.folderIds.length > 0
-    ? await supabase
-      .from("project_archive_folders")
-      .select("id")
-      .eq("project_id", projectId)
-      .in("id", inspection.folderIds)
-    : { data: [], error: null };
-  if (folderReadError) throw folderReadError;
-  if ((folderRows ?? []).length !== inspection.folderIds.length) {
-    throw new FolderOperationError(
-      "삭제 대상 폴더가 변경되었습니다. 삭제 내용을 다시 확인해주세요.",
-      409
-    );
-  }
-  const { data: linkRows, error: linkReadError } = await supabase
-    .from("shot_diagrams")
-    .select("*")
-    .eq("project_id", projectId)
-    .eq("diagram_type", "overhead")
-    .like("shot_ref", "media-link:%");
-  if (linkReadError && linkReadError.code !== "42P01") throw linkReadError;
-  const assetIdSet = new Set(inspection.assetIds);
-  const affectedLinks = (linkRows ?? []).filter((row) => {
-    const data = objectValue(row.data);
-    return data.kind === "media_link"
-      && data.source === "reference"
-      && assetIdSet.has(cleanText(data.assetId, 100));
-  });
-  const linkIds = affectedLinks.map((row) => String(row.id));
-  const rollbackErrors: string[] = [];
-
-  try {
-    if (linkIds.length > 0) {
-      const { error } = await supabase.from("shot_diagrams").delete().in("id", linkIds);
-      if (error) throw error;
-    }
-    if (inspection.assetIds.length > 0) {
-      const { error } = await supabase
-        .from("project_reference_assets")
-        .delete()
-        .eq("project_id", projectId)
-        .in("id", inspection.assetIds);
-      if (error) throw error;
-    }
-    const { error } = await supabase
-      .from("project_archive_folders")
-      .delete()
-      .eq("project_id", projectId)
-      .in("id", inspection.folderIds);
-    if (error) throw error;
-  } catch (error) {
-    if ((assetRows ?? []).length > 0) {
-      const rollback = await supabase
-        .from("project_reference_assets")
-        .upsert(assetRows ?? [], { onConflict: "id" });
-      if (rollback.error) rollbackErrors.push(`asset rollback: ${safeError(rollback.error).message}`);
-    }
-    if (affectedLinks.length > 0) {
-      const rollback = await supabase.from("shot_diagrams").upsert(affectedLinks, { onConflict: "id" });
-      if (rollback.error) rollbackErrors.push(`link rollback: ${safeError(rollback.error).message}`);
-    }
-    throw new FolderOperationError(
-      "폴더 삭제를 완료하지 못했습니다.",
-      500,
-      [safeError(error).message, ...rollbackErrors].join(" · ")
-    );
-  }
-
-  const storagePaths = (assetRows ?? []).flatMap((asset) => {
-    const crop = objectValue(asset.crop_data);
-    return [
-      cleanText(asset.storage_path, 1_000),
-      cleanText(crop.thumbnailPath, 1_000)
-    ].filter(Boolean);
-  });
-  let storageCleanupWarning = "";
-  for (const paths of chunk(storagePaths, 100)) {
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).remove(paths);
-    if (error) {
-      storageCleanupWarning = "DB 삭제는 완료됐지만 일부 Storage 파일을 정리하지 못했습니다.";
-      console.error("[archive-folders:storage-delete]", safeError(error));
-    }
-  }
-  return {
-    deletedFolderCount: inspection.folderIds.length,
-    deletedAssetCount: inspection.assetIds.length,
-    storageCleanupWarning
-  };
-}
-
 async function readFolders(supabase: DbClient, projectId: string): Promise<FolderRow[]> {
   const { data, error } = await supabase
     .from("project_archive_folders")
@@ -683,25 +443,6 @@ async function readFolders(supabase: DbClient, projectId: string): Promise<Folde
     .eq("project_id", projectId);
   if (error) throw error;
   return (data ?? []) as FolderRow[];
-}
-
-async function readLinkedReferenceAssetIds(supabase: DbClient, projectId: string) {
-  const { data, error } = await supabase
-    .from("shot_diagrams")
-    .select("data")
-    .eq("project_id", projectId)
-    .eq("diagram_type", "overhead")
-    .like("shot_ref", "media-link:%");
-  if (error) {
-    if (error.code === "42P01") return new Set<string>();
-    throw error;
-  }
-  return new Set((data ?? []).flatMap((row) => {
-    const source = objectValue(row.data);
-    return source.kind === "media_link" && source.source === "reference"
-      ? [cleanText(source.assetId, 100)].filter(Boolean)
-      : [];
-  }));
 }
 
 function dedupeSelectedRoots(folders: FolderRow[]) {
@@ -768,14 +509,6 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
-}
-
-function chunk<T>(values: T[], size: number) {
-  const output: T[][] = [];
-  for (let index = 0; index < values.length; index += size) {
-    output.push(values.slice(index, index + size));
-  }
-  return output;
 }
 
 function mapFolder(row: Record<string, unknown>) {

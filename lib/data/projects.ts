@@ -340,6 +340,71 @@ export async function saveProjectBasicInfo(projectId: string, basicInfo: Project
   return savedBasicInfo;
 }
 
+export type ProjectBasicInfoEntityKind = "staff" | "actor";
+
+export async function deleteProjectBasicInfoEntity(
+  projectId: string,
+  input: { kind: ProjectBasicInfoEntityKind; id: string }
+): Promise<string> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  if (!isValidDatabaseProjectId(databaseProjectId)) {
+    throw new Error("로컬 프로젝트의 기본정보 삭제는 서버 복원 영수증을 사용하지 않습니다.");
+  }
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/basic-info`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "delete_entity", ...input })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & {
+    receipt?: string;
+    basicInfo?: unknown;
+  };
+  if (!response.ok || !payload.receipt) {
+    throw new Error(payload.error || "프로젝트 기본정보 항목을 삭제하지 못했습니다.");
+  }
+  if (payload.basicInfo) cacheProjectBasicInfo(databaseProjectId, normalizeProjectBasicInfo(payload.basicInfo));
+  return payload.receipt;
+}
+
+export async function restoreDeletedProjectBasicInfoEntity(
+  projectId: string,
+  receipt: string
+): Promise<ProjectBasicInfo> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/basic-info`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "restore_deleted_entity", receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload & { basicInfo?: unknown };
+  if (!response.ok || !payload.basicInfo) {
+    throw new Error(payload.error || "프로젝트 기본정보 항목을 복원하지 못했습니다.");
+  }
+  const basicInfo = normalizeProjectBasicInfo(payload.basicInfo);
+  cacheProjectBasicInfo(databaseProjectId, basicInfo);
+  return basicInfo;
+}
+
+export async function finalizeDeletedProjectBasicInfoEntity(
+  projectId: string,
+  receipt: string
+): Promise<void> {
+  const databaseProjectId = normalizeProjectId(projectId);
+  const response = await fetch(`/api/projects/${encodeURIComponent(databaseProjectId)}/basic-info`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted_entity", receipt })
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as ProjectApiErrorPayload;
+    throw new Error(payload.error || "프로젝트 기본정보 항목 삭제를 확정하지 못했습니다.");
+  }
+}
+
 function cacheProject(projectId: string, value: Project) {
   projectCache.set(projectId, {
     value,

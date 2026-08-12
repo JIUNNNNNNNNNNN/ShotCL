@@ -23,6 +23,7 @@ type ProgressScheduleEditorModalProps = {
   onClose: () => void;
   onSave?: (values: ProgressScheduleEditorValues) => void | Promise<void>;
   onAutoSaveMemo?: (memo: string) => Promise<void>;
+  onDeleteImage?: (imageUrl: string) => void;
 };
 
 /** 기타일정의 그림과 진행 메모만 명시적으로 저장하는 작은 팝업입니다. */
@@ -32,7 +33,8 @@ export function ProgressScheduleEditorModal({
   isSaving,
   onClose,
   onSave,
-  onAutoSaveMemo
+  onAutoSaveMemo,
+  onDeleteImage
 }: ProgressScheduleEditorModalProps) {
   const memoScopeKey = `progress-schedule-memo:${item.id}`;
   const [values, setValues] = useState<ProgressScheduleEditorValues>(() => ({
@@ -103,6 +105,14 @@ export function ProgressScheduleEditorModal({
     onClose();
   }
 
+  function deleteImage() {
+    const imageUrl = values.imageUrl;
+    if (!imageUrl) return;
+    setValues((current) => ({ ...current, imageFile: null, imageUrl: null }));
+    if (values.imageFile) return;
+    onDeleteImage?.(imageUrl);
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3"
@@ -164,7 +174,7 @@ export function ProgressScheduleEditorModal({
                 </label>
                 <Button
                   variant="ghost"
-                  onClick={() => setValues((current) => ({ ...current, imageFile: null, imageUrl: null }))}
+                  onClick={deleteImage}
                   disabled={!values.imageUrl}
                   className="!min-h-9 py-1 text-xs"
                 >

@@ -11,6 +11,11 @@ import {
   decodeProjectStaffNotes,
   encodeProjectStaffNotes
 } from "@/lib/staffRoleMetadata";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 
 type StaffMemberInput = {
@@ -35,10 +40,14 @@ type StaffReorderInput = {
   memberIds?: unknown;
   member?: unknown;
   expectedUpdatedAt?: unknown;
+  deletedMember?: unknown;
+  deletedDepartment?: unknown;
+  receipt?: unknown;
 };
 
 type StaffDeleteInput = {
   memberId?: unknown;
+  departmentId?: unknown;
 };
 
 const STAFF_MEMBER_COLUMNS = "id,project_id,department,name,phone,location,notes,sort_order,created_at,updated_at" as const;
@@ -278,6 +287,20 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
     }
     if (body?.action === "update-department") {
       return await updateStaffDepartmentDraft(supabase, projectId, body);
+    }
+    if (body?.action === "restore-deleted-member") {
+      return await restoreDeletedStaffMember(supabase, projectId, body.receipt);
+    }
+    if (body?.action === "restore-deleted-department") {
+      return await restoreDeletedStaffDepartment(supabase, projectId, body.receipt);
+    }
+    if (body?.action === "finalize-deleted-member") {
+      parseStaffMemberDeleteReceipt(projectId, body.receipt);
+      return NextResponse.json({ ok: true, finalized: true });
+    }
+    if (body?.action === "finalize-deleted-department") {
+      parseStaffDepartmentDeleteReceipt(projectId, body.receipt);
+      return NextResponse.json({ ok: true, finalized: true });
     }
     if (!body || typeof body.department !== "string" || !Array.isArray(body.memberIds) || body.memberIds.length === 0 || body.memberIds.length > 500) {
       return NextResponse.json({ error: "스탭 순서 데이터가 올바르지 않습니다." }, { status: 400 });
@@ -527,29 +550,171 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
     const body = (await request.json()) as StaffDeleteInput | null;
-    if (!body) {
-      return NextResponse.json({ error: "스탭 행 ID가 올바르지 않습니다." }, { status: 400 });
+    if (!body) return NextResponse.json({ error: "삭제할 항목 ID가 올바르지 않습니다." }, { status: 400 });
+    const departmentId = String(body.departmentId ?? "").trim();
+    if (departmentId) {
+      if (!isUuid(departmentId)) {
+        return NextResponse.json({ error: "부서 ID가 올바르지 않습니다." }, { status: 400 });
+      }
+      const { data: department, error: departmentError } = await supabase
+        .from("project_staff_departments")
+        .select(STAFF_DEPARTMENT_COLUMNS)
+        .eq("project_id", projectId)
+        .eq("id", departmentId)
+        .maybeSingle();
+      if (departmentError) throw departmentError;
+      if (!department) {
+        return NextResponse.json({ error: "부서를 찾을 수 없습니다." }, { status: 404 });
+      }
+      const receipt = createProjectDeleteReceipt({
+        projectId,
+        kind: "staff-department",
+        payload: { department }
+      });
+      const { data: deletedDepartment, error } = await supabase
+        .from("project_staff_departments")
+        .delete()
+        .eq("project_id", projectId)
+        .eq("id", departmentId)
+        .eq("updated_at", String(department.updated_at ?? ""))
+        .select("id,updated_at")
+        .maybeSingle();
+      if (error) throw error;
+      if (!deletedDepartment) {
+        return NextResponse.json(
+          { error: "부서가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요." },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ departmentId, deleted: true, receipt });
     }
     const memberId = String(body.memberId ?? "").trim();
     if (!isUuid(memberId)) {
       return NextResponse.json({ error: "스탭 행 ID가 올바르지 않습니다." }, { status: 400 });
     }
 
-    const { data: deletedRows, error } = await supabase
+    const [{ data: member, error: memberError }, { data: departments, error: departmentsError }] = await Promise.all([
+      supabase
+        .from("project_staff_members")
+        .select(STAFF_MEMBER_COLUMNS)
+        .eq("project_id", projectId)
+        .eq("id", memberId)
+        .maybeSingle(),
+      supabase
+        .from("project_staff_departments")
+        .select(STAFF_DEPARTMENT_COLUMNS)
+        .eq("project_id", projectId)
+    ]);
+    if (memberError) throw memberError;
+    if (departmentsError) throw departmentsError;
+    if (!member) {
+      return NextResponse.json({ error: "스탭을 찾을 수 없습니다." }, { status: 404 });
+    }
+    const department = (departments ?? []).find((candidate) => (
+      staffDepartmentScopeKey(candidate.name) === staffDepartmentScopeKey(member.department)
+    )) ?? null;
+    const receipt = createProjectDeleteReceipt({
+      projectId,
+      kind: "staff-member",
+      payload: { member, department }
+    });
+    const { data: deletedMember, error } = await supabase
       .from("project_staff_members")
       .delete()
       .eq("project_id", projectId)
       .eq("id", memberId)
-      .select("id");
+      .eq("updated_at", String(member.updated_at ?? ""))
+      .select("id,updated_at")
+      .maybeSingle();
     if (error) throw error;
+    if (!deletedMember) {
+      return NextResponse.json(
+        { error: "스탭 정보가 다른 곳에서 변경되었습니다. 최신 내용을 확인해주세요." },
+        { status: 409 }
+      );
+    }
 
     return NextResponse.json({
       memberId,
-      deleted: (deletedRows ?? []).length > 0
+      deleted: true,
+      receipt
     });
   } catch (error) {
     return staffRouteError(error, "스탭을 삭제하지 못했습니다.");
   }
+}
+
+async function restoreDeletedStaffMember(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  receipt: unknown
+) {
+  const snapshot = parseStaffMemberDeleteReceipt(projectId, receipt);
+  let insertedDepartment: Record<string, unknown> | null = null;
+  if (snapshot.department) {
+    const { data, error } = await supabase
+      .from("project_staff_departments")
+      .upsert(snapshot.department, { onConflict: "id", ignoreDuplicates: true })
+      .select(STAFF_DEPARTMENT_COLUMNS)
+      .maybeSingle();
+    if (error?.code === "23505") {
+      return NextResponse.json({ error: "같은 이름의 부서가 이미 있습니다." }, { status: 409 });
+    }
+    if (error) throw error;
+    insertedDepartment = data;
+  }
+  const { data, error } = await supabase
+    .from("project_staff_members")
+    .upsert(snapshot.member, { onConflict: "id", ignoreDuplicates: true })
+    .select(STAFF_MEMBER_COLUMNS)
+    .maybeSingle();
+  if (error) {
+    if (insertedDepartment) await rollbackRestoredStaffDepartment(supabase, projectId, insertedDepartment);
+    throw error;
+  }
+  const fallback = data ? null : await supabase
+    .from("project_staff_members")
+    .select(STAFF_MEMBER_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("id", String(snapshot.member.id))
+    .maybeSingle();
+  if (fallback?.error) {
+    if (insertedDepartment) await rollbackRestoredStaffDepartment(supabase, projectId, insertedDepartment);
+    throw fallback.error;
+  }
+  const saved = data ?? fallback?.data;
+  if (!saved) {
+    if (insertedDepartment) await rollbackRestoredStaffDepartment(supabase, projectId, insertedDepartment);
+    return NextResponse.json({ error: "스탭을 복원하지 못했습니다." }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true, member: staffMemberResponseRow(saved) });
+}
+
+async function restoreDeletedStaffDepartment(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  receipt: unknown
+) {
+  const department = parseStaffDepartmentDeleteReceipt(projectId, receipt);
+  const { data, error } = await supabase
+    .from("project_staff_departments")
+    .upsert(department, { onConflict: "id", ignoreDuplicates: true })
+    .select(STAFF_DEPARTMENT_COLUMNS)
+    .maybeSingle();
+  if (error?.code === "23505") {
+    return NextResponse.json({ error: "같은 이름의 부서가 이미 있습니다." }, { status: 409 });
+  }
+  if (error) throw error;
+  const fallback = data ? null : await supabase
+    .from("project_staff_departments")
+    .select(STAFF_DEPARTMENT_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("id", String(department.id))
+    .maybeSingle();
+  if (fallback?.error) throw fallback.error;
+  const saved = data ?? fallback?.data;
+  if (!saved) return NextResponse.json({ error: "부서를 복원하지 못했습니다." }, { status: 409 });
+  return NextResponse.json({ ok: true, department: saved });
 }
 
 async function requireAdminScope(
@@ -723,6 +888,11 @@ function normalizeText(value: unknown, maxLength: number) {
   return String(value ?? "").slice(0, maxLength);
 }
 
+function normalizeIsoDate(value: unknown) {
+  const parsed = typeof value === "string" ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
+}
+
 function normalizeExpectedUpdatedAt(value: unknown, label: string):
   | { ok: true; value: string }
   | { ok: false; error: string } {
@@ -740,7 +910,80 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function parseStaffMemberDeleteReceipt(projectId: string, receipt: unknown) {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: "staff-member"
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const payload = value as Record<string, unknown>;
+  const member = validateStaffReceiptRow(payload.member, projectId, "member");
+  const department = payload.department == null
+    ? null
+    : validateStaffReceiptRow(payload.department, projectId, "department");
+  if (
+    department
+    && staffDepartmentScopeKey(department.name) !== staffDepartmentScopeKey(member.department)
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return { member, department };
+}
+
+function parseStaffDepartmentDeleteReceipt(projectId: string, receipt: unknown) {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: "staff-department"
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return validateStaffReceiptRow(
+    (value as Record<string, unknown>).department,
+    projectId,
+    "department"
+  );
+}
+
+function validateStaffReceiptRow(
+  value: unknown,
+  projectId: string,
+  kind: "member" | "department"
+) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const row = value as Record<string, unknown>;
+  if (
+    !isUuid(String(row.id ?? ""))
+    || String(row.project_id ?? "") !== projectId
+    || !String(row.updated_at ?? "").trim()
+    || (kind === "department" && !normalizeText(row.name, 100).trim())
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return row;
+}
+
+async function rollbackRestoredStaffDepartment(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  department: Record<string, unknown>
+) {
+  await supabase
+    .from("project_staff_departments")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("id", String(department.id ?? ""))
+    .eq("updated_at", String(department.updated_at ?? ""));
+}
+
 function staffRouteError(error: unknown, fallback: string) {
+  if (error instanceof ProjectDeleteReceiptError) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
   const message = error && typeof error === "object" && "message" in error
     ? String(error.message)

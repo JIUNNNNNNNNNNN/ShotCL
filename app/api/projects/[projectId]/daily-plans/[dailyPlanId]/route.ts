@@ -11,6 +11,11 @@ import {
   normalizeDailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
 import { getAccessGrant, ProjectAccessUnavailableError, requireProjectAccessDb } from "@/lib/projectAccess/server";
+import {
+  createProjectDeleteReceipt,
+  ProjectDeleteReceiptError,
+  verifyProjectDeleteReceipt
+} from "@/lib/projectDeleteReceipt.server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type { DailyPlanLocation } from "@/lib/types";
 
@@ -36,14 +41,44 @@ type DailyPlanPatchBody = {
   };
 };
 
+const PROGRESS_DAILY_PLAN_COLUMNS = "id,project_id,title,source_type,source_file_name,shooting_date,episode,call_time,meeting_location,shooting_locations,meal_times,memo,created_at,updated_at";
+const DAILY_PLAN_DELETE_RECEIPT_KIND = "daily-plan-round";
+const MAX_DAILY_PLAN_DELETE_CHILD_ROWS = 2_000;
+const DAILY_PLAN_RELATION_RESTORE_BATCH_SIZE = 100;
+const DAILY_PLAN_DELETE_CAS_BATCH_SIZE = 50;
+const DAILY_PLAN_STORAGE_SCAN_PAGE_SIZE = 500;
+const MAX_DAILY_PLAN_STORAGE_SCAN_ROWS = 20_000;
+const STORAGE_DELETE_BATCH_SIZE = 100;
+const STORAGE_BUCKET = "storyboards";
+
+type DatabaseRow = Record<string, unknown>;
+type DeletedDailyPlanReceiptPayload = {
+  plan: DatabaseRow;
+  dailyPlanShots: DatabaseRow[];
+  dailyPlanStaffMembers: DatabaseRow[];
+  progressShotIds: string[];
+};
+
 export async function GET(request: NextRequest, context: { params: Promise<{ projectId: string; dailyPlanId: string }> }) {
   try {
     const { projectId: routeProjectId, dailyPlanId } = await context.params;
     const projectId = normalizeProjectId(routeProjectId);
     if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
+    if (!isValidDatabaseProjectId(dailyPlanId)) return NextResponse.json({ error: "일촬표 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant) return NextResponse.json({ error: "프로젝트 접근 권한이 없습니다." }, { status: 401 });
     const supabase = requireProjectAccessDb();
+    if (request.nextUrl.searchParams.get("progress") === "1") {
+      const { data: plan, error } = await supabase
+        .from("daily_plans")
+        .select(PROGRESS_DAILY_PLAN_COLUMNS)
+        .eq("project_id", projectId)
+        .eq("id", dailyPlanId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!plan) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+      return NextResponse.json({ plan });
+    }
     const [{ data: plan, error: planError }, { data: shots, error: shotError }] = await Promise.all([
       supabase.from("daily_plans").select("*").eq("project_id", projectId).eq("id", dailyPlanId).maybeSingle(),
       supabase.from("daily_plan_shots").select("*").eq("project_id", projectId).eq("daily_plan_id", dailyPlanId).order("order_index")
@@ -519,18 +554,438 @@ function dailyPlanPatchError(error: unknown, fallbackMessage: string) {
   );
 }
 
+/** 삭제 영수증으로 원래 ID의 회차와 cascade child를 canonical하게 복원합니다. */
+export async function POST(request: NextRequest, context: { params: Promise<{ projectId: string; dailyPlanId: string }> }) {
+  let failureMessage = "일촬표를 복원하지 못했습니다.";
+  try {
+    const { projectId: routeProjectId, dailyPlanId } = await context.params;
+    const projectId = normalizeProjectId(routeProjectId);
+    if (!isValidDatabaseProjectId(projectId) || !isValidDatabaseProjectId(dailyPlanId)) {
+      return NextResponse.json({ error: "프로젝트 또는 일촬표 ID가 올바르지 않습니다." }, { status: 400 });
+    }
+    const grant = await getAccessGrant(request, projectId);
+    if (!grant || grant.role !== "admin") {
+      return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
+    }
+    const body = (await request.json()) as { operation?: unknown; receipt?: unknown };
+    if (body.operation !== "restore_deleted" && body.operation !== "finalize_deleted") {
+      return NextResponse.json({ error: "지원하지 않는 일촬표 복원 작업입니다." }, { status: 400 });
+    }
+    const snapshot = readDeletedDailyPlanReceipt(projectId, dailyPlanId, body.receipt);
+    const supabase = requireProjectAccessDb();
+    if (body.operation === "finalize_deleted") {
+      failureMessage = "일촬표 삭제를 확정하지 못했습니다.";
+      const finalizedPaths = await finalizeDeletedDailyPlanStorage(
+        supabase,
+        projectId,
+        dailyPlanId,
+        snapshot.plan
+      );
+      return NextResponse.json({ success: true, finalized: true, finalizedPaths });
+    }
+
+    const { error: planError } = await supabase
+      .from("daily_plans")
+      .upsert([snapshot.plan], { onConflict: "id", ignoreDuplicates: true });
+    if (planError) throw planError;
+    await restoreDailyPlanChildRows(supabase, "daily_plan_shots", snapshot.dailyPlanShots);
+    await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", snapshot.dailyPlanStaffMembers);
+    if (snapshot.progressShotIds.length > 0) {
+      // Deleting the plan sets this FK to NULL. Do not steal a cut that another
+      // editor deliberately attached to a different round while it was absent.
+      for (let start = 0; start < snapshot.progressShotIds.length; start += DAILY_PLAN_RELATION_RESTORE_BATCH_SIZE) {
+        const { error: relationError } = await supabase
+          .from("shots")
+          .update({ daily_plan_id: dailyPlanId })
+          .eq("project_id", projectId)
+          .in("id", snapshot.progressShotIds.slice(start, start + DAILY_PLAN_RELATION_RESTORE_BATCH_SIZE))
+          .is("daily_plan_id", null);
+        if (relationError) throw relationError;
+      }
+    }
+    return NextResponse.json({
+      success: true,
+      restoredDailyPlanId: dailyPlanId,
+      restoredShotIds: snapshot.dailyPlanShots.map((row) => String(row.id))
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof ProjectDeleteReceiptError ? error.message : failureMessage },
+      { status: error instanceof ProjectDeleteReceiptError ? 400 : error instanceof ProjectAccessUnavailableError ? 503 : 500 }
+    );
+  }
+}
+
 export async function DELETE(request: NextRequest, context: { params: Promise<{ projectId: string; dailyPlanId: string }> }) {
   try {
     const { projectId: routeProjectId, dailyPlanId } = await context.params;
     const projectId = normalizeProjectId(routeProjectId);
-    if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
+    if (!isValidDatabaseProjectId(projectId) || !isValidDatabaseProjectId(dailyPlanId)) {
+      return NextResponse.json({ error: "프로젝트 또는 일촬표 ID가 올바르지 않습니다." }, { status: 400 });
+    }
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     const supabase = requireProjectAccessDb();
-    const { error } = await supabase.from("daily_plans").delete().eq("project_id", projectId).eq("id", dailyPlanId);
-    if (error) throw error;
-    return NextResponse.json({ success: true });
+    const [planResult, shotResult, progressShotResult] = await Promise.all([
+      supabase.from("daily_plans").select("*").eq("project_id", projectId).eq("id", dailyPlanId).maybeSingle(),
+      supabase.from("daily_plan_shots").select("*").eq("project_id", projectId).eq("daily_plan_id", dailyPlanId).order("order_index").order("created_at"),
+      supabase.from("shots").select("id").eq("project_id", projectId).eq("daily_plan_id", dailyPlanId)
+    ]);
+    if (planResult.error) throw planResult.error;
+    if (shotResult.error) throw shotResult.error;
+    if (progressShotResult.error) throw progressShotResult.error;
+    if (!planResult.data) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+
+    const staffResult = await supabase
+      .from("daily_plan_staff_members")
+      .select("*")
+      .eq("project_id", projectId)
+      .eq("daily_plan_id", dailyPlanId)
+      .order("sort_order")
+      .order("created_at");
+    if (staffResult.error && !isMissingDailyPlanStaffTableError(staffResult.error)) throw staffResult.error;
+    if (
+      (shotResult.data ?? []).length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+      || (staffResult.data ?? []).length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+      || (progressShotResult.data ?? []).length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+    ) {
+      return NextResponse.json({ error: "복원 정보를 안전하게 만들 수 있는 회차 크기를 초과했습니다." }, { status: 413 });
+    }
+    const receipt = createProjectDeleteReceipt({
+      projectId,
+      kind: DAILY_PLAN_DELETE_RECEIPT_KIND,
+      payload: {
+        plan: planResult.data,
+        dailyPlanShots: shotResult.data ?? [],
+        dailyPlanStaffMembers: staffResult.error ? [] : staffResult.data ?? [],
+        progressShotIds: (progressShotResult.data ?? []).map((row) => String(row.id))
+      } satisfies DeletedDailyPlanReceiptPayload
+    });
+
+    const dailyPlanShotRows = (shotResult.data ?? []) as DatabaseRow[];
+    const staffRows = (staffResult.error ? [] : staffResult.data ?? []) as DatabaseRow[];
+    const deletedShotRows = await deleteDailyPlanChildRowsWithVersions(
+      supabase,
+      "daily_plan_shots",
+      projectId,
+      dailyPlanId,
+      dailyPlanShotRows
+    );
+    if (deletedShotRows.error || deletedShotRows.rows.length !== dailyPlanShotRows.length) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", deletedShotRows.rows);
+      if (deletedShotRows.error) throw deletedShotRows.error;
+      return dailyPlanDeleteConflictResponse();
+    }
+    const deletedStaffRows = await deleteDailyPlanChildRowsWithVersions(
+      supabase,
+      "daily_plan_staff_members",
+      projectId,
+      dailyPlanId,
+      staffRows
+    );
+    if (deletedStaffRows.error || deletedStaffRows.rows.length !== staffRows.length) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", dailyPlanShotRows);
+      await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", deletedStaffRows.rows);
+      if (deletedStaffRows.error) throw deletedStaffRows.error;
+      return dailyPlanDeleteConflictResponse();
+    }
+
+    // Do not cascade rows or detach progress shots created/reassigned after the
+    // receipt snapshot. This closes the practical non-transactional race while
+    // preserving all unrelated progress-shot edits.
+    const [remainingShotResult, remainingStaffResult, remainingProgressResult] = await Promise.all([
+      supabase
+        .from("daily_plan_shots")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("daily_plan_id", dailyPlanId)
+        .limit(1),
+      supabase
+        .from("daily_plan_staff_members")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("daily_plan_id", dailyPlanId)
+        .limit(1),
+      supabase
+        .from("shots")
+        .select("id")
+        .eq("project_id", projectId)
+        .eq("daily_plan_id", dailyPlanId)
+    ]);
+    const remainingStaffError = remainingStaffResult.error
+      && !isMissingDailyPlanStaffTableError(remainingStaffResult.error)
+      ? remainingStaffResult.error
+      : null;
+    if (remainingShotResult.error || remainingStaffError || remainingProgressResult.error) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", dailyPlanShotRows);
+      await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", staffRows);
+      throw remainingShotResult.error ?? remainingStaffError ?? remainingProgressResult.error;
+    }
+    const expectedProgressIds = new Set((progressShotResult.data ?? []).map((row) => String(row.id)));
+    const currentProgressIds = new Set((remainingProgressResult.data ?? []).map((row) => String(row.id)));
+    const progressRelationChanged = expectedProgressIds.size !== currentProgressIds.size
+      || [...expectedProgressIds].some((id) => !currentProgressIds.has(id));
+    if (
+      (remainingShotResult.data ?? []).length > 0
+      || (!remainingStaffResult.error && (remainingStaffResult.data ?? []).length > 0)
+      || progressRelationChanged
+    ) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", dailyPlanShotRows);
+      await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", staffRows);
+      return dailyPlanDeleteConflictResponse();
+    }
+
+    const { data: deleted, error: deleteError } = await supabase
+      .from("daily_plans")
+      .delete()
+      .eq("project_id", projectId)
+      .eq("id", dailyPlanId)
+      .eq("updated_at", planResult.data.updated_at)
+      .select("id")
+      .maybeSingle();
+    if (deleteError) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", dailyPlanShotRows);
+      await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", staffRows);
+      throw deleteError;
+    }
+    if (!deleted) {
+      await restoreDailyPlanChildRows(supabase, "daily_plan_shots", dailyPlanShotRows);
+      await restoreDailyPlanChildRows(supabase, "daily_plan_staff_members", staffRows);
+      return dailyPlanDeleteConflictResponse();
+    }
+    return NextResponse.json({ success: true, deleted: true, receipt });
   } catch (error) {
     return NextResponse.json({ error: "일촬표를 삭제하지 못했습니다." }, { status: error instanceof ProjectAccessUnavailableError ? 503 : 500 });
   }
+}
+
+async function deleteDailyPlanChildRowsWithVersions(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  table: "daily_plan_shots" | "daily_plan_staff_members",
+  projectId: string,
+  dailyPlanId: string,
+  rows: DatabaseRow[]
+) {
+  const deletedRows: DatabaseRow[] = [];
+  for (let start = 0; start < rows.length; start += DAILY_PLAN_DELETE_CAS_BATCH_SIZE) {
+    const batch = rows.slice(start, start + DAILY_PLAN_DELETE_CAS_BATCH_SIZE);
+    const versionFilter = batch.map((row) => (
+      `and(id.eq.${String(row.id)},updated_at.eq.${JSON.stringify(String(row.updated_at ?? ""))})`
+    )).join(",");
+    const { data, error } = await supabase
+      .from(table)
+      .delete()
+      .eq("project_id", projectId)
+      .eq("daily_plan_id", dailyPlanId)
+      .in("id", batch.map((row) => String(row.id)))
+      .or(versionFilter)
+      .select("*");
+    if (error) return { rows: deletedRows, error };
+    deletedRows.push(...((data ?? []) as DatabaseRow[]));
+    if ((data ?? []).length !== batch.length) break;
+  }
+  return { rows: deletedRows, error: null };
+}
+
+async function restoreDailyPlanChildRows(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  table: "daily_plan_shots" | "daily_plan_staff_members",
+  rows: DatabaseRow[]
+) {
+  for (let start = 0; start < rows.length; start += DAILY_PLAN_DELETE_CAS_BATCH_SIZE) {
+    const { error } = await supabase
+      .from(table)
+      .upsert(rows.slice(start, start + DAILY_PLAN_DELETE_CAS_BATCH_SIZE), {
+        onConflict: "id",
+        ignoreDuplicates: true
+      });
+    if (error && !(table === "daily_plan_staff_members" && isMissingDailyPlanStaffTableError(error))) {
+      throw error;
+    }
+  }
+}
+
+function dailyPlanDeleteConflictResponse() {
+  return NextResponse.json(
+    { error: "일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인해주세요." },
+    { status: 409 }
+  );
+}
+
+async function finalizeDeletedDailyPlanStorage(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  dailyPlanId: string,
+  plan: DatabaseRow
+) {
+  const candidates = dailyPlanStorageReferences(plan, projectId, dailyPlanId, true);
+  if (candidates.paths.size === 0) return 0;
+
+  const liveReferences = { paths: new Set<string>(), urls: new Set<string>() };
+  let scanned = 0;
+  while (scanned < MAX_DAILY_PLAN_STORAGE_SCAN_ROWS) {
+    const { data, error } = await supabase
+      .from("daily_plans")
+      .select("id,memo,meal_times")
+      .eq("project_id", projectId)
+      .order("id")
+      .range(scanned, scanned + DAILY_PLAN_STORAGE_SCAN_PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as DatabaseRow[];
+    for (const row of rows) {
+      const rowId = String(row.id ?? "");
+      const references = dailyPlanStorageReferences(row, projectId, rowId, false);
+      references.paths.forEach((path) => liveReferences.paths.add(path));
+      references.urls.forEach((url) => liveReferences.urls.add(url));
+    }
+    scanned += rows.length;
+    if (rows.length < DAILY_PLAN_STORAGE_SCAN_PAGE_SIZE) break;
+  }
+  if (scanned >= MAX_DAILY_PLAN_STORAGE_SCAN_ROWS) {
+    throw new Error("프로젝트 파일 참조 범위가 너무 커서 안전하게 정리할 수 없습니다.");
+  }
+
+  const removable = [...candidates.paths].filter((path) => (
+    !liveReferences.paths.has(path)
+    && ![...candidates.urlsByPath.get(path) ?? []].some((url) => liveReferences.urls.has(url))
+  ));
+  for (let start = 0; start < removable.length; start += STORAGE_DELETE_BATCH_SIZE) {
+    const { error } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .remove(removable.slice(start, start + STORAGE_DELETE_BATCH_SIZE));
+    if (error) throw error;
+  }
+  return removable.length;
+}
+
+function dailyPlanStorageReferences(
+  plan: DatabaseRow,
+  projectId: string,
+  dailyPlanId: string,
+  strictOwner: boolean
+) {
+  const paths = new Set<string>();
+  const urls = new Set<string>();
+  const urlsByPath = new Map<string, Set<string>>();
+  const add = (pathValue: unknown, urlValue?: unknown, expectedPrefix?: string) => {
+    const path = String(pathValue ?? "").trim();
+    const url = String(urlValue ?? "").trim();
+    if (url) urls.add(url);
+    if (!path || path.includes("..") || (expectedPrefix && !path.startsWith(expectedPrefix))) return;
+    paths.add(path);
+    if (url) {
+      const linked = urlsByPath.get(path) ?? new Set<string>();
+      linked.add(url);
+      urlsByPath.set(path, linked);
+    }
+  };
+
+  const meta = decodeDailyPlanMemo(String(plan.memo ?? ""));
+  for (const point of meta.gatheringPoints) {
+    for (const photo of point.photos) {
+      const expectedPrefix = strictOwner
+        ? `projects/${projectId}/daily-plans/${dailyPlanId}/gathering-points/${point.id}/${photo.id}/`
+        : undefined;
+      add(photo.storagePath, photo.url, expectedPrefix);
+      add(photo.thumbnailPath, photo.thumbnailUrl, expectedPrefix);
+      add(storagePathFromPublicUrl(photo.url), photo.url, expectedPrefix);
+      add(storagePathFromPublicUrl(photo.thumbnailUrl), photo.thumbnailUrl, expectedPrefix);
+    }
+  }
+  for (const item of normalizeDailyPlanMealTimes(plan.meal_times)) {
+    const imageUrl = String(item.imageUrl ?? "").trim();
+    if (!imageUrl) continue;
+    const path = storagePathFromPublicUrl(imageUrl);
+    const expectedPrefix = strictOwner
+      ? `storyboard-files/${projectId}/schedule-items/${safeStorageName(`${dailyPlanId}-${item.id}`)}/`
+      : undefined;
+    add(path, imageUrl, expectedPrefix);
+  }
+  return { paths, urls, urlsByPath };
+}
+
+function storagePathFromPublicUrl(value: unknown) {
+  try {
+    const pathname = new URL(String(value ?? "")).pathname;
+    const marker = `/storage/v1/object/public/${STORAGE_BUCKET}/`;
+    const markerIndex = pathname.indexOf(marker);
+    if (markerIndex < 0) return "";
+    return decodeURIComponent(pathname.slice(markerIndex + marker.length));
+  } catch {
+    return "";
+  }
+}
+
+function safeStorageName(value: string) {
+  return value.normalize("NFKD")
+    .replace(/[^\w.\-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 120) || "storyboard-file";
+}
+
+function readDeletedDailyPlanReceipt(
+  projectId: string,
+  dailyPlanId: string,
+  receipt: unknown
+): DeletedDailyPlanReceiptPayload {
+  const value = verifyProjectDeleteReceipt<unknown>(receipt, {
+    projectId,
+    kind: DAILY_PLAN_DELETE_RECEIPT_KIND
+  });
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ProjectDeleteReceiptError();
+  const payload = value as Partial<DeletedDailyPlanReceiptPayload>;
+  if (
+    !payload.plan
+    || typeof payload.plan !== "object"
+    || Array.isArray(payload.plan)
+    || payload.plan.id !== dailyPlanId
+    || payload.plan.project_id !== projectId
+    || !Array.isArray(payload.dailyPlanShots)
+    || !Array.isArray(payload.dailyPlanStaffMembers)
+    || !Array.isArray(payload.progressShotIds)
+    || payload.dailyPlanShots.length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+    || payload.dailyPlanStaffMembers.length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+    || payload.progressShotIds.length > MAX_DAILY_PLAN_DELETE_CHILD_ROWS
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  const validateChildRows = (rows: DatabaseRow[]) => {
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new ProjectDeleteReceiptError();
+      const id = String(row.id ?? "").trim();
+      if (
+        !isValidDatabaseProjectId(id)
+        || ids.has(id)
+        || row.project_id !== projectId
+        || row.daily_plan_id !== dailyPlanId
+      ) {
+        throw new ProjectDeleteReceiptError();
+      }
+      ids.add(id);
+    }
+  };
+  validateChildRows(payload.dailyPlanShots);
+  validateChildRows(payload.dailyPlanStaffMembers);
+  const progressShotIds = payload.progressShotIds.map((id) => String(id ?? "").trim());
+  if (
+    progressShotIds.some((id) => !isValidDatabaseProjectId(id))
+    || new Set(progressShotIds).size !== progressShotIds.length
+  ) {
+    throw new ProjectDeleteReceiptError();
+  }
+  return {
+    plan: payload.plan,
+    dailyPlanShots: payload.dailyPlanShots,
+    dailyPlanStaffMembers: payload.dailyPlanStaffMembers,
+    progressShotIds
+  };
+}
+
+function isMissingDailyPlanStaffTableError(error: { code?: string; message?: string }) {
+  if (error.code === "42P01" || error.code === "PGRST205") return true;
+  const message = String(error.message ?? "").toLowerCase();
+  return message.includes("daily_plan_staff_members")
+    && (message.includes("does not exist") || message.includes("could not find"));
 }

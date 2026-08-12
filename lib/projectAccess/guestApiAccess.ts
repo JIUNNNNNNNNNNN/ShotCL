@@ -6,6 +6,7 @@ export type GuestProjectApiRequest = {
 };
 
 const LEGACY_PROJECT_ID_PATTERN = /^project_([0-9a-f-]{36})$/i;
+const DATABASE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_ARCHIVE_DAILY_PLAN_ID = "__project_archive__";
 const PROJECT_SPACE_PRESETS_DAILY_PLAN_ID = "__project_space_presets__";
 
@@ -36,8 +37,31 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
   if (!suffix) return true;
   if (suffix === "/daily-plans") return true;
 
+  const dailyPlanDetailMatch = suffix.match(/^\/daily-plans\/([^/]+)$/);
+  if (dailyPlanDetailMatch) {
+    let dailyPlanId = "";
+    try {
+      dailyPlanId = decodeURIComponent(dailyPlanDetailMatch[1] ?? "");
+    } catch {
+      return false;
+    }
+    // Round switching needs one full plan, but never an unbounded nested
+    // collection or a client-selected project scope.
+    const hasNoQuery = input.searchParams.size === 0;
+    const hasProgressQuery = input.searchParams.size === 1
+      && input.searchParams.get("progress") === "1";
+    return DATABASE_UUID_PATTERN.test(dailyPlanId)
+      && (hasNoQuery || hasProgressQuery);
+  }
+
   if (suffix === "/shots") {
     return Boolean(input.searchParams.get("dailyPlanId")?.trim());
+  }
+
+  if (suffix === "/progress-events") {
+    const dailyPlanId = input.searchParams.get("dailyPlanId")?.trim() ?? "";
+    return DATABASE_UUID_PATTERN.test(dailyPlanId)
+      && input.searchParams.size === 1;
   }
 
   if (suffix === "/reference-assets") {

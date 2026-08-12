@@ -66,16 +66,16 @@ test("root auth and project access each have one persistent layout owner", () =>
   assert.equal(countMatches(projectLayout, /<ProjectWorkspaceProvider(?:\s|>)/gu), 0);
 });
 
-test("auth bootstrap has no pathname subscription and project pages reuse the layout snapshot", () => {
+test("auth bootstrap keys only on Guest-project scope and project pages reuse the layout snapshot", () => {
   const authProvider = readSource("components/AuthSessionProvider.tsx");
-  assert.doesNotMatch(authProvider, /\busePathname\b/u);
+  assert.match(authProvider, /const guestProjectRoute = \/\^\\\/projects/u);
 
   const authEffectStart = authProvider.indexOf("useEffect(() => {");
   const refreshAccountStart = authProvider.indexOf("const refreshAccount", authEffectStart);
   assert.ok(authEffectStart >= 0 && refreshAccountStart > authEffectStart);
   const authEffect = authProvider.slice(authEffectStart, refreshAccountStart);
   assert.doesNotMatch(authEffect, /\bpathname\b/u);
-  assert.match(authEffect, /\}, \[applySession\]\);/u);
+  assert.match(authEffect, /\}, \[applySession, guestProjectRoute\]\);/u);
 
   const directProjectReads = projectPageSources
     .map((pathname) => [
@@ -130,6 +130,10 @@ test("same-project navigation never forces a refresh or hard document navigation
     .filter(([, count]) => count > 0);
   assert.deepEqual(refreshOwners, []);
 
+  // The account invite bridge is not same-project navigation: it must apply the
+  // same-origin POST response's linked-membership cookies before entering the
+  // project document. Ordinary project UI navigation stays soft.
+  const allowedHardNavigationOwners = new Set(["app/invite/[token]/route.ts"]);
   const hardNavigationOwners = productSources
     .map((pathname) => [
       pathname,
@@ -138,7 +142,7 @@ test("same-project navigation never forces a refresh or hard document navigation
         /(?:\bwindow\.)?\blocation\.(?:assign|replace)\s*\(|(?:\bwindow\.)?\blocation\.href\s*=/gu
       )
     ])
-    .filter(([, count]) => count > 0);
+    .filter(([pathname, count]) => count > 0 && !allowedHardNavigationOwners.has(pathname));
   assert.deepEqual(hardNavigationOwners, []);
 });
 
@@ -225,6 +229,7 @@ test("all project mutation routes retain an explicit server access guard", () =>
     ["app/api/projects/[projectId]/daily-plans/[dailyPlanId]/staff-list/route.ts", /\bredirectToProjectStaffRoute\s*\(/u],
     ["app/api/projects/[projectId]/daily-plans/route.ts", /\bgetAccessGrant\s*\(/u],
     ["app/api/projects/[projectId]/reference-assets/route.ts", /\bgetMaterialRole\s*\(/u],
+    ["app/api/projects/[projectId]/schedule-images/route.ts", /\brequireAdminProject\s*\(/u],
     ["app/api/projects/[projectId]/scene-list/route.ts", /\brequireWriteScope\s*\(/u],
     ["app/api/projects/[projectId]/shot-diagrams/route.ts", /\bgetDiagramAccessRole\s*\(/u],
     ["app/api/projects/[projectId]/shots/[shotId]/move/route.ts", /\bgetAccessGrant\s*\(/u],

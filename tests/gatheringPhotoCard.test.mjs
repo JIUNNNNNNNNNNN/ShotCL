@@ -10,6 +10,10 @@ const componentCss = readFileSync(
   new URL("../components/DailyPlanGatheringLocations.module.css", import.meta.url),
   "utf8"
 );
+const gatheringPlaceSource = readFileSync(
+  new URL("../lib/progress/gatheringPlace.ts", import.meta.url),
+  "utf8"
+);
 
 const {
   didGatheringPhotoPointerMove,
@@ -35,8 +39,9 @@ test("long press uses 500ms and cancels only after moving beyond 10px", () => {
 });
 
 test("card enforces a shared one-photo add/replace/delete pipeline", () => {
-  assert.match(componentSource, /allowMultipleAlbum=\{false\}/u);
-  assert.match(componentSource, /origin:\s*"card"/u);
+  assert.equal((componentSource.match(/type="file"/gu) ?? []).length, 1);
+  assert.match(componentSource, /accept="image\/\*"/u);
+  assert.doesNotMatch(componentSource, /\bcapture=|\bmultiple=/u);
   assert.match(componentSource, /const file = files\[0\]/u);
   assert.match(componentSource, /replaceDailyPlanGatheringPhoto/u);
   assert.match(componentSource, /uploadDailyPlanGatheringPhoto/u);
@@ -45,14 +50,12 @@ test("card enforces a shared one-photo add/replace/delete pipeline", () => {
   assert.doesNotMatch(componentSource, /router\.refresh|location\.reload/u);
 });
 
-test("optimistic delete exposes the empty slot and retains a local focus target", () => {
-  const deletingStart = componentSource.indexOf("if (isDeletingPhoto)");
-  const addStart = componentSource.indexOf("if (canAddPhoto)", deletingStart);
-  const deletingSource = componentSource.slice(deletingStart, addStart);
-  assert.ok(deletingStart > 0 && addStart > deletingStart);
-  assert.match(deletingSource, /사진 추가/u);
-  assert.match(deletingSource, /삭제 중/u);
-  assert.match(deletingSource, /tabIndex=\{-1\}/u);
+test("optimistic delete uses global Undo without a blocking delete spinner", () => {
+  assert.match(componentSource, /deleteWithUndo\(\{/u);
+  assert.match(componentSource, /key: `gathering-photo:/u);
+  assert.match(componentSource, /restoreLocal:[\s\S]*setOptimisticallyRestoredPhoto\(photo\)/u);
+  assert.match(componentSource, /finalizeDailyPlanGatheringPhotoDelete/u);
+  assert.doesNotMatch(componentSource, /isDeletingPhoto|삭제 중/u);
   assert.match(componentSource, /deleteManagedPhoto\(\)[\s\S]*requestAnimationFrame[\s\S]*photoMediaRef\.current\?\.focus/u);
 });
 
@@ -65,10 +68,10 @@ test("editable plans without a gathering record keep the upload skeleton", () =>
   assert.match(componentSource, /const canMutatePhotos = Boolean\(canEdit && hasPersistentProject\)/u);
   assert.match(componentSource, /gatheringPointId:\s*place\?\.persistedId \?\? null/u);
   assert.match(componentSource, /locationName:\s*place\?\.locationName \|\| "집합장소"/u);
-  assert.match(componentSource, /meta\.gatheringPoints\.find\(\(item\) => item\.photos\.length > 0\)/u);
-  assert.match(componentSource, /resolveEffectiveGatheringLocation\(plan\.shootingLocations\)/u);
-  assert.match(componentSource, /id: `location:\$\{effectiveLocation\.id\}`/u);
-  assert.match(componentSource, /if \(!locationName && !point\) return null/u);
+  assert.match(gatheringPlaceSource, /meta\.gatheringPoints\.find\(\(item\) => item\.photos\.length > 0\)/u);
+  assert.match(gatheringPlaceSource, /resolveEffectiveGatheringLocation\(plan\.shootingLocations\)/u);
+  assert.match(gatheringPlaceSource, /id: `location:\$\{effectiveLocation\.id\}`/u);
+  assert.match(gatheringPlaceSource, /if \(!locationName && !point\) return null/u);
 });
 
 test("meeting photo scope blocks the native iOS image callout and drag path", () => {

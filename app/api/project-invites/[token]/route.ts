@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   clearProjectGuestInviteCookie,
+  clearProjectGuestProgressTargetCookie,
   ProjectAccessUnavailableError,
-  setProjectGuestInviteCookie
+  setProjectGuestInviteCookie,
+  setProjectGuestProgressTargetCookie
 } from "@/lib/projectAccess/server";
 import {
   linkShotclAccountProjectMembership,
@@ -13,7 +15,8 @@ import {
   ProjectStaffInviteMigrationRequiredError,
   ProjectStaffInviteUnavailableError
 } from "@/lib/projectStaffInvites.server";
-import { buildProjectNavigationHref } from "@/lib/projectNavigation";
+import { buildProgressRoundHref, buildProjectNavigationHref } from "@/lib/projectNavigation";
+import { resolveInviteProgressTarget } from "@/lib/progress/resolveInviteProgressTarget.server";
 
 type RouteContext = { params: Promise<{ token: string }> };
 
@@ -48,20 +51,34 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const { token } = await context.params;
     const invite = await inspectProjectStaffInvite(token);
     if (!invite) return invalidInviteResponse();
-    const account = await resolveShotclAuthenticatedAccount(request);
+    const [account, target] = await Promise.all([
+      resolveShotclAuthenticatedAccount(request),
+      resolveInviteProgressTarget(invite.projectId)
+    ]);
     const linkedRole = account
       ? await linkShotclAccountProjectMembership(account.userId, invite.projectId)
       : null;
+    const destination = target.dailyPlanId
+      ? buildProgressRoundHref(invite.projectId, target.dailyPlanId)
+      : buildProjectNavigationHref(invite.projectId, "progress");
 
     const response = publicInviteJson({
       ok: true,
       status: linkedRole ? "account_linked" : "guest_ready",
       projectId: invite.projectId,
       projectName: invite.projectName,
-      destination: buildProjectNavigationHref(invite.projectId, "progress")
+      destination
     });
-    if (linkedRole) clearProjectGuestInviteCookie(response);
-    else setProjectGuestInviteCookie(response, token);
+    if (linkedRole) {
+      clearProjectGuestInviteCookie(response);
+    } else {
+      setProjectGuestInviteCookie(response, token);
+      if (target.dailyPlanId) {
+        setProjectGuestProgressTargetCookie(response, invite.projectId, target.dailyPlanId);
+      } else {
+        clearProjectGuestProgressTargetCookie(response);
+      }
+    }
     return response;
   } catch (error) {
     return publicInviteErrorResponse(error);

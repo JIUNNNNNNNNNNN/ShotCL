@@ -1,6 +1,11 @@
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { DailyPlanMealTime } from "@/lib/types";
 
 const STORAGE_BUCKET = "storyboards";
+
+async function loadFallbackSupabaseClient() {
+  const { getSupabaseBrowserClient } = await import("@/lib/supabase/client");
+  return getSupabaseBrowserClient();
+}
 
 async function hasSharedAccess(projectId: string) {
   try {
@@ -55,7 +60,7 @@ async function saveStoryboardImage(projectId: string, asset: StoryboardAsset, fi
     return payload.imageUrl;
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (supabase) {
     const storagePath = `storyboard-files/${projectId}/${asset.folder}/${sanitizeFileName(asset.ref)}/${Date.now()}-${sanitizeFileName(file.name) || "image"}`;
     const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, file, {
@@ -83,4 +88,85 @@ export async function saveScheduleImage(projectId: string, dailyPlanId: string, 
     folder: "schedule-items",
     ref: `${dailyPlanId}-${itemId}`
   }, file);
+}
+
+export type ScheduleImageDeleteResult = {
+  mealTimes: DailyPlanMealTime[];
+  updatedAt: string;
+  receipt: string;
+};
+
+export async function deleteScheduleImageWithReceipt(input: {
+  projectId: string;
+  dailyPlanId: string;
+  itemId: string;
+  imageUrl: string;
+  expectedUpdatedAt: string;
+}): Promise<ScheduleImageDeleteResult> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(input.projectId)}/schedule-images`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({
+      dailyPlanId: input.dailyPlanId,
+      itemId: input.itemId,
+      imageUrl: input.imageUrl,
+      expectedUpdatedAt: input.expectedUpdatedAt
+    })
+  });
+  return readScheduleImageMutation(response, true, "기타일정 이미지를 삭제하지 못했습니다.");
+}
+
+export async function restoreScheduleImageDelete(
+  projectId: string,
+  receipt: string
+): Promise<Omit<ScheduleImageDeleteResult, "receipt">> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/schedule-images`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ receipt })
+  });
+  const result = await readScheduleImageMutation(response, false, "기타일정 이미지 삭제를 되돌리지 못했습니다.");
+  return { mealTimes: result.mealTimes, updatedAt: result.updatedAt };
+}
+
+export async function finalizeScheduleImageDelete(projectId: string, receipt: string): Promise<void> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/schedule-images`, {
+    method: "POST",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ receipt })
+  });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(payload.error || "기타일정 이미지 파일을 정리하지 못했습니다.");
+}
+
+async function readScheduleImageMutation(
+  response: Response,
+  receiptRequired: boolean,
+  fallback: string
+): Promise<ScheduleImageDeleteResult> {
+  const payload = (await response.json().catch(() => ({}))) as {
+    mealTimes?: unknown;
+    updatedAt?: unknown;
+    receipt?: unknown;
+    error?: string;
+  };
+  const updatedAt = String(payload.updatedAt ?? "").trim();
+  const receipt = typeof payload.receipt === "string" ? payload.receipt : "";
+  if (
+    !response.ok
+    || !Array.isArray(payload.mealTimes)
+    || !updatedAt
+    || (receiptRequired && !receipt)
+  ) {
+    throw new Error(payload.error || fallback);
+  }
+  return {
+    mealTimes: payload.mealTimes as DailyPlanMealTime[],
+    updatedAt,
+    receipt
+  };
 }

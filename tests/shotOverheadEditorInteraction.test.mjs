@@ -15,6 +15,11 @@ function sourceBetween(startMarker, endMarker) {
   return editorSource.slice(start, end);
 }
 
+test("the active diagram modal declares ownership of local undo shortcuts", () => {
+  assert.match(editorSource, /data-local-undo-scope="active"/u);
+  assert.match(editorSource, /command && event\.key\.toLowerCase\(\) === "z"[\s\S]*event\.preventDefault\(\)[\s\S]*undo\(\)/u);
+});
+
 test("selected controls use a final overlay and capture-phase nearest resolution", () => {
   const cameraRender = editorSource.indexOf("{diagram.cameras.map((camera) => {");
   const controlLayer = editorSource.indexOf("data-shot-overhead-control-layer");
@@ -108,7 +113,7 @@ test("manual preset apply confirms replacement and records exactly one diagram c
   assert.equal(editorSource.match(/applyShotOverheadSpaceSnapshot\(/gu)?.length, 1);
 });
 
-test("preset persistence is explicit, versioned, confirmed, and absent from read-only UI", () => {
+test("preset persistence is explicit, versioned, immediately deleted, and absent from read-only UI", () => {
   const savePreset = sourceBetween(
     "async function saveCurrentSpacePreset() {",
     "async function deleteCurrentSpacePreset() {"
@@ -122,7 +127,7 @@ test("preset persistence is explicit, versioned, confirmed, and absent from read
     "async function persistAndClose() {"
   );
   assert.match(deletePreset, /readOnly/u);
-  assert.match(deletePreset, /window\.confirm/u);
+  assert.doesNotMatch(deletePreset, /window\.confirm/u);
   assert.match(deletePreset, /onDeleteSpacePreset\(presetAtRequest\)/u);
 
   const editableToolbarStart = editorSource.indexOf("{!readOnly ? (\n          <div");

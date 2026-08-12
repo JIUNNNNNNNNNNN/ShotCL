@@ -97,7 +97,6 @@ export function ProjectCalendarEventEditor({
   ));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [dismissHint, setDismissHint] = useState("");
   const [isClosing, setIsClosing] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
@@ -110,7 +109,6 @@ export function ProjectCalendarEventEditor({
   });
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const isPending = mutationPending || isSubmitting;
   // 기존 일정은 자동저장되므로 닫기 차단이 필요하지 않습니다. 새 일정만 명시적으로 생성합니다.
@@ -254,22 +252,9 @@ export function ProjectCalendarEventEditor({
   }, []);
 
   useEffect(() => {
-    if (!deleteConfirmationOpen) return;
-    const frame = window.requestAnimationFrame(() => {
-      dialogRef.current?.querySelector<HTMLElement>("[role='alertdialog'] button")?.focus({ preventScroll: true });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [deleteConfirmationOpen]);
-
-  useEffect(() => {
     const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
       if (keyboardEvent.key === "Escape") {
         keyboardEvent.preventDefault();
-        if (deleteConfirmationOpen) {
-          setDeleteConfirmationOpen(false);
-          window.requestAnimationFrame(() => deleteReturnFocusRef.current?.focus({ preventScroll: true }));
-          return;
-        }
         if (isDirty && !readOnly) {
           setDismissHint("변경 내용을 취소하려면 취소 버튼을 눌러주세요.");
           return;
@@ -297,7 +282,7 @@ export function ProjectCalendarEventEditor({
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeWithMotion, deleteConfirmationOpen, isDirty, isSheet, readOnly]);
+  }, [closeWithMotion, isDirty, isSheet, readOnly]);
 
   function updateValue<Key extends keyof ProjectCalendarEventEditorValues>(
     key: Key,
@@ -336,19 +321,10 @@ export function ProjectCalendarEventEditor({
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!event || !onDelete || isPending) return;
-    setIsSubmitting(true);
-    setErrors({});
-    try {
-      await onDelete(event.id);
-      closeWithMotion();
-    } catch (error) {
-      setDeleteConfirmationOpen(false);
-      setErrors({ form: error instanceof Error ? error.message : "일정을 삭제하지 못했습니다." });
-    } finally {
-      setIsSubmitting(false);
-    }
+    void onDelete(event.id);
+    closeWithMotion();
   }
 
   function handleBackdropPointerDown(pointerEvent: ReactPointerEvent<HTMLDivElement>) {
@@ -358,16 +334,6 @@ export function ProjectCalendarEventEditor({
       return;
     }
     closeWithMotion();
-  }
-
-  function openDeleteConfirmation() {
-    deleteReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setDeleteConfirmationOpen(true);
-  }
-
-  function closeDeleteConfirmation() {
-    setDeleteConfirmationOpen(false);
-    window.requestAnimationFrame(() => deleteReturnFocusRef.current?.focus({ preventScroll: true }));
   }
 
   const editorStyle = {
@@ -399,22 +365,7 @@ export function ProjectCalendarEventEditor({
         data-position-ready={position.ready}
         onPointerDown={(pointerEvent) => pointerEvent.stopPropagation()}
       >
-        {deleteConfirmationOpen && event ? (
-          <div role="alertdialog" aria-labelledby="project-calendar-delete-title" className={styles.deleteConfirmation}>
-            <div>
-              <h2 id="project-calendar-delete-title" className={styles.editorTitle}>일정을 삭제할까요?</h2>
-              <p className={styles.editorDescription}>삭제한 일정은 프로젝트 달력에서 즉시 사라집니다.</p>
-            </div>
-            <div className={styles.editorActions}>
-              <Button variant="ghost" onClick={closeDeleteConfirmation} disabled={isPending}>취소</Button>
-              <Button variant="danger" onClick={() => void handleDelete()} disabled={isPending}>
-                <Trash2 className="h-4 w-4" aria-hidden />
-                {isPending ? "삭제 중" : "삭제"}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <form
+        <form
             onSubmit={handleSubmit}
             noValidate
             onBlurCapture={() => {
@@ -550,7 +501,7 @@ export function ProjectCalendarEventEditor({
 
             <footer className={styles.editorFooter}>
               {event && !readOnly && onDelete ? (
-                <Button type="button" variant="danger" onClick={openDeleteConfirmation} disabled={isPending}>
+                <Button type="button" variant="danger" onClick={handleDelete} disabled={isPending}>
                   <Trash2 className="h-4 w-4" aria-hidden />
                   삭제
                 </Button>
@@ -570,7 +521,6 @@ export function ProjectCalendarEventEditor({
               </div>
             </footer>
           </form>
-        )}
       </div>
     </div>
   ), document.body);

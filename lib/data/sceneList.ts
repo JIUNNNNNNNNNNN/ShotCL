@@ -26,6 +26,7 @@ type SceneListPayload = {
   cellMergesMaterialized?: unknown;
   cellMergesUpdatedAt?: unknown;
   orderedIds?: unknown;
+  receipt?: unknown;
   error?: string;
 };
 
@@ -60,8 +61,20 @@ export type ProjectSceneClearResult = {
   items: ProjectSceneItem[];
 };
 
+export type ProjectSceneRestoreCell = ProjectSceneClearCell & { value: string };
+
 export type ProjectSceneListResult = ProjectSceneList & {
   actorRoles: string[];
+};
+
+export type ProjectSceneItemDeleteMutation = {
+  receipt: string;
+  cellMergesUpdatedAt: string | null;
+};
+
+export type ProjectSceneItemRestoreMutation = {
+  item: ProjectSceneItem;
+  cellMergesUpdatedAt: string | null;
 };
 
 export class SceneListMergeMutationError extends Error {
@@ -520,6 +533,40 @@ export async function clearProjectSceneCells(
   return { clearedCells: normalizedCells, items: nextItems };
 }
 
+/** 선택 칸 비우기 Undo에서 삭제된 셀 값만 stable scene ID 기준으로 복원합니다. */
+export async function restoreProjectSceneCells(
+  projectId: string,
+  cells: ProjectSceneRestoreCell[]
+): Promise<ProjectSceneClearResult> {
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/scene-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore-cells", cells })
+    });
+    const payload = (await response.json().catch(() => ({}))) as SceneListPayload & { restoredCells?: unknown };
+    if (response.ok) return {
+      clearedCells: normalizeClearCells(payload.restoredCells),
+      items: (payload.items ?? []).map(sceneItemFromRow)
+    };
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "선택 칸을 복원하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+  const current = readLocalSceneList(projectId);
+  const byScene = new Map<string, Map<ProjectSceneMergeColumn, string>>();
+  for (const cell of cells) {
+    const values = byScene.get(cell.sceneId) ?? new Map<ProjectSceneMergeColumn, string>();
+    values.set(cell.column, cell.value);
+    byScene.set(cell.sceneId, values);
+  }
+  const nextItems = current.items.map((item) => restoreLocalSceneItem(item, byScene.get(item.id)));
+  writeLocalSceneList(projectId, { ...current, items: nextItems });
+  return { clearedCells: cells, items: nextItems };
+}
+
 /** Scene 드래그가 끝난 뒤 안정적인 ID 순서와 sort_order만 저장합니다. */
 export async function reorderProjectSceneItems(
   projectId: string,
@@ -569,6 +616,88 @@ export async function reorderProjectSceneItems(
     items: reordered
   });
   return reordered;
+}
+
+export async function deleteProjectSceneItem(
+  projectId: string,
+  itemId: string
+): Promise<ProjectSceneItemDeleteMutation | null> {
+  if (isValidDatabaseProjectId(projectId)) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/scene-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete-item", itemId })
+    });
+    const payload = await response.json().catch(() => ({})) as SceneListPayload;
+    if (!response.ok) throw new Error(payload.error || "씬을 삭제하지 못했습니다.");
+    if (typeof payload.receipt !== "string" || !payload.receipt) {
+      throw new Error("씬 삭제 복원 정보를 받지 못했습니다.");
+    }
+    return {
+      receipt: payload.receipt,
+      cellMergesUpdatedAt: payload.cellMergesUpdatedAt
+        ? String(payload.cellMergesUpdatedAt)
+        : null
+    };
+  }
+  const current = readLocalSceneList(projectId);
+  writeLocalSceneList(projectId, {
+    ...current,
+    items: current.items.filter((item) => item.id !== itemId),
+    cellMerges: current.cellMerges.filter((merge) => !merge.sceneIds.includes(itemId))
+  });
+  return null;
+}
+
+export async function restoreProjectSceneItem(
+  projectId: string,
+  receipt: string | null,
+  item: ProjectSceneItem,
+  removedMerges: ProjectSceneCellMerge[]
+): Promise<ProjectSceneItemRestoreMutation> {
+  if (isValidDatabaseProjectId(projectId)) {
+    if (!receipt) throw new Error("씬 삭제 복원 정보가 없습니다.");
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/scene-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "restore-item", receipt })
+    });
+    const payload = await response.json().catch(() => ({})) as SceneListPayload;
+    if (!response.ok) throw new Error(payload.error || "씬을 복원하지 못했습니다.");
+    if (!payload.item) throw new Error("복원된 씬 정보를 받지 못했습니다.");
+    return {
+      item: sceneItemFromRow(payload.item),
+      cellMergesUpdatedAt: payload.cellMergesUpdatedAt
+        ? String(payload.cellMergesUpdatedAt)
+        : null
+    };
+  }
+  const current = readLocalSceneList(projectId);
+  const existing = current.items.find((candidate) => candidate.id === item.id);
+  if (existing) return { item: existing, cellMergesUpdatedAt: null };
+  const nextItems = sortSceneItems([...current.items, item]);
+  const availableIds = new Set(nextItems.map((candidate) => candidate.id));
+  const nextMerges = normalizeSceneListCellMerges([
+    ...current.cellMerges,
+    ...removedMerges.filter((merge) => merge.sceneIds.every((id) => availableIds.has(id)))
+  ]);
+  writeLocalSceneList(projectId, { ...current, items: nextItems, cellMerges: nextMerges });
+  return { item, cellMergesUpdatedAt: null };
+}
+
+export async function finalizeDeletedProjectSceneItem(
+  projectId: string,
+  receipt: string | null
+) {
+  if (!receipt || !isValidDatabaseProjectId(projectId)) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/scene-list`, {
+    method: "PATCH",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "finalize-deleted-item", receipt })
+  });
+  const payload = await response.json().catch(() => ({})) as SceneListPayload;
+  if (!response.ok) throw new Error(payload.error || "씬 삭제를 확정하지 못했습니다.");
 }
 
 function sceneItemFromRow(row: Record<string, unknown>): ProjectSceneItem {
@@ -712,6 +841,22 @@ function clearLocalSceneItem(
   if (columns.has("day")) next.dayLabel = "";
   if (columns.has("time")) next.dayNight = "";
   if (columns.has("intExt")) next.interiorExterior = "";
+  return next;
+}
+
+function restoreLocalSceneItem(
+  item: ProjectSceneItem,
+  values: Map<ProjectSceneMergeColumn, string> | undefined
+) {
+  if (!values?.size) return item;
+  const next = { ...item, updatedAt: new Date().toISOString() };
+  for (const [column, value] of values) {
+    if (column === "location") next.mainLocation = value;
+    else if (column === "subLocation") next.subLocation = value;
+    else if (column === "day") next.dayLabel = value;
+    else if (column === "time") next.dayNight = value;
+    else if (column === "intExt") next.interiorExterior = value;
+  }
   return next;
 }
 

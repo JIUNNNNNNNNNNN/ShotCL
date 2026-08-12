@@ -41,6 +41,7 @@ import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   useAutoContextualGuide,
@@ -87,11 +88,12 @@ import { KeyedMutationQueue } from "@/lib/client/keyedMutationQueue";
 import type { AutosaveStatus as AutosaveStatusValue } from "@/lib/client/latestAutosaveQueue";
 import {
   deleteProjectReferenceAssets,
-  inspectProjectReferenceAssets,
+  finalizeDeletedProjectReferenceAssets,
   listProjectReferenceAssetsByTypes,
   ProjectReferenceAssetReorderError,
   ProjectReferenceAssetSceneCutError,
   reorderProjectReferenceAssets,
+  restoreDeletedProjectReferenceAssets,
   updateProjectReferenceAsset,
   updateProjectReferenceAssetSceneCut,
   uploadProjectReferenceAsset,
@@ -114,7 +116,11 @@ import { auditQuery } from "@/lib/queryAudit";
 import {
   deleteOverheadDiagramArchives,
   deleteShotOverheadSpacePreset,
+  finalizeDeletedOverheadDiagramArchives,
+  finalizeDeletedShotOverheadSpacePreset,
   loadOverheadArchiveWorkspace,
+  restoreDeletedOverheadDiagramArchives,
+  restoreDeletedShotOverheadSpacePreset,
   saveOverheadDiagramArchive,
   saveShotOverheadSpacePreset
 } from "@/lib/data/shotMediaArchive";
@@ -165,16 +171,9 @@ type PendingImport = {
   inheritedAssets?: Array<ProjectReferenceAsset | null>;
 };
 
-type PendingConfirm = {
+type ArchiveDeleteAction = {
   assetIds: string[];
   diagrams: OverheadDiagramArchiveItem[];
-  linkedAssetCount: number;
-  label: string;
-  message?: string;
-};
-
-type PendingDeleteAsset = {
-  id: string;
   label: string;
 };
 
@@ -369,6 +368,7 @@ export default function ProjectStoryboardOverheadPage() {
   const { projectId, projectName } = useProjectWorkspace();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
+  const { deleteWithUndo } = useProjectDeleteUndo();
   const supportsDiagramEditing = useShotOverheadEditorViewport();
   const [activeType, setActiveType] = useState<ArchiveViewType>("overhead");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
@@ -410,7 +410,6 @@ export default function ProjectStoryboardOverheadPage() {
   const [progressMessage, setProgressMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const [supportsDesktopDrop, setSupportsDesktopDrop] = useState(false);
   const [supportsDirectoryPicker, setSupportsDirectoryPicker] = useState(false);
   const [uploadFailures, setUploadFailures] = useState<ArchiveUploadFailure[]>([]);
@@ -424,7 +423,6 @@ export default function ProjectStoryboardOverheadPage() {
   const [reorderVisual, setReorderVisual] = useState<{ assetId: string; targetId: string | null } | null>(null);
   const [reorderOverlay, setReorderOverlay] = useState<ArchiveReorderOverlay | null>(null);
   const [isOverDeleteZone, setIsOverDeleteZone] = useState(false);
-  const [pendingDeleteAsset, setPendingDeleteAsset] = useState<PendingDeleteAsset | null>(null);
   const { completeGuide, registerAnchor, requestGuide } = useContextualGuide();
   const uploadGuideAnchorRef = useContextualGuideAnchor<HTMLLabelElement>(
     diagramDraft || pendingImport ? null : "archive.upload"
@@ -440,8 +438,6 @@ export default function ProjectStoryboardOverheadPage() {
     || editingAsset
     || renamingAsset
     || preview
-    || pendingConfirm
-    || pendingDeleteAsset
   );
   useContextualGuideBlocker("archive-editor-overlay", guideOverlayOpen);
   useAutoContextualGuide(
@@ -529,8 +525,6 @@ export default function ProjectStoryboardOverheadPage() {
   const reorderOverlayRef = useRef<HTMLDivElement | null>(null);
   const reorderVisualReleaseTimerRef = useRef<number | null>(null);
   const deleteDropZoneRef = useRef<HTMLDivElement | null>(null);
-  const pendingDeleteAssetRef = useRef<PendingDeleteAsset | null>(null);
-  const deleteInspectionInFlightRef = useRef(false);
   const newDiagramButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const metadataFingerprint = editingAsset
@@ -543,7 +537,6 @@ export default function ProjectStoryboardOverheadPage() {
     : "";
   renamingAssetRef.current = renamingAsset;
   renameFingerprintRef.current = renameFingerprint;
-  const deleteActionInFlightRef = useRef(false);
 
   const archiveEditorAutosaveStatus = useMemo<AutosaveStatusValue>(() => {
     const metadataEntries = [...metadataDraftStates.entries()];
@@ -714,11 +707,6 @@ export default function ProjectStoryboardOverheadPage() {
     setPendingMetadataAssetIds(new Set());
     setPendingRenameAssetIds(new Set());
     setPendingReorderGroupKeys(new Set());
-    deleteActionInFlightRef.current = false;
-    deleteInspectionInFlightRef.current = false;
-    pendingDeleteAssetRef.current = null;
-    setPendingDeleteAsset(null);
-    setPendingConfirm(null);
     selectedKeysRef.current = new Set();
     setSelectedKeys(new Set());
     setSelectionAnchorKey(null);
@@ -829,17 +817,6 @@ export default function ProjectStoryboardOverheadPage() {
   }, [exitReorderMode, reorderModeGroupKey]);
 
   useEffect(() => {
-    if (!pendingConfirm || isSaving) return;
-    const handleConfirmEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setPendingConfirm(null);
-      setErrorMessage("");
-    };
-    document.addEventListener("keydown", handleConfirmEscape);
-    return () => document.removeEventListener("keydown", handleConfirmEscape);
-  }, [isSaving, pendingConfirm]);
-
-  useEffect(() => {
     if (!statusMessage) return;
     const timeout = window.setTimeout(() => setStatusMessage(""), 5_000);
     return () => window.clearTimeout(timeout);
@@ -878,7 +855,6 @@ export default function ProjectStoryboardOverheadPage() {
       }
       reorderSessionRef.current = null;
     }
-    pendingDeleteAssetRef.current = null;
     if (pendingImportRef.current) releaseArchivePages(pendingImportRef.current.pages);
   }, []);
 
@@ -1048,8 +1024,6 @@ export default function ProjectStoryboardOverheadPage() {
       || selectionMode
       || selectedKeys.size > 0
       || isSaving
-      || pendingConfirm
-      || pendingDeleteAsset
     ) return null;
 
     for (const group of archiveGroups) {
@@ -1079,8 +1053,6 @@ export default function ProjectStoryboardOverheadPage() {
     completeArchiveOrderByGroupKey,
     isSaving,
     pendingImport,
-    pendingConfirm,
-    pendingDeleteAsset,
     query,
     selectedKeys.size,
     selectionMode
@@ -1093,8 +1065,6 @@ export default function ProjectStoryboardOverheadPage() {
       || selectionMode
       || selectedKeys.size > 0
       || isSaving
-      || pendingConfirm
-      || pendingDeleteAsset
     ) return null;
     return archiveReorderGuideAssetId ?? firstVisibleArchiveAssetId;
   }, [
@@ -1104,8 +1074,6 @@ export default function ProjectStoryboardOverheadPage() {
     firstVisibleArchiveAssetId,
     isSaving,
     pendingImport,
-    pendingConfirm,
-    pendingDeleteAsset,
     selectedKeys.size,
     selectionMode
   ]);
@@ -1117,8 +1085,6 @@ export default function ProjectStoryboardOverheadPage() {
     && !pendingImport
     && visibleSelectionKeys.length >= 2
     && !isSaving
-    && !pendingConfirm
-    && !pendingDeleteAsset
     ? firstVisibleArchiveAssetId
     : null;
   const archiveMultiSelectGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
@@ -2679,150 +2645,133 @@ export default function ProjectStoryboardOverheadPage() {
     }
   }
 
-  async function confirmPendingAction() {
-    if (!projectId || !pendingConfirm || !canEdit || deleteActionInFlightRef.current) return;
-    const action = pendingConfirm;
+  function executeArchiveDelete(action: ArchiveDeleteAction) {
+    if (!projectId || !canEdit || action.assetIds.length + action.diagrams.length === 0) return;
     const operationProjectId = projectId;
     const operationEpoch = archiveProjectEpochRef.current;
-    deleteActionInFlightRef.current = true;
-    setIsSaving(true);
-    setErrorMessage("");
-    let deletedCount = 0;
-    const failures: string[] = [];
-    let remainingAssetIds: string[] = [];
-    const remainingDiagrams: OverheadDiagramArchiveItem[] = [];
-    const warnings: string[] = [];
-    try {
-      if (action.assetIds.length > 0) {
-        for (const assetId of action.assetIds) deletedAssetIdsRef.current.add(assetId);
-        const assetMutationKeys = action.assetIds.map((assetId) => (
-          archiveAssetMutationKey(operationProjectId, assetId)
-        ));
-        // Tombstone first, then wait for older metadata/reorder work on these assets.
-        // This lets deletion lock the group that is actually committed on the server.
-        await archiveMutationQueueRef.current.enqueue(assetMutationKeys, async () => undefined);
-        if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-        const deletingGroupKeys = new Set(action.assetIds.flatMap((assetId) => {
-          const committed = committedPlacementByAssetIdRef.current.get(assetId);
-          if (committed) return [archiveOrderGroupKey(committed.sceneId, committed.cutNumber)];
-          const asset = archiveAssetsRef.current.find((entry) => entry.id === assetId);
-          return asset ? [archiveAssetOrderGroupKey(asset)] : [];
-        }));
-        const deleteGroupVersions = nextGroupOperationVersions(deletingGroupKeys);
-        try {
-          const result = await archiveMutationQueueRef.current.enqueue(
-            [
-              ...assetMutationKeys,
-              ...[...deletingGroupKeys].map((groupKey) => archiveGroupMutationKey(operationProjectId, groupKey))
-            ],
-            () => deleteProjectReferenceAssets(operationProjectId, action.assetIds)
-          );
-          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          removeAssetsFromLocalState(action.assetIds);
-          commitOrderUpdates(result.orders);
-          if (groupOperationVersionsAreCurrent(deleteGroupVersions)) applyOrderUpdates(result.orders);
-          deletedCount += action.assetIds.length;
-          if (result.storageCleanupWarning) warnings.push(result.storageCleanupWarning);
-          if (result.orderNormalizationWarning) warnings.push(result.orderNormalizationWarning);
-        } catch (error) {
-          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          for (const assetId of action.assetIds) deletedAssetIdsRef.current.delete(assetId);
-          if (groupOperationVersionsAreCurrent(deleteGroupVersions)) {
-            setCombinedArchiveAssets(restoreCommittedArchivePlacements(
-              archiveAssetsRef.current,
-              deletingGroupKeys
-            ));
-          }
-          remainingAssetIds = [...action.assetIds];
-          failures.push(error instanceof Error ? error.message : "선택한 이미지를 삭제하지 못했습니다.");
-        }
-      }
-      if (action.diagrams.length > 0) {
-        try {
-          await deleteOverheadDiagramArchives(operationProjectId, action.diagrams.map((item) => item.id));
-          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          removeDiagramsFromLocalState(action.diagrams.map((item) => item.id));
-          deletedCount += action.diagrams.length;
-        } catch (error) {
-          if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-          remainingDiagrams.push(...action.diagrams);
-          failures.push(error instanceof Error ? error.message : "부감도를 삭제하지 못했습니다.");
-        }
-      }
-      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-      if (failures.length === 0) {
-        setPendingConfirm(null);
+    const assetIds = [...new Set(action.assetIds)];
+    const diagramIds = [...new Set(action.diagrams.map((item) => item.id))];
+    const assetIdSet = new Set(assetIds);
+    const diagramIdSet = new Set(diagramIds);
+    const assetSnapshots = archiveAssetsRef.current.flatMap((asset, index) => (
+      assetIdSet.has(asset.id) ? [{ item: asset, index }] : []
+    ));
+    const diagramSnapshots = diagramArchives.flatMap((diagram, index) => (
+      diagramIdSet.has(diagram.id) ? [{ item: diagram, index }] : []
+    ));
+    const deletingGroupKeys = new Set(assetSnapshots.map(({ item }) => archiveAssetOrderGroupKey(item)));
+    const assetMutationKeys = assetIds.map((assetId) => archiveAssetMutationKey(operationProjectId, assetId));
+    let assetReceipt = "";
+    let diagramReceipt = "";
+
+    deleteWithUndo({
+      key: `archive:${[...assetIds.map((id) => `asset:${id}`), ...diagramIds.map((id) => `diagram:${id}`)].sort().join("|")}`,
+      label: action.label,
+      removeLocal: () => {
+        for (const assetId of assetIds) deletedAssetIdsRef.current.add(assetId);
+        removeAssetsFromLocalState(assetIds);
+        removeDiagramsFromLocalState(diagramIds);
         clearSelection();
-        setStatusMessage(`${deletedCount}개 항목을 삭제했습니다.`);
-        if (warnings.length > 0) setErrorMessage(warnings.join(" · "));
-      } else {
-        setPendingConfirm({
-          ...action,
-          assetIds: remainingAssetIds,
-          diagrams: remainingDiagrams,
-          linkedAssetCount: remainingAssetIds.length > 0 ? action.linkedAssetCount : 0,
-          label: remainingAssetIds.length + remainingDiagrams.length === 1
-            ? action.label
-            : `삭제하지 못한 ${remainingAssetIds.length + remainingDiagrams.length}개 항목`
-        });
-        setSelectionMode(selectedKeysRef.current.size > 0);
-        setErrorMessage([
-          deletedCount > 0 ? `${deletedCount}개 삭제됨` : "",
-          `${failures.length}개 삭제 실패`,
-          failures[0]
-        ].filter(Boolean).join(" · "));
+        setErrorMessage("");
+        setStatusMessage(`${action.label}을 삭제했습니다. Command/Ctrl + Z로 되돌릴 수 있습니다.`);
+      },
+      restoreLocal: () => {
+        for (const assetId of assetIds) deletedAssetIdsRef.current.delete(assetId);
+        const restoredAssets = insertSnapshotsAtIndices(
+          archiveAssetsRef.current.filter((asset) => !assetIdSet.has(asset.id)),
+          assetSnapshots
+        );
+        commitArchiveAssetPlacements(assetSnapshots.map(({ item }) => item));
+        setCombinedArchiveAssets(restoredAssets);
+        setDiagramArchives((current) => insertSnapshotsAtIndices(
+          current.filter((diagram) => !diagramIdSet.has(diagram.id)),
+          diagramSnapshots
+        ));
+        setStatusMessage(`${action.label} 삭제를 되돌렸습니다.`);
+      },
+      deleteRemote: async () => {
+        try {
+          if (assetIds.length > 0) {
+            const result = await archiveMutationQueueRef.current.enqueue(
+              [
+                ...assetMutationKeys,
+                ...[...deletingGroupKeys].map((groupKey) => archiveGroupMutationKey(operationProjectId, groupKey))
+              ],
+              () => deleteProjectReferenceAssets(operationProjectId, assetIds)
+            );
+            assetReceipt = result.receipt;
+            if (archiveOperationIsCurrent(operationProjectId, operationEpoch)) {
+              commitOrderUpdates(result.orders);
+              applyOrderUpdates(result.orders);
+              const warning = [result.storageCleanupWarning, result.orderNormalizationWarning]
+                .filter(Boolean).join(" · ");
+              if (warning) setErrorMessage(warning);
+            }
+          }
+          if (diagramIds.length > 0) {
+            const result = await deleteOverheadDiagramArchives(operationProjectId, diagramIds);
+            diagramReceipt = result.receipt;
+          }
+        } catch (error) {
+          await Promise.allSettled([
+            assetReceipt
+              ? restoreDeletedProjectReferenceAssets(operationProjectId, assetReceipt)
+              : Promise.resolve(),
+            diagramReceipt
+              ? restoreDeletedOverheadDiagramArchives(operationProjectId, diagramReceipt)
+              : Promise.resolve()
+          ]);
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        const [assetResult, restoredDiagrams] = await Promise.all([
+          assetReceipt
+            ? restoreDeletedProjectReferenceAssets(operationProjectId, assetReceipt)
+            : Promise.resolve(null),
+          diagramReceipt
+            ? restoreDeletedOverheadDiagramArchives(operationProjectId, diagramReceipt)
+            : Promise.resolve([])
+        ]);
+        if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
+        if (assetResult) {
+          mergeUploadedAssets(assetResult.assets);
+          commitOrderUpdates(assetResult.orders);
+          applyOrderUpdates(assetResult.orders);
+          if (assetResult.orderNormalizationWarning) setErrorMessage(assetResult.orderNormalizationWarning);
+        }
+        if (restoredDiagrams.length > 0) {
+          const restoredIds = new Set(restoredDiagrams.map((item) => item.id));
+          setDiagramArchives((current) => [
+            ...restoredDiagrams,
+            ...current.filter((item) => !restoredIds.has(item.id))
+          ]);
+        }
+      },
+      finalize: async () => {
+        await Promise.all([
+          assetReceipt
+            ? finalizeDeletedProjectReferenceAssets(operationProjectId, assetReceipt)
+            : Promise.resolve(),
+          diagramReceipt
+            ? finalizeDeletedOverheadDiagramArchives(operationProjectId, diagramReceipt)
+            : Promise.resolve()
+        ]);
       }
-    } finally {
-      if (archiveOperationIsCurrent(operationProjectId, operationEpoch)) {
-        deleteActionInFlightRef.current = false;
-        setIsSaving(false);
-      }
-    }
+    });
   }
 
-  async function requestDraggedAssetDelete(assetId: string) {
-    if (!projectId || !canEdit || pendingDeleteAssetRef.current || pendingConfirm) return;
-    const operationProjectId = projectId;
-    const operationEpoch = archiveProjectEpochRef.current;
+  function requestDraggedAssetDelete(assetId: string) {
     const asset = archiveAssetsRef.current.find((entry) => entry.id === assetId);
     if (!asset) {
       setErrorMessage("삭제할 이미지를 찾을 수 없습니다.");
       return;
     }
-    const pending = { id: asset.id, label: archiveDisplayName(asset) };
-    pendingDeleteAssetRef.current = pending;
-    setPendingDeleteAsset(pending);
-    setErrorMessage("");
-    try {
-      const inspection = await inspectProjectReferenceAssets(operationProjectId, [pending.id]);
-      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-      if (pendingDeleteAssetRef.current?.id !== pending.id) return;
-      setPendingConfirm({
-        assetIds: [pending.id],
-        diagrams: [],
-        linkedAssetCount: inspection.linkedAssetCount,
-        label: pending.label,
-        message: [
-          "이 이미지를 삭제하시겠습니까? 삭제한 이미지는 복구할 수 없습니다.",
-          inspection.linkedAssetCount > 0
-            ? "진행도에 연결된 파일의 연결도 함께 해제됩니다."
-            : ""
-        ].filter(Boolean).join(" ")
-      });
-    } catch (error) {
-      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-      if (pendingDeleteAssetRef.current?.id === pending.id) {
-        setErrorMessage(error instanceof Error ? error.message : "삭제할 이미지를 확인하지 못했습니다.");
-      }
-    } finally {
-      if (
-        archiveOperationIsCurrent(operationProjectId, operationEpoch)
-        && pendingDeleteAssetRef.current?.id === pending.id
-      ) {
-        pendingDeleteAssetRef.current = null;
-        setPendingDeleteAsset(null);
-      }
-    }
+    executeArchiveDelete({
+      assetIds: [asset.id],
+      diagrams: [],
+      label: archiveDisplayName(asset)
+    });
   }
 
   function updateSelectedKeys(
@@ -2897,31 +2846,13 @@ export default function ProjectStoryboardOverheadPage() {
     setSelectionMode(true);
   }
 
-  async function deleteSelectedAssets() {
-    if (!projectId || selectedKeys.size === 0 || deleteInspectionInFlightRef.current) return;
-    const operationProjectId = projectId;
-    const operationEpoch = archiveProjectEpochRef.current;
-    setErrorMessage("");
-    deleteInspectionInFlightRef.current = true;
-    try {
-      const assetInspection = selectedReferenceAssetIds.length > 0
-        ? await inspectProjectReferenceAssets(operationProjectId, selectedReferenceAssetIds)
-        : null;
-      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-      setPendingConfirm({
-        assetIds: selectedReferenceAssetIds,
-        diagrams: selectedDiagramItems,
-        linkedAssetCount: assetInspection?.linkedAssetCount ?? 0,
-        label: selectedCount ? `선택한 ${selectedCount}개 항목` : "선택한 항목"
-      });
-    } catch (error) {
-      if (!archiveOperationIsCurrent(operationProjectId, operationEpoch)) return;
-      setErrorMessage(error instanceof Error ? error.message : "삭제할 자료를 확인하지 못했습니다.");
-    } finally {
-      if (archiveOperationIsCurrent(operationProjectId, operationEpoch)) {
-        deleteInspectionInFlightRef.current = false;
-      }
-    }
+  function deleteSelectedAssets() {
+    if (!projectId || selectedCount === 0) return;
+    executeArchiveDelete({
+      assetIds: selectedReferenceAssetIds,
+      diagrams: selectedDiagramItems,
+      label: selectedCount === 1 ? "선택한 항목" : `선택한 ${selectedCount}개 항목`
+    });
   }
 
   function clearSelection() {
@@ -3168,20 +3099,49 @@ export default function ProjectStoryboardOverheadPage() {
       throw new Error("공간 프리셋을 삭제할 권한을 확인할 수 없습니다.");
     }
     const operationProjectId = projectId;
-    try {
-      await deleteShotOverheadSpacePreset(operationProjectId, {
-        presetId: preset.id,
-        expectedUpdatedAt: preset.updatedAt || null
-      });
-      if (activeProjectIdRef.current === operationProjectId) {
+    const originalIndex = spacePresets.findIndex((item) => item.id === preset.id);
+    let receipt = "";
+    const accepted = deleteWithUndo({
+      key: `shot-overhead-space-preset:${preset.id}`,
+      label: `${preset.location.displayName} 공간 프리셋`,
+      removeLocal: () => {
         setSpacePresets((current) => current.filter((item) => item.id !== preset.id));
         setErrorMessage("");
+      },
+      restoreLocal: () => {
+        setSpacePresets((current) => insertSnapshotsAtIndices(
+          current.filter((item) => item.id !== preset.id),
+          [{ item: preset, index: Math.max(0, originalIndex) }]
+        ));
+      },
+      deleteRemote: async () => {
+        try {
+          receipt = await deleteShotOverheadSpacePreset(operationProjectId, {
+            presetId: preset.id,
+            expectedUpdatedAt: preset.updatedAt || null
+          });
+        } catch (error) {
+          if (activeProjectIdRef.current === operationProjectId) {
+            setErrorMessage(error instanceof Error ? error.message : "공간 프리셋을 삭제하지 못했습니다.");
+          }
+          throw error;
+        }
+      },
+      restoreRemote: async () => {
+        const restored = await restoreDeletedShotOverheadSpacePreset(operationProjectId, receipt);
+        if (!restored || activeProjectIdRef.current !== operationProjectId) return;
+        setSpacePresets((current) => insertSnapshotsAtIndices(
+          current.filter((item) => item.id !== restored.id),
+          [{ item: restored, index: Math.max(0, originalIndex) }]
+        ));
+        setErrorMessage("");
+      },
+      finalize: async () => {
+        await finalizeDeletedShotOverheadSpacePreset(operationProjectId, receipt);
       }
-    } catch (error) {
-      if (activeProjectIdRef.current === operationProjectId) {
-        setErrorMessage(error instanceof Error ? error.message : "공간 프리셋을 삭제하지 못했습니다.");
-      }
-      throw error;
+    });
+    if (!accepted) {
+      throw new Error("이미 처리 중인 공간 프리셋입니다.");
     }
   }
 
@@ -3278,7 +3238,6 @@ export default function ProjectStoryboardOverheadPage() {
       || selectionMode
       || selectedKeysRef.current.size > 0
       || orderedAssetIds.length < 1
-      || pendingDeleteAssetRef.current !== null
       || reorderSessionRef.current !== null
     ) return;
     const groupKey = archiveOrderGroupKey(sceneId, cutNumber);
@@ -4604,8 +4563,6 @@ export default function ProjectStoryboardOverheadPage() {
                       && !selectionMode
                       && selectedKeys.size === 0
                       && !isSaving
-                      && !pendingConfirm
-                      && !pendingDeleteAsset
                       && !(group.sceneId && !group.scene)
                       && !(group.sceneId === null && cutGroup.cutNumber !== null)
                       && orderedAssets.every((asset) => archiveAssetOrderGroupKey(asset) === orderGroupKey)
@@ -4692,8 +4649,6 @@ export default function ProjectStoryboardOverheadPage() {
                         && !selectionMode
                         && selectedKeys.size === 0
                         && !isSaving
-                        && !pendingConfirm
-                        && !pendingDeleteAsset
                         && !deletedAssetIdsRef.current.has(asset.id);
                       const assetReorderEnabled = dragDeleteEnabled && groupReorderEnabled;
                       const visibleOrderNumber = visibleOrderByAssetId.get(asset.id) ?? 1;
@@ -4935,8 +4890,6 @@ export default function ProjectStoryboardOverheadPage() {
       {reorderOverlay
         && canEdit
         && !selectionMode
-        && !pendingConfirm
-        && !pendingDeleteAsset
         && typeof document !== "undefined"
         ? createPortal(
           <ArchiveDeleteDropZone
@@ -5061,28 +5014,6 @@ export default function ProjectStoryboardOverheadPage() {
           onSave={closeAssetRename}
         />
       ) : null}
-      {pendingConfirm ? (
-        <div className="fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[95] mx-auto max-w-lg">
-          <CompactConfirm
-            message={pendingConfirm.message ?? [
-              `${pendingConfirm.label}을 삭제할까요?`,
-              pendingConfirm.linkedAssetCount > 0
-                ? `진행도에 연결된 파일 ${pendingConfirm.linkedAssetCount}개의 연결도 해제됩니다.`
-                : "",
-              pendingConfirm.diagrams.length > 0
-                ? "선택한 직접 만든 부감도의 연결 정보도 함께 삭제됩니다."
-                : ""
-            ].filter(Boolean).join(" ")}
-            errorMessage={errorMessage}
-            isSaving={isSaving}
-            onConfirm={() => void confirmPendingAction()}
-            onCancel={() => {
-              setPendingConfirm(null);
-              setErrorMessage("");
-            }}
-          />
-        </div>
-      ) : null}
       <ImagePreviewModal imageUrl={preview?.url ?? null} title={preview?.title ?? "자료"} onClose={() => setPreview(null)} />
       <style jsx global>{`
         @keyframes archive-reorder-jiggle {
@@ -5113,37 +5044,6 @@ function ArchiveCutText({ cutNo, typeLabel }: { cutNo: string; typeLabel?: strin
       </p>
       {typeLabel ? <span className="shrink-0 text-[10px] text-field-muted">{typeLabel}</span> : null}
     </div>
-  );
-}
-
-function CompactConfirm({
-  message,
-  errorMessage,
-  isSaving,
-  onConfirm,
-  onCancel
-}: {
-  message: string;
-  errorMessage: string;
-  isSaving: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <section className="flex flex-wrap items-center gap-2 border border-field-divider bg-field-elevated p-3" role="alertdialog" aria-label="삭제 확인">
-      <p className="min-w-0 flex-1 text-xs leading-5 text-field-text">{message}</p>
-      {errorMessage ? (
-        <p className="basis-full text-xs font-bold leading-5 text-field-danger" role="alert">
-          {errorMessage}
-        </p>
-      ) : null}
-      <button type="button" disabled={isSaving} onClick={onCancel} className="min-h-9 border border-field-divider bg-field-panel px-3 text-xs font-bold text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover disabled:opacity-50">
-        취소
-      </button>
-      <button type="button" disabled={isSaving} onClick={onConfirm} className="min-h-9 border border-field-danger bg-field-danger px-3 text-xs font-bold text-field-text disabled:opacity-50">
-        {isSaving ? "처리 중" : "삭제"}
-      </button>
-    </section>
   );
 }
 
@@ -6425,4 +6325,17 @@ function archiveUploadSummary(
 
 function errorMessageOf(error: unknown, fallback: string) {
   return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+function insertSnapshotsAtIndices<T extends { id: string }>(
+  current: T[],
+  snapshots: Array<{ item: T; index: number }>
+) {
+  if (snapshots.length === 0) return current;
+  const restoredIds = new Set(snapshots.map(({ item }) => item.id));
+  const next = current.filter((item) => !restoredIds.has(item.id));
+  for (const { item, index } of [...snapshots].sort((left, right) => left.index - right.index)) {
+    next.splice(Math.min(Math.max(0, index), next.length), 0, item);
+  }
+  return next;
 }

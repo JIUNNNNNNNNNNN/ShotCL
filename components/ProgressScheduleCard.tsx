@@ -39,6 +39,8 @@ export function ProgressScheduleCard({ item, onOpen, onImagePreview }: ProgressS
           <img
             src={item.imageUrl}
             alt={`${title} 그림`}
+            loading="lazy"
+            decoding="async"
             className="block h-full w-full  object-contain"
           />
         </button>

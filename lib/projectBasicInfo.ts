@@ -93,6 +93,15 @@ export function createBlankProjectMainStaffMember(index = 0): ProjectMainStaffMe
   };
 }
 
+/** DB 변경 없이 basic-info actors JSON에 저장되는 새 배우 ID를 만듭니다. */
+export function createBlankProjectActor(): ProjectActor {
+  return {
+    id: createActorId(`new-${Date.now()}-${Math.random().toString(16).slice(2)}`),
+    role: "",
+    name: ""
+  };
+}
+
 /**
  * 특정 회차에 참여하는 메인 스태프를 stable id와 저장 순서를 유지한 채 반환합니다.
  * 일촬표용 호출에서는 dailyPlanOnly를 true로 전달해 표시 여부까지 함께 판정합니다.
@@ -260,11 +269,23 @@ function findInvalidMainStaffEpisodeNumber(
 
 function normalizeActors(value: unknown): ProjectActor[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 200).map((actor) => {
+  const usedIds = new Set<string>();
+  return value.slice(0, 200).map((actor, index) => {
     const source = isRecord(actor) ? actor : {};
+    const role = normalizeText(source.role, 100);
+    const name = normalizeText(source.name, 100);
+    const requestedId = normalizeActorId(source.id);
+    let id = requestedId || createActorId(`legacy-${index}-${role}-${name}`);
+    let collision = 1;
+    while (usedIds.has(id)) {
+      id = createActorId(`${requestedId || `legacy-${index}-${role}-${name}`}-${collision}`);
+      collision += 1;
+    }
+    usedIds.add(id);
     return {
-      role: normalizeText(source.role, 100),
-      name: normalizeText(source.name, 100)
+      id,
+      role,
+      name
     };
   }).filter((actor) => actor.role || actor.name);
 }
@@ -283,6 +304,20 @@ function normalizeText(value: unknown, maxLength: number) {
 function createStaffId(seed: string) {
   const normalized = seed.toLocaleLowerCase("ko-KR").replace(/[^0-9a-z가-힣]+/g, "-").replace(/^-|-$/g, "");
   return `main_staff_${normalized || "member"}`;
+}
+
+function normalizeActorId(value: unknown) {
+  const normalized = String(value ?? "").trim().slice(0, 160);
+  return /^project_actor_[0-9a-z-]+$/i.test(normalized) ? normalized : "";
+}
+
+function createActorId(seed: string) {
+  let hash = 2166136261;
+  for (const character of seed.normalize("NFKC")) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `project_actor_${(hash >>> 0).toString(36)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

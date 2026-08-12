@@ -1,9 +1,14 @@
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { normalizeShotStatus, shotDraftToInsertRow, shotFromRow, shotPatchToRow } from "@/lib/data/mappers";
 import { createLocalId, readLocalBuckets, writeLocalBuckets } from "@/lib/data/localStore";
+import { isValidDatabaseProjectId } from "@/lib/projectId";
 import type { Shot, ShotDraft, ShotStatus } from "@/lib/types";
 
 const shotListColumns = "id,project_id,daily_plan_id,analysis_run_id,scene_number,cut_number,shot_number,title,description,location,characters,memo,notes,order_index,status,storyboard_image_url,source_file_id,source_page,source_row,created_at,updated_at";
+
+async function loadFallbackSupabaseClient() {
+  const { getSupabaseBrowserClient } = await import("@/lib/supabase/client");
+  return getSupabaseBrowserClient();
+}
 
 async function getSharedRole(projectId: string): Promise<"admin" | "progress" | null> {
   try {
@@ -28,7 +33,7 @@ export async function listShots(projectId: string, dailyPlanId?: string): Promis
   } catch {
     // 공유 세션이 없는 레거시 프로젝트는 기존 저장소 조회로 이어집니다.
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     let query = supabase
@@ -88,7 +93,7 @@ export async function createShotsFromDrafts(projectId: string, drafts: ShotDraft
   }
   const existingShots = await listShots(projectId, dailyPlanId);
   const maxOrder = existingShots.reduce((max, shot) => Math.max(max, shot.orderIndex), 0);
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const rows = drafts.map((draft, index) => shotDraftToInsertRow(projectId, draft, maxOrder + index + 1, dailyPlanId));
@@ -217,7 +222,7 @@ export async function updateShot(shotId: string, patch: Partial<Shot>, projectId
     if (!response.ok || !payload.shot) throw new Error(payload.error || "컷을 수정하지 못했습니다.");
     return shotFromRow(payload.shot);
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const { data, error } = await supabase.from("shots").update(shotPatchToRow(patch)).eq("id", shotId).select("*").single();
@@ -283,7 +288,7 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
     if (!(error instanceof TypeError)) throw error;
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   const updatedShot = await updateShot(shot.id, { status: newStatus });
 
   if (!supabase) {
@@ -309,51 +314,111 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
   return updatedShot;
 }
 
-/** 현재 회차의 컷 목록을 초기화할 때 사용합니다. */
-export async function deleteAllShots(projectId: string, dailyPlanId?: string): Promise<void> {
-  if (await getSharedRole(projectId)) {
-    const query = dailyPlanId ? `?dailyPlanId=${encodeURIComponent(dailyPlanId)}` : "";
+/** 현재 회차의 컷 목록을 초기화하고 서버 서명 복원 영수증을 돌려줍니다. */
+export async function deleteAllShots(projectId: string, dailyPlanId: string): Promise<string | null> {
+  if (isValidDatabaseProjectId(projectId)) {
+    const query = `?dailyPlanId=${encodeURIComponent(dailyPlanId)}`;
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots${query}`, { method: "DELETE" });
-    if (!response.ok) {
-      const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; receipt?: unknown };
+    if (!response.ok || typeof payload.receipt !== "string") {
       throw new Error(payload.error || "컷 목록을 삭제하지 못했습니다.");
     }
-    return;
+    return payload.receipt;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     let query = supabase.from("shots").delete().eq("project_id", projectId);
     if (dailyPlanId) query = query.eq("daily_plan_id", dailyPlanId);
     const { error } = await query;
     if (error) throw error;
-    return;
+    return null;
   }
 
   const buckets = readLocalBuckets();
   writeLocalBuckets({ shots: buckets.shots.filter((shot) => shot.projectId !== projectId || (dailyPlanId ? shot.dailyPlanId !== dailyPlanId : false)) }, projectId);
+  return null;
 }
 
-/** 컷을 삭제합니다. */
-export async function deleteShot(shot: Shot): Promise<void> {
-  if (await getSharedRole(shot.projectId)) {
+/** 컷을 삭제하고 서버 서명 복원 영수증을 돌려줍니다. */
+export async function deleteShot(shot: Shot): Promise<string | null> {
+  if (isValidDatabaseProjectId(shot.projectId)) {
     const response = await fetch(`/api/projects/${encodeURIComponent(shot.projectId)}/shots/${encodeURIComponent(shot.id)}`, { method: "DELETE" });
-    if (!response.ok) {
-      const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; receipt?: unknown };
+    if (!response.ok || typeof payload.receipt !== "string") {
       throw new Error(payload.error || "컷을 삭제하지 못했습니다.");
     }
-    return;
+    return payload.receipt;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const { error } = await supabase.from("shots").delete().eq("id", shot.id);
     if (error) throw error;
-    return;
+    return null;
   }
 
   const buckets = readLocalBuckets();
   writeLocalBuckets({ shots: buckets.shots.filter((item) => item.id !== shot.id) }, shot.projectId);
+  return null;
+}
+
+/** 삭제 Undo용 stable-ID 복원입니다. 새 컷 생성 경로와 섞지 않습니다. */
+export async function restoreDeletedShots(
+  projectId: string,
+  receipt: string | null,
+  fallbackShots: readonly Shot[]
+): Promise<void> {
+  if (receipt) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "restore_deleted", receipt })
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || "컷을 복원하지 못했습니다.");
+    }
+    return;
+  }
+  const shots = fallbackShots;
+  if (shots.length === 0) return;
+  const supabase = await loadFallbackSupabaseClient();
+  if (supabase) {
+    const rows = shots.map((shot) => shotToRestoreRow(shot));
+    const { error } = await supabase.from("shots").upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+    if (error) throw error;
+    return;
+  }
+  const buckets = readLocalBuckets();
+  const restoredIds = new Set(shots.map((shot) => shot.id));
+  writeLocalBuckets({
+    shots: [...buckets.shots.filter((shot) => !restoredIds.has(shot.id)), ...shots]
+  }, projectId);
+}
+
+/** DB entity finalize는 영수증 scope를 검증한 뒤 안전하게 폐기하는 idempotent no-op입니다. */
+export async function finalizeDeletedShots(projectId: string, receipt: string | null): Promise<void> {
+  if (!receipt) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shots`, {
+    method: "POST",
+    keepalive: receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt })
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || "컷 삭제를 확정하지 못했습니다.");
+  }
+}
+
+function shotToRestoreRow(shot: Shot) {
+  return {
+    id: shot.id,
+    ...shotDraftToInsertRow(shot.projectId, shot, shot.orderIndex, shot.dailyPlanId),
+    created_at: shot.createdAt,
+    updated_at: shot.updatedAt
+  };
 }
 
 /** 편집 모달의 기존 위/아래 버튼으로 촬영 순서를 한 칸 바꿉니다. */
@@ -380,7 +445,7 @@ export async function moveShot(projectId: string, shotId: string, direction: "up
 
   const current = shots[currentIndex];
   const target = shots[targetIndex];
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const [currentResult, targetResult] = await Promise.all([
@@ -430,7 +495,7 @@ export async function reorderShots(projectId: string, dailyPlanId: string, order
     throw new Error("현재 프로젝트와 회차의 전체 컷만 정렬할 수 있습니다.");
   }
 
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (supabase) {
     const { data: rawShots, error: selectError } = await supabase
       .from("shots")

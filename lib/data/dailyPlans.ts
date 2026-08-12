@@ -24,7 +24,6 @@ import {
   encodeDailyPlanMemo,
   normalizeDailyPlanPrintMeta
 } from "@/lib/dailyPlan/printMeta";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { calculateDailyProgressByPlan } from "@/lib/progress/dailyProgress";
@@ -57,8 +56,19 @@ export type DailyPlanListItem = DailyPlan & {
   sceneNumbers: string[];
 };
 
+export type DeletedDailyPlanMutation = {
+  receipt: string | null;
+  fallback: DailyPlanWithShots | null;
+  progressShotIds: string[];
+};
+
 const dailyPlanListRequests = new Map<string, Promise<DailyPlanListItem[]>>();
 const dailyPlanListColumns = "id,project_id,title,source_type,source_file_name,shooting_date,episode,call_time,meeting_location,shooting_locations,meal_times,memo,created_at,updated_at";
+
+async function loadFallbackSupabaseClient() {
+  const { getSupabaseBrowserClient } = await import("@/lib/supabase/client");
+  return getSupabaseBrowserClient();
+}
 
 export type UpdateDailyPlanGatheringAddressInput = {
   projectId: string;
@@ -269,7 +279,7 @@ async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
   } catch (error) {
     if (error instanceof Error && error.message === "Key staff 권한이 필요합니다.") throw error;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const { data, error } = await supabase
@@ -373,7 +383,7 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
   } catch (error) {
     if (error instanceof Error && error.message === "Key staff 권한이 필요합니다.") throw error;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     const { data: planRow, error: planError } = await supabase
@@ -404,6 +414,42 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
     plan,
     shots: dailyPlanShots.filter((shot) => shot.dailyPlanId === dailyPlanId).sort((a, b) => a.orderIndex - b.orderIndex)
   };
+}
+
+/** Progress 회차 전환용: 편집기 daily_plan_shots 없이 표시 메타데이터만 읽습니다. */
+export async function getProgressDailyPlan(
+  projectId: string,
+  dailyPlanId: string
+): Promise<DailyPlan | null> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}?progress=1`,
+      { cache: "no-store" }
+    );
+    if (response.ok) {
+      const payload = (await response.json()) as { plan?: Record<string, unknown> };
+      return payload.plan ? dailyPlanFromRow(payload.plan) : null;
+    }
+    if (response.status === 403) throw new Error("Key staff 권한이 필요합니다.");
+  } catch (error) {
+    if (error instanceof Error && error.message === "Key staff 권한이 필요합니다.") throw error;
+  }
+
+  const supabase = await loadFallbackSupabaseClient();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("daily_plans")
+      .select(dailyPlanListColumns)
+      .eq("project_id", projectId)
+      .eq("id", dailyPlanId)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? dailyPlanFromRow(data) : null;
+  }
+
+  return readLocalBuckets().dailyPlans.find((plan) => (
+    plan.projectId === projectId && plan.id === dailyPlanId
+  )) ?? null;
 }
 
 /** 기타일정의 진행용 메모와 그림만 저장하며 컷/진행표 데이터는 변경하지 않습니다. */
@@ -888,7 +934,7 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
     if (input.dailyPlanId) {
@@ -1030,7 +1076,7 @@ export async function saveDailyPlanWithShots(input: SaveDailyPlanInput): Promise
 }
 
 async function findSupabaseDuplicateDailyPlan(projectId: string, draft: DailyPlanDraft): Promise<DailyPlanWithShots | null> {
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (!supabase) return null;
 
   const { data, error } = await supabase.from("daily_plans").select("*").eq("project_id", projectId);
@@ -1050,7 +1096,7 @@ async function findSupabaseDuplicateDailyPlan(projectId: string, draft: DailyPla
 }
 
 async function insertDailyPlanShots(projectId: string, dailyPlanId: string, shots: DailyPlanShotDraft[]) {
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
   if (!supabase || shots.length === 0) return [];
 
   const rows = shots.map((shot, index) => dailyPlanShotDraftToRow(projectId, dailyPlanId, shot, index + 1));
@@ -1101,12 +1147,14 @@ export async function duplicateDailyPlan(projectId: string, dailyPlanId: string)
   });
 }
 
-/** 저장된 일촬표와 연결 컷 행을 삭제합니다. */
-export async function deleteDailyPlan(projectId: string, dailyPlanId: string): Promise<void> {
+/** 저장된 일촬표와 cascade child를 삭제하고 복원 영수증을 돌려줍니다. */
+export async function deleteDailyPlan(projectId: string, dailyPlanId: string): Promise<DeletedDailyPlanMutation> {
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, { method: "DELETE" });
-    const payload = (await response.json().catch(() => ({}))) as { error?: string };
-    if (response.ok) return;
+    const payload = (await response.json().catch(() => ({}))) as { error?: string; receipt?: unknown };
+    if (response.ok && typeof payload.receipt === "string") {
+      return { receipt: payload.receipt, fallback: null, progressShotIds: [] };
+    }
     if (isValidDatabaseProjectId(projectId) || response.status === 403) {
       throw new Error(payload.error || (response.status === 403 ? "Key staff 권한이 필요합니다." : "일촬표를 삭제하지 못했습니다."));
     }
@@ -1114,15 +1162,40 @@ export async function deleteDailyPlan(projectId: string, dailyPlanId: string): P
     // 실제 DB 프로젝트의 API 실패는 브라우저 fallback으로 성공처럼 처리하지 않습니다.
     if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
   }
-  const supabase = getSupabaseBrowserClient();
+  const supabase = await loadFallbackSupabaseClient();
 
   if (supabase) {
+    const [{ data: planRow, error: planError }, { data: shotRows, error: shotError }, { data: progressRows, error: progressError }] = await Promise.all([
+      supabase.from("daily_plans").select("*").eq("id", dailyPlanId).eq("project_id", projectId).maybeSingle(),
+      supabase.from("daily_plan_shots").select("*").eq("daily_plan_id", dailyPlanId).eq("project_id", projectId).order("order_index"),
+      supabase.from("shots").select("id").eq("daily_plan_id", dailyPlanId).eq("project_id", projectId)
+    ]);
+    if (planError) throw planError;
+    if (shotError) throw shotError;
+    if (progressError) throw progressError;
+    if (!planRow) throw new Error("삭제할 일촬표를 찾을 수 없습니다.");
+    const fallback = {
+      plan: dailyPlanFromRow(planRow),
+      shots: (shotRows ?? []).map(dailyPlanShotFromRow)
+    };
     const { error } = await supabase.from("daily_plans").delete().eq("id", dailyPlanId).eq("project_id", projectId);
     if (error) throw error;
-    return;
+    return {
+      receipt: null,
+      fallback,
+      progressShotIds: (progressRows ?? []).map((row) => String(row.id))
+    };
   }
 
   const buckets = readLocalBuckets();
+  const plan = buckets.dailyPlans.find((item) => item.id === dailyPlanId && item.projectId === projectId);
+  if (!plan) throw new Error("삭제할 일촬표를 찾을 수 없습니다.");
+  const fallback = {
+    plan,
+    shots: buckets.dailyPlanShots
+      .filter((shot) => shot.dailyPlanId === dailyPlanId && shot.projectId === projectId)
+      .sort((left, right) => left.orderIndex - right.orderIndex)
+  };
   writeLocalBuckets(
     {
       dailyPlans: buckets.dailyPlans.filter((plan) => plan.id !== dailyPlanId),
@@ -1130,6 +1203,93 @@ export async function deleteDailyPlan(projectId: string, dailyPlanId: string): P
     },
     projectId
   );
+  return { receipt: null, fallback, progressShotIds: [] };
+}
+
+/** 삭제 영수증 또는 legacy local snapshot으로 stable-ID 회차를 복원합니다. */
+export async function restoreDeletedDailyPlan(
+  projectId: string,
+  dailyPlanId: string,
+  mutation: DeletedDailyPlanMutation | null
+): Promise<void> {
+  if (!mutation) throw new Error("일촬표 복원 정보가 없습니다.");
+  if (mutation.receipt) {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "restore_deleted", receipt: mutation.receipt })
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(payload.error || "일촬표를 복원하지 못했습니다.");
+    }
+    return;
+  }
+  if (!mutation.fallback) throw new Error("일촬표 복원 정보가 없습니다.");
+  const supabase = await loadFallbackSupabaseClient();
+  if (supabase) {
+    const { plan, shots } = mutation.fallback;
+    const { error: planError } = await supabase.from("daily_plans").upsert([{
+      id: plan.id,
+      ...dailyPlanDraftToRow(projectId, plan),
+      created_at: plan.createdAt,
+      updated_at: plan.updatedAt
+    }], { onConflict: "id", ignoreDuplicates: true });
+    if (planError) throw planError;
+    if (shots.length > 0) {
+      const rows = shots.map((shot) => ({
+        id: shot.id,
+        ...dailyPlanShotDraftToRow(projectId, dailyPlanId, shot, shot.orderIndex),
+        created_at: shot.createdAt,
+        updated_at: shot.updatedAt
+      }));
+      const { error: shotError } = await supabase
+        .from("daily_plan_shots")
+        .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+      if (shotError) throw shotError;
+    }
+    if (mutation.progressShotIds.length > 0) {
+      const { error: relationError } = await supabase
+        .from("shots")
+        .update({ daily_plan_id: dailyPlanId })
+        .eq("project_id", projectId)
+        .in("id", mutation.progressShotIds)
+        .is("daily_plan_id", null);
+      if (relationError) throw relationError;
+    }
+    return;
+  }
+  const buckets = readLocalBuckets();
+  const restoredShotIds = new Set(mutation.fallback.shots.map((shot) => shot.id));
+  writeLocalBuckets({
+    dailyPlans: [
+      ...buckets.dailyPlans.filter((plan) => plan.id !== dailyPlanId),
+      mutation.fallback.plan
+    ],
+    dailyPlanShots: [
+      ...buckets.dailyPlanShots.filter((shot) => !restoredShotIds.has(shot.id)),
+      ...mutation.fallback.shots
+    ]
+  }, projectId);
+}
+
+/** DB-only 회차 삭제 finalize는 receipt scope 검증 후 idempotent하게 끝납니다. */
+export async function finalizeDeletedDailyPlan(
+  projectId: string,
+  dailyPlanId: string,
+  mutation: DeletedDailyPlanMutation | null
+): Promise<void> {
+  if (!mutation?.receipt) return;
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`, {
+    method: "POST",
+    keepalive: mutation.receipt.length <= 48_000,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "finalize_deleted", receipt: mutation.receipt })
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { error?: string };
+    throw new Error(payload.error || "일촬표 삭제를 확정하지 못했습니다.");
+  }
 }
 
 /** 일촬표 컷 행을 기존 shots 진행표에 넣을 수 있는 초안으로 바꿉니다. */

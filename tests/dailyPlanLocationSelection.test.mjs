@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const editorPath = new URL("../components/DailyPlanEditor.tsx", import.meta.url);
+const locationMenuPath = new URL("../components/DailyPlanLocationMenu.tsx", import.meta.url);
 
 function sourceBetween(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -106,4 +107,39 @@ test("location changes stay in the existing local autosave snapshot without refe
   assert.match(autosave, /plan,[\s\S]*?printMeta,[\s\S]*?locations,[\s\S]*?mealTimes,[\s\S]*?scenes/u);
   assert.match(autosave, /saveCurrentPlan\(false, undefined, true, snapshot\)/u);
   assert.doesNotMatch(autosave, /router\.refresh|fetch\(/u);
+});
+
+test("Daily Plan entity deletes are immediate, undoable, and use the existing autosave queue", async () => {
+  const [source, menuSource] = await Promise.all([
+    readFile(editorPath, "utf8"),
+    readFile(locationMenuPath, "utf8")
+  ]);
+  const deleteLocation = sourceBetween(
+    source,
+    "function deleteLocation(index: number)",
+    "async function openDaumAddressSearch("
+  );
+  const deleteRows = sourceBetween(
+    source,
+    "function deleteTimetableRow(rowKey: string)",
+    "function persistActorMutation("
+  );
+  const deleteActor = sourceBetween(
+    source,
+    "function deleteActorRow(actorId: string)",
+    "function updateSceneLocation("
+  );
+
+  for (const deleteSource of [deleteLocation, deleteRows, deleteActor]) {
+    assert.match(deleteSource, /deleteWithUndo\(\{/u);
+    assert.match(deleteSource, /removeLocal:/u);
+    assert.match(deleteSource, /restoreLocal:/u);
+    assert.match(deleteSource, /deleteRemote: persistCurrentDeleteState/u);
+    assert.match(deleteSource, /restoreRemote: persistCurrentDeleteState/u);
+    assert.doesNotMatch(deleteSource, /window\.confirm|role="alertdialog"/u);
+  }
+
+  assert.match(menuSource, /onClick=\{\(\) => run\(onDelete\)\}/u);
+  assert.doesNotMatch(menuSource, /isDeleteConfirming|role=\{isDeleteConfirming|삭제 확인/u);
+  assert.doesNotMatch(source, /pendingTimetableDeleteKey|pendingActorDeleteId/u);
 });

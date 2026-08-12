@@ -231,12 +231,18 @@ test("client sends ensure intent only for add with a missing persisted parent", 
   );
 });
 
-test("DELETE commits metadata before best-effort storage cleanup and supports stale retries", () => {
+test("DELETE stages reversible metadata removal and defers storage cleanup to finalize", () => {
   const deleteStart = routeSource.indexOf("export async function DELETE");
   const patchStart = routeSource.indexOf("export async function PATCH");
   const deleteSource = routeSource.slice(deleteStart, patchStart);
 
-  assert.ok(deleteSource.indexOf("const saved = await saveMemo") < deleteSource.indexOf("[gathering-photos:delete-cleanup]"));
+  assert.ok(deleteSource.indexOf("createProjectDeleteReceipt") < deleteSource.indexOf("const saved = await saveMemo"));
+  assert.doesNotMatch(deleteSource, /storage\.from\(STORAGE_BUCKET\)\.remove|delete-cleanup/u);
+  assert.match(routeSource, /async function finalizeDeletedGatheringPhoto/u);
+  assert.match(routeSource, /photoStillReferenced[\s\S]*finalized: false, restored: true/u);
+  assert.match(routeSource, /finalizeDeletedGatheringPhoto[\s\S]*storage\.from\(STORAGE_BUCKET\)\.remove\(paths\)/u);
+  assert.match(routeSource, /async function restoreDeletedGatheringPhoto/u);
+  assert.match(routeSource, /restoredPhotos\.splice\([\s\S]*snapshot\.originalIndex/u);
   assert.match(deleteSource, /if \(!photo\) \{[\s\S]*idempotent: true/u);
   assert.match(
     deleteSource,

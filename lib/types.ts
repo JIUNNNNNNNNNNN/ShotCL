@@ -80,6 +80,8 @@ export type ProjectMainStaffMember = {
 };
 
 export type ProjectActor = {
+  /** 기본정보 JSON 안에서 배우 추가·삭제·재정렬을 추적하는 안정적인 식별자입니다. */
+  id: string;
   role: string;
   name: string;
 };
@@ -330,16 +332,6 @@ export type ProjectArchiveFolder = {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
-};
-
-export type ProjectArchiveFolderInspection = {
-  selectedRootIds: string[];
-  folderIds: string[];
-  assetIds: string[];
-  selectedFolderCount: number;
-  descendantFolderCount: number;
-  assetCount: number;
-  linkedAssetCount: number;
 };
 
 export type ProjectScenarioImageSegment = {
