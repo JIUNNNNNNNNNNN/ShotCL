@@ -63,6 +63,7 @@ import {
 } from "@/lib/progress/dailyProgress";
 import { buildProgressMediaGalleryItems } from "@/lib/progress/mediaGallery";
 import { resolveRelevantProgressRound } from "@/lib/progress/resolveRelevantRound";
+import { orderProgressShotsByShootingOrder } from "@/lib/progress/shootingOrder";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
@@ -393,6 +394,24 @@ export default function ProjectDetailPage() {
   const selectedPlan = useMemo(
     () => dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null,
     [dailyPlanId, dailyPlans]
+  );
+  const selectedPrintMeta = useMemo(
+    () => decodeDailyPlanMemo(selectedPlan?.memo ?? ""),
+    [selectedPlan?.memo]
+  );
+  // Progress keeps Shot objects and their stable IDs untouched. Only the
+  // rendered current-round sequence is derived from the Daily Plan source of
+  // truth, so status/media updates cannot fall back to stale order_index rows.
+  const orderedShots = useMemo(
+    () => orderProgressShotsByShootingOrder(shots, selectedPrintMeta.timetableScenes),
+    [selectedPrintMeta.timetableScenes, shots]
+  );
+  // Numeric Cut cards are governed by the Daily Plan order (or its numeric
+  // blank-order fallback). Keep the legacy drag path only for manual,
+  // non-numeric Progress entries so it cannot silently fight the source data.
+  const isProgressOrderLocked = useMemo(
+    () => shots.some((shot) => /^\d+$/.test(String(shot.cutNumber ?? "").trim())),
+    [shots]
   );
   const selectedPlanRef = useRef<DailyPlan | null>(selectedPlan);
   useLayoutEffect(() => {
@@ -998,16 +1017,16 @@ export default function ProjectDetailPage() {
   }, [commitSessionBuckets, dailyPlanId, mediaLinksByShotId, progressEntryKey, projectId, rebuildArchiveMedia]);
   const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
   const activeShots = useMemo(
-    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "active"),
-    [sessionBucketByShotId, shots]
+    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "active"),
+    [orderedShots, sessionBucketByShotId]
   );
   const okShots = useMemo(
-    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "ok"),
-    [sessionBucketByShotId, shots]
+    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "ok"),
+    [orderedShots, sessionBucketByShotId]
   );
   const omitShots = useMemo(
-    () => shots.filter((shot) => sessionBucketByShotId.get(shot.id) === "omit"),
-    [sessionBucketByShotId, shots]
+    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "omit"),
+    [orderedShots, sessionBucketByShotId]
   );
   const visibleShotsForMediaGuide = useMemo(() => [
     ...activeShots,
@@ -1021,19 +1040,19 @@ export default function ProjectDetailPage() {
     ))?.id ?? null
   ), [archiveMediaByShotId, visibleShotsForMediaGuide]);
   const reorderGuideBucket = useMemo<ProgressVisualBucket | null>(() => {
-    if (role !== "admin" || isReordering) return null;
+    if (role !== "admin" || isReordering || isProgressOrderLocked) return null;
     if (activeShots.length >= 2) return "active";
     if (okExpanded && okShots.length >= 2) return "ok";
     if (omitExpanded && omitShots.length >= 2) return "omit";
     return null;
-  }, [activeShots.length, isReordering, okExpanded, okShots.length, omitExpanded, omitShots.length, role]);
+  }, [activeShots.length, isProgressOrderLocked, isReordering, okExpanded, okShots.length, omitExpanded, omitShots.length, role]);
   const scheduleRowsByIndex = useMemo(
-    () => selectedPlan ? placeScheduleRows(shots, selectedPlan.mealTimes, decodeDailyPlanMemo(selectedPlan.memo).timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
-    [selectedPlan, shots]
+    () => selectedPlan ? placeScheduleRows(orderedShots, selectedPlan.mealTimes, selectedPrintMeta.timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
+    [orderedShots, selectedPlan, selectedPrintMeta.timetableRowOrder]
   );
   const activeScheduleRowsByIndex = useMemo(
-    () => remapScheduleRowsForVisibleShots(shots, activeShots, scheduleRowsByIndex),
-    [activeShots, scheduleRowsByIndex, shots]
+    () => remapScheduleRowsForVisibleShots(orderedShots, activeShots, scheduleRowsByIndex),
+    [activeShots, orderedShots, scheduleRowsByIndex]
   );
   const scheduleRowCount = selectedPlan?.mealTimes.filter(isMeaningfulScheduleRow).length ?? 0;
   const progressActionMenu = useMemo<ProjectPageActionMenuRegistration | null>(() => {
@@ -1496,7 +1515,7 @@ export default function ProjectDetailPage() {
   ), [archiveMediaByShotId, canEditProgressStatus, handleOpenMedia, handleStatusChange, isGuest, loadShotGalleryMedia, mediaGuideShotId, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
-    if (!projectId || !dailyPlanId || role !== "admin" || isReordering) return;
+    if (!projectId || !dailyPlanId || role !== "admin" || isReordering || isProgressOrderLocked) return;
 
     const requestedEntryKey = activeProgressEntryKeyRef.current;
     const previousShots = shotsRef.current;
@@ -1639,7 +1658,7 @@ export default function ProjectDetailPage() {
         <div className="mb-2 px-1">
           <h2 className="text-lg font-black text-field-text">오늘 컷</h2>
         </div>
-        {shots.length === 0 && scheduleRowCount === 0 ? (
+        {orderedShots.length === 0 && scheduleRowCount === 0 ? (
           <Card>
             <h2 className="text-xl font-black text-field-text">아직 등록된 컷이 없습니다</h2>
             <p className="mt-2 text-base leading-6 text-field-muted">필요하면 새 컷을 추가해 진행을 시작할 수 있습니다.</p>
@@ -1652,10 +1671,10 @@ export default function ProjectDetailPage() {
                 <span className="tabular-nums text-xs font-bold text-field-subtle">{activeShots.length}</span>
               </div>
               <ProgressShotList
-                allShots={shots}
+                allShots={orderedShots}
                 visibleShots={activeShots}
                 readOnly={isGuest}
-                disabled={role !== "admin" || isReordering}
+                disabled={role !== "admin" || isReordering || isProgressOrderLocked}
                 interactionGuideTarget={reorderGuideBucket === "active"}
                 onReorder={handleReorderShots}
                 renderShot={renderShot}
@@ -1686,10 +1705,10 @@ export default function ProjectDetailPage() {
             >
               {okShots.length > 0 ? (
                 <ProgressShotList
-                  allShots={shots}
+                  allShots={orderedShots}
                   visibleShots={okShots}
                   readOnly={isGuest}
-                  disabled={role !== "admin" || isReordering}
+                  disabled={role !== "admin" || isReordering || isProgressOrderLocked}
                   interactionGuideTarget={reorderGuideBucket === "ok"}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
@@ -1705,10 +1724,10 @@ export default function ProjectDetailPage() {
             >
               {omitShots.length > 0 ? (
                 <ProgressShotList
-                  allShots={shots}
+                  allShots={orderedShots}
                   visibleShots={omitShots}
                   readOnly={isGuest}
-                  disabled={role !== "admin" || isReordering}
+                  disabled={role !== "admin" || isReordering || isProgressOrderLocked}
                   interactionGuideTarget={reorderGuideBucket === "omit"}
                   onReorder={handleReorderShots}
                   renderShot={renderShot}
