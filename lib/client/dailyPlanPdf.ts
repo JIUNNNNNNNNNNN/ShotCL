@@ -12,6 +12,8 @@ const A4_SHORT_EDGE_MM = 210;
 const A4_LONG_EDGE_MM = 297;
 const CANVAS_DIMENSION_TOLERANCE_PX = 2;
 const CANVAS_ASPECT_RATIO_TOLERANCE = 0.002;
+const HTML2CANVAS_FONT_METRICS_IMAGE_SOURCE =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 type DailyPlanPdfCanvas = Pick<HTMLCanvasElement, "height" | "width">;
 
@@ -155,68 +157,73 @@ export async function exportDailyPlanPdf(
       compress: true
     });
     const geometry = resolvePageGeometry(input.orientation);
-
-    for (let index = 0; index < pages.length; index += 1) {
-      const page = pages[index];
-      const canvas = await html2canvas(page, {
-        allowTaint: false,
-        backgroundColor: DAILY_PLAN_PDF_BACKGROUND,
-        logging: false,
-        removeContainer: true,
-        scale: DAILY_PLAN_PDF_RENDER_SCALE,
-        scrollX: 0,
-        scrollY: 0,
-        useCORS: true,
-        width: geometry.cssWidth,
-        height: geometry.cssHeight,
-        windowWidth: geometry.cssWidth,
-        windowHeight: geometry.cssHeight,
-        onclone(_document, clonedPage) {
-          // Move the isolated offscreen staging clone into the capture viewport
-          // without touching the live document or its screen preview transform.
-          let ancestor: HTMLElement | null = clonedPage;
-          while (ancestor) {
-            ancestor.style.visibility = "visible";
-            ancestor = ancestor.parentElement;
+    const removeFontMetricsFix = installHtml2CanvasFontMetricsFix(input.root.ownerDocument);
+    try {
+      for (let index = 0; index < pages.length; index += 1) {
+        const page = pages[index];
+        const canvas = await html2canvas(page, {
+          allowTaint: false,
+          backgroundColor: DAILY_PLAN_PDF_BACKGROUND,
+          logging: false,
+          removeContainer: true,
+          scale: DAILY_PLAN_PDF_RENDER_SCALE,
+          scrollX: 0,
+          scrollY: 0,
+          useCORS: true,
+          width: geometry.cssWidth,
+          height: geometry.cssHeight,
+          windowWidth: geometry.cssWidth,
+          windowHeight: geometry.cssHeight,
+          onclone(_document, clonedPage) {
+            // Move the isolated offscreen staging clone into the capture viewport
+            // without touching the live document or its screen preview transform.
+            let ancestor: HTMLElement | null = clonedPage;
+            while (ancestor) {
+              ancestor.style.visibility = "visible";
+              ancestor = ancestor.parentElement;
+            }
+            const staging = clonedPage.closest<HTMLElement>(".daily-plan-print-staging");
+            if (staging) {
+              staging.style.left = "0";
+              staging.style.position = "absolute";
+              staging.style.top = "0";
+              staging.style.zIndex = "0";
+            }
+            const width = `${geometry.cssWidth}px`;
+            const height = `${geometry.cssHeight}px`;
+            clonedPage.style.boxSizing = "border-box";
+            clonedPage.style.width = width;
+            clonedPage.style.minWidth = width;
+            clonedPage.style.maxWidth = width;
+            clonedPage.style.height = height;
+            clonedPage.style.minHeight = height;
+            clonedPage.style.maxHeight = height;
+            clonedPage.style.margin = "0";
+            clonedPage.style.opacity = "1";
+            clonedPage.style.transform = "none";
+            clonedPage.style.transformOrigin = "top left";
           }
-          const staging = clonedPage.closest<HTMLElement>(".daily-plan-print-staging");
-          if (staging) {
-            staging.style.left = "0";
-            staging.style.position = "absolute";
-            staging.style.top = "0";
-            staging.style.zIndex = "0";
-          }
-          const width = `${geometry.cssWidth}px`;
-          const height = `${geometry.cssHeight}px`;
-          clonedPage.style.boxSizing = "border-box";
-          clonedPage.style.width = width;
-          clonedPage.style.minWidth = width;
-          clonedPage.style.maxWidth = width;
-          clonedPage.style.height = height;
-          clonedPage.style.minHeight = height;
-          clonedPage.style.maxHeight = height;
-          clonedPage.style.margin = "0";
-          clonedPage.style.opacity = "1";
-          clonedPage.style.transform = "none";
-          clonedPage.style.transformOrigin = "top left";
-        }
-      });
-      assertCanvas(canvas, geometry);
+        });
+        assertCanvas(canvas, geometry);
 
-      if (index > 0) pdf.addPage("a4", input.orientation);
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      assertPdfPageSize(pageWidth, pageHeight, geometry);
-      pdf.addImage(
-        canvas,
-        "PNG",
-        0,
-        0,
-        pageWidth,
-        pageHeight,
-        undefined,
-        "FAST"
-      );
+        if (index > 0) pdf.addPage("a4", input.orientation);
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        assertPdfPageSize(pageWidth, pageHeight, geometry);
+        const placement = resolveCenteredImagePlacement(canvas, pageWidth, pageHeight);
+        pdf.addImage(
+          canvas,
+          "PNG",
+          placement.x,
+          placement.y,
+          placement.width,
+          placement.height,
+          undefined,
+          "FAST"
+        );
+      }
+    } finally {
+      removeFontMetricsFix();
     }
 
     const blob = pdf.output("blob");
@@ -246,6 +253,18 @@ export async function exportDailyPlanPdf(
   } catch {
     throw new DailyPlanPdfExportError();
   }
+}
+
+function installHtml2CanvasFontMetricsFix(ownerDocument: Document | null) {
+  const parent = ownerDocument?.head ?? ownerDocument?.documentElement;
+  if (!ownerDocument || !parent) return () => {};
+  // html2canvas measures font baselines with this private 1px GIF. Tailwind's
+  // global img display:block reset changes its offset and shifts captured text.
+  const style = ownerDocument.createElement("style");
+  style.setAttribute("data-daily-plan-pdf-font-metrics-fix", "true");
+  style.textContent = `img[src="${HTML2CANVAS_FONT_METRICS_IMAGE_SOURCE}"] { display: inline-block !important; }`;
+  parent.appendChild(style);
+  return () => style.remove();
 }
 
 function assertExportInput(input: DailyPlanPdfExportInput) {
@@ -343,4 +362,20 @@ function assertPdfPageSize(
   if (Math.abs(actualAspectRatio / expectedAspectRatio - 1) > CANVAS_ASPECT_RATIO_TOLERANCE) {
     throw new Error("Unexpected A4 PDF page aspect ratio");
   }
+}
+
+function resolveCenteredImagePlacement(
+  canvas: DailyPlanPdfCanvas,
+  pageWidth: number,
+  pageHeight: number
+) {
+  const scale = Math.min(pageWidth / canvas.width, pageHeight / canvas.height);
+  const width = canvas.width * scale;
+  const height = canvas.height * scale;
+  return {
+    x: (pageWidth - width) / 2,
+    y: (pageHeight - height) / 2,
+    width,
+    height
+  };
 }

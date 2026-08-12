@@ -95,10 +95,7 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
   assert.equal(pdf.images.length, 2);
   for (const image of pdf.images) {
     assert.equal(image.format, "PNG");
-    assert.equal(image.x, 0);
-    assert.equal(image.y, 0);
-    assert.equal(image.width, 297);
-    assert.equal(image.height, 210);
+    assertCenteredUniformPlacement(image, 297, 210);
     assert.equal(image.compression, "FAST");
   }
 
@@ -174,16 +171,83 @@ test("exportDailyPlanPdf falls back to the root and keeps portrait A4 geometry",
   assert.equal(result.filename, "portrait plan.pdf");
   assert.equal(result.pageCount, 1);
   assert.deepEqual(pdfInstances[0].addedPages, []);
-  assert.deepEqual(pdfInstances[0].images.map(({ x, y, width, height }) => ({ x, y, width, height })), [{
-    x: 0,
-    y: 0,
-    width: 210,
-    height: 297
-  }]);
+  assert.equal(pdfInstances[0].images.length, 1);
+  assertCenteredUniformPlacement(pdfInstances[0].images[0], 210, 297);
+});
+
+test("PDF capture narrowly restores html2canvas font metrics images and removes the style", async () => {
+  const styleDocument = createStyleOwnerDocument();
+  const root = createRoot([{ id: "first" }, { id: "second" }], styleDocument.ownerDocument);
+  const activeRules = [];
+
+  await exportDailyPlanPdf({
+    root,
+    orientation: "landscape",
+    filename: "font-metrics.pdf"
+  }, createDependencies({
+    capture(_page, options) {
+      assert.equal(styleDocument.mountedStyles.length, 1);
+      activeRules.push(styleDocument.mountedStyles[0].textContent);
+      return createCanonicalCanvas(options);
+    }
+  }));
+
+  assert.deepEqual(activeRules, [
+    'img[src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"] { display: inline-block !important; }',
+    'img[src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"] { display: inline-block !important; }'
+  ]);
+  assert.equal(styleDocument.mountedStyles.length, 0);
+  assert.equal(styleDocument.removedStyles.length, 1);
+  assert.equal(
+    styleDocument.removedStyles[0].attributes["data-daily-plan-pdf-font-metrics-fix"],
+    "true"
+  );
+});
+
+test("font metrics compatibility style is removed when html2canvas rejects", async () => {
+  const styleDocument = createStyleOwnerDocument();
+  const root = createRoot([], styleDocument.ownerDocument);
+
+  await assert.rejects(
+    exportDailyPlanPdf({
+      root,
+      orientation: "landscape",
+      filename: "font-metrics-failure.pdf"
+    }, createDependencies({
+      capture() {
+        assert.equal(styleDocument.mountedStyles.length, 1);
+        throw new Error("capture failed");
+      }
+    })),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+
+  assert.equal(styleDocument.mountedStyles.length, 0);
+  assert.equal(styleDocument.removedStyles.length, 1);
+});
+
+test("font metrics compatibility style is removed when jsPDF image placement rejects", async () => {
+  const styleDocument = createStyleOwnerDocument();
+  const root = createRoot([], styleDocument.ownerDocument);
+
+  await assert.rejects(
+    exportDailyPlanPdf({
+      root,
+      orientation: "landscape",
+      filename: "font-metrics-add-image-failure.pdf"
+    }, createDependencies({ addImageError: new Error("addImage failed") })),
+    (error) => error instanceof DailyPlanPdfExportError
+      && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+  );
+
+  assert.equal(styleDocument.mountedStyles.length, 0);
+  assert.equal(styleDocument.removedStyles.length, 1);
 });
 
 test("exportDailyPlanPdf rejects a non-PDF signature before creating a download URL", async () => {
-  const root = createRoot([]);
+  const styleDocument = createStyleOwnerDocument();
+  const root = createRoot([], styleDocument.ownerDocument);
   let objectUrlCalls = 0;
   const dependencies = createDependencies({
     outputBlob: new Blob(["not a pdf"], { type: "application/pdf" }),
@@ -199,6 +263,8 @@ test("exportDailyPlanPdf rejects a non-PDF signature before creating a download 
       && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
   );
   assert.equal(objectUrlCalls, 0);
+  assert.equal(styleDocument.mountedStyles.length, 0);
+  assert.equal(styleDocument.removedStyles.length, 1);
 });
 
 test("exportDailyPlanPdf rejects noncanonical capture dimensions before creating a download URL", async () => {
@@ -325,8 +391,9 @@ test("exportDailyPlanPdf revokes its object URL when the download trigger fails"
   assert.deepEqual(revoked, ["blob:test"]);
 });
 
-function createRoot(markedPages) {
+function createRoot(markedPages, ownerDocument) {
   return {
+    ownerDocument,
     queries: [],
     matches() {
       return false;
@@ -338,11 +405,47 @@ function createRoot(markedPages) {
   };
 }
 
+function createStyleOwnerDocument() {
+  const mountedStyles = [];
+  const removedStyles = [];
+  const head = {
+    appendChild(style) {
+      mountedStyles.push(style);
+      style.remove = () => {
+        const index = mountedStyles.indexOf(style);
+        if (index >= 0) mountedStyles.splice(index, 1);
+        removedStyles.push(style);
+      };
+      return style;
+    }
+  };
+  return {
+    mountedStyles,
+    removedStyles,
+    ownerDocument: {
+      head,
+      documentElement: head,
+      createElement(tagName) {
+        assert.equal(tagName, "style");
+        return {
+          attributes: {},
+          textContent: "",
+          setAttribute(name, value) {
+            this.attributes[name] = value;
+          },
+          remove() {}
+        };
+      }
+    }
+  };
+}
+
 function createDependencies({
   capture = (_page, options) => createCanonicalCanvas(options),
   orientation = "landscape",
   pdfInstances = [],
   outputBlob = new Blob(["%PDF-1.7 test"], { type: "application/pdf" }),
+  addImageError,
   createObjectUrl = () => "blob:test",
   triggerDownload = () => undefined,
   revokeObjectUrl = () => undefined
@@ -352,7 +455,7 @@ function createDependencies({
       return async (page, options) => capture(page, options);
     },
     async loadJsPdf() {
-      return createFakeJsPdf(pdfInstances, orientation, outputBlob);
+      return createFakeJsPdf(pdfInstances, orientation, outputBlob, addImageError);
     },
     createObjectUrl,
     triggerDownload,
@@ -380,10 +483,24 @@ function createCanonicalCanvas(options) {
   };
 }
 
+function assertCenteredUniformPlacement(image, pageWidth, pageHeight) {
+  const horizontalScale = image.width / image.canvas.width;
+  const verticalScale = image.height / image.canvas.height;
+  assert.ok(Math.abs(horizontalScale - verticalScale) < 1e-12);
+  assert.ok(Math.abs(image.x - (pageWidth - image.width) / 2) < 1e-12);
+  assert.ok(Math.abs(image.y - (pageHeight - image.height) / 2) < 1e-12);
+  assert.ok(image.x >= 0);
+  assert.ok(image.y >= 0);
+  assert.ok(image.x + image.width <= pageWidth + Number.EPSILON);
+  assert.ok(image.y + image.height <= pageHeight + Number.EPSILON);
+  assert.ok(image.x > 0 || image.y > 0);
+}
+
 function createFakeJsPdf(
   instances,
   orientation,
-  outputBlob = new Blob(["%PDF-1.7 test"], { type: "application/pdf" })
+  outputBlob = new Blob(["%PDF-1.7 test"], { type: "application/pdf" }),
+  addImageError
 ) {
   return class FakeJsPdf {
     constructor(options) {
@@ -404,6 +521,7 @@ function createFakeJsPdf(
     }
 
     addImage(canvas, format, x, y, width, height, alias, compression) {
+      if (addImageError) throw addImageError;
       this.images.push({ canvas, format, x, y, width, height, alias, compression });
     }
 
