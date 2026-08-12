@@ -85,6 +85,8 @@ export type DailyPlanPdfExportInput = {
   filename: string;
   orientation: DailyPlanPdfOrientation;
   root: HTMLElement;
+  /** Live Landscape capture guard; omitted by the isolated Portrait renderer. */
+  validateSource?: (root: HTMLElement) => boolean;
 };
 
 export type DailyPlanPdfExportResult = {
@@ -150,6 +152,7 @@ export async function exportDailyPlanPdf(
       dependencies.loadHtml2Canvas(),
       dependencies.loadJsPdf()
     ]);
+    assertSourceIsCurrent(input);
     const pdf = new JsPdf({
       orientation: input.orientation,
       unit: "mm",
@@ -160,6 +163,7 @@ export async function exportDailyPlanPdf(
     const removeFontMetricsFix = installHtml2CanvasFontMetricsFix(input.root.ownerDocument);
     try {
       for (let index = 0; index < pages.length; index += 1) {
+        assertSourceIsCurrent(input);
         const page = pages[index];
         const canvas = await html2canvas(page, {
           allowTaint: false,
@@ -175,8 +179,8 @@ export async function exportDailyPlanPdf(
           windowWidth: geometry.cssWidth,
           windowHeight: geometry.cssHeight,
           onclone(_document, clonedPage) {
-            // Move the isolated offscreen staging clone into the capture viewport
-            // without touching the live document or its screen preview transform.
+            // Normalize only capture-shell positioning/transforms inside html2canvas's
+            // clone. The live preview and all document cell geometry stay untouched.
             let ancestor: HTMLElement | null = clonedPage;
             while (ancestor) {
               ancestor.style.visibility = "visible";
@@ -188,6 +192,13 @@ export async function exportDailyPlanPdf(
               staging.style.position = "absolute";
               staging.style.top = "0";
               staging.style.zIndex = "0";
+            }
+            const livePreviewPaper = clonedPage.closest<HTMLElement>(
+              ".daily-plan-preview-sheet"
+            );
+            if (livePreviewPaper) {
+              livePreviewPaper.style.transform = "none";
+              livePreviewPaper.style.transformOrigin = "top left";
             }
             const width = `${geometry.cssWidth}px`;
             const height = `${geometry.cssHeight}px`;
@@ -275,6 +286,12 @@ function assertExportInput(input: DailyPlanPdfExportInput) {
     || (input.orientation !== "landscape" && input.orientation !== "portrait")
   ) {
     throw new Error("Invalid Daily Plan PDF input");
+  }
+}
+
+function assertSourceIsCurrent(input: DailyPlanPdfExportInput) {
+  if (input.validateSource && !input.validateSource(input.root)) {
+    throw new Error("Daily Plan PDF source changed before capture");
   }
 }
 

@@ -115,22 +115,26 @@ test("exportDailyPlanPdf lazily captures marked pages into one named A4 landscap
     assert.equal(options.scrollX, 0);
     assert.equal(options.scrollY, 0);
   }
-  const stagingClone = { style: {}, parentElement: null };
+  const previewViewportClone = { style: {}, parentElement: null };
+  const livePreviewPaperClone = {
+    style: { transform: "scale(0.42)", transformOrigin: "top left" },
+    parentElement: previewViewportClone
+  };
   const pageClone = {
     style: {},
-    parentElement: stagingClone,
+    parentElement: livePreviewPaperClone,
     closest(selector) {
-      assert.equal(selector, ".daily-plan-print-staging");
-      return stagingClone;
+      if (selector === ".daily-plan-print-staging") return null;
+      if (selector === ".daily-plan-preview-sheet") return livePreviewPaperClone;
+      assert.fail(`unexpected closest selector: ${selector}`);
     }
   };
   captures[0][2].onclone({}, pageClone);
   assert.equal(pageClone.style.visibility, "visible");
-  assert.equal(stagingClone.style.visibility, "visible");
-  assert.equal(stagingClone.style.left, "0");
-  assert.equal(stagingClone.style.top, "0");
-  assert.equal(stagingClone.style.position, "absolute");
-  assert.equal(stagingClone.style.zIndex, "0");
+  assert.equal(livePreviewPaperClone.style.visibility, "visible");
+  assert.equal(previewViewportClone.style.visibility, "visible");
+  assert.equal(livePreviewPaperClone.style.transform, "none");
+  assert.equal(livePreviewPaperClone.style.transformOrigin, "top left");
   assert.equal(pageClone.style.boxSizing, "border-box");
   assert.equal(pageClone.style.width, `${landscapeGeometry.cssWidth}px`);
   assert.equal(pageClone.style.minWidth, `${landscapeGeometry.cssWidth}px`);
@@ -168,6 +172,23 @@ test("exportDailyPlanPdf falls back to the root and keeps portrait A4 geometry",
   assert.equal(captured[0].options.height, portraitGeometry.cssHeight);
   assert.equal(captured[0].options.windowWidth, portraitGeometry.cssWidth);
   assert.equal(captured[0].options.windowHeight, portraitGeometry.cssHeight);
+  const stagingClone = { style: {}, parentElement: null };
+  const pageClone = {
+    style: {},
+    parentElement: stagingClone,
+    closest(selector) {
+      if (selector === ".daily-plan-print-staging") return stagingClone;
+      if (selector === ".daily-plan-preview-sheet") return null;
+      assert.fail(`unexpected closest selector: ${selector}`);
+    }
+  };
+  captured[0].options.onclone({}, pageClone);
+  assert.equal(stagingClone.style.visibility, "visible");
+  assert.equal(stagingClone.style.left, "0");
+  assert.equal(stagingClone.style.top, "0");
+  assert.equal(stagingClone.style.position, "absolute");
+  assert.equal(stagingClone.style.zIndex, "0");
+  assert.equal(pageClone.style.transform, "none");
   assert.equal(result.filename, "portrait plan.pdf");
   assert.equal(result.pageCount, 1);
   assert.deepEqual(pdfInstances[0].addedPages, []);
@@ -389,6 +410,40 @@ test("exportDailyPlanPdf revokes its object URL when the download trigger fails"
       && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
   );
   assert.deepEqual(revoked, ["blob:test"]);
+});
+
+test("live Landscape capture aborts when its source changes during lazy loading or between pages", async () => {
+  for (const invalidateAfterValidation of [1, 2]) {
+    const root = createRoot([{ id: "first" }, { id: "second" }]);
+    let validations = 0;
+    let captures = 0;
+    let objectUrlCalls = 0;
+    await assert.rejects(
+      exportDailyPlanPdf({
+        root,
+        orientation: "landscape",
+        filename: "source-changed.pdf",
+        validateSource() {
+          validations += 1;
+          return validations <= invalidateAfterValidation;
+        }
+      }, createDependencies({
+        capture(_page, options) {
+          captures += 1;
+          return createCanonicalCanvas(options);
+        },
+        createObjectUrl() {
+          objectUrlCalls += 1;
+          return "blob:must-not-download";
+        }
+      })),
+      (error) => error instanceof DailyPlanPdfExportError
+        && error.message === DAILY_PLAN_PDF_ERROR_MESSAGE
+    );
+    assert.equal(validations, invalidateAfterValidation + 1);
+    assert.equal(captures, invalidateAfterValidation === 1 ? 0 : 1);
+    assert.equal(objectUrlCalls, 0);
+  }
 });
 
 function createRoot(markedPages, ownerDocument) {

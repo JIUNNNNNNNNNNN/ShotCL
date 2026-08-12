@@ -540,6 +540,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   const sidebarSaveRequestRef = useRef<() => void>(() => {});
   const sidebarPrintRequestRef = useRef<() => void>(() => {});
   const sidebarPortraitPrintRequestRef = useRef<() => void>(() => {});
+  const livePreviewPaperRef = useRef<HTMLDivElement | null>(null);
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
   const resolvedPreviewProfileRef = useRef<DailyPlanResolvedPreviewProfile | null>(null);
   const editorTrashRef = useRef<HTMLDivElement | null>(null);
@@ -1861,17 +1862,29 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
         pageLayout: resolvedProfile.pageLayout
       };
       setPrintProbe(null);
-      setPrintJob(nextPrintJob);
-      const exportRoot = await waitForDailyPlanPrintDocument(
-        printDocumentRef,
-        nextPrintJob,
-        { waitForFonts: true }
-      );
+      let exportRoot: HTMLElement;
+      if (orientation === "landscape") {
+        exportRoot = await waitForDailyPlanPrintDocument(
+          livePreviewPaperRef,
+          nextPrintJob,
+          { waitForFonts: true }
+        );
+      } else {
+        setPrintJob(nextPrintJob);
+        exportRoot = await waitForDailyPlanPrintDocument(
+          printDocumentRef,
+          nextPrintJob,
+          { waitForFonts: true }
+        );
+      }
       const { exportDailyPlanPdf } = await import("@/lib/client/dailyPlanPdf");
       await exportDailyPlanPdf({
         root: exportRoot,
         orientation,
-        filename: buildDailyPlanPdfFilename(currentPreviewData)
+        filename: buildDailyPlanPdfFilename(currentPreviewData),
+        ...(orientation === "landscape"
+          ? { validateSource: (root: HTMLElement) => doesDailyPlanPrintRootMatch(root, nextPrintJob) }
+          : {})
       });
       setMessage(action === "portrait" ? "세로 PDF를 저장했습니다." : "PDF를 저장했습니다.");
     } catch {
@@ -2637,6 +2650,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           snapshotId={previewSnapshotId}
           orientation={documentOrientation}
           onResolvedProfile={publishResolvedPreviewProfile}
+          paperRef={livePreviewPaperRef}
         />
 
       </div>
@@ -4468,12 +4482,14 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
   data,
   snapshotId,
   orientation,
-  onResolvedProfile
+  onResolvedProfile,
+  paperRef
 }: {
   data: DailyPlanPreviewData;
   snapshotId: string;
   orientation: DailyPlanPdfOrientation | null;
   onResolvedProfile: (profile: DailyPlanResolvedPreviewProfile) => void;
+  paperRef: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
     <section className="daily-plan-live-preview mt-5 border border-[#c8c8c3] bg-[#e8e8e5] p-2 text-[#111111] md:p-5">
@@ -4486,6 +4502,7 @@ const DailyPlanLivePreview = memo(function DailyPlanLivePreview({
           snapshotId={snapshotId}
           orientation={orientation}
           onResolvedProfile={onResolvedProfile}
+          paperRef={paperRef}
         />
       ) : (
         <SectionLoader />
@@ -4498,15 +4515,16 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   data,
   snapshotId,
   orientation,
-  onResolvedProfile
+  onResolvedProfile,
+  paperRef
 }: {
   data: DailyPlanPreviewData;
   snapshotId: string;
   orientation: DailyPlanPdfOrientation;
   onResolvedProfile: (profile: DailyPlanResolvedPreviewProfile) => void;
+  paperRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const documentRef = useRef<HTMLDivElement | null>(null);
   const timetableRows = useMemo(() => getPrintTimetableRows(data), [data]);
   const previewPageWidth = getDailyPlanPageWidthPixels(orientation);
   const previewPageHeight = getDailyPlanPageHeightPixels(orientation);
@@ -4549,7 +4567,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
   useLayoutEffect(() => {
     if (!hasCurrentPresentation) return;
     const container = containerRef.current;
-    const documentElement = documentRef.current;
+    const documentElement = paperRef.current;
     if (!container || !documentElement) return;
     let isCancelled = false;
     let resizeFrame: number | null = null;
@@ -4557,7 +4575,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
 
     function updateSize(allowDensityChange: boolean) {
       const currentContainer = containerRef.current;
-      const currentDocument = documentRef.current;
+      const currentDocument = paperRef.current;
       if (!currentContainer || !currentDocument) return;
       const availableWidth = currentContainer.getBoundingClientRect().width;
       if (!Number.isFinite(availableWidth) || availableWidth <= 0) return;
@@ -4675,6 +4693,7 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
     onResolvedProfile,
     orientation,
     pageLayout,
+    paperRef,
     previewPageHeight,
     previewPageWidth,
     snapshotId
@@ -4696,8 +4715,11 @@ const ScaledDailyPlanPreview = memo(function ScaledDailyPlanPreview({
         style={{ width: measurement.scaledWidth, height: measurement.scaledHeight }}
       >
         <div
-          ref={documentRef}
+          ref={paperRef}
+          data-testid="daily-plan-live-preview-paper"
           data-orientation={orientation}
+          data-snapshot-id={snapshotId}
+          data-density={density}
           data-preview-layout={pageLayout}
           className="daily-plan-preview-sheet absolute left-0 top-0 box-border origin-top-left bg-white p-[10mm]"
           style={{
@@ -4962,7 +4984,7 @@ function doesDailyPlanPrintRootMatch(root: HTMLElement, expected: DailyPlanPrint
   return root.dataset.snapshotId === expected.snapshotId
     && root.dataset.orientation === expected.orientation
     && root.dataset.density === expected.density
-    && root.dataset.printLayout === expected.pageLayout;
+    && (root.dataset.printLayout ?? root.dataset.previewLayout) === expected.pageLayout;
 }
 
 function getDailyPlanPrintGeometrySignature(root: HTMLElement) {
