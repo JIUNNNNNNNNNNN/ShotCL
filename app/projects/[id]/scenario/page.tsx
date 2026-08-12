@@ -14,10 +14,10 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { useParams } from "next/navigation";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   useAutoContextualGuide,
   useContextualGuideBlocker
@@ -40,7 +40,6 @@ import {
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
-import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { useAutosave } from "@/hooks/useAutosave";
@@ -61,8 +60,7 @@ const ScenarioPdfSceneSegments = dynamic(
 );
 
 export default function ProjectScenarioPage() {
-  const params = useParams<{ id: string | string[] }>();
-  const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const { projectId, projectName } = useProjectWorkspace();
   const { role, isGuest } = useProjectAccess();
   const canEdit = role === "admin" && !isGuest;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,7 +68,6 @@ export default function ProjectScenarioPage() {
   const uploadInFlightRef = useRef(false);
   const uploadSuccessTimerRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
-  const [projectName, setProjectName] = useState("");
   const [assets, setAssets] = useState<ProjectReferenceAsset[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("scenes");
@@ -166,20 +163,12 @@ export default function ProjectScenarioPage() {
     if (!projectId) return false;
     if (withLoader && isMountedRef.current) setIsLoading(true);
     try {
-      const [project, scenarioAssets] = await Promise.all([
-        auditQuery(
-          "scenario.loadProject",
-          "app/projects/[id]/scenario/page.tsx:load",
-          () => getProject(projectId)
-        ),
-        auditQuery(
-          "scenario.loadFilesAndSceneMetadata",
-          "app/projects/[id]/scenario/page.tsx:load",
-          () => listProjectReferenceAssets(projectId, "scenario")
-        )
-      ]);
+      const scenarioAssets = await auditQuery(
+        "scenario.loadFilesAndSceneMetadata",
+        "app/projects/[id]/scenario/page.tsx:load",
+        () => listProjectReferenceAssets(projectId, "scenario")
+      );
       if (!isMountedRef.current) return false;
-      setProjectName(project?.name ?? "프로젝트");
       setAssets(scenarioAssets);
       setSelectedId((current) => scenarioAssets.some((asset) => asset.id === current)
         ? current

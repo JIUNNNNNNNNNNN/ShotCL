@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { ArrowLeft, Plus, Save } from "lucide-react";
 import { InlineLoader, PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { SceneListNativeTable } from "@/components/SceneListNativeTable";
 import { SceneListPortraitReadOnly } from "@/components/SceneListPortraitReadOnly";
 import {
@@ -36,20 +36,13 @@ import {
   type ProjectSceneReferenceAutosaveResult
 } from "@/lib/data/sceneList";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
-import { getProject } from "@/lib/data/projects";
 import { auditQuery } from "@/lib/queryAudit";
 import { deriveLegacySceneListMerges, type SceneListMergeCell } from "@/lib/sceneListMergeModel";
 import type {
-  Project,
   ProjectSceneCellMerge,
   ProjectSceneItem,
   ProjectSceneMergeColumn
 } from "@/lib/types";
-
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  return Array.isArray(params.id) ? params.id[0] : params.id;
-}
 
 type PersistedMergeSnapshot = {
   merges: ProjectSceneCellMerge[];
@@ -96,11 +89,10 @@ const projectSceneItemMutationTails = new Map<string, Promise<void>>();
 
 /** 프로젝트 공통 씬리스트를 수동 저장하며 Cut 값은 일촬표 컷수와 공유합니다. */
 export default function ProjectSceneListPage() {
-  const projectId = useProjectId();
+  const { project, projectId } = useProjectWorkspace();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const viewportMode = useSceneListViewportMode();
-  const [project, setProject] = useState<Project | null>(null);
   const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
   const [items, setItems] = useState<ProjectSceneItem[]>([]);
   const [expandedPortraitSceneIds, setExpandedPortraitSceneIds] = useState<Set<string>>(
@@ -117,6 +109,7 @@ export default function ProjectSceneListPage() {
   const [isMergePersisting, setIsMergePersisting] = useState(false);
   const [isClearPersisting, setIsClearPersisting] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [composingAutosaveKey, setComposingAutosaveKey] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [cutInputErrors, setCutInputErrors] = useState<Record<string, string>>({});
@@ -134,7 +127,10 @@ export default function ProjectSceneListPage() {
     materialized: false,
     updatedAt: null
   });
-  const sceneListGuideReady = !isLoading && loadedProjectId === projectId && Boolean(project);
+  const sceneListGuideReady = !isLoading
+    && !loadFailed
+    && loadedProjectId === projectId
+    && Boolean(project);
   useAutoContextualGuide(
     "scene-list.desktop-intro",
     sceneListGuideReady && viewportMode === "editor" && canEdit
@@ -370,6 +366,7 @@ export default function ProjectSceneListPage() {
     if (!projectId) return;
     const requestVersion = ++loadRequestVersionRef.current;
     setIsLoading(true);
+    setLoadFailed(false);
     try {
       await Promise.all([
         projectMergeMutationTails.get(projectId),
@@ -380,18 +377,11 @@ export default function ProjectSceneListPage() {
         || activeProjectIdRef.current !== projectId
         || loadRequestVersionRef.current !== requestVersion
       ) return;
-      const [projectData, sceneList] = await Promise.all([
-        auditQuery(
-          "sceneList.loadProject",
-          "app/projects/[id]/scene-list/page.tsx:load",
-          () => getProject(projectId)
-        ),
-        auditQuery(
-          "sceneList.loadSceneItems",
-          "app/projects/[id]/scene-list/page.tsx:load",
-          () => getProjectSceneList(projectId)
-        )
-      ]);
+      const sceneList = await auditQuery(
+        "sceneList.loadSceneItems",
+        "app/projects/[id]/scene-list/page.tsx:load",
+        () => getProjectSceneList(projectId)
+      );
       const visibleMerges = sceneList.cellMergesMaterialized
         ? sceneList.cellMerges
         : deriveLegacySceneListMerges(sceneList.items);
@@ -409,8 +399,8 @@ export default function ProjectSceneListPage() {
         materialized: sceneList.cellMergesMaterialized,
         updatedAt: sceneList.cellMergesUpdatedAt
       };
-      setProject(projectData);
       setLoadedProjectId(projectId);
+      setLoadFailed(false);
       setItems(sceneList.items);
       setActorRoles(sceneList.actorRoles);
       setScenarioReference(sceneList.scenarioReference);
@@ -436,8 +426,8 @@ export default function ProjectSceneListPage() {
         && activeProjectIdRef.current === projectId
         && loadRequestVersionRef.current === requestVersion
       ) {
-        setProject(null);
         setLoadedProjectId(projectId);
+        setLoadFailed(true);
         setErrorMessage(getErrorMessage(error, "씬리스트를 불러오지 못했습니다."));
       }
     } finally {
@@ -954,7 +944,7 @@ export default function ProjectSceneListPage() {
     );
   }
 
-  if (!project) {
+  if (!project || loadFailed) {
     return (
       <div className="border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-bold text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>

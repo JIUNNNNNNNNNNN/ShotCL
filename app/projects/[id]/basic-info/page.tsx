@@ -1,25 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { PageLoader } from "@/components/PixelDogLoader";
 import { ProjectBasicInfoForm } from "@/components/ProjectBasicInfoForm";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { Card } from "@/components/ui/Card";
-import { getProject, getProjectBasicInfo, saveProjectBasicInfo } from "@/lib/data/projects";
-import type { Project, ProjectBasicInfo } from "@/lib/types";
-
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  return Array.isArray(params.id) ? params.id[0] : params.id;
-}
+import { getProjectBasicInfo, saveProjectBasicInfo } from "@/lib/data/projects";
+import type { ProjectBasicInfo } from "@/lib/types";
 
 /** 새 프로젝트 생성 직후와 관리자 수정 메뉴가 함께 사용하는 프로젝트 기본정보 화면입니다. */
 export default function ProjectBasicInfoPage() {
-  const projectId = useProjectId();
   const router = useRouter();
-  const { updateProjectBasicInfo } = useProjectWorkspace();
-  const [project, setProject] = useState<Project | null>(null);
+  const { project, projectId, updateProjectBasicInfo } = useProjectWorkspace();
   const [basicInfo, setBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
@@ -33,10 +26,9 @@ export default function ProjectBasicInfoPage() {
 
     let active = true;
     setIsLoading(true);
-    void Promise.all([getProject(projectId), getProjectBasicInfo(projectId)])
-      .then(([projectData, basicInfoData]) => {
+    void getProjectBasicInfo(projectId)
+      .then((basicInfoData) => {
         if (!active) return;
-        setProject(projectData);
         setBasicInfo(basicInfoData);
         setErrorMessage("");
       })

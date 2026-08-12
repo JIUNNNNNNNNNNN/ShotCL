@@ -19,6 +19,7 @@ import {
   isMemberReadOnlyFallback,
   resolveLiveProjectCapability
 } from "@/lib/projectAccess/clientCapability";
+import type { ProjectWorkspaceSnapshot } from "@/lib/projectWorkspaceSnapshot";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
 import {
   resolveDismissedProjectOwnerId,
@@ -54,6 +55,7 @@ export function ProjectAccessGate({
   accessMode,
   accountUserId,
   accessPreferenceScope,
+  initialWorkspace,
   children
 }: {
   projectId: string;
@@ -63,6 +65,7 @@ export function ProjectAccessGate({
   editorEligible: boolean;
   accountUserId: string | null;
   accessPreferenceScope: string;
+  initialWorkspace: ProjectWorkspaceSnapshot;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -205,7 +208,12 @@ export function ProjectAccessGate({
         role={currentRole}
       >
         <ProjectPageActionsProvider>
-          <ProjectWorkspaceProvider projectId={projectId} initialProjectName={projectName}>
+          <ProjectWorkspaceProvider
+            key={projectId}
+            projectId={projectId}
+            initialProjectName={projectName}
+            initialWorkspace={initialWorkspace}
+          >
             <ProjectWorkspaceShell>
               {memberRestrictedFallback ? (
                 <section className="mx-auto flex min-h-[35dvh] w-full max-w-lg items-center justify-center px-4 py-8 text-center">

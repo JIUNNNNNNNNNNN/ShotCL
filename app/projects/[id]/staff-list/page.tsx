@@ -12,12 +12,12 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useParams } from "next/navigation";
 import { ArrowLeft, ChevronDown, Plus, Save, Users, X } from "lucide-react";
 import { ArchiveDeleteDropZone } from "@/components/ArchiveDeleteDropZone";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { InlineLoader, PageLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   StaffEpisodeParticipation,
   isStaffParticipationControlTarget
@@ -42,14 +42,13 @@ import {
 } from "@/lib/data/staffMembers";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
-import { getProject } from "@/lib/data/projects";
 import {
   groupStaffMembersForDisplay,
   getStaffDepartmentColor,
   normalizeStaffDepartment,
   sortStaffMembers
 } from "@/lib/dailyPlan/staffList";
-import type { Project, ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
+import type { ProjectStaffDepartment, ProjectStaffMember } from "@/lib/types";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { useKeyedAutosave } from "@/hooks/useKeyedAutosave";
 
@@ -76,16 +75,10 @@ type StaffAutosaveResult =
   | { kind: "member"; member: ProjectStaffMember }
   | { kind: "department"; department: ProjectStaffDepartment };
 
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  return Array.isArray(params.id) ? params.id[0] : params.id;
-}
-
 /** 일촬표와 독립된 프로젝트 공통 스탭 풀을 관리합니다. */
 export default function StaffListPage() {
   const { role } = useProjectAccess();
-  const projectId = useProjectId();
-  const [project, setProject] = useState<Project | null>(null);
+  const { project, projectId } = useProjectWorkspace();
   const [members, setMembers] = useState<ProjectStaffMember[]>([]);
   const [departments, setDepartments] = useState<ProjectStaffDepartment[]>([]);
   const [totalEpisodes, setTotalEpisodes] = useState(0);
@@ -94,6 +87,7 @@ export default function StaffListPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [composingAutosaveKey, setComposingAutosaveKey] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -139,7 +133,7 @@ export default function StaffListPage() {
   membersRef.current = members;
   departmentsRef.current = departments;
   useUnsavedChangesGuard(isDirty);
-  useAutoContextualGuide("staff.intro", !isLoading && Boolean(project));
+  useAutoContextualGuide("staff.intro", !isLoading && !loadFailed && Boolean(project));
 
   const staffAutosaveEntities = useMemo<StaffAutosaveEntity[]>(() => [
     ...members
@@ -341,12 +335,9 @@ export default function StaffListPage() {
 
   const load = useCallback(async () => {
     if (!projectId) return;
+    setLoadFailed(false);
     try {
-      const [projectData, staffData] = await Promise.all([
-        getProject(projectId),
-        listProjectStaffMembers(projectId, { includeTotalEpisodes: true })
-      ]);
-      setProject(projectData);
+      const staffData = await listProjectStaffMembers(projectId, { includeTotalEpisodes: true });
       membersRef.current = staffData.members;
       setMembers(staffData.members);
       persistedMemberIdsRef.current = new Set(staffData.members.map((member) => member.id));
@@ -372,7 +363,9 @@ export default function StaffListPage() {
         staffData.members,
         staffData.departments
       ));
+      setLoadFailed(false);
     } catch (error) {
+      setLoadFailed(true);
       setErrorMessage(error instanceof Error ? error.message : "스탭 리스트를 불러오지 못했습니다.");
     } finally {
       setIsLoading(false);
@@ -820,7 +813,7 @@ export default function StaffListPage() {
 
   if (isLoading) return <PageLoader />;
 
-  if (!project) {
+  if (!project || loadFailed) {
     return (
       <div className="rounded-[10px] border border-field-danger bg-field-panel p-6 text-center">
         <p className="font-black text-field-danger">{errorMessage || "프로젝트를 찾을 수 없습니다."}</p>

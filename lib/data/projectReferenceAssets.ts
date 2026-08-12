@@ -8,7 +8,6 @@ import type {
   ProjectReferenceCrop,
   ProjectScenarioScene,
 } from "@/lib/types";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
 
 type ApiError = { error?: string; detail?: string };
@@ -101,14 +100,7 @@ const STORYBOARD_BULK_MAX_COUNT = 8;
 const STORYBOARD_BULK_MAX_BYTES = 3 * 1024 * 1024;
 
 async function fetchArchiveApi(input: RequestInfo | URL, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  const supabase = getSupabaseBrowserClient();
-  if (supabase) {
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  return fetch(input, { ...init, headers });
+  return fetch(input, { ...init, credentials: "same-origin" });
 }
 
 export type ProjectCostumeBulkSaveInput = {

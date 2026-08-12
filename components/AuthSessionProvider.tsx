@@ -19,6 +19,10 @@ import {
   syncAccountSession,
   type AccountSessionSyncResult
 } from "@/lib/auth/client";
+import {
+  shouldAdvanceAccountGeneration,
+  shouldUseBackgroundAccountSync
+} from "@/lib/auth/sessionTransition";
 import { normalizeTrustedGoogleIdentity } from "@/lib/projectAccess/accountCore";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -47,6 +51,7 @@ type ApplySessionOptions = {
   force?: boolean;
   throwOnError?: boolean;
   projectId?: string | null;
+  authEvent?: string | null;
 };
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
@@ -90,7 +95,8 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     const {
       force = false,
       throwOnError = false,
-      projectId: requestedProjectId = null
+      projectId: requestedProjectId = null,
+      authEvent = null
     } = options;
     const projectId = requestedProjectId?.trim().toLowerCase() || null;
     const operationId = operationRef.current + 1;
@@ -128,6 +134,16 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     }
 
     const token = session.access_token;
+    const previousSynchronizedUserId = synchronizedUserIdRef.current;
+    const previousEditorEligible = lastSyncResultRef.current?.editorEligible ?? null;
+    const backgroundSync = !force && shouldUseBackgroundAccountSync({
+      authEvent,
+      requestedProjectId: projectId,
+      synchronizedProjectId: lastSynchronizedProjectIdRef.current,
+      synchronizedUserId: previousSynchronizedUserId,
+      nextUserId: session.user.id,
+      previousEditorEligible
+    });
     if (
       !force
       && lastSynchronizedTokenRef.current === token
@@ -142,7 +158,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       return lastSyncResultRef.current;
     }
 
-    if (mountedRef.current) {
+    if (mountedRef.current && !backgroundSync) {
       setStatus("syncing");
       setErrorMessage("");
       if (synchronizedUserIdRef.current !== session.user.id) setIsEditorEligible(false);
@@ -166,7 +182,15 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       setIsEditorEligible(result.editorEligible);
       setStatus("authenticated");
       setErrorMessage("");
-      setAccountGeneration((current) => current + 1);
+      if (shouldAdvanceAccountGeneration({
+        background: backgroundSync,
+        previousUserId: previousSynchronizedUserId,
+        nextUserId: session.user.id,
+        previousEditorEligible,
+        nextEditorEligible: result.editorEligible
+      })) {
+        setAccountGeneration((current) => current + 1);
+      }
       return result;
     } catch (error) {
       if (mountedRef.current && operationRef.current === operationId) {
@@ -214,13 +238,14 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       });
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       authEventVersion += 1;
       // auth callback 안에서 다시 Supabase API를 호출하지 않도록 다음 task에서 동기화합니다.
       window.setTimeout(() => {
         if (mountedRef.current) {
           void applySession(session, {
-            projectId: getCurrentCallbackProjectId()
+            projectId: getCurrentCallbackProjectId(),
+            authEvent: event
           });
         }
       }, 0);

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight, UserRoundPlus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
@@ -28,6 +29,7 @@ export function ProjectInviteRedeemer({
   token: string;
   initialState: InviteScreenState;
 }) {
+  const router = useRouter();
   const [state, setState] = useState(initialState);
   const [isJoining, setIsJoining] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -45,9 +47,9 @@ export function ProjectInviteRedeemer({
   }, []);
 
   const openProgress = useCallback((destination: string) => {
-    // 전체 navigation으로 새 access cookie를 server layout에 반영하되 invite POST는 history에서 제거합니다.
-    window.location.replace(destination);
-  }, []);
+    // POST 응답의 Set-Cookie가 반영된 뒤 새 project layout을 client navigation으로 엽니다.
+    router.replace(destination);
+  }, [router]);
 
   const joinProject = useCallback(async () => {
     if (requestInFlightRef.current || state.status !== "valid") return;

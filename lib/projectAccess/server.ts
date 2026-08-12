@@ -10,7 +10,8 @@ import { resolveEffectiveProjectRole } from "@/lib/projectAccess/accountCore";
 import {
   getShotclBearerToken,
   resolveShotclAuthenticatedAccountFromCredentials,
-  SHOTCL_ACCOUNT_COOKIE
+  SHOTCL_ACCOUNT_COOKIE,
+  type ShotclAuthenticatedAccount
 } from "@/lib/projectAccess/accountServer";
 import { isGuestProjectApiRequestAllowed } from "@/lib/projectAccess/guestApiAccess";
 
@@ -23,17 +24,30 @@ const STAFF_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export class ProjectAccessUnavailableError extends Error {}
 
 export type ProjectRequestAccessMode = "member" | "guest" | "legacy";
+export type ProjectRequestProjectSnapshot = {
+  id: string;
+  name: string;
+  shoot_date: string | null;
+  description: string | null;
+  created_at: string;
+  share_enabled: boolean;
+};
 export type ProjectRequestAccess = {
   grant: ProjectAccessGrant;
   mode: ProjectRequestAccessMode;
   editorEligible: boolean;
   accountUserId?: string;
+  project?: ProjectRequestProjectSnapshot;
 };
 export type ProjectRequestAccessTokens = {
   accountSessionToken?: string | null;
   bearerToken?: string | null;
   guestInviteToken?: string | null;
   legacySessionToken?: string | null;
+};
+export type ProjectRequestAccountAccess = {
+  account: ShotclAuthenticatedAccount | null;
+  access: ProjectRequestAccess | null;
 };
 
 export function requireProjectAccessDb() {
@@ -77,6 +91,12 @@ export function hashProjectSessionToken(token: string) {
 export function getAccessPreferenceScope(token: string | null) {
   if (!token) return "";
   return createHash("sha256").update(`shotcl-ui-preferences:${token}`).digest("hex");
+}
+
+/** Member preference keys stay compatible with the former browser `auth:<uid>` namespace. */
+export function getAccountAccessPreferenceScope(userId: string | null) {
+  const normalizedUserId = userId?.trim().toLowerCase() ?? "";
+  return normalizedUserId ? `auth:${normalizedUserId}` : "";
 }
 
 export function getJoinAttemptKey(request: NextRequest, normalizedProjectName: string) {
@@ -237,21 +257,38 @@ export async function getLegacyAccessGrant(request: NextRequest, projectId: stri
 }
 
 export async function getProjectRequestAccess(request: NextRequest, projectId: string) {
-  const access = await getProjectRequestAccessFromTokens(projectId, {
+  return (await getProjectRequestAccountAccess(request, projectId)).access;
+}
+
+/** Resolve the request account and its project grant from one account-session lookup. */
+export async function getProjectRequestAccountAccess(
+  request: NextRequest,
+  projectId: string
+): Promise<ProjectRequestAccountAccess> {
+  const tokens = {
     accountSessionToken: request.cookies.get(SHOTCL_ACCOUNT_COOKIE)?.value ?? null,
     bearerToken: getShotclBearerToken(request),
     guestInviteToken: getProjectGuestInviteToken(request),
     legacySessionToken: getSessionToken(request)
+  } satisfies ProjectRequestAccessTokens;
+  const account = await resolveShotclAuthenticatedAccountFromCredentials({
+    accountSessionToken: tokens.accountSessionToken,
+    bearerToken: tokens.bearerToken
   });
+  let access = await resolveProjectRequestAccess(
+    normalizeProjectId(projectId),
+    tokens,
+    account
+  );
   if (access?.mode === "guest" && !isGuestProjectApiRequestAllowed({
     method: request.method,
     pathname: request.nextUrl.pathname,
     projectId,
     searchParams: request.nextUrl.searchParams
   })) {
-    return null;
+    access = null;
   }
-  return access;
+  return { account, access };
 }
 
 export async function getProjectRequestAccessMode(request: NextRequest, projectId: string) {
@@ -334,17 +371,25 @@ export async function getProjectRequestAccessFromTokens(
   tokens: ProjectRequestAccessTokens
 ): Promise<ProjectRequestAccess | null> {
   const databaseProjectId = normalizeProjectId(projectId);
-  const supabase = requireProjectAccessDb();
   const account = await resolveShotclAuthenticatedAccountFromCredentials({
     accountSessionToken: tokens.accountSessionToken,
     bearerToken: tokens.bearerToken
   });
+  return resolveProjectRequestAccess(databaseProjectId, tokens, account);
+}
+
+async function resolveProjectRequestAccess(
+  databaseProjectId: string,
+  tokens: ProjectRequestAccessTokens,
+  account: ShotclAuthenticatedAccount | null
+): Promise<ProjectRequestAccess | null> {
+  const supabase = requireProjectAccessDb();
 
   if (account) {
     const [projectResult, membershipResult] = await Promise.all([
       supabase
         .from("projects")
-        .select("id,name,created_at,created_by")
+        .select("id,name,shoot_date,description,created_at,share_enabled,created_by")
         .eq("id", databaseProjectId)
         .maybeSingle(),
       supabase
@@ -376,6 +421,14 @@ export async function getProjectRequestAccessFromTokens(
         mode: "member",
         editorEligible: account.isEditor,
         accountUserId: account.userId,
+        project: {
+          id: String(project.id),
+          name: String(project.name || "프로젝트"),
+          shoot_date: typeof project.shoot_date === "string" ? project.shoot_date : null,
+          description: typeof project.description === "string" ? project.description : null,
+          created_at: String(project.created_at || ""),
+          share_enabled: project.share_enabled === true
+        },
         grant: {
           projectId: String(project.id),
           projectName: String(project.name || "프로젝트"),

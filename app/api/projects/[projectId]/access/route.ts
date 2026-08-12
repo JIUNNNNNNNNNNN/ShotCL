@@ -7,6 +7,7 @@ import {
   clearJoinFailures,
   getAccessGrant,
   getKeyStaffUpgradeAttemptKey,
+  getProjectRequestAccountAccess,
   isJoinRateLimited,
   ProjectAccessUnavailableError,
   recordJoinFailure,
@@ -14,7 +15,6 @@ import {
   verifyPasscode
 } from "@/lib/projectAccess/server";
 import {
-  resolveShotclAuthenticatedAccount,
   ShotclAccountUnavailableError
 } from "@/lib/projectAccess/accountServer";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return upgradeJson({ ok: false, error: "권한 변경 요청을 확인할 수 없습니다.", code: "PROJECT_ACCESS_REQUEST_FORBIDDEN" }, 403);
     }
 
-    const account = await resolveShotclAuthenticatedAccount(request);
+    const { account, access } = await getProjectRequestAccountAccess(request, projectId);
     if (!account) {
       return upgradeJson({ ok: false, error: "Google 계정으로 로그인해야 합니다.", code: "GOOGLE_ACCOUNT_REQUIRED" }, 401);
     }
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return upgradeJson({ ok: false, error: "4자리 Key staff 비밀번호를 입력하세요.", code: "PROJECT_ACCESS_PASSWORD_INVALID" }, 400);
     }
 
-    const grant = await getAccessGrant(request, projectId);
+    const grant = access?.grant ?? null;
     const initialDecision = getKeyStaffUpgradeDecision(grant?.role ?? null, false);
     if (initialDecision === "forbidden") {
       return upgradeJson({ ok: false, error: "현재 프로젝트의 Staff 권한을 확인할 수 없습니다.", code: "PROJECT_ACCESS_FORBIDDEN" }, 403);

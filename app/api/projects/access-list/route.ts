@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getAccountAccessPreferenceScope,
   getAccessPreferenceScope,
   getSessionToken,
   listAccessGrants,
@@ -7,7 +8,6 @@ import {
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { resolveShotclAuthenticatedAccount } from "@/lib/projectAccess/accountServer";
-import { createHash } from "node:crypto";
 
 export async function GET(request: NextRequest) {
   try {
@@ -30,9 +30,7 @@ export async function GET(request: NextRequest) {
       });
       return NextResponse.json({
         projects,
-        preferenceScope: createHash("sha256")
-          .update(`shotcl-account-preferences:${account.userId}`)
-          .digest("hex")
+        preferenceScope: getAccountAccessPreferenceScope(account.userId)
       }, { headers: { "Cache-Control": "private, no-store", Vary: "Cookie" } });
     }
 

@@ -1,29 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import { ListChecks } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { getProject } from "@/lib/data/projects";
-import type { Project } from "@/lib/types";
-
-function useProjectId() {
-  const params = useParams<{ id: string | string[] }>();
-  const id = params.id;
-  return Array.isArray(id) ? id[0] : id;
-}
 
 /** 편집 기능은 컷 리스트 카드 모달로 통합되어, 이 페이지는 안내용으로 유지합니다. */
 export default function EditShotsPage() {
-  const projectId = useProjectId();
-  const [project, setProject] = useState<Project | null>(null);
-
-  useEffect(() => {
-    if (!projectId) return;
-    getProject(projectId).then(setProject).catch(() => setProject(null));
-  }, [projectId]);
+  const { project, projectId } = useProjectWorkspace();
 
   return (
     <>

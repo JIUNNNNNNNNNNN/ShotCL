@@ -4,15 +4,15 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { PageLoader } from "@/components/PixelDogLoader";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import { ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { getDailyPlanWithShots } from "@/lib/data/dailyPlans";
-import { getProject, getProjectBasicInfo } from "@/lib/data/projects";
+import { getProjectBasicInfo } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { listProjectStaffMembers } from "@/lib/data/staffMembers";
 import type {
   DailyPlanWithShots,
-  Project,
   ProjectBasicInfo,
   ProjectSceneItem,
   ProjectStaffDepartment,
@@ -25,16 +25,15 @@ const DailyPlanEditor = dynamic(
 );
 
 function useRouteIds() {
-  const params = useParams<{ id: string | string[]; dailyPlanId: string | string[] }>();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id;
+  const params = useParams<{ dailyPlanId: string | string[] }>();
   const dailyPlanId = Array.isArray(params.dailyPlanId) ? params.dailyPlanId[0] : params.dailyPlanId;
-  return { projectId: id, dailyPlanId };
+  return { dailyPlanId };
 }
 
 /** 저장된 일촬표를 다시 열어 수정합니다. */
 export default function DailyPlanDetailPage() {
-  const { projectId, dailyPlanId } = useRouteIds();
-  const [project, setProject] = useState<Project | null>(null);
+  const { dailyPlanId } = useRouteIds();
+  const { project, projectId } = useProjectWorkspace();
   const [projectBasicInfo, setProjectBasicInfo] = useState<ProjectBasicInfo | null>(null);
   const [projectStaffMembers, setProjectStaffMembers] = useState<ProjectStaffMember[]>([]);
   const [projectStaffDepartments, setProjectStaffDepartments] = useState<ProjectStaffDepartment[]>([]);
@@ -49,23 +48,12 @@ export default function DailyPlanDetailPage() {
     async function loadDailyPlan() {
       void import("@/components/DailyPlanEditor").catch(() => undefined);
       try {
-        const [projectData, planData, basicInfo, staffList, sceneList] = await Promise.all([
-          getProject(projectId),
+        const [planData, basicInfo, staffList, sceneList] = await Promise.all([
           getDailyPlanWithShots(projectId, dailyPlanId),
           getProjectBasicInfo(projectId).catch(() => null),
           listProjectStaffMembers(projectId).catch(() => null),
           getProjectSceneList(projectId).catch(() => null)
         ]);
-        setProject(projectData);
-        if (!projectData) {
-          setDailyPlan(null);
-          setProjectBasicInfo(null);
-          setProjectStaffMembers([]);
-          setProjectStaffDepartments([]);
-          setSceneListItems([]);
-          setErrorMessage("");
-          return;
-        }
         setDailyPlan(planData);
         setProjectBasicInfo(basicInfo);
         setProjectStaffMembers(staffList?.members ?? []);

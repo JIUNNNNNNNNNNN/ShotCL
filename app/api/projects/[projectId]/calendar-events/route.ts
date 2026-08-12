@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getProjectRequestRole,
+  getProjectRequestAccess,
   ProjectAccessUnavailableError,
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const projectId = await getValidatedProjectId(context);
     if (!projectId) return invalidProjectResponse();
-    const role = await getProjectRequestRole(request, projectId);
+    const role = (await getProjectRequestAccess(request, projectId))?.grant.role ?? null;
     if (!role) return forbiddenResponse("프로젝트 일정을 확인할 권한이 없습니다.");
 
     const range = getOptionalDateRange(request);
@@ -81,13 +81,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const createdBy = await resolveAuthenticatedUserId(request, access.supabase);
     const { data, error } = await access.supabase
       .from("project_calendar_events")
       .insert({
         project_id: access.projectId,
         ...projectCalendarEventInputToRow(validation.value),
-        created_by: createdBy
+        created_by: access.accountUserId
       })
       .select(SELECT_COLUMNS)
       .single();
@@ -162,10 +161,21 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
 async function requireCalendarEditAccess(request: NextRequest, context: RouteContext) {
   const projectId = await getValidatedProjectId(context);
   if (!projectId) return invalidProjectResponse();
-  const role = await getProjectRequestRole(request, projectId);
-  if (!role) return forbiddenResponse("프로젝트 접근 권한이 없습니다.");
-  if (role !== "admin") return forbiddenResponse("프로젝트 일정은 Key staff만 수정할 수 있습니다.");
-  return { projectId, supabase: requireProjectAccessDb() };
+  const access = await getProjectRequestAccess(request, projectId);
+  if (!access) return forbiddenResponse("프로젝트 접근 권한이 없습니다.");
+  if (
+    access.grant.role !== "admin"
+    || access.mode !== "member"
+    || !access.editorEligible
+    || !access.accountUserId
+  ) {
+    return forbiddenResponse("프로젝트 일정은 Key staff만 수정할 수 있습니다.");
+  }
+  return {
+    projectId,
+    supabase: requireProjectAccessDb(),
+    accountUserId: access.accountUserId
+  };
 }
 
 async function getValidatedProjectId(context: RouteContext) {
@@ -198,18 +208,6 @@ async function readRequestBody(request: NextRequest): Promise<Record<string, unk
   } catch {
     return null;
   }
-}
-
-async function resolveAuthenticatedUserId(
-  request: NextRequest,
-  supabase: ReturnType<typeof requireProjectAccessDb>
-) {
-  const authorization = request.headers.get("authorization")?.trim() ?? "";
-  const token = authorization.match(/^Bearer\s+(.+)$/iu)?.[1]?.trim();
-  if (!token) return null;
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return null;
-  return data.user.id;
 }
 
 function calendarEventErrorResponse(error: unknown, fallbackMessage: string) {

@@ -17,7 +17,7 @@ import {
 } from "@/components/RememberedProjectCard";
 import { MotionPresence } from "@/components/ui/MotionPresence";
 import { getGoTarget, GoTargetAccessDeniedError } from "@/lib/data/goTarget";
-import { listAccessibleProjects, verifyProjectAccess } from "@/lib/data/projects";
+import { listAccessibleProjects } from "@/lib/data/projects";
 import { projectFromRow } from "@/lib/data/mappers";
 import { cleanProjectName, sanitizePasscode } from "@/lib/projectAccess/core";
 import {
@@ -703,7 +703,7 @@ function MainHomeContent() {
     restoreProjectToRememberedList(projectId);
   }
 
-  async function openPreviouslyJoinedProject(project: Project | undefined) {
+  function openPreviouslyJoinedProject(project: Project | undefined) {
     if (accountStatus === "error") {
       setJoinProjectError(accountError || "Google 계정 상태를 확인한 뒤 다시 시도해 주세요.");
       return;
@@ -715,28 +715,14 @@ function MainHomeContent() {
     setSelectedProjectId(project.id);
     setJoinProjectError("");
 
-    try {
-      const grant = await verifyProjectAccess(project.id);
-      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
-      if (!grant) {
-        forgetProjectSelection(project.id);
-        setProjects((current) => current.filter((item) => item.id !== project.id));
-        setJoinProjectError("접근 권한이 만료되었습니다. 비밀번호로 다시 참여해주세요.");
-        releaseProjectNavigation(attemptId);
-        return;
-      }
-
-      rememberProjectSelection(grant.projectId);
-      pushProjectRoute(
-        grant.projectId,
-        `/projects/${encodeURIComponent(grant.projectId)}`,
-        attemptId
-      );
-    } catch (error) {
-      if (!isMountedRef.current || navigationAttemptRef.current !== attemptId) return;
-      setJoinProjectError(error instanceof Error ? error.message : "프로젝트 접근 권한을 확인하지 못했습니다.");
-      releaseProjectNavigation(attemptId);
-    }
+    // 이 목록은 방금 server access-list가 확인한 결과이며, 최종 race 검증은
+    // 새로 mount되는 /projects/[id] layout이 담당합니다.
+    rememberProjectSelection(project.id);
+    pushProjectRoute(
+      project.id,
+      `/projects/${encodeURIComponent(project.id)}`,
+      attemptId
+    );
   }
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {

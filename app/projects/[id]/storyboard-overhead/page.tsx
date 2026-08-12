@@ -30,7 +30,6 @@ import {
   Upload,
   X
 } from "lucide-react";
-import { useParams } from "next/navigation";
 import type {
   ArchiveImportCommit,
   ArchiveImportProgressState,
@@ -42,6 +41,7 @@ import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
+import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
 import {
   useAutoContextualGuide,
   useContextualGuide,
@@ -109,7 +109,6 @@ import {
   retainVisibleSelection,
   visibleSelectionOrder
 } from "@/lib/archiveSelection";
-import { getProject } from "@/lib/data/projects";
 import { getProjectSceneList } from "@/lib/data/sceneList";
 import { auditQuery } from "@/lib/queryAudit";
 import {
@@ -367,12 +366,10 @@ const ARCHIVE_NATURAL_COLLATOR = new Intl.Collator("ko-KR", {
 });
 
 export default function ProjectStoryboardOverheadPage() {
-  const params = useParams<{ id: string | string[] }>();
-  const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const { projectId, projectName } = useProjectWorkspace();
   const { role } = useProjectAccess();
   const canEdit = role !== "progress";
   const supportsDiagramEditing = useShotOverheadEditorViewport();
-  const [projectName, setProjectName] = useState("");
   const [activeType, setActiveType] = useState<ArchiveViewType>("overhead");
   const [overheads, setOverheads] = useState<ProjectReferenceAsset[]>([]);
   const [storyboards, setStoryboards] = useState<ProjectReferenceAsset[]>([]);
@@ -650,12 +647,7 @@ export default function ProjectStoryboardOverheadPage() {
     setDiagramArchives([]);
     setSpacePresets([]);
     try {
-      const [project, archiveAssets, workspace, sceneResult] = await Promise.all([
-        auditQuery(
-          "archive.loadProject",
-          "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
-          () => getProject(projectId)
-        ),
+      const [archiveAssets, workspace, sceneResult] = await Promise.all([
         auditQuery(
           "archive.loadReferenceAssets",
           "app/projects/[id]/storyboard-overhead/page.tsx:loadArchive",
@@ -680,7 +672,6 @@ export default function ProjectStoryboardOverheadPage() {
       if (activeProjectIdRef.current !== requestedProjectId) return;
       const overheadAssets = archiveAssets.filter((asset) => asset.assetType === "overhead");
       const storyboardAssets = archiveAssets.filter((asset) => asset.assetType === "storyboard");
-      setProjectName(project?.name ?? "프로젝트");
       setOverheads(overheadAssets);
       setStoryboards(storyboardAssets);
       replaceCommittedArchivePlacements([...overheadAssets, ...storyboardAssets]);

@@ -4,13 +4,11 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
-  useRef,
   useState
 } from "react";
 import { listDailyPlans, type DailyPlanListItem } from "@/lib/data/dailyPlans";
-import { getProject } from "@/lib/data/projects";
+import type { ProjectWorkspaceSnapshot } from "@/lib/projectWorkspaceSnapshot";
 import type { DailyPlan, Project, ProjectBasicInfo } from "@/lib/types";
 
 type DailyPlanSummaryPatch = Partial<Pick<
@@ -37,47 +35,18 @@ const ProjectWorkspaceContext = createContext<ProjectWorkspaceValue | null>(null
 export function ProjectWorkspaceProvider({
   projectId,
   initialProjectName,
+  initialWorkspace,
   children
 }: {
   projectId: string;
   initialProjectName: string | null;
+  initialWorkspace: ProjectWorkspaceSnapshot;
   children: React.ReactNode;
 }) {
-  const [project, setProject] = useState<Project | null>(null);
-  const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const loadVersionRef = useRef(0);
-
-  const loadWorkspace = useCallback(async () => {
-    const version = loadVersionRef.current + 1;
-    loadVersionRef.current = version;
-    setIsLoading(true);
-
-    const [projectResult, planResult] = await Promise.allSettled([
-      getProject(projectId),
-      listDailyPlans(projectId)
-    ]);
-    if (loadVersionRef.current !== version) return;
-
-    if (projectResult.status === "fulfilled") setProject(projectResult.value);
-    if (planResult.status === "fulfilled") setDailyPlans(planResult.value);
-
-    const messages = [projectResult, planResult].flatMap((result) => (
-      result.status === "rejected"
-        ? [result.reason instanceof Error ? result.reason.message : "프로젝트 메뉴를 불러오지 못했습니다."]
-        : []
-    ));
-    setError(messages[0] ?? "");
-    setIsLoading(false);
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadWorkspace();
-    return () => {
-      loadVersionRef.current += 1;
-    };
-  }, [loadWorkspace]);
+  const [project, setProject] = useState<Project | null>(initialWorkspace.project);
+  const [dailyPlans, setDailyPlans] = useState<DailyPlanListItem[]>(initialWorkspace.dailyPlans);
+  const [error, setError] = useState(initialWorkspace.error);
+  const isLoading = false;
 
   const refreshDailyPlans = useCallback(async () => {
     const plans = await listDailyPlans(projectId);

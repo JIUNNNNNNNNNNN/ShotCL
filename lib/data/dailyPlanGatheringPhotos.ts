@@ -1,5 +1,4 @@
 import { isValidDatabaseProjectId } from "@/lib/projectId";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type GatheringPhotoFailure = {
   photoId: string;
@@ -173,16 +172,9 @@ export async function saveDailyPlanGatheringPhotoOrder(
 }
 
 async function fetchGatheringApi(projectId: string, dailyPlanId: string, init: RequestInit) {
-  const headers = new Headers(init.headers);
-  const supabase = getSupabaseBrowserClient();
-  if (supabase) {
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  }
   return fetch(
     `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}/gathering-photos`,
-    { ...init, headers }
+    { ...init, credentials: "same-origin" }
   );
 }
 

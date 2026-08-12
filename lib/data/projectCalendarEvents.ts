@@ -1,4 +1,3 @@
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { createLocalId, notifyLocalProjectChange, readLocalBuckets } from "@/lib/data/localStore";
 import { getLocalProjectIdCandidates, isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import {
@@ -251,14 +250,7 @@ function getCalendarEndpoint(projectId: string) {
 }
 
 async function fetchProjectCalendarApi(input: RequestInfo | URL, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  const supabase = getSupabaseBrowserClient();
-  if (supabase) {
-    const { data } = await supabase.auth.getSession();
-    const accessToken = data.session?.access_token;
-    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-  return fetch(input, { ...init, headers, credentials: "same-origin" });
+  return fetch(input, { ...init, credentials: "same-origin" });
 }
 
 async function readPayload(response: Response): Promise<CalendarApiPayload> {
