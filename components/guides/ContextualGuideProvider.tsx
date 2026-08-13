@@ -1230,8 +1230,6 @@ function orderGuideSides(
     first = preferredPlacement;
   } else if (anchor.closest(".project-shell__navigation")) {
     first = "right";
-  } else if (anchor.closest(".project-shell__action-panel")) {
-    first = "left";
   } else if (anchor.closest(".project-shell__app-bar") || rect.top < viewport.top + viewport.height * 0.25) {
     first = "bottom";
   } else if (rect.bottom > viewport.top + viewport.height * 0.75) {
@@ -1284,17 +1282,6 @@ function getAnchorPlacementRect(anchor: HTMLElement, rect: DOMRect) {
       top: rect.top,
       bottom: rect.bottom,
       width: navigationRect.right - rect.left,
-      height: rect.height
-    };
-  }
-  const actionPanelRect = anchor.closest(".project-shell__action-panel")?.getBoundingClientRect();
-  if (actionPanelRect) {
-    return {
-      left: actionPanelRect.left,
-      right: rect.right,
-      top: rect.top,
-      bottom: rect.bottom,
-      width: rect.right - actionPanelRect.left,
       height: rect.height
     };
   }

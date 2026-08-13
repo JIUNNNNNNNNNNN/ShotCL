@@ -84,6 +84,38 @@ test("meeting photo scope blocks the native iOS image callout and drag path", ()
   assert.match(componentCss, /\.photoImage\s*\{[^}]*-webkit-user-drag:\s*none[^}]*-webkit-touch-callout:\s*none/su);
 });
 
+test("gathering-place actions live in a permission-aware section context menu", () => {
+  assert.doesNotMatch(componentSource, /onActionsChange|GatheringLocationActions/u);
+  assert.match(componentSource, /role="menu"[\s\S]*aria-label="집합장소 작업 메뉴"/u);
+  assert.match(componentSource, /label="사진 추가"[\s\S]*label="사진 관리"[\s\S]*label="주소 수정"/u);
+  assert.match(componentSource, /visible: Boolean\(canEdit && place\)/u);
+  assert.match(componentSource, /addPhotosDisabled=\{sectionActions\.addPhotosDisabled\}/u);
+  assert.match(componentSource, /managePhotosDisabled=\{sectionActions\.managePhotosDisabled\}/u);
+  assert.match(componentSource, /editAddressDisabled=\{sectionActions\.editAddressDisabled\}/u);
+});
+
+test("section context gestures exclude photo and interactive targets", () => {
+  assert.match(componentSource, /GATHERING_CONTEXT_MENU_LONG_PRESS_MS = 500/u);
+  assert.match(componentSource, /GATHERING_CONTEXT_MENU_MOVE_PX = 10/u);
+  assert.match(componentSource, /GATHERING_CONTEXT_INTERACTIVE_SELECTOR[\s\S]*data-gathering-photo-action[\s\S]*role='button'/u);
+  assert.match(componentSource, /event\.pointerType === "mouse"/u);
+  assert.match(componentSource, /document\.addEventListener\("scroll", cancelPressesOnScroll, true\)/u);
+  assert.match(componentSource, /data-gathering-context-long-press="header"/u);
+  assert.match(componentSource, /surface\.dataset\.gatheringContextLongPress === "header" \|\| target === surface/u);
+  assert.match(componentSource, /onPhotoPointerDown=\{startPhotoLongPress\}/u);
+});
+
+test("section context menu supports mouse, keyboard, viewport clamping, and focus recovery", () => {
+  assert.match(componentSource, /onContextMenu=\{handleSectionContextMenu\}/u);
+  assert.match(componentSource, /event\.key === "Enter" \|\| event\.key === " "[\s\S]*event\.key === "ContextMenu"[\s\S]*event\.shiftKey && event\.key === "F10"/u);
+  assert.match(componentSource, /window\.innerWidth - bounds\.width/u);
+  assert.match(componentSource, /window\.innerHeight - bounds\.height/u);
+  assert.match(componentSource, /document\.addEventListener\("pointerdown", handleOutsidePointer, true\)/u);
+  assert.match(componentSource, /event\.key === "Escape"[\s\S]*closeSectionContextMenu\(true\)/u);
+  assert.match(componentSource, /ArrowDown[\s\S]*ArrowUp[\s\S]*Home[\s\S]*End/u);
+  assert.match(componentSource, /createPortal\([\s\S]*<GatheringSectionActionsMenu/u);
+});
+
 test("meeting card removes preview and filename UI while keeping copy fallback", () => {
   const rowStart = componentSource.indexOf("function GatheringPlaceRow");
   const stripStart = componentSource.indexOf("export function GatheringPhotoStrip");

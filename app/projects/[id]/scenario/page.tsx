@@ -22,10 +22,8 @@ import {
   useAutoContextualGuide,
   useContextualGuideBlocker
 } from "@/components/guides/ContextualGuideProvider";
-import {
-  useProjectPageActionMenu,
-  type ProjectPageActionMenuRegistration
-} from "@/components/ProjectPageActions";
+import type { ProjectPageActionMenuRegistration } from "@/components/ProjectPageActions";
+import { ProjectPageActionsMenu } from "@/components/ProjectPageActionsMenu";
 import {
   ScenarioUploadProgress,
   type ScenarioUploadProgressState,
@@ -691,15 +689,13 @@ export default function ProjectScenarioPage() {
         onSelect: handleDownload,
         hidden: isGuest,
         disabled: !selectedAsset || isDownloading,
-        pending: isDownloading,
-        closeDrawerOnSelect: false
+        pending: isDownloading
       },
       scenarioRefresh: {
         onSelect: () => actionHandlersRef.current.refresh(),
         hidden: isGuest,
         disabled: hasStructuralChanges || isRefreshing || isSaving || isUploading,
-        pending: isRefreshing,
-        closeDrawerOnSelect: false
+        pending: isRefreshing
       },
       scenarioDelete: {
         onSelect: () => actionHandlersRef.current.delete(),
@@ -721,8 +717,6 @@ export default function ProjectScenarioPage() {
     selectedAsset,
     viewMode
   ]);
-  useProjectPageActionMenu(scenarioActionMenu);
-
   if (isLoading) return <PageLoader />;
 
   return (
@@ -801,6 +795,7 @@ export default function ProjectScenarioPage() {
               />
             </>
           ) : null}
+          <ProjectPageActionsMenu registration={isGuest ? null : scenarioActionMenu} />
         </div>
       </div>
 

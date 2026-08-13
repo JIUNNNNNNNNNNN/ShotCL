@@ -77,7 +77,7 @@ test("long-press change action labels the same stable input before closing", () 
 
 test("desktop action uses the same input synchronously without a deferred handoff", () => {
   const openStart = gatheringLocationsSource.indexOf("const openAddPhotoPicker");
-  const openEnd = gatheringLocationsSource.indexOf("\n\n  const actionControls", openStart);
+  const openEnd = gatheringLocationsSource.indexOf("\n\n  const sectionActions", openStart);
   const open = gatheringLocationsSource.slice(openStart, openEnd);
   assert.match(open, /photoInputRef\.current\?\.click\(\)/u);
   assert.doesNotMatch(open, /\basync\b|\bawait\b|setTimeout|requestAnimationFrame|Promise/u);

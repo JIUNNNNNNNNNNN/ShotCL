@@ -69,7 +69,6 @@ export type ContextualGuideAnchorKey =
   | "daily-plan.timetable-reorder-row"
   | "daily-plan.actor-row"
   | "daily-plan.pdf-actions"
-  | "shell.action-toggle"
   | "progress.cut-list"
   | "progress.shot-card"
   | "progress.media-gallery"
@@ -388,7 +387,7 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     title: "PDF 저장",
     description: "가로 PDF 또는 모바일용 PDF로 저장할 수 있습니다.",
     persistentAnchor: "daily-plan.pdf-actions",
-    compactAnchor: "shell.action-toggle",
+    compactAnchor: "daily-plan.pdf-actions",
     preferredPlacement: "left",
     permission: "manage",
     replayLabel: "PDF 저장"
@@ -526,7 +525,7 @@ export const CONTEXTUAL_GUIDES: Record<ContextualGuideId, ContextualGuideDefinit
     description: "씬별 보기, 편집과 공유 기능을 사용할 수 있습니다.",
     compactDescription: "메뉴를 열어 보기와 공유 기능을 사용할 수 있습니다.",
     persistentAnchor: "scenario.actions",
-    compactAnchor: "shell.action-toggle",
+    compactAnchor: "scenario.actions",
     preferredPlacement: "left",
     permission: "any",
     replayLabel: "시나리오 메뉴"

@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
-import { ProjectPageActionsProvider } from "@/components/ProjectPageActions";
 import { ProjectDeleteUndoProvider } from "@/components/ProjectDeleteUndoProvider";
 import { ProjectWorkspaceProvider } from "@/components/ProjectWorkspaceContext";
 import { ProjectWorkspaceShell } from "@/components/ProjectWorkspaceShell";
@@ -208,7 +207,6 @@ export function ProjectAccessGate({
         userNamespace={accessPreferenceScope}
         role={currentRole}
       >
-        <ProjectPageActionsProvider>
           <ProjectWorkspaceProvider
             key={projectId}
             projectId={projectId}
@@ -237,7 +235,6 @@ export function ProjectAccessGate({
               </ProjectWorkspaceShell>
             </ProjectDeleteUndoProvider>
           </ProjectWorkspaceProvider>
-        </ProjectPageActionsProvider>
       </ContextualGuideProvider>
     </ProjectAccessContext.Provider>
   );

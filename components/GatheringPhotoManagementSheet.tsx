@@ -53,8 +53,7 @@ export function GatheringPhotoManagementSheet({
     const target = returnFocusRef.current;
     returnFocusRef.current = null;
     window.requestAnimationFrame(() => {
-      const fallback = document.querySelector<HTMLButtonElement>(".project-shell__action-toggle");
-      const focusTarget = isValidReturnTarget(target) ? target : fallback;
+      const focusTarget = isValidReturnTarget(target) ? target : null;
       focusTarget?.focus({ preventScroll: true });
     });
   }, [returnFocusRef]);

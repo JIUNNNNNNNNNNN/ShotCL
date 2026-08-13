@@ -6,8 +6,8 @@ const progressPageSource = readFileSync(
   new URL("../app/projects/[id]/page.tsx", import.meta.url),
   "utf8"
 );
-const rightSidebarSource = readFileSync(
-  new URL("../components/RightProjectSidebar.tsx", import.meta.url),
+const gatheringLocationSource = readFileSync(
+  new URL("../components/DailyPlanGatheringLocations.tsx", import.meta.url),
   "utf8"
 );
 
@@ -49,26 +49,23 @@ test("archive rebuild and metadata patch callbacks are scoped by the selected ro
   assert.doesNotMatch(metadataPatchSource, /\bselectedPlan\b/);
 });
 
-test("compact Progress actions omit duplicate photo controls but keep address editing", () => {
+test("Progress keeps only page-wide cut creation in its local page menu", () => {
   const actionMenuSource = sourceBetween(
     "const progressActionMenu = useMemo<ProjectPageActionMenuRegistration | null>(() => {",
-    "useProjectPageActionMenu(progressActionMenu);"
-  );
-  const addPhotos = actionMenuSource.slice(
-    actionMenuSource.indexOf("progressGatheringPhotoAdd: {"),
-    actionMenuSource.indexOf("progressGatheringPhotoManage: {")
-  );
-  const managePhotos = actionMenuSource.slice(
-    actionMenuSource.indexOf("progressGatheringPhotoManage: {"),
-    actionMenuSource.indexOf("progressGatheringAddressEdit: {")
-  );
-  const editAddress = actionMenuSource.slice(
-    actionMenuSource.indexOf("progressGatheringAddressEdit: {")
+    "const handleImagePreview = useCallback"
   );
 
-  assert.match(addPhotos, /hiddenInDrawer: true/u);
-  assert.match(managePhotos, /hiddenInDrawer: true/u);
-  assert.doesNotMatch(editAddress, /hiddenInDrawer: true/u);
-  assert.match(rightSidebarSource, /mode === "drawer"[\s\S]*!action\.hiddenInDrawer/u);
-  assert.doesNotMatch(rightSidebarSource, /progress\.gathering-photo/u);
+  assert.match(actionMenuSource, /progressAddCut:\s*\{/u);
+  assert.match(actionMenuSource, /hidden: progressOnly \|\| !persistentProjectShell/u);
+  assert.doesNotMatch(actionMenuSource, /progressGatheringPhoto|progressGatheringAddress/u);
+  assert.match(progressPageSource, /action=\{<ProjectPageActionsMenu registration=\{progressActionMenu\} \/>\}/u);
+});
+
+test("gathering-place actions live in its permission-aware section context menu", () => {
+  assert.match(gatheringLocationSource, /role="menu"[\s\S]*aria-label="집합장소 작업 메뉴"/u);
+  assert.match(gatheringLocationSource, /label="사진 추가"[\s\S]*label="사진 관리"[\s\S]*label="주소 수정"/u);
+  assert.match(gatheringLocationSource, /Boolean\(canEdit && place\)/u);
+  assert.match(gatheringLocationSource, /onContextMenu=\{handleSectionContextMenu\}/u);
+  assert.match(gatheringLocationSource, /GATHERING_CONTEXT_MENU_LONG_PRESS_MS = 500/u);
+  assert.doesNotMatch(progressPageSource, /onActionsChange|GatheringLocationActions/u);
 });

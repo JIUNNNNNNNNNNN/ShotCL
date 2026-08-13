@@ -49,10 +49,8 @@ import {
   useContextualGuideAnchor,
   useContextualGuideBlocker
 } from "@/components/guides/ContextualGuideProvider";
-import {
-  useProjectPageActionMenu,
-  type ProjectPageActionMenuRegistration
-} from "@/components/ProjectPageActions";
+import type { ProjectPageActionMenuRegistration } from "@/components/ProjectPageActions";
+import { ProjectPageActionsMenu } from "@/components/ProjectPageActionsMenu";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import type { ShotOverheadEditorMetadata } from "@/components/ShotOverheadEditor";
 import { Card } from "@/components/ui/Card";
@@ -470,7 +468,6 @@ export default function ProjectStoryboardOverheadPage() {
       }
     }
   }), [activeType, projectId]);
-  useProjectPageActionMenu(archiveActionMenu);
   const preparingRef = useRef(false);
   const folderScanRef = useRef(false);
   const longPressRef = useRef<ArchivePointerSession | null>(null);
@@ -4259,11 +4256,14 @@ export default function ProjectStoryboardOverheadPage() {
             <h1 className="ui-density-heading font-display break-words font-bold text-field-text [overflow-wrap:anywhere]">부감도&콘티 아카이브</h1>
             <p className="break-words text-xs text-field-muted [overflow-wrap:anywhere]">{projectName} · 컷에 연결하기 전 프로젝트 공통 자료</p>
           </div>
-          {canEdit ? (
-            <AutosaveStatus status={archiveEditorAutosaveStatus} onRetry={retryArchiveEditorDrafts} />
-          ) : (
-            <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span>
-          )}
+          <div className="flex shrink-0 items-center gap-2">
+            {canEdit ? (
+              <AutosaveStatus status={archiveEditorAutosaveStatus} onRetry={retryArchiveEditorDrafts} />
+            ) : (
+              <span className="rounded-md border border-field-border bg-field-panel px-3 py-2 text-xs font-semibold text-field-muted">읽기 전용</span>
+            )}
+            <ProjectPageActionsMenu registration={archiveActionMenu} />
+          </div>
         </div>
 
         {errorMessage ? <p role="alert" className=" border border-field-danger bg-field-danger/10 px-3 py-2 text-sm font-bold text-field-danger">{errorMessage}</p> : null}

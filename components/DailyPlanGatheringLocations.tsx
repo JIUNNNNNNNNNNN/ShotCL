@@ -1,17 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject
+} from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronDown,
   ChevronUp,
   Clock3,
   Copy,
   ImageIcon,
+  ImagePlus,
+  Images,
   LoaderCircle,
   MapPin,
   Save,
   Trash2,
-  X
+  X,
+  type LucideIcon
 } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
 import { GatheringPhotoManagementSheet } from "@/components/GatheringPhotoManagementSheet";
@@ -53,18 +69,6 @@ import { cn } from "@/lib/utils";
 import type { AutosaveStatus as AutosaveStatusValue } from "@/lib/client/latestAutosaveQueue";
 import styles from "./DailyPlanGatheringLocations.module.css";
 
-export type GatheringLocationActions = {
-  visible: boolean;
-  addPhotos: () => void;
-  managePhotos: () => void;
-  editAddress: () => void;
-  addPhotosDisabled: boolean;
-  addPhotosPending: boolean;
-  managePhotosDisabled: boolean;
-  editAddressDisabled: boolean;
-  editAddressPending: boolean;
-};
-
 type DailyPlanGatheringLocationsProps = {
   projectId: string;
   plan: DailyPlan;
@@ -72,7 +76,6 @@ type DailyPlanGatheringLocationsProps = {
   onPlanMetadataChange: (
     patch: Pick<DailyPlan, "memo" | "updatedAt"> & Partial<Pick<DailyPlan, "shootingLocations">>
   ) => void;
-  onActionsChange?: (actions: GatheringLocationActions | null) => void;
 };
 
 type ExistingDraftPhoto = {
@@ -107,15 +110,42 @@ type GatheringPhotoLongPress = {
   timer: number;
 };
 
+type GatheringSectionLongPress = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  timer: number;
+};
+
+type GatheringSectionContextMenu = {
+  x: number;
+  y: number;
+};
+
 const MAX_SOURCE_IMAGE_BYTES = 20 * 1024 * 1024;
 const ADDRESS_COPY_FEEDBACK_MS = 1300;
+const GATHERING_CONTEXT_MENU_EDGE_PX = 8;
+const GATHERING_CONTEXT_MENU_LONG_PRESS_MS = 500;
+const GATHERING_CONTEXT_MENU_MOVE_PX = 10;
+const GATHERING_CONTEXT_MENU_WIDTH_PX = 224;
+const GATHERING_CONTEXT_MENU_ESTIMATED_HEIGHT_PX = 136;
+const GATHERING_CONTEXT_INTERACTIVE_SELECTOR = [
+  "a",
+  "button",
+  "input",
+  "label",
+  "select",
+  "textarea",
+  "[contenteditable='true']",
+  "[data-gathering-photo-action]",
+  "[role='button']"
+].join(",");
 
 export function DailyPlanGatheringLocations({
   projectId,
   plan,
   canEdit,
-  onPlanMetadataChange,
-  onActionsChange
+  onPlanMetadataChange
 }: DailyPlanGatheringLocationsProps) {
   const place = useMemo(
     () => selectProgressGatheringPlace(plan),
@@ -135,8 +165,15 @@ export function DailyPlanGatheringLocations({
   const [pendingPhotos, setPendingPhotos] = useState<InlinePendingPhoto[]>([]);
   const [uploadProgress, setUploadProgress] = useState("");
   const [uploadError, setUploadError] = useState("");
+  const [sectionContextMenu, setSectionContextMenu] = useState<GatheringSectionContextMenu | null>(null);
   const photoInputId = useId();
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const sectionContextTriggerRef = useRef<HTMLDivElement | null>(null);
+  const sectionContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const sectionContextReturnFocusRef = useRef<HTMLElement | null>(null);
+  const sectionLongPressRef = useRef<GatheringSectionLongPress | null>(null);
+  const suppressSectionContextMenuUntilRef = useRef(0);
   const pickerPlanIdRef = useRef("");
   const photoIntentRef = useRef<GatheringPhotoIntent>({ mode: "add" });
   const uploadLockRef = useRef(false);
@@ -189,6 +226,23 @@ export function DailyPlanGatheringLocations({
     longPressRef.current = null;
   }, []);
 
+  const cancelSectionLongPress = useCallback(() => {
+    const interaction = sectionLongPressRef.current;
+    if (interaction) window.clearTimeout(interaction.timer);
+    sectionLongPressRef.current = null;
+  }, []);
+
+  const closeSectionContextMenu = useCallback((restoreFocus = false) => {
+    setSectionContextMenu(null);
+    if (!restoreFocus) return;
+    const target = sectionContextReturnFocusRef.current;
+    window.requestAnimationFrame(() => {
+      const fallback = sectionContextTriggerRef.current;
+      const focusTarget = target?.isConnected && !target.closest("[inert]") ? target : fallback;
+      focusTarget?.focus({ preventScroll: true });
+    });
+  }, []);
+
   const addressAutosave = useAutosave<string>({
     value: addressDraft,
     enabled: Boolean(canEdit && isEditingAddress && place && !isComposingAddress),
@@ -238,13 +292,12 @@ export function DailyPlanGatheringLocations({
 
   const openAddPhotoPicker = useCallback(() => {
     if (!prepareAddPhoto()) return;
-    // The persistent project action panel keeps its existing fallback. Keep
-    // activation synchronous in the trusted click handler and reuse the same
-    // stable generic input as the canonical card label.
+    // Keep activation synchronous in the trusted click handler and reuse the
+    // same stable generic input as the canonical card label.
     photoInputRef.current?.click();
   }, [prepareAddPhoto]);
 
-  const actionControls = useMemo<GatheringLocationActions>(() => ({
+  const sectionActions = useMemo(() => ({
     visible: Boolean(canEdit && place),
     addPhotos: openAddPhotoPicker,
     managePhotos: () => {
@@ -284,7 +337,6 @@ export function DailyPlanGatheringLocations({
     isEditingPhotos,
     isSavingAddress,
     isPhotoBusy,
-    isUploadBusy,
     isPhotoInputDisabled,
     openAddPhotoPicker,
     place,
@@ -293,18 +345,12 @@ export function DailyPlanGatheringLocations({
   ]);
 
   useEffect(() => {
-    onActionsChange?.(actionControls);
-  }, [actionControls, onActionsChange]);
-
-  useEffect(() => () => {
-    onActionsChange?.(null);
-  }, [onActionsChange]);
-
-  useEffect(() => {
     activePlanIdRef.current = plan.id;
     uploadGenerationRef.current += 1;
     uploadLockRef.current = false;
     cancelPhotoLongPress();
+    cancelSectionLongPress();
+    setSectionContextMenu(null);
     setIsEditingPhotos(false);
     setIsEditingAddress(false);
     setIsPhotoManagementOpen(false);
@@ -324,7 +370,7 @@ export function DailyPlanGatheringLocations({
     copyFeedbackTimerRef.current = null;
     inlineObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     inlineObjectUrlsRef.current.clear();
-  }, [cancelPhotoLongPress, plan.id]);
+  }, [cancelPhotoLongPress, cancelSectionLongPress, plan.id]);
 
   useEffect(() => {
     if (
@@ -352,27 +398,82 @@ export function DailyPlanGatheringLocations({
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
-      const interaction = longPressRef.current;
-      if (!interaction || interaction.pointerId !== event.pointerId) return;
-      if (didGatheringPhotoPointerMove(
-        { x: interaction.startX, y: interaction.startY },
-        { x: event.clientX, y: event.clientY }
-      )) cancelPhotoLongPress();
+      const photoInteraction = longPressRef.current;
+      if (
+        photoInteraction?.pointerId === event.pointerId
+        && didGatheringPhotoPointerMove(
+          { x: photoInteraction.startX, y: photoInteraction.startY },
+          { x: event.clientX, y: event.clientY }
+        )
+      ) cancelPhotoLongPress();
+      const sectionInteraction = sectionLongPressRef.current;
+      if (
+        sectionInteraction?.pointerId === event.pointerId
+        && Math.hypot(
+          event.clientX - sectionInteraction.startX,
+          event.clientY - sectionInteraction.startY
+        ) > GATHERING_CONTEXT_MENU_MOVE_PX
+      ) cancelSectionLongPress();
     }
     function handlePointerEnd(event: PointerEvent) {
       if (longPressRef.current?.pointerId === event.pointerId) cancelPhotoLongPress();
+      if (sectionLongPressRef.current?.pointerId === event.pointerId) cancelSectionLongPress();
     }
+    const cancelPressesOnScroll = () => {
+      cancelPhotoLongPress();
+      cancelSectionLongPress();
+    };
     window.addEventListener("pointermove", handlePointerMove, true);
     window.addEventListener("pointerup", handlePointerEnd, true);
     window.addEventListener("pointercancel", handlePointerEnd, true);
-    document.addEventListener("scroll", cancelPhotoLongPress, true);
+    document.addEventListener("scroll", cancelPressesOnScroll, true);
     return () => {
       window.removeEventListener("pointermove", handlePointerMove, true);
       window.removeEventListener("pointerup", handlePointerEnd, true);
       window.removeEventListener("pointercancel", handlePointerEnd, true);
-      document.removeEventListener("scroll", cancelPhotoLongPress, true);
+      document.removeEventListener("scroll", cancelPressesOnScroll, true);
     };
-  }, [cancelPhotoLongPress]);
+  }, [cancelPhotoLongPress, cancelSectionLongPress]);
+
+  useLayoutEffect(() => {
+    if (!sectionContextMenu || !sectionContextMenuRef.current) return;
+    const menu = sectionContextMenuRef.current;
+    const bounds = menu.getBoundingClientRect();
+    const maxX = Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, window.innerWidth - bounds.width - GATHERING_CONTEXT_MENU_EDGE_PX);
+    const maxY = Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, window.innerHeight - bounds.height - GATHERING_CONTEXT_MENU_EDGE_PX);
+    const x = Math.min(Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, sectionContextMenu.x), maxX);
+    const y = Math.min(Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, sectionContextMenu.y), maxY);
+    if (x !== sectionContextMenu.x || y !== sectionContextMenu.y) {
+      setSectionContextMenu({ x, y });
+      return;
+    }
+    menu.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")?.focus({ preventScroll: true });
+  }, [sectionContextMenu]);
+
+  useEffect(() => {
+    if (!sectionContextMenu) return undefined;
+    const handleOutsidePointer = (event: PointerEvent) => {
+      if (sectionContextMenuRef.current?.contains(event.target as Node)) return;
+      closeSectionContextMenu();
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSectionContextMenu(true);
+      }
+    };
+    const handleViewportChange = () => closeSectionContextMenu();
+    document.addEventListener("pointerdown", handleOutsidePointer, true);
+    window.addEventListener("keydown", handleEscape);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsidePointer, true);
+      window.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [closeSectionContextMenu, sectionContextMenu]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -381,11 +482,115 @@ export function DailyPlanGatheringLocations({
       uploadGenerationRef.current += 1;
       copyRequestRef.current += 1;
       cancelPhotoLongPress();
+      cancelSectionLongPress();
       if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current);
       inlineObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
       inlineObjectUrlsRef.current.clear();
     };
-  }, [cancelPhotoLongPress]);
+  }, [cancelPhotoLongPress, cancelSectionLongPress]);
+
+  useEffect(() => {
+    if (!sectionActions.visible && sectionContextMenu) closeSectionContextMenu();
+  }, [closeSectionContextMenu, sectionActions.visible, sectionContextMenu]);
+
+  function isSectionContextTarget(target: EventTarget | null, longPress: boolean) {
+    if (!(target instanceof Element) || !sectionRef.current?.contains(target)) return false;
+    if (target.closest(GATHERING_CONTEXT_INTERACTIVE_SELECTOR)) return false;
+    if (!longPress) return true;
+    const surface = target.closest<HTMLElement>("[data-gathering-context-long-press]");
+    if (!surface) return false;
+    return surface.dataset.gatheringContextLongPress === "header" || target === surface;
+  }
+
+  function openSectionContextMenu(clientX: number, clientY: number, returnFocus?: HTMLElement | null) {
+    if (!sectionActions.visible) return;
+    const maxX = Math.max(
+      GATHERING_CONTEXT_MENU_EDGE_PX,
+      window.innerWidth - GATHERING_CONTEXT_MENU_WIDTH_PX - GATHERING_CONTEXT_MENU_EDGE_PX
+    );
+    const maxY = Math.max(
+      GATHERING_CONTEXT_MENU_EDGE_PX,
+      window.innerHeight - GATHERING_CONTEXT_MENU_ESTIMATED_HEIGHT_PX - GATHERING_CONTEXT_MENU_EDGE_PX
+    );
+    sectionContextReturnFocusRef.current = returnFocus ?? sectionContextTriggerRef.current;
+    setSectionContextMenu({
+      x: Math.min(Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, clientX), maxX),
+      y: Math.min(Math.max(GATHERING_CONTEXT_MENU_EDGE_PX, clientY), maxY)
+    });
+  }
+
+  function handleSectionPointerDown(event: ReactPointerEvent<HTMLElement>) {
+    if (
+      !sectionActions.visible
+      || !event.isPrimary
+      || event.pointerType === "mouse"
+      || event.button !== 0
+      || !isSectionContextTarget(event.target, true)
+    ) return;
+    cancelSectionLongPress();
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const timer = window.setTimeout(() => {
+      const interaction = sectionLongPressRef.current;
+      if (!interaction || interaction.pointerId !== pointerId) return;
+      sectionLongPressRef.current = null;
+      suppressSectionContextMenuUntilRef.current = Date.now() + 800;
+      openSectionContextMenu(startX, startY, sectionContextTriggerRef.current);
+    }, GATHERING_CONTEXT_MENU_LONG_PRESS_MS);
+    sectionLongPressRef.current = { pointerId, startX, startY, timer };
+  }
+
+  function handleSectionContextMenu(event: ReactMouseEvent<HTMLElement>) {
+    if (!sectionActions.visible || !isSectionContextTarget(event.target, false)) return;
+    event.preventDefault();
+    if (Date.now() < suppressSectionContextMenuUntilRef.current) return;
+    openSectionContextMenu(event.clientX, event.clientY, sectionContextTriggerRef.current);
+  }
+
+  function handleSectionContextKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const directActivation = event.target === event.currentTarget
+      && (event.key === "Enter" || event.key === " ");
+    const contextActivation = event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+    if (
+      !sectionActions.visible
+      || (!directActivation && !contextActivation)
+    ) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    openSectionContextMenu(
+      rect.left + Math.min(rect.width, 28),
+      rect.bottom,
+      event.currentTarget
+    );
+  }
+
+  function handleSectionMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='menuitem']:not(:disabled)")
+    );
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowDown") nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+    else if (event.key === "ArrowUp") nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = items.length - 1;
+    else if (event.key === "Tab") {
+      closeSectionContextMenu();
+      return;
+    } else return;
+    event.preventDefault();
+    items[nextIndex]?.focus({ preventScroll: true });
+  }
+
+  function runSectionAction(action: () => void, restoreFocusAfterAction = false) {
+    action();
+    setSectionContextMenu(null);
+    if (!restoreFocusAfterAction) return;
+    const target = sectionContextReturnFocusRef.current ?? sectionContextTriggerRef.current;
+    window.requestAnimationFrame(() => target?.focus({ preventScroll: true }));
+  }
 
   function isCurrentUpload(planId: string, generation: number) {
     return mountedRef.current
@@ -394,16 +599,19 @@ export function DailyPlanGatheringLocations({
   }
 
   function rememberDialogTrigger() {
-    dialogReturnFocusRef.current = document.activeElement instanceof HTMLElement
+    const activeElement = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
+    dialogReturnFocusRef.current = activeElement?.closest("[role='menu']")
+      ? sectionContextReturnFocusRef.current ?? sectionContextTriggerRef.current
+      : activeElement;
   }
 
   function restoreDialogTrigger() {
     const target = dialogReturnFocusRef.current;
     dialogReturnFocusRef.current = null;
     window.requestAnimationFrame(() => {
-      const fallback = document.querySelector<HTMLButtonElement>(".project-shell__action-toggle");
+      const fallback = sectionContextTriggerRef.current;
       const focusTarget = target?.isConnected && !target.closest("[inert]") ? target : fallback;
       focusTarget?.focus({ preventScroll: true });
     });
@@ -704,13 +912,26 @@ export function DailyPlanGatheringLocations({
 
   return (
     <section
+      ref={sectionRef}
       className={cn(
         "mb-3 rounded-[var(--radius-card)] border border-field-border bg-field-section",
         styles.card
       )}
       aria-labelledby="gathering-locations-title"
+      onContextMenu={handleSectionContextMenu}
+      onPointerDown={handleSectionPointerDown}
     >
-      <div className="flex min-h-9 items-center justify-between gap-3 border-b border-field-border px-3 py-2">
+      <div
+        ref={sectionContextTriggerRef}
+        data-gathering-context-long-press="header"
+        tabIndex={sectionActions.visible ? 0 : undefined}
+        className="flex min-h-9 select-none items-center justify-between gap-3 border-b border-field-border px-3 py-2 [touch-action:pan-y] [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-field-primary"
+        aria-label={sectionActions.visible ? "집합장소. Enter, Space, Shift+F10 또는 메뉴 키로 작업 메뉴 열기" : undefined}
+        aria-haspopup={sectionActions.visible ? "menu" : undefined}
+        aria-expanded={sectionActions.visible ? Boolean(sectionContextMenu) : undefined}
+        aria-controls={sectionContextMenu ? "gathering-section-actions-menu" : undefined}
+        onKeyDown={handleSectionContextKeyDown}
+      >
         <h2 id="gathering-locations-title" className="text-sm font-bold text-field-text">집합장소</h2>
         <div className="flex min-w-0 items-center justify-end gap-2">
           {message ? <p className="min-w-0 break-words text-right text-[11px] font-normal text-field-muted [overflow-wrap:anywhere]" role="status">{message}</p> : null}
@@ -827,7 +1048,117 @@ export function DailyPlanGatheringLocations({
           />
         ) : null}
       </MotionPresence>
+
+      {typeof document !== "undefined" && sectionContextMenu && sectionActions.visible
+        ? createPortal(
+            <GatheringSectionActionsMenu
+              menu={sectionContextMenu}
+              menuRef={sectionContextMenuRef}
+              addPhotosDisabled={sectionActions.addPhotosDisabled}
+              addPhotosPending={sectionActions.addPhotosPending}
+              managePhotosDisabled={sectionActions.managePhotosDisabled}
+              editAddressDisabled={sectionActions.editAddressDisabled}
+              editAddressPending={sectionActions.editAddressPending}
+              onAddPhotos={() => runSectionAction(sectionActions.addPhotos, true)}
+              onManagePhotos={() => runSectionAction(sectionActions.managePhotos)}
+              onEditAddress={() => runSectionAction(sectionActions.editAddress)}
+              onKeyDown={handleSectionMenuKeyDown}
+            />,
+            document.body
+          )
+        : null}
     </section>
+  );
+}
+
+function GatheringSectionActionsMenu({
+  menu,
+  menuRef,
+  addPhotosDisabled,
+  addPhotosPending,
+  managePhotosDisabled,
+  editAddressDisabled,
+  editAddressPending,
+  onAddPhotos,
+  onManagePhotos,
+  onEditAddress,
+  onKeyDown
+}: {
+  menu: GatheringSectionContextMenu;
+  menuRef: RefObject<HTMLDivElement | null>;
+  addPhotosDisabled: boolean;
+  addPhotosPending: boolean;
+  managePhotosDisabled: boolean;
+  editAddressDisabled: boolean;
+  editAddressPending: boolean;
+  onAddPhotos: () => void;
+  onManagePhotos: () => void;
+  onEditAddress: () => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    <div
+      ref={menuRef}
+      id="gathering-section-actions-menu"
+      data-project-shell-portal
+      role="menu"
+      aria-label="집합장소 작업 메뉴"
+      className="ui-motion-menu fixed z-[100] grid w-56 gap-1 rounded-[var(--radius-menu)] border border-field-divider bg-field-elevated p-1.5 text-field-text shadow-floating"
+      style={{ left: menu.x, top: menu.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onKeyDown={onKeyDown}
+    >
+      <GatheringSectionActionItem
+        label="사진 추가"
+        icon={ImagePlus}
+        disabled={addPhotosDisabled}
+        pending={addPhotosPending}
+        onSelect={onAddPhotos}
+      />
+      <GatheringSectionActionItem
+        label="사진 관리"
+        icon={Images}
+        disabled={managePhotosDisabled}
+        onSelect={onManagePhotos}
+      />
+      <GatheringSectionActionItem
+        label="주소 수정"
+        icon={MapPin}
+        disabled={editAddressDisabled}
+        pending={editAddressPending}
+        onSelect={onEditAddress}
+      />
+    </div>
+  );
+}
+
+function GatheringSectionActionItem({
+  label,
+  icon: Icon,
+  disabled,
+  pending = false,
+  onSelect
+}: {
+  label: string;
+  icon: LucideIcon;
+  disabled: boolean;
+  pending?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      aria-busy={pending || undefined}
+      onClick={onSelect}
+      className="flex min-h-10 w-full items-center gap-2 rounded-[var(--radius-control)] px-3 text-left text-xs font-bold text-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      {pending
+        ? <LoaderCircle className="h-4 w-4 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden />
+        : <Icon className="h-4 w-4 shrink-0" aria-hidden />}
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -872,7 +1203,7 @@ function GatheringPlaceRow({
   addressCopyStatus: "idle" | "copied" | "failed";
 }) {
   return (
-    <article className="min-w-0 p-3">
+    <article data-gathering-context-long-press="blank" className="min-w-0 select-none p-3 [touch-action:pan-y] [-webkit-touch-callout:none]">
       <div className={styles.layout}>
         <div className={styles.time} aria-label={callTime ? `집합 시간 ${callTime}` : "집합 시간 미입력"}>
           <Clock3 className={styles.timeIcon} aria-hidden />

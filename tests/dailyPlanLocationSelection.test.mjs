@@ -101,7 +101,7 @@ test("location changes stay in the existing local autosave snapshot without refe
   const autosave = sourceBetween(
     source,
     "const dailyPlanAutosaveSnapshot = useMemo<DailyPlanAutosaveSnapshot>",
-    "sidebarSaveRequestRef.current"
+    "pageSaveActionRef.current"
   );
 
   assert.match(autosave, /plan,[\s\S]*?printMeta,[\s\S]*?locations,[\s\S]*?mealTimes,[\s\S]*?scenes/u);

@@ -11,7 +11,7 @@ test("automatic PDF freezes the exact live preview snapshot/profile and lazy-loa
   const editor = await readFile(editorPath, "utf8");
   const handler = editor.slice(
     editor.indexOf("async function handlePrint("),
-    editor.indexOf("sidebarPrintRequestRef.current")
+    editor.indexOf("pagePrintActionRef.current")
   );
 
   assert.ok(handler.indexOf("if (isPrintingRef.current) return") >= 0);
@@ -79,11 +79,11 @@ test("user-facing PDF actions consistently name the A4 Portrait output as mobile
   ]);
   const handler = editor.slice(
     editor.indexOf("async function handlePrint("),
-    editor.indexOf("sidebarPrintRequestRef.current")
+    editor.indexOf("pagePrintActionRef.current")
   );
   const registration = editor.slice(
     editor.indexOf("const dailyPlanActionMenu"),
-    editor.indexOf("useProjectPageActionMenu(dailyPlanActionMenu)")
+    editor.indexOf("const isActorCardDragging")
   );
   const actionDefinitions = actions.slice(
     actions.indexOf("const ACTION_DEFINITIONS"),
@@ -98,6 +98,7 @@ test("user-facing PDF actions consistently name the A4 Portrait output as mobile
     registration,
     /dailyPlanPdf:\s*\{\s*label: documentOrientation === "portrait" \? "모바일용 PDF" : "가로 PDF"/u
   );
+  assert.match(editor, /<ProjectPageActionsMenu registration=\{dailyPlanActionMenu\} \/>/u);
   assert.match(actionDefinitions, /dailyPlanPortraitPdf: \{ label: "모바일용 PDF"/u);
   assert.match(
     handler,

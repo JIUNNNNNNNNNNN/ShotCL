@@ -222,7 +222,6 @@
   --ui-calendar-weekday-height: 26px;
   --ui-calendar-day-min-height: 76px;
   --ui-shell-navigation-width: clamp(240px, 18vw, 300px);
-  --ui-shell-action-width: clamp(208px, 15vw, 264px);
   --ui-dialog-safe-margin: 16px;
   --surface-00: var(--bg-base);
   --surface-01: var(--bg-surface-1);
@@ -313,7 +312,6 @@
     --ui-calendar-weekday-height: 24px;
     --ui-calendar-day-min-height: 68px;
     --ui-shell-navigation-width: clamp(260px, 19vw, 292px);
-    --ui-shell-action-width: clamp(196px, 14vw, 224px);
     --ui-dialog-safe-margin: 12px;
   }
 }
@@ -625,18 +623,6 @@ button {
   from {
     opacity: 0;
     transform: translateX(-6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes ui-panel-right-enter {
-  from {
-    opacity: 0;
-    transform: translateX(6px);
   }
 
   to {
@@ -2392,12 +2378,11 @@ button {
   margin: 0;
 }
 
-/* Shell mode is independent from density. React applies the same canonical
-   720x700 viewport query through data-project-shell-mode; CSS only lays out
-   the single mounted panel or drawer system for that mode. */
+/* Shell mode is independent from density. Persistent viewports keep the
+   project navigation and page in a two-column workspace; compact viewports
+   mount only the left navigation drawer. */
 .project-shell {
   --project-shell-navigation-width: var(--ui-shell-navigation-width);
-  --project-shell-action-width: var(--ui-shell-action-width);
   box-sizing: border-box;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2432,7 +2417,7 @@ button {
   display: grid;
   grid-column: 1;
   grid-row: 1;
-  grid-template-columns: 44px 44px minmax(0, 1fr) 44px;
+  grid-template-columns: 44px 44px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -2480,11 +2465,6 @@ button {
   height: var(--ui-icon-size);
 }
 
-.project-shell__bar-spacer {
-  width: 44px;
-  height: 44px;
-}
-
 .project-shell__content {
   grid-column: 1;
   grid-row: 2;
@@ -2517,42 +2497,159 @@ button {
   animation: ui-page-enter var(--motion-base) var(--ease-out-native);
 }
 
-.project-shell__action-panel {
-  display: none;
+.project-page-actions {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg-surface-1);
-  border-left: 1px solid var(--border-subtle);
-  animation: ui-panel-right-enter var(--motion-base) var(--ease-out-native);
+  flex: 0 0 auto;
 }
 
-.project-action-menu__header {
-  gap: var(--ui-card-gap);
-  padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
+.project-page-actions__trigger {
+  display: grid;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
+  place-items: center;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-control);
+  background: var(--ui-surface-2);
+  color: var(--ui-text-secondary);
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native),
+    transform var(--motion-fast) var(--ease-out-native);
 }
 
-.project-action-menu__items {
-  gap: var(--ui-card-gap);
-  padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
+.project-page-actions__trigger:hover,
+.project-page-actions__trigger[aria-expanded="true"] {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-surface-3);
+  color: var(--ui-accent);
 }
 
-.project-action-menu__item {
-  min-height: var(--ui-control-height);
-  gap: var(--ui-card-gap);
-  padding: var(--ui-card-padding-block) var(--ui-card-padding-inline);
+.project-page-actions__trigger:active {
+  transform: scale(0.96);
 }
 
-.project-action-menu__icon {
+.project-page-actions__trigger:focus-visible,
+.project-page-actions__item:focus-visible {
+  outline: 2px solid var(--ui-accent-focus);
+  outline-offset: 2px;
+}
+
+.project-page-actions__trigger > svg,
+.project-page-actions__icon {
   width: var(--ui-icon-size);
   height: var(--ui-icon-size);
 }
 
-.project-shell__drawer-layer,
-.project-shell__action-drawer-overlay {
+.project-page-actions__menu {
+  position: fixed;
+  z-index: 96;
+  min-width: min(220px, calc(100vw - 16px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-surface-4);
+  color: var(--ui-text-primary);
+  box-shadow: var(--shadow-floating);
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.project-page-actions__title {
+  padding: 9px 10px 7px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  color: var(--ui-text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.project-page-actions__items {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+}
+
+.project-page-actions__group {
+  display: grid;
+  gap: 4px;
+  padding-top: 5px;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+
+.project-page-actions__group:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.project-page-actions__group-label {
+  padding: 4px 6px 1px;
+  color: var(--ui-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.project-page-actions__item {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+  transition:
+    border-color var(--motion-fast) var(--ease-out-native),
+    background-color var(--motion-fast) var(--ease-out-native),
+    color var(--motion-fast) var(--ease-out-native);
+}
+
+.project-page-actions__item:hover,
+.project-page-actions__item[aria-current] {
+  border-color: var(--ui-accent-border);
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+}
+
+.project-page-actions__item[data-emphasis="primary"] {
+  color: var(--ui-accent);
+}
+
+.project-page-actions__item--danger {
+  color: var(--field-danger);
+}
+
+.project-page-actions__item--danger:hover {
+  border-color: color-mix(in srgb, var(--field-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--field-danger) 10%, transparent);
+  color: var(--field-danger);
+}
+
+.project-page-actions__item:disabled {
+  cursor: not-allowed;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-text-disabled);
+}
+
+.project-page-actions__icon {
+  flex: 0 0 auto;
+}
+
+.project-shell__drawer-layer {
   position: fixed;
   inset: 0;
   z-index: 90;
@@ -2564,8 +2661,7 @@ button {
     visibility 0s linear var(--motion-fast);
 }
 
-.project-shell__drawer-layer[data-open="true"],
-.project-shell__action-drawer-overlay[data-open="true"] {
+.project-shell__drawer-layer[data-open="true"] {
   visibility: visible;
   opacity: 1;
   pointer-events: auto;
@@ -2574,8 +2670,7 @@ button {
     visibility 0s linear 0s;
 }
 
-.project-shell__drawer-backdrop,
-.project-shell__action-drawer-overlay::before {
+.project-shell__drawer-backdrop {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2588,12 +2683,7 @@ button {
   background: rgba(0, 0, 0, 0.3);
 }
 
-.project-shell__action-drawer-overlay::before {
-  background: rgba(0, 0, 0, 0.62);
-}
-
-.project-shell__navigation-drawer,
-.project-shell__action-drawer {
+.project-shell__navigation-drawer {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -2668,14 +2758,6 @@ button {
   width: 44px;
   height: 44px;
   flex-basis: 44px;
-}
-
-.project-shell__action-drawer {
-  right: 0;
-  width: min(336px, calc(100vw - 24px));
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  border-left: 1px solid var(--ui-border-default);
 }
 
 .project-navigation {
@@ -3015,13 +3097,6 @@ button {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.project-shell[data-project-shell-mode="persistent"].project-shell--has-actions {
-  grid-template-columns:
-    var(--project-shell-navigation-width)
-    minmax(0, 1fr)
-    var(--project-shell-action-width);
-}
-
 .project-shell[data-project-shell-mode="persistent"] .project-shell__navigation {
   display: flex;
   grid-column: 1;
@@ -3042,22 +3117,13 @@ button {
     max(var(--ui-page-padding-block), env(safe-area-inset-bottom));
 }
 
-.project-shell[data-project-shell-mode="persistent"] .project-shell__action-panel {
-  display: flex;
-  grid-column: 3;
-  grid-row: 1;
-  flex-direction: column;
-}
-
-.project-shell[data-project-shell-mode="persistent"] .project-shell__drawer-layer,
-.project-shell[data-project-shell-mode="persistent"] .project-shell__action-drawer-overlay {
+.project-shell[data-project-shell-mode="persistent"] .project-shell__drawer-layer {
   display: none;
 }
 
 @media (min-width: 1200px) and (min-height: 700px) {
   .project-shell {
     --project-shell-navigation-width: clamp(240px, 18vw, 300px);
-    --project-shell-action-width: clamp(208px, 15vw, 264px);
   }
 
   .pixel-dog-loader-page {
@@ -3065,20 +3131,17 @@ button {
   }
 }
 
-/* Tablet landscape and compact desktop retain both panels with narrower rails. */
+/* Tablet landscape and compact desktop retain the persistent left rail. */
 @media (min-width: 900px) and (max-width: 1199px) and (min-height: 700px) {
   .project-shell {
     --project-shell-navigation-width: clamp(210px, 22vw, 240px);
-    --project-shell-action-width: clamp(180px, 19vw, 210px);
   }
 }
 
-/* Tablet portrait keeps the shell persistent and spends width on content by
-   compacting both rails rather than hiding them. */
+/* Tablet portrait keeps the shell persistent and compacts the left rail. */
 @media (min-width: 720px) and (max-width: 899px) and (min-height: 700px) {
   .project-shell {
     --project-shell-navigation-width: clamp(170px, 23vw, 200px);
-    --project-shell-action-width: clamp(150px, 20vw, 180px);
   }
 }
 
@@ -3138,27 +3201,6 @@ button {
     padding: 6px 7px;
   }
 
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__header,
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__items {
-    padding: 8px;
-  }
-
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__items {
-    gap: 7px;
-  }
-
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__item {
-    min-height: 44px;
-    gap: 7px;
-    padding: 7px 8px;
-    font-size: 0.8125rem;
-    white-space: normal;
-  }
-
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__icon {
-    width: 18px;
-    height: 18px;
-  }
 }
 
 @media (min-width: 720px) and (max-width: 899px) and (min-height: 700px) {
@@ -3171,14 +3213,8 @@ button {
     padding: 5px 6px;
   }
 
-  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-label,
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__item {
+  .project-shell[data-project-shell-mode="persistent"] .project-navigation__card-label {
     font-size: 0.75rem;
-  }
-
-  .project-shell[data-project-shell-mode="persistent"] .project-action-menu__header .font-display {
-    font-size: 0.875rem;
-    line-height: 1.35;
   }
 }
 
@@ -5277,16 +5313,12 @@ button {
     div[id^="archive-scene-"]
   ),
   .project-shell__navigation,
-  .project-shell__action-panel,
   .project-shell__drawer-layer,
-  .project-shell__action-drawer-overlay,
   .project-shell__drawer-backdrop,
-  .project-shell__action-drawer-overlay::before,
   .project-shell__page > *,
   .project-navigation__card,
   .project-navigation__card-chevron,
-  .project-shell__navigation-drawer,
-  .project-shell__action-drawer {
+  .project-shell__navigation-drawer {
     transition-duration: 0.01ms !important;
     animation: none !important;
   }

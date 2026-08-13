@@ -14,16 +14,14 @@ import {
 } from "react";
 import { useSearchParams } from "next/navigation";
 import { RotateCcw } from "lucide-react";
+import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
 import { PageLoader, SectionLoader } from "@/components/PixelDogLoader";
-import {
-  useProjectPageActionMenu,
-  type ProjectPageActionMenuRegistration
-} from "@/components/ProjectPageActions";
+import type { ProjectPageActionMenuRegistration } from "@/components/ProjectPageActions";
+import { ProjectPageActionsMenu } from "@/components/ProjectPageActionsMenu";
 import { ProjectGuideMenu } from "@/components/ProjectGuideMenu";
 import { useProjectDeleteUndo } from "@/components/ProjectDeleteUndoProvider";
 import { ProgressDetailHeader } from "@/components/ProgressDetailHeader";
 import { DailyProgressSummary } from "@/components/DailyProgressSummary";
-import type { GatheringLocationActions } from "@/components/DailyPlanGatheringLocations";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
@@ -277,6 +275,7 @@ export default function ProjectDetailPage() {
     upsertDailyPlan
   } = useProjectWorkspace();
   const progressOnly = role === "progress";
+  const persistentProjectShell = usePersistentProjectShell();
   const searchParams = useSearchParams();
   const requestedDailyPlanId = searchParams.get("dailyPlanId") ?? "";
   const isProgressView = searchParams.get("view") === "progress" || Boolean(requestedDailyPlanId);
@@ -339,7 +338,6 @@ export default function ProjectDetailPage() {
   const [editingSchedule, setEditingSchedule] = useState<EditingScheduleState | null>(null);
   const [savingScheduleSessionId, setSavingScheduleSessionId] = useState<number | null>(null);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [gatheringLocationActions, setGatheringLocationActions] = useState<GatheringLocationActions | null>(null);
   const [preview, setPreview] = useState<{
     url: string;
     title: string;
@@ -1124,41 +1122,21 @@ export default function ProjectDetailPage() {
       actions: {
         progressAddCut: {
           onSelect: () => setIsAddOpen(true),
-          hidden: progressOnly,
+          hidden: progressOnly || !persistentProjectShell,
           disabled: isSaving
         },
-        progressGatheringPhotoAdd: {
-          onSelect: gatheringLocationActions?.addPhotos,
-          hidden: progressOnly || !gatheringLocationActions?.visible,
-          hiddenInDrawer: true,
-          disabled: gatheringLocationActions?.addPhotosDisabled ?? true,
-          pending: gatheringLocationActions?.addPhotosPending ?? false
-        },
-        progressGatheringPhotoManage: {
-          onSelect: gatheringLocationActions?.managePhotos,
-          hidden: progressOnly || !gatheringLocationActions?.visible,
-          hiddenInDrawer: true,
-          disabled: gatheringLocationActions?.managePhotosDisabled ?? true
-        },
-        progressGatheringAddressEdit: {
-          onSelect: gatheringLocationActions?.editAddress,
-          hidden: progressOnly || !gatheringLocationActions?.visible,
-          disabled: gatheringLocationActions?.editAddressDisabled ?? true,
-          pending: gatheringLocationActions?.editAddressPending ?? false
-        }
       }
     };
   }, [
     dailyPlanId,
-    gatheringLocationActions,
     isProgressView,
     isSaving,
+    persistentProjectShell,
     progressOnly,
     project,
     projectId,
     selectedPlan
   ]);
-  useProjectPageActionMenu(progressActionMenu);
   const handleImagePreview = useCallback((url: string, title: string) => {
     setPreview({ url, title: title.trim() || "콘티" });
   }, []);
@@ -1716,7 +1694,7 @@ export default function ProjectDetailPage() {
         projectName={project.name}
         episodeLabel={formatEpisodeLabel(selectedPlan, 0)}
         shootingDate={selectedPlan.shootingDate}
-        action={null}
+        action={<ProjectPageActionsMenu registration={progressActionMenu} />}
       />
 
       <DailyProgressSummary progress={dailyProgress} />
@@ -1729,7 +1707,6 @@ export default function ProjectDetailPage() {
           plan={selectedPlan}
           canEdit={role === "admin"}
           onPlanMetadataChange={handleDailyPlanMetadataChange}
-          onActionsChange={setGatheringLocationActions}
         />
       )}
 

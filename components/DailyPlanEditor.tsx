@@ -140,10 +140,8 @@ import { MemoPopoverField } from "@/components/MemoPopoverField";
 import { InlineLoader, SectionLoader } from "@/components/PixelDogLoader";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
-import {
-  useProjectPageActionMenu,
-  type ProjectPageActionMenuRegistration
-} from "@/components/ProjectPageActions";
+import type { ProjectPageActionMenuRegistration } from "@/components/ProjectPageActions";
+import { ProjectPageActionsMenu } from "@/components/ProjectPageActionsMenu";
 import { WeatherRegionPicker } from "@/components/weather/WeatherRegionPicker";
 import { Button } from "@/components/ui/Button";
 import { useDailyPlanTimetableInteraction } from "@/components/useDailyPlanTimetableInteraction";
@@ -541,9 +539,9 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
   ) => Promise<boolean>>(() => Promise.resolve(true));
   const isPrintingRef = useRef(false);
   const editorInteractionRootRef = useRef<HTMLDivElement | null>(null);
-  const sidebarSaveRequestRef = useRef<() => void>(() => {});
-  const sidebarPrintRequestRef = useRef<() => void>(() => {});
-  const sidebarPortraitPrintRequestRef = useRef<() => void>(() => {});
+  const pageSaveActionRef = useRef<() => void>(() => {});
+  const pagePrintActionRef = useRef<() => void>(() => {});
+  const pagePortraitPrintActionRef = useRef<() => void>(() => {});
   const livePreviewPaperRef = useRef<HTMLDivElement | null>(null);
   const printDocumentRef = useRef<HTMLDivElement | null>(null);
   const resolvedPreviewProfileRef = useRef<DailyPlanResolvedPreviewProfile | null>(null);
@@ -2060,7 +2058,7 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
   }, [currentEditorFingerprint, dailyPlanAutosave, dailyPlanAutosaveSnapshot, savedEditorFingerprint]);
 
-  sidebarSaveRequestRef.current = () => {
+  pageSaveActionRef.current = () => {
     void saveCurrentPlan();
   };
 
@@ -2154,11 +2152,11 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     }
   }
 
-  sidebarPrintRequestRef.current = () => {
+  pagePrintActionRef.current = () => {
     void handlePrint("automatic");
   };
 
-  sidebarPortraitPrintRequestRef.current = () => {
+  pagePortraitPrintActionRef.current = () => {
     void handlePrint("portrait");
   };
 
@@ -2168,25 +2166,23 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
     actions: {
       dailyPlanPdf: {
         label: documentOrientation === "portrait" ? "모바일용 PDF" : "가로 PDF",
-        onSelect: () => sidebarPrintRequestRef.current(),
+        onSelect: () => pagePrintActionRef.current(),
         disabled: !canPrint || !documentOrientation || isPrinting,
         pending: activePrintAction === "automatic"
       },
       dailyPlanPortraitPdf: {
-        onSelect: () => sidebarPortraitPrintRequestRef.current(),
+        onSelect: () => pagePortraitPrintActionRef.current(),
         disabled: !canPrint || isPrinting,
         pending: activePrintAction === "portrait",
         hidden: documentOrientation !== "landscape"
       },
       dailyPlanSave: {
-        onSelect: () => sidebarSaveRequestRef.current(),
+        onSelect: () => pageSaveActionRef.current(),
         disabled: !canManageTimetable || isSaving || dailyPlanAutosave.isPending,
         pending: isSaving || dailyPlanAutosave.isPending
       },
     }
   }), [activePrintAction, canManageTimetable, canPrint, dailyPlanAutosave.isPending, dailyPlanId, documentOrientation, isPrinting, isSaving, project.id]);
-  useProjectPageActionMenu(dailyPlanActionMenu);
-
   const isActorCardDragging = actorInteraction.isDragging;
   const activeCardInteraction = isActorCardDragging ? actorInteraction : timetableInteraction;
   const hasActiveCardDrag = actorInteraction.isDragging || timetableInteraction.isDragging;
@@ -2217,11 +2213,22 @@ export function DailyPlanEditor({ project, projectBasicInfo, projectStaffMembers
           isSaving ? "pointer-events-none select-none" : ""
         }`}
       >
-        {canManageTimetable && dailyPlanId ? (
-          <div className="mb-2 flex justify-end">
-            <AutosaveStatus status={dailyPlanAutosave.status} onRetry={dailyPlanAutosave.retry} />
+        <header className="mb-2 flex min-w-0 items-start justify-between gap-2 text-left">
+          <div className="min-w-0">
+            <h1 className="ui-density-heading font-display break-words font-black text-field-text [overflow-wrap:anywhere]">
+              일촬표
+            </h1>
+            <p className="mt-0.5 break-words text-[11px] font-semibold text-field-muted [overflow-wrap:anywhere]">
+              {project.name} · {formatDailyPlanRoundLabel(plan)}
+            </p>
           </div>
-        ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {canManageTimetable && dailyPlanId ? (
+              <AutosaveStatus status={dailyPlanAutosave.status} onRetry={dailyPlanAutosave.retry} />
+            ) : null}
+            <ProjectPageActionsMenu registration={dailyPlanActionMenu} />
+          </div>
+        </header>
         {message ? <div role="status" className="mb-4 border border-field-primary/50 bg-field-primary/10 p-4 text-sm font-semibold text-field-text">{message}</div> : null}
         {errorMessage ? <div role="alert" className="mb-4 border border-field-danger bg-field-toast p-4 text-sm font-semibold text-field-danger">{errorMessage}</div> : null}
 
