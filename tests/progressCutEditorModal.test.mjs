@@ -14,6 +14,12 @@ test("Cut editor keeps canonical Shot content and actor fields", () => {
   assert.match(editorSource, /charactersText: shot\.characters\.join\(", "\)/u);
   assert.match(editorSource, /updateField\("description", event\.target\.value\)/u);
   assert.match(editorSource, /updateField\("charactersText", event\.target\.value\)/u);
+  const contentField = editorSource.indexOf(">컷 내용</span>");
+  const actorField = editorSource.indexOf(">등장인물</span>", contentField);
+  const overheadSection = editorSource.indexOf('mediaType="overhead"', actorField);
+  const storyboardSection = editorSource.indexOf('mediaType="storyboard"', overheadSection);
+  assert.ok(contentField > 0 && contentField < actorField);
+  assert.ok(actorField < overheadSection && overheadSection < storyboardSection);
 });
 
 test("desktop Cut editor contains both media sections without a nested picker dialog", () => {
@@ -22,6 +28,7 @@ test("desktop Cut editor contains both media sections without a nested picker di
   assert.match(editorSource, /<ShotArchiveSelector/u);
   assert.doesNotMatch(editorSource, /<ShotArchivePicker/u);
   assert.match(pickerSource, /export function ShotArchiveSelector/u);
+  assert.doesNotMatch(pickerSource, /export function ShotArchivePicker/u);
 });
 
 test("media selection, unlink, and upload share stable canonical linkage", () => {
@@ -30,15 +37,25 @@ test("media selection, unlink, and upload share stable canonical linkage", () =>
   assert.match(editorSource, /const shotKey = getShotDiagramKey\(shot\)/u);
   assert.match(editorSource, /await uploadProjectReferenceAsset\(/u);
   assert.match(editorSource, /await saveShotMediaLink\(shot, mediaType, \{ assetId: uploaded\.id, source: "reference" \}\)/u);
+  assert.match(editorSource, /shotRef: shotKey\.shotRef,[\s\S]*?assetId: uploaded\.id,[\s\S]*?publicUrl: uploaded\.publicUrl/u);
+  assert.match(editorSource, /onMediaMutation\?\.\(\{ shotId: shot\.id, shotRef: shotKey\.shotRef, mediaType, link: nextLink \}\)/u);
+  assert.match(pickerSource, /shotRef: getShotDiagramKey\(shot\)\.shotRef/u);
+  assert.match(pickerSource, /const nextLink = asset \? toShotMediaLink\(shot, mediaType, asset\) : null/u);
+  assert.match(pickerSource, /onMutation\(\{ shotId: shot\.id, shotRef, mediaType, link: nextLink \}\)/u);
   assert.match(editorSource, /thumbnailFile: optimized\.thumbnailFile/u);
   assert.match(editorSource, /shotRef: shotKey\.shotRef/u);
   assert.doesNotMatch(editorSource, /router\.refresh/u);
+  assert.doesNotMatch(pickerSource, /router\.refresh/u);
 });
 
 test("media mutations remain read-only gated and category-local", () => {
-  assert.match(editorSource, /readOnly=\{readOnly \|\| !onMediaSaved\}/u);
+  assert.match(editorSource, /readOnly=\{readOnly \|\| !onMediaMutation\}/u);
   assert.match(editorSource, /if \(readOnly \|\| isUploading\) return/u);
   assert.match(editorSource, /const \[isUploading, setIsUploading\] = useState\(false\)/u);
+  assert.match(editorSource, /imageUrl \|\| diagram \? "사진 교체" : "사진 추가"/u);
   assert.match(pickerSource, /if \(readOnly \|\| isSaving\) return/u);
   assert.match(pickerSource, /const \[isSaving, setIsSaving\] = useState\(false\)/u);
+  assert.match(pickerSource, /asset \? \{ assetId: asset\.id, source: asset\.source \} : null/u);
+  assert.match(pickerSource, />\s*연결 해제\s*<\/button>/u);
+  assert.doesNotMatch(pickerSource, /deleteProjectReferenceAsset|deleteOverheadDiagramArchive/u);
 });

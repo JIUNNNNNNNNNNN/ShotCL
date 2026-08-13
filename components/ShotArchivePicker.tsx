@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Search, Unlink, X } from "lucide-react";
+import { Check, Search, Unlink } from "lucide-react";
 import { SectionLoader } from "@/components/PixelDogLoader";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { listProjectReferenceAssets } from "@/lib/data/projectReferenceAssets";
@@ -9,6 +9,7 @@ import {
   listOverheadDiagramArchive,
   saveShotMediaLink
 } from "@/lib/data/shotMediaArchive";
+import { getShotDiagramKey } from "@/lib/data/shotDiagrams";
 import type {
   OverheadDiagramArchiveItem,
   ProjectReferenceAsset,
@@ -22,6 +23,7 @@ type PickerAsset = {
   id: string;
   source: "reference" | "diagram";
   title: string;
+  filename: string;
   memo: string;
   sceneNo: string;
   cutNo: string;
@@ -34,72 +36,21 @@ type PickerAsset = {
 
 const ARCHIVE_PICKER_COLLATOR = new Intl.Collator("ko-KR", { numeric: true, sensitivity: "base" });
 
-export function ShotArchivePicker({
-  shot,
-  initialType,
-  selectedLinks,
-  readOnly,
-  onClose,
-  onSaved
-}: {
-  shot: Shot;
-  initialType: ShotMediaType;
-  selectedLinks: readonly ShotMediaLink[];
-  readOnly: boolean;
-  onClose: () => void;
-  onSaved: () => Promise<void> | void;
-}) {
-  const [mediaType, setMediaType] = useState<ShotMediaType>(initialType);
-
-  return (
-    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
-      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
-        <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="font-display break-words text-lg font-bold text-field-text">아카이브에서 선택</h2>
-            <p className="break-words text-xs font-normal text-field-muted [overflow-wrap:anywhere]">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
-          </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
-            <X className="h-5 w-5" aria-hidden />
-          </button>
-        </header>
-
-        <div className="grid gap-3 border-b border-field-divider p-3">
-          <div className="grid grid-cols-2 gap-2">
-            {(["overhead", "storyboard"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setMediaType(type)}
-                className={`min-h-10 border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${mediaType === type ? "neon-selected" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
-              >
-                {type === "overhead" ? "부감도" : "콘티"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <ShotArchiveSelector
-          key={mediaType}
-          shot={shot}
-          mediaType={mediaType}
-          selectedLinks={selectedLinks}
-          readOnly={readOnly}
-          onSaved={onSaved}
-          onLinked={onClose}
-          className="min-h-0 flex-1"
-        />
-      </section>
-    </div>
-  );
-}
+export type ShotMediaLinkMutation = {
+  /** Parent state is keyed by the immutable Cut row id, never its visual order. */
+  shotId: string;
+  shotRef: string;
+  mediaType: ShotMediaType;
+  /** The exact canonical link after this mutation; null means this category was unlinked. */
+  link: ShotMediaLink | null;
+};
 
 export type ShotArchiveSelectorProps = {
   shot: Shot;
   mediaType: ShotMediaType;
   selectedLinks: readonly ShotMediaLink[];
   readOnly: boolean;
-  onSaved: () => Promise<void> | void;
+  onMutation: (mutation: ShotMediaLinkMutation) => Promise<void> | void;
   onLinked?: () => void;
   compact?: boolean;
   className?: string;
@@ -111,7 +62,7 @@ export function ShotArchiveSelector({
   mediaType,
   selectedLinks,
   readOnly,
-  onSaved,
+  onMutation,
   onLinked,
   compact = false,
   className
@@ -164,12 +115,14 @@ export function ShotArchiveSelector({
     setIsSaving(true);
     setErrorMessage("");
     try {
+      const shotRef = getShotDiagramKey(shot).shotRef;
+      const nextLink = asset ? toShotMediaLink(shot, mediaType, asset) : null;
       await saveShotMediaLink(
         shot,
         mediaType,
         asset ? { assetId: asset.id, source: asset.source } : null
       );
-      await onSaved();
+      await onMutation({ shotId: shot.id, shotRef, mediaType, link: nextLink });
       if (asset) onLinked?.();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷 자료 연결을 저장하지 못했습니다.");
@@ -261,6 +214,7 @@ function referencePickerAsset(asset: ProjectReferenceAsset): PickerAsset {
     id: asset.id,
     source: "reference",
     title: asset.crop.title || asset.filename,
+    filename: asset.filename,
     memo: asset.crop.memo || "",
     sceneNo: asset.sceneNo || "",
     cutNo: asset.cutNo || "",
@@ -277,6 +231,7 @@ function diagramPickerAsset(asset: OverheadDiagramArchiveItem): PickerAsset {
     id: asset.id,
     source: "diagram",
     title: asset.title,
+    filename: asset.title,
     memo: asset.memo,
     sceneNo: asset.sceneNo,
     cutNo: asset.cutNo,
@@ -285,6 +240,22 @@ function diagramPickerAsset(asset: OverheadDiagramArchiveItem): PickerAsset {
     diagram: asset.diagram,
     sortOrder: Number.MAX_SAFE_INTEGER,
     createdAt: asset.createdAt
+  };
+}
+
+function toShotMediaLink(
+  shot: Shot,
+  mediaType: ShotMediaType,
+  asset: PickerAsset
+): ShotMediaLink {
+  return {
+    shotRef: getShotDiagramKey(shot).shotRef,
+    mediaType,
+    assetId: asset.id,
+    source: asset.source,
+    publicUrl: asset.publicUrl,
+    filename: asset.filename,
+    diagram: asset.diagram
   };
 }
 

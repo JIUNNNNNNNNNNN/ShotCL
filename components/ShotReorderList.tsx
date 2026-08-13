@@ -73,8 +73,8 @@ function reorderVisibleShots(
 }
 
 /**
- * 카드와 부감도/콘티 영역을 길게 누른 뒤 위아래로 움직여 정렬합니다.
- * 짧은 클릭은 기존 동작을 유지하고, 대화형 자식 요소는 모든 카드 제스처에서 제외합니다.
+ * 카드의 비대화형 표면을 길게 누른 뒤 위아래로 움직여 정렬합니다.
+ * 대표 미디어 같은 대화형 자식은 Gallery click과 카드 제스처가 충돌하지 않도록 제외합니다.
  */
 export function ShotReorderList({
   allShots,

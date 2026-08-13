@@ -7,6 +7,7 @@ import {
   mergeProgressMediaWithLinkedFallbacks,
   moveGalleryIndex,
   orderProgressMediaAsArchive,
+  prioritizeProgressMediaGalleryItem,
   progressMediaIdentityKey,
   progressMediaSummaryDisplayUrl,
   safeProgressThumbnailUrl
@@ -43,6 +44,24 @@ test("a unique legacy image is appended without displacing the canonical represe
     thumbnailUrl: "/story-2.jpg"
   });
   assert.deepEqual(duplicate.map((item) => item.id), ["story-2", "story-1"]);
+});
+
+test("an explicit Cut link becomes representative without dropping or reordering other Gallery items", () => {
+  const gallery = buildProgressMediaGalleryItems(assets, "storyboard", {
+    id: "direct",
+    title: "direct",
+    url: "/direct.jpg",
+    thumbnailUrl: "/direct.jpg"
+  });
+  assert.deepEqual(gallery.map((item) => item.id), ["story-2", "story-1", "direct"]);
+  assert.deepEqual(
+    prioritizeProgressMediaGalleryItem(gallery, "/direct.jpg").map((item) => item.id),
+    ["direct", "story-2", "story-1"]
+  );
+  assert.deepEqual(
+    prioritizeProgressMediaGalleryItem(gallery, "/missing.jpg").map((item) => item.id),
+    ["story-2", "story-1", "direct"]
+  );
 });
 
 test("bounded gallery navigation never moves beyond the first or last image", () => {

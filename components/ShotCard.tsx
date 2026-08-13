@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type RefCallback } from "react";
-import { Images, Map } from "lucide-react";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
@@ -9,6 +8,7 @@ import type { ProgressArchiveMediaAsset } from "@/lib/data/shotMediaArchive";
 import {
   buildProgressMediaGalleryItems,
   clampGalleryIndex,
+  prioritizeProgressMediaGalleryItem,
   type ProgressMediaCategory,
   type ProgressMediaGalleryItem
 } from "@/lib/progress/mediaGallery";
@@ -17,7 +17,7 @@ import {
   resolveProgressCardHalfStatus,
   resolveProgressStatusToggle
 } from "@/lib/progress/shotCardInteraction";
-import { type Shot, type ShotMediaType, type ShotStatus } from "@/lib/types";
+import { type Shot, type ShotMediaLink, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
 import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
@@ -26,35 +26,31 @@ export type ShotCardProps = {
   shot: Shot;
   onOpen: (shot: Shot) => void;
   onEdit?: (shot: Shot) => void;
-  onOpenMedia: (shot: Shot, type: ShotMediaType) => void;
   archiveMedia?: ProgressArchiveMediaAsset[];
+  selectedMediaLinks?: readonly ShotMediaLink[];
+  mediaRevision?: number;
   onLoadGalleryMedia?: (
     shot: Shot,
     category: ProgressMediaCategory
   ) => Promise<ProgressArchiveMediaAsset[]>;
   onStatusChange: (shot: Shot, status: ShotStatus) => void;
-  progressOnly?: boolean;
   cardOpenDisabled?: boolean;
   statusReadOnly?: boolean;
-  showMediaActions?: boolean;
-  isOverheadLoading?: boolean;
   interactionMediaGuideTarget?: boolean;
 };
 
-/** 컷 중심 현장 진행표 카드입니다. 버튼 클릭은 카드 수정 모달과 분리합니다. */
+/** 대표 미디어는 Gallery, 카드의 물리 우클릭은 기존 Cut 편집기로 분리합니다. */
 export const ShotCard = memo(function ShotCard({
   shot,
   onOpen,
   onEdit,
-  onOpenMedia,
   archiveMedia = [],
+  selectedMediaLinks = [],
+  mediaRevision = 0,
   onLoadGalleryMedia,
   onStatusChange,
-  progressOnly = false,
   cardOpenDisabled = false,
   statusReadOnly = false,
-  showMediaActions = true,
-  isOverheadLoading = false,
   interactionMediaGuideTarget = false
 }: ShotCardProps) {
   const persistentInteraction = usePersistentProjectShell();
@@ -66,31 +62,43 @@ export const ShotCard = memo(function ShotCard({
   const cutLabel = formatProgressCutLabel(shot.sceneNumber, shot.cutNumber);
   const [loadedGalleryMedia, setLoadedGalleryMedia] = useState<{
     shotId: string;
+    revision: number;
     assets: ProgressArchiveMediaAsset[];
   } | null>(null);
+  const mediaRevisionRef = useRef(mediaRevision);
+  mediaRevisionRef.current = mediaRevision;
   const effectiveArchiveMedia = loadedGalleryMedia?.shotId === shot.id
+    && loadedGalleryMedia.revision === mediaRevision
     ? loadedGalleryMedia.assets
     : archiveMedia;
-  const storyboardGallery = useMemo(() => buildProgressMediaGalleryItems(
-    effectiveArchiveMedia,
-    "storyboard",
-    shot.storyboardImageUrl ? {
-      id: `${shot.id}:legacy-storyboard`,
-      title: `${cutLabel} 콘티`,
-      url: shot.storyboardImageUrl,
-      thumbnailUrl: shot.storyboardImageUrl
-    } : null
-  ), [cutLabel, effectiveArchiveMedia, shot.id, shot.storyboardImageUrl]);
-  const overheadGallery = useMemo(() => buildProgressMediaGalleryItems(
-    effectiveArchiveMedia,
-    "overhead",
-    shot.overheadImageUrl ? {
-      id: `${shot.id}:legacy-overhead`,
-      title: `${cutLabel} 부감도`,
-      url: shot.overheadImageUrl,
-      thumbnailUrl: shot.overheadImageUrl
-    } : null
-  ), [cutLabel, effectiveArchiveMedia, shot.id, shot.overheadImageUrl]);
+  const selectedStoryboardLink = selectedMediaLinks.find((link) => link.mediaType === "storyboard") ?? null;
+  const selectedOverheadLink = selectedMediaLinks.find((link) => link.mediaType === "overhead") ?? null;
+  const storyboardGallery = useMemo(() => prioritizeProgressMediaGalleryItem(
+    buildProgressMediaGalleryItems(
+      effectiveArchiveMedia,
+      "storyboard",
+      shot.storyboardImageUrl ? {
+        id: `${shot.id}:legacy-storyboard`,
+        title: `${cutLabel} 콘티`,
+        url: shot.storyboardImageUrl,
+        thumbnailUrl: shot.storyboardImageUrl
+      } : null
+    ),
+    selectedStoryboardLink?.publicUrl
+  ), [cutLabel, effectiveArchiveMedia, selectedStoryboardLink?.publicUrl, shot.id, shot.storyboardImageUrl]);
+  const overheadGallery = useMemo(() => prioritizeProgressMediaGalleryItem(
+    buildProgressMediaGalleryItems(
+      effectiveArchiveMedia,
+      "overhead",
+      shot.overheadImageUrl ? {
+        id: `${shot.id}:legacy-overhead`,
+        title: `${cutLabel} 부감도`,
+        url: shot.overheadImageUrl,
+        thumbnailUrl: shot.overheadImageUrl
+      } : null
+    ),
+    selectedOverheadLink?.publicUrl
+  ), [cutLabel, effectiveArchiveMedia, selectedOverheadLink?.publicUrl, shot.id, shot.overheadImageUrl]);
   const hasStoryboard = storyboardGallery.length > 0;
   const hasOverhead = overheadGallery.length > 0 || hasOverheadDiagram;
   const hasAnyMedia = hasStoryboard || hasOverhead;
@@ -111,8 +119,8 @@ export const ShotCard = memo(function ShotCard({
     () => storyboardGallery.map((item) => ({ url: item.url, title: item.title })),
     [storyboardGallery]
   );
-  const overheadGalleryImages = useMemo(() => [
-    ...(hasOverheadDiagram && shot.overheadDiagram ? [{
+  const prefersLinkedOverheadImage = Boolean(selectedOverheadLink?.publicUrl?.trim());
+  const overheadDiagramGalleryItem = hasOverheadDiagram && shot.overheadDiagram ? {
       url: `diagram:${shot.id}`,
       title: `${cutLabel} 부감도`,
       content: (
@@ -120,9 +128,14 @@ export const ShotCard = memo(function ShotCard({
           <ShotOverheadPreview diagram={shot.overheadDiagram} label={`${cutLabel} 부감도`} />
         </div>
       )
-    }] : []),
-    ...overheadGallery.map((item) => ({ url: item.url, title: item.title }))
-  ], [cutLabel, hasOverheadDiagram, overheadGallery, shot.id, shot.overheadDiagram]);
+    } : null;
+  const overheadGalleryImages = useMemo(() => {
+    const imageItems = overheadGallery.map((item) => ({ url: item.url, title: item.title }));
+    if (!overheadDiagramGalleryItem) return imageItems;
+    return prefersLinkedOverheadImage
+      ? [...imageItems, overheadDiagramGalleryItem]
+      : [overheadDiagramGalleryItem, ...imageItems];
+  }, [overheadDiagramGalleryItem, overheadGallery, prefersLinkedOverheadImage]);
   const activeGalleryImages = activeGallery === "storyboard"
     ? storyboardGalleryImages
     : activeGallery === "overhead"
@@ -140,6 +153,11 @@ export const ShotCard = memo(function ShotCard({
     }
     if (galleryIndex !== safeGalleryIndex) setGalleryIndex(safeGalleryIndex);
   }, [activeGallery, activeGalleryImages.length, galleryIndex, safeGalleryIndex]);
+
+  useEffect(() => {
+    setLoadedGalleryMedia(null);
+    setLoadingGallery(null);
+  }, [mediaRevision, shot.id]);
 
   function shouldIgnoreCardStatus(target: EventTarget | null) {
     return target instanceof Element && Boolean(target.closest(
@@ -180,17 +198,26 @@ export const ShotCard = memo(function ShotCard({
 
   async function openGallery(event: React.MouseEvent<HTMLButtonElement>, category: ProgressMediaCategory) {
     event.stopPropagation();
-    if (onLoadGalleryMedia && loadedGalleryMedia?.shotId !== shot.id) {
+    const requestedRevision = mediaRevisionRef.current;
+    if (
+      onLoadGalleryMedia
+      && (
+        loadedGalleryMedia?.shotId !== shot.id
+        || loadedGalleryMedia.revision !== requestedRevision
+      )
+    ) {
       setLoadingGallery(category);
       try {
         const assets = await onLoadGalleryMedia(shot, category);
-        setLoadedGalleryMedia({ shotId: shot.id, assets });
+        if (mediaRevisionRef.current !== requestedRevision) return;
+        setLoadedGalleryMedia({ shotId: shot.id, revision: requestedRevision, assets });
       } catch {
         return;
       } finally {
         setLoadingGallery(null);
       }
     }
+    if (mediaRevisionRef.current !== requestedRevision) return;
     setGalleryIndex(0);
     setActiveGallery(category);
   }
@@ -227,53 +254,13 @@ export const ShotCard = memo(function ShotCard({
       >
         <div className="grid min-w-0 max-w-full gap-2 overflow-hidden">
           <div className="min-w-0 px-0.5">
-            <div className="relative grid min-w-0 grid-cols-1 items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-              <span className="hidden sm:block" aria-hidden />
-              <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 sm:col-start-2">
-                <h2 className="min-w-0 break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">
-                  {cutLabel}
-                </h2>
-                <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
-                  <span className="font-display">{statusLabel}</span>
-                </p>
-              </div>
-              {showMediaActions ? <div className="flex flex-wrap items-center justify-center gap-1 justify-self-center sm:col-start-3 sm:justify-self-end">
-                <button
-                  type="button"
-                  data-no-drag="true"
-                  data-progress-interactive="true"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenMedia(shot, "storyboard");
-                  }}
-                  className={cn(
-                    "ui-density-control inline-flex items-center gap-1 border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary",
-                    hasStoryboard ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
-                  )}
-                  title={progressOnly ? "콘티 아카이브 보기" : "콘티 아카이브에서 선택"}
-                >
-                  <Images className="h-3.5 w-3.5" aria-hidden />
-                  콘티
-                </button>
-                <button
-                  type="button"
-                  data-no-drag="true"
-                  data-progress-interactive="true"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenMedia(shot, "overhead");
-                  }}
-                  disabled={isOverheadLoading}
-                  className={cn(
-                    "ui-density-control inline-flex items-center gap-1 border px-2 text-[10px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55",
-                    hasOverhead ? "neon-selected" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
-                  )}
-                  title={progressOnly ? "부감도 아카이브 보기" : "부감도 아카이브에서 선택"}
-                >
-                  <Map className="h-3.5 w-3.5" aria-hidden />
-                  부감도
-                </button>
-              </div> : null}
+            <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+              <h2 className="min-w-0 break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">
+                {cutLabel}
+              </h2>
+              <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
+                <span className="font-display">{statusLabel}</span>
+              </p>
             </div>
 
             <div className="mt-0.5 grid min-w-0 grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-normal leading-4 text-field-muted">
@@ -303,7 +290,8 @@ export const ShotCard = memo(function ShotCard({
                 <ProgressMediaPreviewTile
                   label="부감도"
                   items={overheadGallery}
-                  diagram={hasOverheadDiagram ? shot.overheadDiagram : null}
+                  diagram={hasOverheadDiagram && !prefersLinkedOverheadImage ? shot.overheadDiagram : null}
+                  count={overheadGalleryImages.length}
                   loading={loadingGallery === "overhead"}
                   guideAnchorRef={interactionMediaGuideCategory === "overhead"
                     ? mediaGalleryGuideAnchorRef
@@ -340,6 +328,7 @@ function ProgressMediaPreviewTile({
   label,
   items,
   diagram,
+  count: countOverride,
   loading = false,
   guideAnchorRef,
   onOpen
@@ -347,6 +336,7 @@ function ProgressMediaPreviewTile({
   label: "콘티" | "부감도";
   items: ProgressMediaGalleryItem[];
   diagram?: Shot["overheadDiagram"] | null;
+  count?: number;
   loading?: boolean;
   guideAnchorRef?: RefCallback<HTMLButtonElement>;
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -356,22 +346,12 @@ function ProgressMediaPreviewTile({
   // browser URL remains a safe fallback; modern rows still prefer the compact
   // thumbnail variant.
   const previewUrl = firstItem?.thumbnailUrl || firstItem?.url || "";
-  const hasContent = Boolean(firstItem || diagram);
-  const count = items.length + (diagram ? 1 : 0);
+  const count = countOverride ?? items.length + (diagram ? 1 : 0);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     setImageFailed(false);
   }, [previewUrl]);
-
-  if (!hasContent) {
-    return (
-      <div className="grid min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[var(--radius-control)] border border-dashed border-field-divider bg-field-input/40 text-field-muted" aria-label={`${label} 없음`}>
-        <span className="truncate whitespace-nowrap border-b border-field-divider/70 px-2 py-1.5 text-[10px] font-bold">{label} 없음</span>
-        <span className="flex h-24 min-w-0 items-center justify-center px-2 text-[10px] sm:h-28">이미지 없음</span>
-      </div>
-    );
-  }
 
   return (
     <button

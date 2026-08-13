@@ -66,6 +66,23 @@ export function buildProgressMediaGalleryItems(
   return [...canonicalItems, fallback];
 }
 
+/** 명시적으로 Cut에 연결한 자료를 대표 항목으로 올리되 Gallery의 나머지 순서는 유지합니다. */
+export function prioritizeProgressMediaGalleryItem(
+  items: readonly ProgressMediaGalleryItem[],
+  preferredUrl: string | null | undefined
+): ProgressMediaGalleryItem[] {
+  const normalizedUrl = String(preferredUrl ?? "").trim();
+  const preferredIndex = normalizedUrl
+    ? items.findIndex((item) => item.url === normalizedUrl)
+    : -1;
+  if (preferredIndex <= 0) return [...items];
+  return [
+    items[preferredIndex],
+    ...items.slice(0, preferredIndex),
+    ...items.slice(preferredIndex + 1)
+  ];
+}
+
 /** 아카이브 grid와 같은 sortOrder → 생성시각 → id 순서를 사용합니다. */
 export function orderProgressMediaAsArchive<T extends {
   id: string;

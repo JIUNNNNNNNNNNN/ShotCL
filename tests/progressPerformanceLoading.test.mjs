@@ -64,23 +64,28 @@ test("Progress summary media and stable Cut links load in bounded background bat
   );
   assert.match(
     summaryLoader,
-    /const \[archiveAssets, diagrams, linksByRef\] = await Promise\.all\([\s\S]*?loadShotOverheadDiagrams\(criticalShots\)[\s\S]*?loadShotMediaLinks\(criticalShots\)/u
+    /for \(let attempt = 0; attempt < PROGRESS_MEDIA_LOAD_MAX_ATTEMPTS; attempt \+= 1\)[\s\S]*?const \[archiveResult, diagramResult, linksResult\][\s\S]*?= await Promise\.all\([\s\S]*?loadShotOverheadDiagrams\(criticalShots\)[\s\S]*?loadShotMediaLinks\(criticalShots\)/u
   );
-  assert.match(summaryLoader, /applyShotMediaLinks\(currentShots, linksByRef, diagrams\)/u);
+  assert.match(summaryLoader, /archiveAssets = archiveResult \?\? archiveAssets/u);
+  assert.match(summaryLoader, /PROGRESS_MEDIA_RETRY_DELAY_MS \* \(attempt \+ 1\)/u);
+  assert.match(summaryLoader, /applyShotMediaLinks\(currentShots, effectiveLinksByRef, effectiveLegacyDiagrams\)/u);
   assert.match(
     source,
     /const loadShotGalleryMedia = useCallback[\s\S]*?loadProgressArchiveMediaAssets\(projectId, selectedDailyPlanId, "gallery"\)/u
   );
   assert.match(
     source,
-    /const \[archiveAssets, diagram, linksByRef\] = await Promise\.all\(\[[\s\S]*?archiveRequest\.promise[\s\S]*?loadShotOverheadDiagram\(shot\)[\s\S]*?loadShotMediaLinks\(\[shot\]\)/u
+    /\[archiveAssets, diagramResult, linksResult\] = await Promise\.all\(\[[\s\S]*?archiveRequest\.promise[\s\S]*?loadShotOverheadDiagram\(shot\)[\s\S]*?loadShotMediaLinks\(\[shot\]\)/u
   );
   assert.doesNotMatch(source, /loadProgressArchiveMediaAssets\(\s*projectId,\s*isGuest\s*\?/u);
   assert.match(
     source,
     /const nextShots = shotsRef\.current\.map\(\(currentShot\) => \([\s\S]*?storyboardImageUrl: enrichedShot\.storyboardImageUrl,[\s\S]*?overheadDiagram: enrichedShot\.overheadDiagram/u
   );
-  assert.match(source, /progressMediaLoadVersionRef\.current \+= 1;\s*selectedShotsRefreshVersionRef/u);
+  assert.match(
+    source,
+    /progressMediaLoadVersionRef\.current \+= 1;\s*progressMediaLoadingEntriesRef\.current\.delete\(progressEntryKey\);\s*mediaMutationVersionByShotIdRef\.current\.set\([\s\S]*?galleryArchiveGenerationRef\.current \+= 1;\s*galleryArchiveRequestRef\.current = null;/u
+  );
   assert.match(source, /onLoadGalleryMedia=\{loadShotGalleryMedia\}/u);
   assert.match(shotCard, /const hasAnyMedia = hasStoryboard \|\| hasOverhead;/u);
   assert.doesNotMatch(shotCard, /hasAnyMedia\s*=.*onLoadGalleryMedia/u);

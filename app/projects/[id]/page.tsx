@@ -25,6 +25,7 @@ import { DailyProgressSummary } from "@/components/DailyProgressSummary";
 import { ProgressScheduleCard } from "@/components/ProgressScheduleCard";
 import { ProgressStatusSection } from "@/components/ProgressStatusSection";
 import type { ProgressScheduleEditorValues } from "@/components/ProgressScheduleEditorModal";
+import type { ShotMediaLinkMutation } from "@/components/ShotArchivePicker";
 import type { ShotEditorValues } from "@/components/ShotEditorModal";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -74,7 +75,15 @@ import {
   useContextualGuideAnchor,
   useContextualGuideBlocker
 } from "@/components/guides/ContextualGuideProvider";
-import type { DailyPlan, DailyPlanMealTime, Shot, ShotDraft, ShotMediaLink, ShotMediaType, ShotStatus } from "@/lib/types";
+import type {
+  DailyPlan,
+  DailyPlanMealTime,
+  Shot,
+  ShotDraft,
+  ShotMediaLink,
+  ShotOverheadDiagram,
+  ShotStatus
+} from "@/lib/types";
 
 type ProgressVisualBucket = "active" | "ok" | "omit";
 type EditingScheduleState = {
@@ -85,6 +94,22 @@ type EditingScheduleState = {
 };
 type ProgressImagePreview = { url: string; title: string };
 const EMPTY_PROGRESS_ARCHIVE_MEDIA: ProgressArchiveMediaAsset[] = [];
+const PROGRESS_MEDIA_LOAD_MAX_ATTEMPTS = 3;
+const PROGRESS_MEDIA_RETRY_DELAY_MS = 250;
+
+type LegacyShotMedia = {
+  storyboardImageUrl: string | null;
+  overheadImageUrl: string | null;
+  overheadDiagram: ShotOverheadDiagram | null;
+};
+
+function snapshotLegacyShotMedia(shots: readonly Shot[]) {
+  return new Map<string, LegacyShotMedia>(shots.map((shot) => [shot.id, {
+    storyboardImageUrl: shot.storyboardImageUrl ?? null,
+    overheadImageUrl: shot.overheadImageUrl ?? null,
+    overheadDiagram: shot.overheadDiagram
+  }]));
+}
 
 function hasMultipleProgressGalleryItems(
   shot: Shot,
@@ -197,11 +222,6 @@ const ProgressScheduleEditorModal = dynamic(
   () => import("@/components/ProgressScheduleEditorModal").then((module) => module.ProgressScheduleEditorModal),
   { ssr: false, loading: ModalLoadingFallback }
 );
-const ShotArchivePicker = dynamic(
-  () => import("@/components/ShotArchivePicker").then((module) => module.ShotArchivePicker),
-  { ssr: false, loading: ModalLoadingFallback }
-);
-
 /** 쉼표로 입력한 등장 인물을 배열로 정리합니다. */
 function parseCharacters(value: string) {
   return value
@@ -345,9 +365,12 @@ export default function ProjectDetailPage() {
     index?: number;
   } | null>(null);
   const [mediaLinksByShotId, setMediaLinksByShotId] = useState<Map<string, ShotMediaLink[]>>(new Map());
-  const [mediaPicker, setMediaPicker] = useState<{ shot: Shot; type: ShotMediaType } | null>(null);
+  const [mediaRevisionByShotId, setMediaRevisionByShotId] = useState<Map<string, number>>(new Map());
   const shotsRef = useRef(shots);
   const archiveAssetsRef = useRef<ProgressArchiveMediaAsset[]>([]);
+  const mediaLinksByShotIdRef = useRef(mediaLinksByShotId);
+  const legacyShotMediaByShotIdRef = useRef(snapshotLegacyShotMedia(initialShots));
+  const mediaMutationVersionByShotIdRef = useRef(new Map<string, number>());
   const sessionBucketByShotIdRef = useRef(sessionBucketByShotId);
   const pendingStatusByShotIdRef = useRef(new Map<string, { version: number; status: ShotStatus }>());
   const persistedStatusByShotIdRef = useRef(new Map(initialShots.map((shot) => [shot.id, shot.status])));
@@ -360,8 +383,10 @@ export default function ProjectDetailPage() {
   const criticalLoadingEntriesRef = useRef(new Map<string, number>());
   const progressMediaLoadedEntriesRef = useRef(new Set<string>());
   const progressMediaLoadingEntriesRef = useRef(new Map<string, number>());
+  const galleryArchiveGenerationRef = useRef(0);
   const galleryArchiveRequestRef = useRef<{
     entryKey: string;
+    generation: number;
     promise: Promise<ProgressArchiveMediaAsset[]>;
   } | null>(null);
   const resetProgressEntryRef = useRef(progressEntryKey);
@@ -383,7 +408,7 @@ export default function ProjectDetailPage() {
   );
   useContextualGuideBlocker(
     "progress-overlay",
-    Boolean(editingShot || editingSchedule || isAddOpen || preview || mediaPicker)
+    Boolean(editingShot || editingSchedule || isAddOpen || preview)
   );
 
   const commitSessionBuckets = useCallback((next: Map<string, ProgressVisualBucket>) => {
@@ -398,6 +423,10 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     shotsRef.current = shots;
   }, [shots]);
+
+  useLayoutEffect(() => {
+    mediaLinksByShotIdRef.current = mediaLinksByShotId;
+  }, [mediaLinksByShotId]);
 
   const selectedPlan = useMemo(
     () => dailyPlans.find((plan) => plan.id === dailyPlanId) ?? null,
@@ -471,27 +500,61 @@ export default function ProjectDetailPage() {
     progressMediaLoadingEntriesRef.current.set(requestedEntryKey, mediaLoadVersion);
     void (async () => {
       try {
-        const [archiveAssets, diagrams, linksByRef] = await Promise.all([
-          auditQuery(
-            "progress.loadArchiveMediaSummary",
-            "app/projects/[id]/page.tsx:startProgressMediaLoad",
-            () => loadProgressArchiveMediaAssets(projectId, requestedDailyPlanId, "summary")
-          ).catch(() => [] as ProgressArchiveMediaAsset[]),
-          criticalShots.length > 0
-            ? auditQuery(
-                "progress.loadOverheadDiagrams",
-                "app/projects/[id]/page.tsx:startProgressMediaLoad",
-                () => loadShotOverheadDiagrams(criticalShots)
-              ).catch(() => new Map())
-            : Promise.resolve(new Map()),
-          criticalShots.length > 0
-            ? auditQuery(
-                "progress.loadMediaLinks",
-                "app/projects/[id]/page.tsx:startProgressMediaLoad",
-                () => loadShotMediaLinks(criticalShots)
-              ).catch(() => new Map<string, ShotMediaLink[]>())
-            : Promise.resolve(new Map<string, ShotMediaLink[]>())
-        ]);
+        let archiveAssets: ProgressArchiveMediaAsset[] | null = null;
+        let diagrams: Map<string, ShotOverheadDiagram> | null = criticalShots.length === 0
+          ? new Map<string, ShotOverheadDiagram>()
+          : null;
+        let linksByRef: Map<string, ShotMediaLink[]> | null = criticalShots.length === 0
+          ? new Map<string, ShotMediaLink[]>()
+          : null;
+
+        // A failed secondary media request must not be mistaken for an empty
+        // authoritative response. Retry only the missing bounded round-level
+        // batches, then merge every successful result without clearing the
+        // last known representative/link/diagram for a failed part.
+        for (let attempt = 0; attempt < PROGRESS_MEDIA_LOAD_MAX_ATTEMPTS; attempt += 1) {
+          const [archiveResult, diagramResult, linksResult]: [
+            ProgressArchiveMediaAsset[] | null,
+            Map<string, ShotOverheadDiagram> | null,
+            Map<string, ShotMediaLink[]> | null
+          ] = await Promise.all([
+            archiveAssets
+              ? Promise.resolve(archiveAssets)
+              : auditQuery(
+                  "progress.loadArchiveMediaSummary",
+                  "app/projects/[id]/page.tsx:startProgressMediaLoad",
+                  () => loadProgressArchiveMediaAssets(projectId, requestedDailyPlanId, "summary")
+                ).catch(() => null as ProgressArchiveMediaAsset[] | null),
+            diagrams
+              ? Promise.resolve(diagrams)
+              : auditQuery(
+                  "progress.loadOverheadDiagrams",
+                  "app/projects/[id]/page.tsx:startProgressMediaLoad",
+                  () => loadShotOverheadDiagrams(criticalShots)
+                ).catch(() => null as Map<string, ShotOverheadDiagram> | null),
+            linksByRef
+              ? Promise.resolve(linksByRef)
+              : auditQuery(
+                  "progress.loadMediaLinks",
+                  "app/projects/[id]/page.tsx:startProgressMediaLoad",
+                  () => loadShotMediaLinks(criticalShots)
+                ).catch(() => null as Map<string, ShotMediaLink[]> | null)
+          ]);
+          archiveAssets = archiveResult ?? archiveAssets;
+          diagrams = diagramResult ?? diagrams;
+          linksByRef = linksResult ?? linksByRef;
+
+          if (
+            activeProgressEntryKeyRef.current !== requestedEntryKey
+            || progressMediaLoadVersionRef.current !== mediaLoadVersion
+          ) return;
+          if (archiveAssets && diagrams && linksByRef) break;
+          if (attempt + 1 < PROGRESS_MEDIA_LOAD_MAX_ATTEMPTS) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, PROGRESS_MEDIA_RETRY_DELAY_MS * (attempt + 1));
+            });
+          }
+        }
         if (
           activeProgressEntryKeyRef.current !== requestedEntryKey
           || progressMediaLoadVersionRef.current !== mediaLoadVersion
@@ -504,8 +567,31 @@ export default function ProjectDetailPage() {
         // the latest Shot instances so an OK/OMIT or Realtime patch that landed
         // while the requests were in flight cannot be replaced by the older seed.
         const currentShots = shotsRef.current;
+        if (diagrams) {
+          const nextLegacyMedia = new Map(legacyShotMediaByShotIdRef.current);
+          currentShots.forEach((shot) => {
+            const current = nextLegacyMedia.get(shot.id) ?? {
+              storyboardImageUrl: shot.storyboardImageUrl ?? null,
+              overheadImageUrl: shot.overheadImageUrl ?? null,
+              overheadDiagram: null
+            };
+            nextLegacyMedia.set(shot.id, {
+              ...current,
+              overheadDiagram: diagrams.get(shot.id) ?? null
+            });
+          });
+          legacyShotMediaByShotIdRef.current = nextLegacyMedia;
+        }
+        const effectiveLinksByRef = linksByRef ?? new Map(currentShots.map((shot) => [
+          getShotDiagramKey(shot).shotRef,
+          mediaLinksByShotIdRef.current.get(shot.id) ?? []
+        ]));
+        const effectiveLegacyDiagrams = diagrams ?? new Map(currentShots.flatMap((shot) => {
+          const diagram = legacyShotMediaByShotIdRef.current.get(shot.id)?.overheadDiagram ?? null;
+          return diagram ? [[shot.id, diagram] as const] : [];
+        }));
         const resolvedMediaByShotId = new Map(
-          applyShotMediaLinks(currentShots, linksByRef, diagrams)
+          applyShotMediaLinks(currentShots, effectiveLinksByRef, effectiveLegacyDiagrams)
             .map((shot) => [shot.id, shot])
         );
         const nextShots = currentShots.map((shot) => {
@@ -525,23 +611,31 @@ export default function ProjectDetailPage() {
             overheadDiagram: resolved.overheadDiagram
           };
         });
-        archiveAssetsRef.current = archiveAssets;
+        if (archiveAssets) archiveAssetsRef.current = archiveAssets;
         shotsRef.current = nextShots;
         setShots(nextShots);
-        setArchiveMediaByShotId(currentSelectedPlan
-          ? buildProgressArchiveMediaByShotId({
-              shots: nextShots,
-              assets: archiveAssets,
-              timetableScenes: decodeDailyPlanMemo(currentSelectedPlan.memo).timetableScenes,
-              dailyPlanId: currentSelectedPlan.id,
-              episodeNumber: parseEpisodeNumber(currentSelectedPlan.episode)
-            })
-          : new Map());
-        setMediaLinksByShotId(new Map(nextShots.map((shot) => [
-          shot.id,
-          linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
-        ])));
-        progressMediaLoadedEntriesRef.current.add(requestedEntryKey);
+        if (archiveAssets) {
+          setArchiveMediaByShotId(currentSelectedPlan
+            ? buildProgressArchiveMediaByShotId({
+                shots: nextShots,
+                assets: archiveAssets,
+                timetableScenes: decodeDailyPlanMemo(currentSelectedPlan.memo).timetableScenes,
+                dailyPlanId: currentSelectedPlan.id,
+                episodeNumber: parseEpisodeNumber(currentSelectedPlan.episode)
+              })
+            : new Map());
+        }
+        if (linksByRef) {
+          const nextMediaLinksByShotId = new Map(nextShots.map((shot) => [
+            shot.id,
+            linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
+          ]));
+          mediaLinksByShotIdRef.current = nextMediaLinksByShotId;
+          setMediaLinksByShotId(nextMediaLinksByShotId);
+        }
+        if (archiveAssets && diagrams && linksByRef) {
+          progressMediaLoadedEntriesRef.current.add(requestedEntryKey);
+        }
       } catch {
         // Background media must never replace the already-rendered critical UI with an error state.
       } finally {
@@ -560,9 +654,12 @@ export default function ProjectDetailPage() {
       shotsRef.current = [];
       setShots([]);
       archiveAssetsRef.current = [];
+      legacyShotMediaByShotIdRef.current.clear();
+      mediaLinksByShotIdRef.current = new Map();
       persistedStatusByShotIdRef.current.clear();
       setArchiveMediaByShotId(new Map());
       setMediaLinksByShotId(new Map());
+      setMediaRevisionByShotId(new Map());
       commitSessionBuckets(new Map());
       setErrorMessage(workspaceError);
       setIsLoading(false);
@@ -610,6 +707,7 @@ export default function ProjectDetailPage() {
           shot.id,
           shot.status
         ]));
+        legacyShotMediaByShotIdRef.current = snapshotLegacyShotMedia(selectedShots);
         shotsRef.current = selectedShots;
         setShots(selectedShots);
         const shouldInitializeBuckets = initializedBucketEntryRef.current !== requestedEntryKey;
@@ -659,10 +757,12 @@ export default function ProjectDetailPage() {
     resetProgressEntryRef.current = progressEntryKey;
     criticalLoadVersionRef.current += 1;
     progressMediaLoadVersionRef.current += 1;
+    mediaMutationVersionByShotIdRef.current.clear();
     criticalLoadedEntriesRef.current.clear();
     criticalLoadingEntriesRef.current.clear();
     progressMediaLoadedEntriesRef.current.clear();
     progressMediaLoadingEntriesRef.current.clear();
+    galleryArchiveGenerationRef.current += 1;
     galleryArchiveRequestRef.current = null;
     selectedShotsRefreshVersionRef.current += 1;
     pendingStatusByShotIdRef.current.clear();
@@ -674,8 +774,11 @@ export default function ProjectDetailPage() {
     shotsRef.current = [];
     setShots([]);
     archiveAssetsRef.current = [];
+    legacyShotMediaByShotIdRef.current.clear();
+    mediaLinksByShotIdRef.current = new Map();
     setArchiveMediaByShotId(new Map());
     setMediaLinksByShotId(new Map());
+    setMediaRevisionByShotId(new Map());
     setProcessedExpanded(true);
     setEditingShot(null);
     setEditingSchedule(null);
@@ -712,10 +815,13 @@ export default function ProjectDetailPage() {
   const loadShotGalleryMedia = useCallback(async (shot: Shot) => {
     if (!projectId || !selectedDailyPlanId) return [];
     const requestedEntryKey = progressEntryKey;
+    const requestedMutationVersion = mediaMutationVersionByShotIdRef.current.get(shot.id) ?? 0;
     let archiveRequest = galleryArchiveRequestRef.current;
     if (!archiveRequest || archiveRequest.entryKey !== requestedEntryKey) {
+      const generation = galleryArchiveGenerationRef.current;
       archiveRequest = {
         entryKey: requestedEntryKey,
+        generation,
         promise: auditQuery(
           "progress.loadArchiveMediaGallery",
           "app/projects/[id]/page.tsx:loadShotGalleryMedia",
@@ -725,23 +831,51 @@ export default function ProjectDetailPage() {
       galleryArchiveRequestRef.current = archiveRequest;
     }
 
-    const [archiveAssets, diagram, linksByRef] = await Promise.all([
-      archiveRequest.promise,
-      auditQuery(
-        "progress.loadOverheadDiagram",
-        "app/projects/[id]/page.tsx:loadShotGalleryMedia",
-        () => loadShotOverheadDiagram(shot)
-      ).catch(() => null),
-      auditQuery(
-        "progress.loadMediaLinksForShot",
-        "app/projects/[id]/page.tsx:loadShotGalleryMedia",
-        () => loadShotMediaLinks([shot])
-      ).catch(() => new Map<string, ShotMediaLink[]>())
-    ]);
-    if (activeProgressEntryKeyRef.current !== requestedEntryKey) return [];
+    let archiveAssets: ProgressArchiveMediaAsset[];
+    let diagramResult: { ok: true; value: ShotOverheadDiagram | null } | { ok: false; value: null };
+    let linksResult: { ok: true; value: Map<string, ShotMediaLink[]> } | { ok: false; value: null };
+    try {
+      [archiveAssets, diagramResult, linksResult] = await Promise.all([
+        archiveRequest.promise,
+        auditQuery(
+          "progress.loadOverheadDiagram",
+          "app/projects/[id]/page.tsx:loadShotGalleryMedia",
+          () => loadShotOverheadDiagram(shot)
+        ).then(
+          (value) => ({ ok: true as const, value }),
+          () => ({ ok: false as const, value: null })
+        ),
+        auditQuery(
+          "progress.loadMediaLinksForShot",
+          "app/projects/[id]/page.tsx:loadShotGalleryMedia",
+          () => loadShotMediaLinks([shot])
+        ).then(
+          (value) => ({ ok: true as const, value }),
+          () => ({ ok: false as const, value: null })
+        )
+      ]);
+    } catch (error) {
+      if (galleryArchiveRequestRef.current === archiveRequest) {
+        galleryArchiveRequestRef.current = null;
+      }
+      throw error;
+    }
+    if (
+      activeProgressEntryKeyRef.current !== requestedEntryKey
+      || galleryArchiveGenerationRef.current !== archiveRequest.generation
+      || galleryArchiveRequestRef.current !== archiveRequest
+      || (mediaMutationVersionByShotIdRef.current.get(shot.id) ?? 0) !== requestedMutationVersion
+    ) {
+      throw new Error("Cut 자료가 변경되어 Gallery를 다시 불러와야 합니다.");
+    }
 
-    const diagramByShotId = diagram ? new Map([[shot.id, diagram]]) : new Map();
-    const enrichedShot = applyShotMediaLinks([shot], linksByRef, diagramByShotId)[0] ?? shot;
+    const effectiveLinksByRef = linksResult.ok
+      ? linksResult.value
+      : new Map([[getShotDiagramKey(shot).shotRef, mediaLinksByShotIdRef.current.get(shot.id) ?? []]]);
+    const preservedLegacyDiagram = legacyShotMediaByShotIdRef.current.get(shot.id)?.overheadDiagram ?? null;
+    const effectiveDiagram = diagramResult.ok ? diagramResult.value : preservedLegacyDiagram;
+    const diagramByShotId = effectiveDiagram ? new Map([[shot.id, effectiveDiagram]]) : new Map();
+    const enrichedShot = applyShotMediaLinks([shot], effectiveLinksByRef, diagramByShotId)[0] ?? shot;
     const nextShots = shotsRef.current.map((currentShot) => (
       currentShot.id === shot.id
         ? {
@@ -765,14 +899,28 @@ export default function ProjectDetailPage() {
         })
       : new Map<string, ProgressArchiveMediaAsset[]>();
     archiveAssetsRef.current = archiveAssets;
+    const currentLegacyMedia = legacyShotMediaByShotIdRef.current.get(shot.id) ?? {
+      storyboardImageUrl: shot.storyboardImageUrl ?? null,
+      overheadImageUrl: shot.overheadImageUrl ?? null,
+      overheadDiagram: null
+    };
+    if (diagramResult.ok) {
+      legacyShotMediaByShotIdRef.current = new Map(legacyShotMediaByShotIdRef.current).set(shot.id, {
+        ...currentLegacyMedia,
+        overheadDiagram: diagramResult.value
+      });
+    }
     shotsRef.current = nextShots;
     setShots(nextShots);
     setArchiveMediaByShotId(archiveByShotId);
-    setMediaLinksByShotId((current) => {
-      const next = new Map(current);
-      next.set(shot.id, linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []);
-      return next;
-    });
+    if (linksResult.ok) {
+      setMediaLinksByShotId((current) => {
+        const next = new Map(current);
+        next.set(shot.id, linksResult.value.get(getShotDiagramKey(shot).shotRef) ?? []);
+        mediaLinksByShotIdRef.current = next;
+        return next;
+      });
+    }
     return archiveByShotId.get(shot.id) ?? [];
   }, [progressEntryKey, projectId, selectedDailyPlanId]);
 
@@ -1003,67 +1151,88 @@ export default function ProjectDetailPage() {
     selectedDailyPlanId
   ]);
 
-  const refreshSelectedShotMedia = useCallback(async () => {
-    if (!projectId || !dailyPlanId) return;
-    const requestedEntryKey = progressEntryKey;
-    const currentShots = shotsRef.current;
-    progressMediaLoadVersionRef.current += 1;
-    selectedShotsRefreshVersionRef.current += 1;
-    if (currentShots.length === 0) {
-      setMediaLinksByShotId(new Map());
-      return;
+  const handleShotMediaMutation = useCallback((mutation: ShotMediaLinkMutation) => {
+    if (role !== "admin" || activeProgressEntryKeyRef.current !== progressEntryKey) {
+      throw new Error("현재 Cut의 자료를 변경할 권한이 없습니다.");
     }
-    const [diagrams, linksByRef] = await Promise.all([
-      auditQuery(
-        "progress.reloadOverheadDiagrams",
-        "app/projects/[id]/page.tsx:refreshSelectedShotMedia",
-        () => loadShotOverheadDiagrams(currentShots)
-      ),
-      auditQuery(
-        "progress.reloadMediaLinks",
-        "app/projects/[id]/page.tsx:refreshSelectedShotMedia",
-        () => loadShotMediaLinks(currentShots)
+    const currentShots = shotsRef.current;
+    const target = currentShots.find((shot) => shot.id === mutation.shotId);
+    if (!target || target.projectId !== projectId || target.dailyPlanId !== dailyPlanId) {
+      throw new Error("현재 회차에서 변경할 Cut을 찾지 못했습니다.");
+    }
+    const expectedShotRef = getShotDiagramKey(target).shotRef;
+    if (
+      mutation.shotRef !== expectedShotRef
+      || (
+        mutation.link
+        && (
+          mutation.link.shotRef !== expectedShotRef
+          || mutation.link.mediaType !== mutation.mediaType
+        )
       )
-    ]);
-    if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-    // Linked storyboard URLs are projected onto the shot model for rendering. Strip
-    // the previous projection before applying the newly fetched links so unlinking
-    // an asset does not keep the old URL alive through applyShotMediaLinks' legacy
-    // storyboard fallback.
-    const mediaBaselineShots = currentShots.map((shot) => {
-      const previousStoryboardLink = (mediaLinksByShotId.get(shot.id) ?? [])
-        .find((link) => link.mediaType === "storyboard");
-      return previousStoryboardLink?.publicUrl === shot.storyboardImageUrl
-        ? { ...shot, storyboardImageUrl: null }
-        : shot;
-    });
-    const refreshedMediaByShotId = new Map(
-      applyShotMediaLinks(mediaBaselineShots, linksByRef, diagrams).map((shot) => [shot.id, shot])
+    ) {
+      throw new Error("Cut 자료 연결 정보가 현재 Cut과 일치하지 않습니다.");
+    }
+
+    // Invalidate both background and on-demand Gallery reads before the local
+    // patch. A response that started before this mutation must never restore the
+    // old representative URL or link after upload/replace/unlink succeeds.
+    const shouldRestartInitialMediaLoad = !progressMediaLoadedEntriesRef.current.has(progressEntryKey);
+    progressMediaLoadVersionRef.current += 1;
+    progressMediaLoadingEntriesRef.current.delete(progressEntryKey);
+    mediaMutationVersionByShotIdRef.current.set(
+      target.id,
+      (mediaMutationVersionByShotIdRef.current.get(target.id) ?? 0) + 1
     );
-    const nextShots = shotsRef.current.map((shot) => {
-      const refreshedMedia = refreshedMediaByShotId.get(shot.id);
-      return refreshedMedia
-        ? {
-            ...shot,
-            storyboardImageUrl: refreshedMedia.storyboardImageUrl,
-            overheadImageUrl: refreshedMedia.overheadImageUrl,
-            overheadDiagram: refreshedMedia.overheadDiagram
-          }
-        : shot;
+    galleryArchiveGenerationRef.current += 1;
+    galleryArchiveRequestRef.current = null;
+
+    const previousLinks = mediaLinksByShotIdRef.current.get(target.id) ?? [];
+    const nextShotLinks = previousLinks.filter((link) => link.mediaType !== mutation.mediaType);
+    if (mutation.link) nextShotLinks.push(mutation.link);
+    const nextMediaLinksByShotId = new Map(mediaLinksByShotIdRef.current);
+    nextMediaLinksByShotId.set(target.id, nextShotLinks);
+    mediaLinksByShotIdRef.current = nextMediaLinksByShotId;
+    setMediaLinksByShotId(nextMediaLinksByShotId);
+
+    const previousStoryboardLink = previousLinks.find((link) => link.mediaType === "storyboard") ?? null;
+    const previousOverheadLink = previousLinks.find((link) => link.mediaType === "overhead") ?? null;
+    const legacyMedia = legacyShotMediaByShotIdRef.current.get(target.id) ?? {
+      storyboardImageUrl: previousStoryboardLink ? null : target.storyboardImageUrl ?? null,
+      overheadImageUrl: previousOverheadLink ? null : target.overheadImageUrl ?? null,
+      overheadDiagram: previousOverheadLink?.diagram ? null : target.overheadDiagram
+    };
+    if (!legacyShotMediaByShotIdRef.current.has(target.id)) {
+      legacyShotMediaByShotIdRef.current = new Map(legacyShotMediaByShotIdRef.current)
+        .set(target.id, legacyMedia);
+    }
+
+    const nextShots = currentShots.map((shot) => {
+      if (shot.id !== target.id) return shot;
+      if (mutation.mediaType === "storyboard") {
+        return {
+          ...shot,
+          storyboardImageUrl: mutation.link?.publicUrl || legacyMedia.storyboardImageUrl
+        };
+      }
+      return {
+        ...shot,
+        overheadImageUrl: mutation.link?.publicUrl || legacyMedia.overheadImageUrl,
+        overheadDiagram: mutation.link?.diagram || legacyMedia.overheadDiagram
+      };
     });
     shotsRef.current = nextShots;
     setShots(nextShots);
     rebuildArchiveMedia(nextShots);
-    commitSessionBuckets(reconcileSessionBuckets(
-      nextShots,
-      sessionBucketByShotIdRef.current,
-      false
-    ));
-    setMediaLinksByShotId(new Map(nextShots.map((shot) => [
-      shot.id,
-      linksByRef.get(getShotDiagramKey(shot).shotRef) ?? []
-    ])));
-  }, [commitSessionBuckets, dailyPlanId, mediaLinksByShotId, progressEntryKey, projectId, rebuildArchiveMedia]);
+    setMediaRevisionByShotId((current) => {
+      const next = new Map(current);
+      next.set(target.id, (next.get(target.id) ?? 0) + 1);
+      return next;
+    });
+    if (shouldRestartInitialMediaLoad) {
+      startProgressMediaLoad(nextShots, progressEntryKey, dailyPlanId);
+    }
+  }, [dailyPlanId, progressEntryKey, projectId, rebuildArchiveMedia, role, startProgressMediaLoad]);
   const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
   const activeShots = useMemo(
     () => orderedShots.filter((shot) => getPersistedStatusBucket(shot.status) === "active"),
@@ -1529,26 +1698,29 @@ export default function ProjectDetailPage() {
     });
   }
 
-  const handleOpenMedia = useCallback((shot: Shot, type: ShotMediaType) => {
-    if (isGuest) return;
-    setMediaPicker({ shot, type });
-  }, [isGuest]);
-
   const renderShot = useCallback((shot: Shot) => (
     <ShotCard
       shot={shot}
       onOpen={isGuest ? () => undefined : setEditingShot}
-      onOpenMedia={handleOpenMedia}
       archiveMedia={archiveMediaByShotId.get(shot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
+      selectedMediaLinks={mediaLinksByShotId.get(shot.id) ?? []}
+      mediaRevision={mediaRevisionByShotId.get(shot.id) ?? 0}
       onLoadGalleryMedia={loadShotGalleryMedia}
       onStatusChange={handleStatusChange}
-      progressOnly={progressOnly}
       cardOpenDisabled={isGuest}
       statusReadOnly={!canEditProgressStatus}
-      showMediaActions={!isGuest}
       interactionMediaGuideTarget={shot.id === mediaGuideShotId}
     />
-  ), [archiveMediaByShotId, canEditProgressStatus, handleOpenMedia, handleStatusChange, isGuest, loadShotGalleryMedia, mediaGuideShotId, progressOnly]);
+  ), [
+    archiveMediaByShotId,
+    canEditProgressStatus,
+    handleStatusChange,
+    isGuest,
+    loadShotGalleryMedia,
+    mediaGuideShotId,
+    mediaLinksByShotId,
+    mediaRevisionByShotId
+  ]);
 
   async function handleReorderShots(nextShots: Shot[]) {
     if (!projectId || !dailyPlanId || !selectedPlan || role !== "admin" || isReordering) return;
@@ -1827,9 +1999,7 @@ export default function ProjectDetailPage() {
         archiveMedia={archiveMediaByShotId.get(editingShot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
         selectedMediaLinks={mediaLinksByShotId.get(editingShot.id) ?? []}
         mediaContext={{ episodeNumber: parseEpisodeNumber(selectedPlan?.episode) }}
-        onMediaSaved={role === "admin" ? async () => {
-          await refreshSelectedShotMedia();
-        } : undefined}
+        onMediaMutation={role === "admin" ? handleShotMediaMutation : undefined}
       /> : null}
 
       {!isGuest && editingSchedule ? (
@@ -1862,18 +2032,6 @@ export default function ProjectDetailPage() {
             } : current);
           } : undefined}
           onClose={() => setPreview(null)}
-        />
-      ) : null}
-      {!isGuest && mediaPicker ? (
-        <ShotArchivePicker
-          shot={mediaPicker.shot}
-          initialType={mediaPicker.type}
-          selectedLinks={mediaLinksByShotId.get(mediaPicker.shot.id) ?? []}
-          readOnly={role !== "admin"}
-          onClose={() => setMediaPicker(null)}
-          onSaved={async () => {
-            await refreshSelectedShotMedia();
-          }}
         />
       ) : null}
     </>

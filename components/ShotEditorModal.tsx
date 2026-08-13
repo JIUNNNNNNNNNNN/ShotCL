@@ -3,7 +3,10 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FolderOpen, ImagePlus, Save, Trash2, X } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
-import { ShotArchiveSelector } from "@/components/ShotArchivePicker";
+import {
+  ShotArchiveSelector,
+  type ShotMediaLinkMutation
+} from "@/components/ShotArchivePicker";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
 import { Button } from "@/components/ui/Button";
 import { useAutosave } from "@/hooks/useAutosave";
@@ -51,7 +54,7 @@ export type ShotEditorModalProps = {
   selectedMediaLinks?: readonly ShotMediaLink[];
   mediaContext?: ShotEditorMediaContext;
   /** 이 callback을 제공한 관리자 화면에서만 미디어 mutation control을 엽니다. */
-  onMediaSaved?: (mediaType: ShotMediaType) => Promise<void> | void;
+  onMediaMutation?: (mutation: ShotMediaLinkMutation) => Promise<void> | void;
 };
 
 const fieldClass =
@@ -105,7 +108,7 @@ export function ShotEditorModal({
   archiveMedia = [],
   selectedMediaLinks = [],
   mediaContext,
-  onMediaSaved
+  onMediaMutation
 }: ShotEditorModalProps) {
   const [values, setValues] = useState<ShotEditorValues>(() => (
     shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex)
@@ -300,18 +303,18 @@ export function ShotEditorModal({
                   mediaType="overhead"
                   archiveMedia={archiveMedia}
                   selectedMediaLinks={selectedMediaLinks}
-                  readOnly={readOnly || !onMediaSaved}
+                  readOnly={readOnly || !onMediaMutation}
                   mediaContext={mediaContext}
-                  onMediaSaved={onMediaSaved}
+                  onMediaMutation={onMediaMutation}
                 />
                 <ShotEditorMediaSection
                   shot={shot}
                   mediaType="storyboard"
                   archiveMedia={archiveMedia}
                   selectedMediaLinks={selectedMediaLinks}
-                  readOnly={readOnly || !onMediaSaved}
+                  readOnly={readOnly || !onMediaMutation}
                   mediaContext={mediaContext}
-                  onMediaSaved={onMediaSaved}
+                  onMediaMutation={onMediaMutation}
                 />
               </div>
             ) : null}
@@ -387,7 +390,7 @@ function ShotEditorMediaSection({
   selectedMediaLinks,
   readOnly,
   mediaContext,
-  onMediaSaved
+  onMediaMutation
 }: {
   shot: Shot;
   mediaType: ShotMediaType;
@@ -395,7 +398,7 @@ function ShotEditorMediaSection({
   selectedMediaLinks: readonly ShotMediaLink[];
   readOnly: boolean;
   mediaContext?: ShotEditorMediaContext;
-  onMediaSaved?: (mediaType: ShotMediaType) => Promise<void> | void;
+  onMediaMutation?: (mutation: ShotMediaLinkMutation) => Promise<void> | void;
 }) {
   const label = mediaType === "overhead" ? "부감도" : "스토리보드(콘티)";
   const selectedLink = selectedMediaLinks.find((link) => link.mediaType === mediaType) ?? null;
@@ -472,7 +475,16 @@ function ShotEditorMediaSection({
         }
       );
       await saveShotMediaLink(shot, mediaType, { assetId: uploaded.id, source: "reference" });
-      await onMediaSaved?.(mediaType);
+      const nextLink: ShotMediaLink = {
+        shotRef: shotKey.shotRef,
+        mediaType,
+        assetId: uploaded.id,
+        source: "reference",
+        publicUrl: uploaded.publicUrl,
+        filename: uploaded.filename,
+        diagram: null
+      };
+      await onMediaMutation?.({ shotId: shot.id, shotRef: shotKey.shotRef, mediaType, link: nextLink });
       setArchiveOpen(false);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : `${label} 자료를 업로드하지 못했습니다.`);
@@ -509,7 +521,7 @@ function ShotEditorMediaSection({
             className="inline-flex min-h-9 items-center justify-center gap-1 border border-field-divider bg-field-input px-2 text-[11px] font-bold text-field-text hover:border-field-subtle hover:bg-field-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-wait disabled:opacity-55"
           >
             {isUploading ? <ImagePlus className="h-3.5 w-3.5 animate-pulse" aria-hidden /> : <ImagePlus className="h-3.5 w-3.5" aria-hidden />}
-            {isUploading ? "업로드 중" : "사진 추가"}
+            {isUploading ? "업로드 중" : imageUrl || diagram ? "사진 교체" : "사진 추가"}
           </button>
           <button
             type="button"
@@ -547,7 +559,7 @@ function ShotEditorMediaSection({
             selectedLinks={selectedMediaLinks}
             readOnly={false}
             compact
-            onSaved={() => onMediaSaved?.(mediaType)}
+            onMutation={(mutation) => onMediaMutation?.(mutation)}
             onLinked={() => setArchiveOpen(false)}
           />
         </div>
