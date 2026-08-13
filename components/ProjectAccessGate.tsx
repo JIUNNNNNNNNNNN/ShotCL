@@ -25,6 +25,7 @@ import {
   resolveDismissedProjectOwnerId,
   restoreDismissedProject
 } from "@/lib/projectAccess/dismissedProjects";
+import { isGuestDailyPlanReadPath } from "@/lib/projectNavigation";
 
 type ProjectAccessContextValue = {
   role: SharedProjectRole | null;
@@ -123,7 +124,9 @@ export function ProjectAccessGate({
     && !progressReadablePaths.has(pathname);
   const guestProgressRoute = pathname === progressPath
     && (searchParams.get("view") === "progress" || Boolean(searchParams.get("dailyPlanId")));
-  const guestRouteAllowed = guestProgressRoute || pathname === `${progressPath}/scenario`;
+  const guestRouteAllowed = guestProgressRoute
+    || isGuestDailyPlanReadPath(pathname, projectId)
+    || pathname === `${progressPath}/scenario`;
   const missingAccess = currentRole === null || accessMode === null;
   const denied = missingAccess
     || (isGuest && !guestRouteAllowed)
@@ -188,7 +191,7 @@ export function ProjectAccessGate({
           {missingAccess
             ? "Main에서 프로젝트를 다시 선택하거나 유효한 초대 링크를 열어주세요."
             : isGuest
-              ? "게스트 초대 링크에서는 진행도와 시나리오만 읽을 수 있습니다."
+              ? "게스트 초대 링크에서는 진행도, 일촬표와 시나리오만 읽을 수 있습니다."
               : "Staff 권한은 진행도와 프로젝트 자료를 읽기 전용으로 이용할 수 있습니다."}
         </p>
         <Link

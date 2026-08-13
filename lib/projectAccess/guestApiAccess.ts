@@ -35,7 +35,7 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
 
   const suffix = (matched[2] || "").replace(/\/$/, "");
   if (!suffix) return true;
-  if (suffix === "/daily-plans") return true;
+  if (suffix === "/daily-plans") return input.searchParams.size === 0;
 
   const dailyPlanDetailMatch = suffix.match(/^\/daily-plans\/([^/]+)$/);
   if (dailyPlanDetailMatch) {

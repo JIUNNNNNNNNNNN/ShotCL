@@ -1,5 +1,5 @@
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
-import { normalizeProjectId } from "@/lib/projectId";
+import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 
 export type ProjectNavigationItemId =
   | "basicInfo"
@@ -67,6 +67,22 @@ export function buildProjectBasePath(projectId: string) {
   return `/projects/${encodeURIComponent(projectId)}`;
 }
 
+/** Guest에게 허용하는 일촬표 URL을 목록과 실제 UUID 상세로만 제한합니다. */
+export function isGuestDailyPlanReadPath(pathname: string, projectId: string) {
+  const dailyPlansPath = `${buildProjectBasePath(projectId)}/daily-plans`;
+  const normalizedPathname = pathname.replace(/\/$/u, "");
+  if (normalizedPathname === dailyPlansPath) return true;
+  if (!normalizedPathname.startsWith(`${dailyPlansPath}/`)) return false;
+
+  const encodedDailyPlanId = normalizedPathname.slice(dailyPlansPath.length + 1);
+  if (!encodedDailyPlanId || encodedDailyPlanId.includes("/")) return false;
+  try {
+    return isValidDatabaseProjectId(decodeURIComponent(encodedDailyPlanId));
+  } catch {
+    return false;
+  }
+}
+
 /** pathname과 진행도 query를 함께 사용해 현재 프로젝트 기능을 판정합니다. */
 export function resolveActiveProjectNavigationItem(
   pathname: string,
@@ -97,7 +113,7 @@ export function getProjectPageTitle(pathname: string, searchParams: ProjectSearc
   if (route.remainder === "basic-info") return "기본정보";
   if (route.remainder === "daily-plans") return "일촬표";
   if (route.remainder === "daily-plans/new") return "새 일촬표";
-  if (route.remainder.startsWith("daily-plans/")) return "일촬표 편집";
+  if (route.remainder.startsWith("daily-plans/")) return "일촬표";
   if (route.remainder === "scene-list") return "씬리스트";
   if (route.remainder === "staff-list") return "스탭리스트";
   if (route.remainder === "scenario") return "시나리오";

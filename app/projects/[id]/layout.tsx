@@ -64,6 +64,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
         projectId,
         access.grant.role,
         access.project,
+        access.mode === "guest",
         access.mode === "guest" && progressTarget?.projectId === projectId
           ? progressTarget.dailyPlanId
           : null
@@ -102,11 +103,12 @@ async function loadInitialProjectWorkspace(
   projectId: string,
   role: "admin" | "progress",
   accessProject?: ProjectRequestProjectSnapshot,
+  isGuestWorkspace = false,
   guestProgressDailyPlanId: string | null = null
 ): Promise<ProjectWorkspaceSnapshot> {
   const supabase = requireProjectAccessDb();
   const hasGuestProgressSeed = Boolean(guestProgressDailyPlanId);
-  const planListQuery = hasGuestProgressSeed
+  const planListQuery = isGuestWorkspace
     ? supabase
         .from("daily_plans")
         .select(DAILY_PLAN_SUMMARY_COLUMNS)
@@ -133,7 +135,7 @@ async function loadInitialProjectWorkspace(
           .select("id,name,shoot_date,description,created_at,share_enabled")
           .eq("id", projectId)
           .maybeSingle(),
-    hasGuestProgressSeed
+    isGuestWorkspace
       ? Promise.resolve({ data: null, error: null })
       : supabase
           .from("project_basic_info")
@@ -149,7 +151,7 @@ async function loadInitialProjectWorkspace(
           .eq("id", guestProgressDailyPlanId!)
           .maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    hasGuestProgressSeed
+    isGuestWorkspace
       ? Promise.resolve({ data: [], error: null })
       : supabase
           .from("daily_plan_shots")

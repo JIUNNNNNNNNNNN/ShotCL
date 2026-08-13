@@ -49,10 +49,12 @@ import {
   duplicateDailyPlan,
   finalizeDeletedDailyPlan,
   restoreDeletedDailyPlan,
+  type DailyPlanListItem,
   type DeletedDailyPlanMutation
 } from "@/lib/data/dailyPlans";
 import { compareDailyPlanEpisodes, formatDailyPlanEpisodeLabel } from "@/lib/dailyPlan/carouselPresentation";
 import { formatDailyPlanCardDate } from "@/lib/dailyPlan/dateOnly";
+import { getKoreaDateOnly } from "@/lib/koreaDate";
 import {
   buildDailyPlanRoundHref,
   buildNewDailyPlanHref,
@@ -65,6 +67,8 @@ import {
   resolveActiveProjectNavigationItem,
   type ProjectNavigationItemId
 } from "@/lib/projectNavigation";
+import { createDailyProgressCompletion } from "@/lib/progress/dailyProgress";
+import { resolveRelevantProgressRound } from "@/lib/progress/resolveRelevantRound";
 import type { DailyPlan } from "@/lib/types";
 import type { ProjectJoinNotice } from "@/lib/projectAccess/joinNotice.client";
 
@@ -117,6 +121,7 @@ export function ProjectNavigation({
     projectId,
     projectName,
     dailyPlans,
+    initialProgress,
     isLoading,
     error,
     upsertDailyPlan,
@@ -321,6 +326,8 @@ export function ProjectNavigation({
         drawer={drawer}
         projectId={projectId}
         projectName={projectName}
+        plans={sortedPlans}
+        initialProgressDailyPlanId={initialProgress?.dailyPlanId ?? ""}
         pathname={pathname}
         searchParams={searchParams}
         isLoading={isLoading}
@@ -406,6 +413,8 @@ function GuestProjectNavigation({
   drawer,
   projectId,
   projectName,
+  plans,
+  initialProgressDailyPlanId,
   pathname,
   searchParams,
   isLoading,
@@ -415,17 +424,50 @@ function GuestProjectNavigation({
   drawer: boolean;
   projectId: string;
   projectName: string;
+  plans: DailyPlanListItem[];
+  initialProgressDailyPlanId: string;
   pathname: string;
   searchParams: Pick<URLSearchParams, "get" | "toString">;
   isLoading: boolean;
   error: string;
   onNavigate: (href: string) => void;
 }) {
-  const progressHref = buildProjectNavigationHref(projectId, "progress");
+  const requestedProgressPlanId = searchParams.get("dailyPlanId")?.trim() ?? "";
+  const activeDailyPlanId = plans.find((plan) => isDailyPlanRoundActive(pathname, plan.id))?.id ?? "";
+  const lastGuestRoundIdRef = useRef("");
+  const explicitDailyPlanId = plans.some((plan) => plan.id === requestedProgressPlanId)
+    ? requestedProgressPlanId
+    : activeDailyPlanId;
+  if (explicitDailyPlanId) lastGuestRoundIdRef.current = explicitDailyPlanId;
+  const rememberedDailyPlanId = plans.some((plan) => plan.id === lastGuestRoundIdRef.current)
+    ? lastGuestRoundIdRef.current
+    : "";
+  const seededDailyPlanId = plans.some((plan) => plan.id === initialProgressDailyPlanId)
+    ? initialProgressDailyPlanId
+    : "";
+  const contextualDailyPlanId = explicitDailyPlanId || rememberedDailyPlanId || seededDailyPlanId;
+  const todayKorea = getKoreaDateOnly();
+  const relevantRound = !contextualDailyPlanId && todayKorea
+    ? resolveRelevantProgressRound(plans.map((plan) => ({
+        id: plan.id,
+        shootingDate: plan.shootingDate,
+        episode: plan.episode,
+        progress: createDailyProgressCompletion(plan.progressTotal, plan.progressCompleted)
+      })), todayKorea)
+    : null;
+  const selectedDailyPlanId = contextualDailyPlanId
+    || (relevantRound?.status === "resolved" ? relevantRound.round.id : "");
+  const progressHref = selectedDailyPlanId
+    ? buildProgressRoundHref(projectId, selectedDailyPlanId)
+    : buildProjectNavigationHref(projectId, "progress");
+  const dailyPlansHref = selectedDailyPlanId
+    ? buildDailyPlanRoundHref(projectId, selectedDailyPlanId)
+    : buildProjectNavigationHref(projectId, "dailyPlans");
   const scenarioHref = buildProjectNavigationHref(projectId, "scenario");
   const currentSearch = searchParams.toString();
   const accountReturnTo = `${pathname}${currentSearch ? `?${currentSearch}` : ""}`;
   const progressActive = resolveActiveProjectNavigationItem(pathname, searchParams, projectId) === "progress";
+  const dailyPlansActive = resolveActiveProjectNavigationItem(pathname, searchParams, projectId) === "dailyPlans";
   const scenarioActive = pathname.replace(/\/$/u, "") === scenarioHref;
 
   return (
@@ -450,6 +492,30 @@ function GuestProjectNavigation({
           label="진행도"
           onNavigate={onNavigate}
         />
+        <GuestNavigationLink
+          href={dailyPlansHref}
+          active={dailyPlansActive}
+          icon={CalendarDays}
+          label="일촬표"
+          onNavigate={onNavigate}
+        />
+        {dailyPlansActive ? (
+          <section className="project-navigation__round-section" aria-label="일촬표 회차 목록">
+            <p className="project-navigation__round-heading">일촬표 회차</p>
+            <RoundNavigationList
+              kind="dailyPlans"
+              projectId={projectId}
+              plans={plans}
+              pathname={pathname}
+              searchParams={searchParams}
+              canManage={false}
+              isBusy={isLoading}
+              prefetch={false}
+              onNavigate={onNavigate}
+              onOpenContextMenu={() => undefined}
+            />
+          </section>
+        ) : null}
         <GuestNavigationLink
           href={scenarioHref}
           active={scenarioActive}
@@ -480,6 +546,7 @@ function GuestNavigationLink({
   return (
     <Link
       href={href}
+      prefetch={false}
       aria-current={active ? "page" : undefined}
       onClick={() => onNavigate(href)}
       className={`flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius-control)] border px-3 py-2.5 text-sm font-black transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${
@@ -502,6 +569,7 @@ function RoundNavigationList({
   searchParams,
   canManage,
   isBusy,
+  prefetch = true,
   onNavigate,
   onOpenContextMenu
 }: {
@@ -512,6 +580,7 @@ function RoundNavigationList({
   searchParams: Pick<URLSearchParams, "get">;
   canManage: boolean;
   isBusy: boolean;
+  prefetch?: boolean;
   onNavigate: (href: string) => void;
   onOpenContextMenu: (plan: DailyPlan, clientX: number, clientY: number) => void;
 }) {
@@ -539,6 +608,7 @@ function RoundNavigationList({
               plan={plan}
               href={href}
               active={active}
+              prefetch={prefetch}
               contextMenuEnabled={kind === "dailyPlans" && canManage && !isBusy}
               guideAnchor={index === 0}
               onNavigate={onNavigate}
@@ -587,6 +657,7 @@ function RoundNavigationLink({
   plan,
   href,
   active,
+  prefetch,
   contextMenuEnabled,
   guideAnchor,
   onNavigate,
@@ -595,6 +666,7 @@ function RoundNavigationLink({
   plan: DailyPlan;
   href: string;
   active: boolean;
+  prefetch: boolean;
   contextMenuEnabled: boolean;
   guideAnchor: boolean;
   onNavigate: (href: string) => void;
@@ -656,6 +728,7 @@ function RoundNavigationLink({
     <Link
       ref={interactionGuideAnchorRef}
       href={href}
+      prefetch={prefetch}
       draggable={false}
       aria-current={active ? "page" : undefined}
       aria-label={`${formatDailyPlanEpisodeLabel(plan.episode)}, 촬영일 ${formatDailyPlanCardDate(plan.shootingDate)}`}

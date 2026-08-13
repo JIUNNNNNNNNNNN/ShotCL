@@ -120,6 +120,24 @@ export function buildDailyPlanPreviewTimetableRows(
     : [...orderedSceneRows, ...additionalScheduleRows];
 }
 
+/**
+ * 문서 하단 총 컷수도 화면에 이미 확정된 canonical Total CUT 값을 사용합니다.
+ * 분할 촬영의 `선택 컷/전체 컷` 표기는 왼쪽 선택 컷 수만 합산합니다.
+ */
+export function getDailyPlanPreviewTotalCutCount(
+  rows: readonly DailyPlanPreviewTimetableRow[]
+) {
+  return rows.reduce((total, row) => {
+    if (row.type !== "scene") return total;
+    const scheduledCutText = row.totalCut.split("/", 1)[0]?.trim() ?? "";
+    if (!/^\d+$/.test(scheduledCutText)) return total;
+    const scheduledCutCount = Number(scheduledCutText);
+    return Number.isSafeInteger(scheduledCutCount) && scheduledCutCount >= 0
+      ? total + scheduledCutCount
+      : total;
+  }, 0);
+}
+
 function buildPersistedSceneRows(meta: DailyPlanPrintMeta) {
   const rows = meta.timetableScenes.map((scene): DailyPlanPreviewSceneRow => {
     const snapshot = scene.rowSnapshot;

@@ -1,0 +1,33 @@
+.root {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 190mm;
+  margin-inline: auto;
+  overflow-x: hidden;
+  background: #ffffff;
+  color: #000000;
+}
+
+/* The printable document keeps 190mm geometry by default. Read-only screen
+   presentation uses the same markup and density at the available viewport width. */
+.root :global(.daily-plan-document--portrait) {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.root :global(.daily-plan-portrait-page),
+.root :global(.daily-plan-portrait-page-content) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  .root {
+    --daily-plan-cell-padding-inline: 2px;
+  }
+}
