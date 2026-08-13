@@ -291,7 +291,6 @@ export const ShotCard = memo(function ShotCard({
                   label="부감도"
                   items={overheadGallery}
                   diagram={hasOverheadDiagram && !prefersLinkedOverheadImage ? shot.overheadDiagram : null}
-                  count={overheadGalleryImages.length}
                   loading={loadingGallery === "overhead"}
                   guideAnchorRef={interactionMediaGuideCategory === "overhead"
                     ? mediaGalleryGuideAnchorRef
@@ -328,7 +327,6 @@ function ProgressMediaPreviewTile({
   label,
   items,
   diagram,
-  count: countOverride,
   loading = false,
   guideAnchorRef,
   onOpen
@@ -336,7 +334,6 @@ function ProgressMediaPreviewTile({
   label: "콘티" | "부감도";
   items: ProgressMediaGalleryItem[];
   diagram?: Shot["overheadDiagram"] | null;
-  count?: number;
   loading?: boolean;
   guideAnchorRef?: RefCallback<HTMLButtonElement>;
   onOpen: (event: React.MouseEvent<HTMLButtonElement>) => void;
@@ -346,7 +343,6 @@ function ProgressMediaPreviewTile({
   // browser URL remains a safe fallback; modern rows still prefer the compact
   // thumbnail variant.
   const previewUrl = firstItem?.thumbnailUrl || firstItem?.url || "";
-  const count = countOverride ?? items.length + (diagram ? 1 : 0);
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
@@ -360,14 +356,10 @@ function ProgressMediaPreviewTile({
       data-no-drag="true"
       disabled={loading}
       onClick={onOpen}
-      className="group grid min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[var(--radius-control)] border border-field-divider bg-field-input p-0 text-field-text transition-[border-color,background-color,opacity] hover:border-field-primary/70 hover:bg-field-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
-      aria-label={loading ? `${label} 불러오는 중` : `${label} ${count}장 보기`}
-      title={`${label} ${count}장 보기`}
+      className="group block min-w-0 overflow-hidden rounded-[var(--radius-control)] border border-field-divider bg-field-input p-0 text-field-text transition-[border-color,background-color,opacity] hover:border-field-primary/70 hover:bg-field-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary"
+      aria-label={loading ? `${label} 불러오는 중` : `${label} 보기`}
     >
-      <span className="truncate whitespace-nowrap border-b border-field-divider/70 px-2 py-1.5 text-[10px] font-bold">
-        {label} · {count}
-      </span>
-      <span className="relative flex h-24 min-w-0 items-center justify-center overflow-hidden bg-field-soft sm:h-28">
+      <span className="relative flex h-28 min-w-0 items-center justify-center overflow-hidden bg-field-soft sm:h-32">
         <span className="absolute inset-0 flex items-center justify-center px-2 text-[10px] text-field-muted">
           미리보기 없음
         </span>

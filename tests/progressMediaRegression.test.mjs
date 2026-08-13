@@ -113,6 +113,11 @@ test("representative media clicks remain category Gallery-only interactions", ()
   assert.match(mediaTiles, /label="콘티"[\s\S]*?openGallery\(event, "storyboard"\)/u);
   assert.match(mediaTiles, /label="부감도"[\s\S]*?openGallery\(event, "overhead"\)/u);
   assert.match(source, /type="button"[\s\S]*?data-no-drag="true"[\s\S]*?onClick=\{onOpen\}/u);
+  const previewTile = source.slice(source.indexOf("function ProgressMediaPreviewTile"));
+  assert.doesNotMatch(previewTile, /\{label\}\s*·|countOverride|count\?: number/u);
+  assert.doesNotMatch(previewTile, /\btitle=/u);
+  assert.match(previewTile, /aria-label=\{loading \? `\$\{label\} 불러오는 중` : `\$\{label\} 보기`\}/u);
+  assert.match(previewTile, /className="relative flex h-28[^"]*sm:h-32"/u);
 });
 
 test("Cut editor media mutations patch one stable Cut and invalidate stale Gallery reads", () => {
