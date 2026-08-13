@@ -6,8 +6,9 @@ import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
 import {
   PROGRESS_SWIPE_COMMIT_RATIO,
   resolveProgressPointerIntent,
+  resolveProgressSwipeArmedStatus,
   resolveProgressStatusToggle,
-  resolveProgressSwipeStatus
+  type ProgressSwipeArmedStatus
 } from "@/lib/progress/shotCardInteraction";
 import type { Shot, ShotStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -309,6 +310,8 @@ export function ShotReorderList({
     let dragFrame = 0;
     let swipeFrame = 0;
     let longPressTimer = 0;
+    let swipeArmedStatus: ProgressSwipeArmedStatus = null;
+    let releaseHandled = false;
 
     const restoreDocumentInteraction = () => {
       document.body.style.userSelect = originalUserSelect;
@@ -401,7 +404,9 @@ export function ShotReorderList({
     };
 
     function preventTouchScroll(touchEvent: TouchEvent) {
-      if (mode === "reorder" && touchEvent.cancelable) touchEvent.preventDefault();
+      if ((mode === "swipe" || mode === "reorder") && touchEvent.cancelable) {
+        touchEvent.preventDefault();
+      }
     }
 
     const scheduleSwipeUpdate = () => {
@@ -421,6 +426,16 @@ export function ShotReorderList({
       if (mode === "pending") {
         const deltaX = latestClientX - startX;
         const deltaY = latestClientY - startY;
+        if (Math.hypot(deltaX, deltaY) > CLICK_MOVE_TOLERANCE_PX) {
+          movedBeyondClickTolerance = true;
+          // Slow movement is still intentional movement. Stop the stationary
+          // reorder timer before the 10px axis lock, and never restart it for
+          // this pointer lifecycle.
+          if (longPressTimer) {
+            window.clearTimeout(longPressTimer);
+            longPressTimer = 0;
+          }
+        }
         const intent = resolveProgressPointerIntent(deltaX, deltaY, CLICK_MOVE_TOLERANCE_PX);
         if (intent === "pending") return;
 
@@ -447,12 +462,28 @@ export function ShotReorderList({
         } catch {
           // Pointer capture is an enhancement; the window listeners remain authoritative.
         }
+        if (event.pointerType !== "mouse") {
+          // `pan-y` keeps native vertical scrolling while intent is pending.
+          // Once horizontal ownership is locked, this WebKit fallback prevents
+          // later finger drift from becoming a UA scroll and pointercancel.
+          window.addEventListener("touchmove", preventTouchScroll, { passive: false });
+        }
+        swipeArmedStatus = resolveProgressSwipeArmedStatus(
+          deltaX,
+          swipeWidth,
+          swipeArmedStatus
+        );
         if (pointerEvent.cancelable) pointerEvent.preventDefault();
         scheduleSwipeUpdate();
         return;
       }
 
       if (mode === "swipe") {
+        swipeArmedStatus = resolveProgressSwipeArmedStatus(
+          latestClientX - startX,
+          swipeWidth,
+          swipeArmedStatus
+        );
         if (pointerEvent.cancelable) pointerEvent.preventDefault();
         scheduleSwipeUpdate();
         return;
@@ -463,7 +494,8 @@ export function ShotReorderList({
     }
 
     function handlePointerUp(pointerEvent: PointerEvent) {
-      if (pointerEvent.pointerId !== pointerId) return;
+      if (pointerEvent.pointerId !== pointerId || releaseHandled) return;
+      releaseHandled = true;
       if (mode === "pending") {
         if (movedBeyondClickTolerance) suppressClickUntilRef.current = Date.now() + 400;
         cleanup();
@@ -481,7 +513,12 @@ export function ShotReorderList({
         }
         latestClientX = pointerEvent.clientX;
         const deltaX = latestClientX - startX;
-        const requestedStatus = resolveProgressSwipeStatus(deltaX, swipeWidth);
+        swipeArmedStatus = resolveProgressSwipeArmedStatus(
+          deltaX,
+          swipeWidth,
+          swipeArmedStatus
+        );
+        const requestedStatus = swipeArmedStatus;
         if (!requestedStatus) {
           animateSwipeVisual(shotId, 0, 1);
           cleanup();
@@ -562,13 +599,12 @@ export function ShotReorderList({
                 transform: `translate3d(0, ${dragState.currentY - dragState.startY}px, 0) scale(1.015)`,
                 touchAction: "none",
                 willChange: "transform"
-              } : undefined}
+              } : !persistentInteraction && !statusReadOnly
+                ? { touchAction: "pan-y pinch-zoom" }
+                : undefined}
             >
               <div
                 className="relative isolate overflow-hidden rounded-[var(--radius-card)]"
-                style={!persistentInteraction && !statusReadOnly
-                  ? { touchAction: "pan-y pinch-zoom" }
-                  : undefined}
               >
                 {!persistentInteraction && !statusReadOnly ? (
                   <div

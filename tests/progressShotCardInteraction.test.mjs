@@ -4,8 +4,10 @@ import test from "node:test";
 
 const {
   PROGRESS_SWIPE_COMMIT_RATIO,
+  PROGRESS_SWIPE_DISARM_RATIO,
   resolveProgressCardHalfStatus,
   resolveProgressPointerIntent,
+  resolveProgressSwipeArmedStatus,
   resolveProgressStatusToggle,
   resolveProgressSwipeStatus
 } = await import("../lib/progress/shotCardInteraction.ts");
@@ -35,10 +37,14 @@ test("requesting the current terminal status toggles it back to pending", () => 
 test("gesture intent waits for tolerance and preserves vertical scrolling", () => {
   assert.equal(resolveProgressPointerIntent(10, 0), "pending");
   assert.equal(resolveProgressPointerIntent(6, 10), "pending");
-  assert.equal(resolveProgressPointerIntent(11, 10), "horizontal");
+  assert.equal(resolveProgressPointerIntent(11, 10), "pending");
+  assert.equal(resolveProgressPointerIntent(12, 10), "horizontal");
   assert.equal(resolveProgressPointerIntent(-18, 4), "horizontal");
-  assert.equal(resolveProgressPointerIntent(8, 11), "vertical");
+  assert.equal(resolveProgressPointerIntent(-12, 10), "horizontal");
+  assert.equal(resolveProgressPointerIntent(10, 11), "pending");
+  assert.equal(resolveProgressPointerIntent(10, 12), "vertical");
   assert.equal(resolveProgressPointerIntent(0, -20), "vertical");
+  assert.equal(resolveProgressPointerIntent(10, -12), "vertical");
 });
 
 test("phone swipe commits only at the width-relative threshold with fixed directions", () => {
@@ -50,6 +56,46 @@ test("phone swipe commits only at the width-relative threshold with fixed direct
   assert.equal(resolveProgressSwipeStatus(threshold, width), "ok");
   assert.equal(resolveProgressSwipeStatus(-threshold, width), "omit");
   assert.equal(resolveProgressSwipeStatus(100, 0), null);
+});
+
+test("locked swipe survives slow pauses and commits from final distance without velocity", () => {
+  const width = 300;
+  let armed = null;
+
+  // Slow movement and a repeated coordinate model an arbitrarily long pause.
+  armed = resolveProgressSwipeArmedStatus(40, width, armed);
+  assert.equal(armed, null);
+  armed = resolveProgressSwipeArmedStatus(40, width, armed);
+  assert.equal(armed, null);
+  armed = resolveProgressSwipeArmedStatus(95, width, armed);
+  assert.equal(armed, "ok");
+  armed = resolveProgressSwipeArmedStatus(95, width, armed);
+  assert.equal(armed, "ok");
+
+  let omit = null;
+  omit = resolveProgressSwipeArmedStatus(-95, width, omit);
+  assert.equal(omit, "omit");
+  omit = resolveProgressSwipeArmedStatus(-95, width, omit);
+  assert.equal(omit, "omit");
+});
+
+test("swipe commitment has arm/disarm hysteresis and permits an intentional cancel", () => {
+  const width = 300;
+  const armDistance = width * PROGRESS_SWIPE_COMMIT_RATIO;
+  const disarmDistance = width * PROGRESS_SWIPE_DISARM_RATIO;
+
+  let armed = resolveProgressSwipeArmedStatus(armDistance, width, null);
+  assert.equal(armed, "ok");
+  armed = resolveProgressSwipeArmedStatus(armDistance - 3, width, armed);
+  assert.equal(armed, "ok");
+  armed = resolveProgressSwipeArmedStatus(disarmDistance + 1, width, armed);
+  assert.equal(armed, "ok");
+  armed = resolveProgressSwipeArmedStatus(disarmDistance, width, armed);
+  assert.equal(armed, null);
+
+  // A large direct reversal cannot accidentally keep the old direction.
+  assert.equal(resolveProgressSwipeArmedStatus(-armDistance, width, "ok"), "omit");
+  assert.equal(resolveProgressSwipeArmedStatus(-armDistance + 1, width, "ok"), null);
 });
 
 test("ShotCard has no dedicated status buttons and protects interactive descendants", () => {
@@ -115,6 +161,8 @@ test("swipe move is RAF-scoped DOM work and mutation happens once on release", (
   assert.match(visualUpdate, /surface\.style\.opacity/u);
   assert.doesNotMatch(scheduledMove, /setDragState|onStatusChange|onReorder|fetch\(|router\.refresh/u);
   assert.equal((pointerUp.match(/onStatusChange\(/gu) ?? []).length, 1);
+  assert.match(pointerUp, /if \(pointerEvent\.pointerId !== pointerId \|\| releaseHandled\) return;\s*releaseHandled = true;/u);
+  assert.match(pointerUp, /resolveProgressSwipeArmedStatus\([\s\S]*?const requestedStatus = swipeArmedStatus/u);
   assert.match(pointerUp, /resolveProgressStatusToggle\(shot\.status, requestedStatus\)/u);
   assert.doesNotMatch(source, /fetch\(|router\.refresh/u);
 });
@@ -131,8 +179,23 @@ test("vertical, swipe, and stationary long-press modes are mutually exclusive", 
   assert.match(pointerSession, /window\.clearTimeout\(longPressTimer\)[\s\S]*?if \(intent === "vertical"\)[\s\S]*?cleanup\(\)/u);
   assert.match(pointerSession, /mode = "swipe"/u);
   assert.match(pointerSession, /if \(mode === "swipe"\)[\s\S]*?scheduleSwipeUpdate\(\)/u);
-  assert.match(pointerSession, /if \(mode === "reorder" && touchEvent\.cancelable\) touchEvent\.preventDefault\(\)/u);
-  assert.equal((pointerSession.match(/addEventListener\("touchmove"/gu) ?? []).length, 1);
+  assert.match(pointerSession, /Math\.hypot\(deltaX, deltaY\) > CLICK_MOVE_TOLERANCE_PX[\s\S]*?movedBeyondClickTolerance = true[\s\S]*?window\.clearTimeout\(longPressTimer\)/u);
+  assert.match(pointerSession, /\(mode === "swipe" \|\| mode === "reorder"\) && touchEvent\.cancelable/u);
+  assert.equal((pointerSession.match(/addEventListener\("touchmove"/gu) ?? []).length, 2);
+  assert.equal((pointerSession.match(/removeEventListener\("touchmove"/gu) ?? []).length, 1);
+  assert.match(pointerSession, /mode = "swipe"[\s\S]*?setPointerCapture\(pointerId\)[\s\S]*?addEventListener\("touchmove", preventTouchScroll, \{ passive: false \}\)/u);
+  assert.match(source, /touchAction: "pan-y pinch-zoom"/u);
+  assert.doesNotMatch(pointerSession, /lostpointercapture|velocity|swipeTimeout|maxGesture/u);
+  const lockedSwipeBranch = pointerSession.slice(
+    pointerSession.indexOf('if (mode === "swipe")'),
+    pointerSession.indexOf('if (pointerEvent.cancelable) pointerEvent.preventDefault();\n      scheduleDragUpdate();')
+  );
+  assert.doesNotMatch(lockedSwipeBranch, /resolveProgressPointerIntent|cleanup\(|setTimeout|onStatusChange|onReorder/u);
+  const pointerMove = pointerSession.slice(
+    pointerSession.indexOf("function handlePointerMove"),
+    pointerSession.indexOf("function handlePointerUp")
+  );
+  assert.doesNotMatch(pointerMove, /getBoundingClientRect/u);
 });
 
 test("release animation uses an isolated ghost and supports reduced motion", () => {
