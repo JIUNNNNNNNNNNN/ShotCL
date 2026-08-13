@@ -81,11 +81,13 @@ import {
 import {
   buildSceneLocationOptions,
   createSceneLocationKey,
-  formatDailyPlanTimetableLocation,
   migrateLegacySceneLocationsToLocationCards,
   normalizeDailyPlanLocationAssignments
 } from "@/lib/dailyPlan/sceneLocations";
-import type { DailyPlanPreviewTimetableRow } from "@/lib/dailyPlan/previewTimetable";
+import {
+  buildDailyPlanPreviewTimetableRows,
+  type DailyPlanPreviewTimetableRow
+} from "@/lib/dailyPlan/previewTimetable";
 import { filterRenderablePreviewRows } from "@/lib/dailyPlan/previewDisplay";
 import {
   DAILY_PLAN_DOCUMENT_DENSITY_STEPS,
@@ -5311,70 +5313,7 @@ function getDailyPlanPageHeightPixels(orientation: DailyPlanPdfOrientation) {
 }
 
 function getPrintTimetableRows(data: DailyPlanPreviewData): DailyPlanPreviewTimetableRow[] {
-  const hasExplicitTimetableOrder = data.meta.timetableRowOrder.length > 0;
-  const previewScenes = hasExplicitTimetableOrder
-    ? data.scenes
-    : sortScenesNaturallyForPreview(data.scenes);
-  const sceneRows: DailyPlanPreviewTimetableRow[] = previewScenes.map((scene) => ({
-    type: "scene",
-    start: scene.startTime || "",
-    end: scene.endTime || "",
-    runtime: formatRuntimeMinutes(getRuntimeMinutes(scene.runtimeMinutes, scene.runtime, scene.startTime, scene.endTime)),
-    location: formatDailyPlanTimetableLocation(scene.mainLocation, scene.subLocation),
-    dayNight: normalizeDailyPlanDayNight(scene.dayNight),
-    sceneNumber: formatSceneNumber(scene.sceneNumber),
-    totalCut: getSceneTotalCutForPreview(scene),
-    cast: getValidSceneCastValue(scene.subject, data.meta.starring),
-    description: scene.description,
-    shootingOrder: scene.shootingOrder || "",
-    notes: scene.notes || ""
-  }));
-
-  const additionalScheduleRows: DailyPlanPreviewTimetableRow[] = data.mealTimes.map((meal) => {
-    return {
-      type: "additionalSchedule",
-      start: meal.startTime || "",
-      end: meal.endTime || "",
-      runtime: formatRuntimeMinutes(getRuntimeMinutes(meal.runtimeMinutes, meal.runtime, meal.startTime, meal.endTime)),
-      location: getDailyPlanLocationReferenceAddress({
-        locations: data.locations,
-        locationId: meal.locationId
-      }),
-      memo: meal.memo
-    };
-  });
-
-  const orderedRows = hasExplicitTimetableOrder
-    ? mergeDailyPlanTimetableRows(sceneRows, additionalScheduleRows, data.meta.timetableRowOrder)
-    : [...sceneRows, ...additionalScheduleRows];
-  return orderedRows;
-}
-
-function sortScenesNaturallyForPreview(scenes: DailyPlanPreviewScene[]) {
-  const collator = new Intl.Collator("ko-KR", { numeric: true, sensitivity: "base" });
-  return scenes
-    .map((scene, sourceIndex) => ({
-      scene,
-      sourceIndex,
-      numericValue: getSceneNaturalNumber(scene.sceneNumber)
-    }))
-    .sort((left, right) => {
-      if (left.numericValue !== null || right.numericValue !== null) {
-        if (left.numericValue === null) return 1;
-        if (right.numericValue === null) return -1;
-        if (left.numericValue !== right.numericValue) return left.numericValue - right.numericValue;
-      }
-      const labelOrder = collator.compare(left.scene.sceneNumber, right.scene.sceneNumber);
-      return labelOrder || left.sourceIndex - right.sourceIndex;
-    })
-    .map(({ scene }) => scene);
-}
-
-function getSceneNaturalNumber(value: string) {
-  const match = String(value ?? "").match(/\d+(?:\.\d+)?/);
-  if (!match) return null;
-  const parsed = Number(match[0]);
-  return Number.isFinite(parsed) ? parsed : null;
+  return buildDailyPlanPreviewTimetableRows(data.plan);
 }
 
 function formatSceneNumber(value: string) {
@@ -5455,10 +5394,6 @@ function resolveCastSelectionIds(
 function replaceSceneCastValue(value: string, previousValue: string, nextValue: string) {
   const next = parseSceneCastValues(value).flatMap((item) => item === previousValue ? (nextValue ? [nextValue] : []) : [item]);
   return formatSceneCastValues(next);
-}
-
-function getSceneTotalCutForPreview(scene: DailyPlanPreviewScene) {
-  return scene.cutDisplay;
 }
 
 function PreviewList({ title, children }: { title: string; children: React.ReactNode }) {

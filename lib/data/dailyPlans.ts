@@ -405,6 +405,7 @@ export async function getDailyPlanWithShots(projectId: string, dailyPlanId: stri
     const { data: shotRows, error: shotError } = await supabase
       .from("daily_plan_shots")
       .select("*")
+      .eq("project_id", projectId)
       .eq("daily_plan_id", dailyPlanId)
       .order("order_index", { ascending: true });
 

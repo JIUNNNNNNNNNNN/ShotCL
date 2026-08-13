@@ -4,6 +4,7 @@ import test from "node:test";
 
 const editorPath = new URL("../components/DailyPlanEditor.tsx", import.meta.url);
 const locationMenuPath = new URL("../components/DailyPlanLocationMenu.tsx", import.meta.url);
+const previewTimetablePath = new URL("../lib/dailyPlan/previewTimetable.ts", import.meta.url);
 
 function sourceBetween(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -42,11 +43,24 @@ test("Daily Plan location selectors share compact stable-ID options", async () =
 });
 
 test("additional schedules and call sheets resolve actual addresses only for document output", async () => {
-  const source = await readFile(editorPath, "utf8");
+  const [source, previewTimetableSource] = await Promise.all([
+    readFile(editorPath, "utf8"),
+    readFile(previewTimetablePath, "utf8")
+  ]);
   const timetableRows = sourceBetween(
-    source,
-    "function getPrintTimetableRows(",
-    "function sortScenesNaturallyForPreview("
+    previewTimetableSource,
+    "export function buildDailyPlanPreviewTimetableRows(",
+    "function buildPersistedSceneRows("
+  );
+  const sceneRows = sourceBetween(
+    previewTimetableSource,
+    "function buildPersistedSceneRows(",
+    "function buildAdditionalScheduleRows("
+  );
+  const scheduleRows = sourceBetween(
+    previewTimetableSource,
+    "function buildAdditionalScheduleRows(",
+    "function getPersistedAdditionalSchedules("
   );
   const previewBuilder = sourceBetween(
     source,
@@ -58,9 +72,10 @@ test("additional schedules and call sheets resolve actual addresses only for doc
     source,
     /aria-label=\{`기타 일정 \$\{mealIndex \+ 1\} 장소`\}[\s\S]*?<option value="">장소 없음<\/option>[\s\S]*?dailyPlanLocationOptions\.map/u
   );
-  assert.match(timetableRows, /type: "scene"[\s\S]*?location: formatDailyPlanTimetableLocation\(scene\.mainLocation, scene\.subLocation\)/u);
-  assert.match(timetableRows, /type: "additionalSchedule"[\s\S]*?location: getDailyPlanLocationReferenceAddress\(\{[\s\S]*?locationId: meal\.locationId/u);
-  assert.doesNotMatch(timetableRows, /getDailyPlanLocationOptionLabel/u);
+  assert.match(source, /function getPrintTimetableRows\([\s\S]*?return buildDailyPlanPreviewTimetableRows\(data\.plan\)/u);
+  assert.match(sceneRows, /type: "scene"[\s\S]*?location: formatDailyPlanTimetableLocation\([\s\S]*?effective\.mainLocation,[\s\S]*?effective\.subLocation/u);
+  assert.match(scheduleRows, /type: "additionalSchedule"[\s\S]*?location: getDailyPlanLocationReferenceAddress\(\{[\s\S]*?locationId: meal\.locationId/u);
+  assert.doesNotMatch(`${timetableRows}\n${sceneRows}\n${scheduleRows}`, /getDailyPlanLocationOptionLabel/u);
 
   assert.equal(previewBuilder.match(/getDailyPlanLocationReferenceAddress\(\{/gu)?.length, 2);
   assert.match(previewBuilder, /locationId: person\.callLocationId,[\s\S]*?legacyText: person\.callLocation/u);

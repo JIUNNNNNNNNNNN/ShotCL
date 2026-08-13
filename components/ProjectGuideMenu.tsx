@@ -1,13 +1,14 @@
 import type { SharedProjectRole } from "@/lib/projectAccess/core";
 import { ProjectShootingCalendar } from "@/components/ProjectShootingCalendar";
-import type { DailyPlan, ProjectCalendarInfo } from "@/lib/types";
+import type { DailyPlanListItem } from "@/lib/data/dailyPlans";
+import type { ProjectCalendarInfo } from "@/lib/types";
 
 type ProjectGuideMenuProps = {
   projectId: string;
   projectName: string;
   role: SharedProjectRole | null;
   calendarInfo?: ProjectCalendarInfo | null;
-  dailyPlans: ReadonlyArray<Pick<DailyPlan, "id" | "shootingDate" | "episode">>;
+  dailyPlans: readonly DailyPlanListItem[];
 };
 
 /** 모든 진입 경로가 공유하는 프로젝트 홈의 요약과 촬영 일정입니다. */

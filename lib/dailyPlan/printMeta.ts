@@ -1,8 +1,12 @@
-import { formatKoreanPhoneNumber } from "@/lib/formatKoreanPhoneNumber";
-import { resolveKoreanWeatherRegion } from "@/lib/koreanWeatherRegions";
-import { MAX_SCENE_CUT_COUNT, normalizeSceneCutCount } from "@/lib/sceneCutCount";
-import { normalizeSceneLocationSelections } from "@/lib/dailyPlan/sceneLocations";
-import type { DailyPlanSceneLocationSelection } from "@/lib/types";
+// @ts-ignore -- explicit .ts imports keep this pure module directly testable in Node.
+import { formatKoreanPhoneNumber } from "../formatKoreanPhoneNumber.ts";
+// @ts-ignore -- explicit .ts imports keep this pure module directly testable in Node.
+import { resolveKoreanWeatherRegion } from "../koreanWeatherRegions.ts";
+// @ts-ignore -- explicit .ts imports keep this pure module directly testable in Node.
+import { MAX_SCENE_CUT_COUNT, normalizeSceneCutCount } from "../sceneCutCount.ts";
+// @ts-ignore -- explicit .ts imports keep this pure module directly testable in Node.
+import { normalizeSceneLocationSelections } from "./sceneLocations.ts";
+import type { DailyPlanSceneLocationSelection } from "../types.ts";
 
 export type DailyPlanTimetableRowType = "scene" | "event";
 

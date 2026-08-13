@@ -7,7 +7,6 @@ import {
   DAILY_PLAN_TIMETABLE_COLUMN_WEIGHTS,
   DAILY_PLAN_TIMETABLE_COLUMN_COUNT,
   DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN,
-  DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN,
   getDailyPlanAdditionalScheduleCellLayout,
   type DailyPlanPreviewTimetableRow
 } from "@/lib/dailyPlan/previewTimetable";
@@ -27,6 +26,7 @@ import {
   type DailyPlanPageLayout
 } from "@/lib/dailyPlan/documentLayout";
 import type { DailyPlanDraft, DailyPlanLocation } from "@/lib/types";
+import { DailyPlanTimetable } from "@/components/DailyPlanTimetable";
 
 type DailyPlanDocumentProps = {
   plan: DailyPlanDraft;
@@ -362,7 +362,6 @@ export function DailyPlanPortraitDocument({
     memoFields,
     totalCutCount
   } = data;
-  const summaryFields = createPortraitSummaryFields(timetableRows);
   const detailFields = createPortraitDetailFields(timetableRows);
   const visibleStarringRows: PortraitCallSheetDisplayRow[] = starringRows.map((person) => ({
     id: person.id,
@@ -468,36 +467,11 @@ export function DailyPlanPortraitDocument({
             </tbody>
           </table>
 
-          <table data-portrait-table="timetable-summary" className={sectionTableClass}>
-            <EqualColumns count={portraitColumnCount} />
-            <thead>
-              <tr>
-                {summaryFields.map((field) => (
-                  <th key={field.key} colSpan={field.span} className={`${headerCellClass} ${getTimetableCompactClass(field.key)}`}>
-                    {field.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {timetableRows.length > 0 ? timetableRows.map((row, index) => (
-                <tr key={`portrait-summary-${index}`} className={row.type === "additionalSchedule" ? eventRowClass : undefined}>
-                  {row.type === "additionalSchedule" ? (
-                    <PortraitAdditionalScheduleSummaryCells row={row} />
-                  ) : (
-                    <TimetableCells
-                      fields={summaryFields.map((field) => ({
-                        ...field,
-                        value: getTimetableFieldValue(row, field.key)
-                      }))}
-                    />
-                  )}
-                </tr>
-              )) : (
-                <tr><td colSpan={portraitColumnCount} className={cellClass}>등록된 일정이 없습니다.</td></tr>
-              )}
-            </tbody>
-          </table>
+          <DailyPlanTimetable
+            rows={timetableRows}
+            data-portrait-table="timetable-summary"
+            className={sectionTableClass}
+          />
 
           <table data-portrait-table="scene-details" className={sectionTableClass}>
             <EqualColumns count={portraitColumnCount} />
@@ -788,34 +762,6 @@ function AdditionalScheduleCells({
   );
 }
 
-function PortraitAdditionalScheduleSummaryCells({
-  row
-}: {
-  row: Extract<DailyPlanPreviewTimetableRow, { type: "additionalSchedule" }>;
-}) {
-  const layout = getDailyPlanAdditionalScheduleCellLayout(
-    row.location,
-    portraitColumnCount - DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN
-  );
-  return (
-    <>
-      {[row.start, row.end, row.runtime].map((value, index) => (
-        <td key={`portrait-additional-time-${index}`} className={`${cellClass} daily-plan-cell--nowrap daily-plan-timetable-cell--time`}>
-          {getPreviewCellText(value)}
-        </td>
-      ))}
-      {layout.hasLocation ? (
-        <td colSpan={layout.locationSpan} className={`${cellClass} !p-0`}>
-          <AdditionalScheduleCellContent value={row.location} />
-        </td>
-      ) : null}
-      <td colSpan={layout.contentSpan} className={`${cellClass} !p-0`}>
-        <AdditionalScheduleCellContent value={row.memo} />
-      </td>
-    </>
-  );
-}
-
 function AdditionalScheduleCellContent({
   value
 }: {
@@ -965,40 +911,6 @@ function createTimetableFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDis
       label: "Notes",
       span: 2,
       value: rows.map((row) => row.type === "scene" ? row.notes : "")
-    }
-  ];
-}
-
-/** 세로 원본의 첫 번째 시간표: 10개 동일 폭 열에 시간·장소·씬·컷·촬영순서를 배치합니다. */
-function createPortraitSummaryFields(rows: DailyPlanPreviewTimetableRow[]): PreviewDisplayField[] {
-  return [
-    { key: "start", label: "START", span: 1, value: rows.map((row) => row.start) },
-    { key: "end", label: "END", span: 1, value: rows.map((row) => row.end) },
-    { key: "runtime", label: "RT", span: 1, value: rows.map((row) => row.runtime) },
-    { key: "location", label: "LOCATION", span: DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN, value: rows.map((row) => row.location) },
-    {
-      key: "dayNight",
-      label: "D/N/S",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.dayNight : "")
-    },
-    {
-      key: "sceneNumber",
-      label: "SCENE",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.sceneNumber : "")
-    },
-    {
-      key: "totalCut",
-      label: "Total CUT",
-      span: 1,
-      value: rows.map((row) => row.type === "scene" ? row.totalCut : "")
-    },
-    {
-      key: "shootingOrder",
-      label: "Shooting order",
-      span: 2,
-      value: rows.map((row) => row.type === "scene" ? row.shootingOrder : "")
     }
   ];
 }

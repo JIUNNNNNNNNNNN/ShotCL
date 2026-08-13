@@ -1,4 +1,5 @@
-import { normalizeSceneNumber } from "@/lib/sceneNumber";
+// @ts-ignore -- explicit .ts import keeps this pure module directly testable in Node.
+import { normalizeSceneNumber } from "./sceneNumber.ts";
 
 export const MAX_SCENE_CUT_COUNT = 80;
 

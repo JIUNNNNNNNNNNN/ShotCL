@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DailyPlanCalendarDetail,
+  type DailyPlanCalendarDetailCache
+} from "@/components/DailyPlanCalendarDetail";
 import {
   ProjectMonthlyCalendar,
   type ProjectCalendarEventInput
@@ -17,16 +21,17 @@ import {
   restoreProjectCalendarEvent,
   updateProjectCalendarEvent
 } from "@/lib/data/projectCalendarEvents";
+import type { DailyPlanListItem } from "@/lib/data/dailyPlans";
 import { formatCalendarEpisodeLabel } from "@/lib/projectCalendar";
 import type { ProjectCalendarEvent } from "@/lib/projectCalendarEvents";
 import { buildDailyPlanRoundHref } from "@/lib/projectNavigation";
-import type { DailyPlan, ProjectCalendarInfo } from "@/lib/types";
+import type { ProjectCalendarInfo } from "@/lib/types";
 
 type ProjectShootingCalendarProps = {
   projectId: string;
   projectName: string;
   calendarInfo?: ProjectCalendarInfo | null;
-  dailyPlans: ReadonlyArray<Pick<DailyPlan, "id" | "shootingDate" | "episode">>;
+  dailyPlans: readonly DailyPlanListItem[];
   canManageEvents: boolean;
   canManageInvites: boolean;
 };
@@ -52,6 +57,7 @@ export function ProjectShootingCalendar({
   const [syncMessage, setSyncMessage] = useState("");
   const { deleteWithUndo } = useProjectDeleteUndo();
   const loadVersionRef = useRef(0);
+  const legacyPlanCacheRef = useRef<DailyPlanCalendarDetailCache>(new Map());
   const canManageEventsRef = useRef(canManageEvents);
   canManageEventsRef.current = canManageEvents;
 
@@ -66,6 +72,23 @@ export function ProjectShootingCalendar({
     episodeLabel: formatCalendarEpisodeLabel(plan.episode),
     href: buildDailyPlanRoundHref(projectId, plan.id)
   })), [dailyPlans, projectId]);
+  const dailyPlansById = useMemo(
+    () => new Map(dailyPlans.map((plan) => [plan.id, plan])),
+    [dailyPlans]
+  );
+  const renderDailyPlanDetail = useCallback((selectedPlans: readonly { id: string }[]) => {
+    const selectedSources = selectedPlans.flatMap((plan) => {
+      const source = dailyPlansById.get(plan.id);
+      return source ? [source] : [];
+    });
+    return selectedSources.length > 0 ? (
+      <DailyPlanCalendarDetail
+        projectId={projectId}
+        plans={selectedSources}
+        legacyPlanCache={legacyPlanCacheRef.current}
+      />
+    ) : null;
+  }, [dailyPlansById, projectId]);
 
   // 권한 전환은 이미 로드한 일정 데이터를 폐기하거나 다시 요청하지 않습니다.
   // ProjectAccessGate의 검증된 project-scoped role만 즉시 편집 가능 상태에 반영합니다.
@@ -203,6 +226,7 @@ export function ProjectShootingCalendar({
         onCreateEvent={createEvent}
         onUpdateEvent={updateEvent}
         onDeleteEvent={deleteEvent}
+        renderDailyPlanDetail={renderDailyPlanDetail}
         detailFooter={canManageInvites ? (
           <ProjectStaffInviteCard projectId={projectId} projectName={projectName} />
         ) : undefined}

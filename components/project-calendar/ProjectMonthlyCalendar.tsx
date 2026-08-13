@@ -109,6 +109,7 @@ export type ProjectMonthlyCalendarProps = {
   onCreateEvent?: ProjectCalendarEventMutation;
   onUpdateEvent?: ProjectCalendarEventUpdate;
   onDeleteEvent?: ProjectCalendarEventDelete;
+  renderDailyPlanDetail?: (plans: readonly ProjectCalendarDailyPlan[]) => ReactNode;
   detailFooter?: ReactNode;
 };
 
@@ -126,6 +127,7 @@ export function ProjectMonthlyCalendar({
   onCreateEvent,
   onUpdateEvent,
   onDeleteEvent,
+  renderDailyPlanDetail,
   detailFooter
 }: ProjectMonthlyCalendarProps) {
   const normalizedShootingStart = normalizeDateOnly(shootingStartDate);
@@ -494,7 +496,7 @@ export function ProjectMonthlyCalendar({
       data-project-calendar-shell
     >
       <h2 id="shared-project-calendar-title" className="sr-only">프로젝트 공유 일정</h2>
-      <div className={styles.calendarLayout}>
+      <div className={styles.calendarLayout} data-has-daily-plan={selectedPlans.length > 0 ? "true" : undefined}>
         <div className={styles.calendarPanel} data-project-calendar-panel>
           <div className={styles.toolbar}>
             <h3 className={styles.toolbarTitle}>{visibleMonth.year}년 {visibleMonth.month}월</h3>
@@ -776,6 +778,7 @@ export function ProjectMonthlyCalendar({
                     <small>{formatShortDate(plan.shootingDate)}</small>
                   </div>
                 ))}
+                {renderDailyPlanDetail ? renderDailyPlanDetail(selectedPlans) : null}
               </section>
             ) : null}
 

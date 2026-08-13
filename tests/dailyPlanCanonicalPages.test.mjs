@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const documentPath = new URL("../components/DailyPlanDocument.tsx", import.meta.url);
+const timetablePath = new URL("../components/DailyPlanTimetable.tsx", import.meta.url);
 const editorPath = new URL("../components/DailyPlanEditor.tsx", import.meta.url);
 const stylesPath = new URL("../app/globals.css", import.meta.url);
 
@@ -155,8 +156,9 @@ test("offscreen export staging is capturable and delegates two-page padding to p
 });
 
 test("Portrait bordered cells keep native table centering and symmetric density metrics", async () => {
-  const [documentSource, styles] = await Promise.all([
+  const [documentSource, timetableSource, styles] = await Promise.all([
     readFile(documentPath, "utf8"),
+    readFile(timetablePath, "utf8"),
     readFile(stylesPath, "utf8")
   ]);
   const portrait = sourceBetween(
@@ -173,10 +175,18 @@ test("Portrait bordered cells keep native table centering and symmetric density 
   assert.match(portrait, /data-portrait-table="timetable-summary"/u);
   assert.match(portrait, /data-portrait-table="scene-details"/u);
   assert.match(portrait, /<TimetableCells/u);
-  assert.match(portrait, /<PortraitAdditionalScheduleSummaryCells row=\{row\} \/>/u);
+  assert.match(portrait, /<DailyPlanTimetable[\s\S]*?rows=\{timetableRows\}/u);
+  assert.match(timetableSource, /<AdditionalScheduleSummaryCells row=\{row\} \/>/u);
+  assert.match(timetableSource, /<TimetableCells/u);
+  assert.match(
+    timetableSource,
+    /label: "START"[\s\S]*label: "END"[\s\S]*label: "RT"[\s\S]*label: "LOCATION"[\s\S]*label: "D\/N\/S"[\s\S]*label: "SCENE"[\s\S]*label: "Total CUT"[\s\S]*label: "Shooting order"/u
+  );
+  assert.match(timetableSource, /등록된 일정이 없습니다\./u);
+  assert.doesNotMatch(timetableSource, /총 컷수|DailyPlanDocument|dailyPlanPdf|html2canvas|jspdf/u);
   assert.match(portrait, /총 컷수 \{totalCutCount\}컷/u);
   assert.match(portrait, /<PortraitCallSheetTable[\s\S]*title="Starring"[\s\S]*title="Team"/u);
-  assert.match(documentSource, /daily-plan-additional-cell[^"]*items-center justify-center text-center/u);
+  assert.match(`${documentSource}\n${timetableSource}`, /daily-plan-additional-cell[^"]*items-center justify-center text-center/u);
 
   assert.match(cellRule, /padding:\s*var\(--daily-plan-cell-padding-block\) var\(--daily-plan-cell-padding-inline\)/u);
   assert.match(cellRule, /vertical-align:\s*middle/u);

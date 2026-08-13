@@ -10,6 +10,7 @@ import {
 } from "../lib/dailyPlan/previewTimetable.ts";
 
 const documentPath = new URL("../components/DailyPlanDocument.tsx", import.meta.url);
+const timetablePath = new URL("../components/DailyPlanTimetable.tsx", import.meta.url);
 
 test("additional schedules without a location merge every column after RT", () => {
   for (const location of [null, undefined, "", "   ", "\u00a0\u200b"]) {
@@ -54,18 +55,30 @@ test("adding and removing a location changes only the semantic cell spans", () =
 });
 
 test("document rows use real table cells instead of the old equal-width inner grid", async () => {
-  const source = await readFile(documentPath, "utf8");
+  const [source, timetableSource] = await Promise.all([
+    readFile(documentPath, "utf8"),
+    readFile(timetablePath, "utf8")
+  ]);
   const landscapeSource = source.slice(
     source.indexOf("function AdditionalScheduleCells("),
-    source.indexOf("function PortraitAdditionalScheduleSummaryCells(")
+    source.indexOf("function AdditionalScheduleCellContent(")
   );
   assert.match(landscapeSource, /layout\.hasLocation \? \(/u);
   assert.match(landscapeSource, /colSpan=\{layout\.locationSpan\}/u);
   assert.match(landscapeSource, /colSpan=\{layout\.contentSpan\}/u);
   assert.doesNotMatch(landscapeSource, /grid-cols-2|border-r/u);
-  assert.equal(source.match(/span: DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN/g)?.length, 2);
-  assert.doesNotMatch(source, /joinPreviewValues\(row\.location, row\.memo\)|aria-label=\{label\}/u);
+  assert.equal(`${source}\n${timetableSource}`.match(/span: DAILY_PLAN_TIMETABLE_LOCATION_COLUMN_SPAN/g)?.length, 2);
+  assert.doesNotMatch(`${source}\n${timetableSource}`, /joinPreviewValues\(row\.location, row\.memo\)|aria-label=\{label\}/u);
   assert.match(source, /<td colSpan=\{portraitColumnCount\}[\s\S]*getPreviewCellText\(row\.memo\)/u);
+
+  const portraitSummarySource = timetableSource.slice(
+    timetableSource.indexOf("function AdditionalScheduleSummaryCells("),
+    timetableSource.indexOf("function AdditionalScheduleCellContent(")
+  );
+  assert.match(portraitSummarySource, /timetableColumnCount - DAILY_PLAN_TIMETABLE_TIME_COLUMN_SPAN/u);
+  assert.match(portraitSummarySource, /layout\.hasLocation \? \(/u);
+  assert.match(portraitSummarySource, /colSpan=\{layout\.locationSpan\}/u);
+  assert.match(portraitSummarySource, /colSpan=\{layout\.contentSpan\}/u);
 
   const sceneRendererSource = source.slice(
     source.indexOf("function TimetableCells("),

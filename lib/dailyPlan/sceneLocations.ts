@@ -1,11 +1,12 @@
-import { getDailyPlanLocationAddress } from "@/lib/dailyPlan/location";
+// @ts-ignore -- explicit .ts import keeps this pure module directly testable in Node.
+import { getDailyPlanLocationAddress } from "./location.ts";
 import type {
   DailyPlanLocation,
   DailyPlanSceneLocationSelection,
   ProjectSceneItem
-} from "@/lib/types";
+} from "../types.ts";
 
-export type { DailyPlanSceneLocationSelection } from "@/lib/types";
+export type { DailyPlanSceneLocationSelection } from "../types.ts";
 
 export type DailyPlanPreviewLocationRow = {
   id: string;
