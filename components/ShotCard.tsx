@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState, type RefCallback } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefCallback } from "react";
 import { Images, Map } from "lucide-react";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 import { ShotOverheadPreview } from "@/components/ShotOverheadPreview";
@@ -13,13 +13,19 @@ import {
   type ProgressMediaGalleryItem
 } from "@/lib/progress/mediaGallery";
 import { formatProgressCutLabel } from "@/lib/progress/cutLabel";
+import {
+  resolveProgressCardHalfStatus,
+  resolveProgressStatusToggle
+} from "@/lib/progress/shotCardInteraction";
 import { type Shot, type ShotMediaType, type ShotStatus } from "@/lib/types";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { cn } from "@/lib/utils";
+import { usePersistentProjectShell } from "@/hooks/useProjectShellMode";
 
-type ShotCardProps = {
+export type ShotCardProps = {
   shot: Shot;
   onOpen: (shot: Shot) => void;
+  onEdit?: (shot: Shot) => void;
   onOpenMedia: (shot: Shot, type: ShotMediaType) => void;
   archiveMedia?: ProgressArchiveMediaAsset[];
   onLoadGalleryMedia?: (
@@ -39,6 +45,7 @@ type ShotCardProps = {
 export const ShotCard = memo(function ShotCard({
   shot,
   onOpen,
+  onEdit,
   onOpenMedia,
   archiveMedia = [],
   onLoadGalleryMedia,
@@ -50,6 +57,8 @@ export const ShotCard = memo(function ShotCard({
   isOverheadLoading = false,
   interactionMediaGuideTarget = false
 }: ShotCardProps) {
+  const persistentInteraction = usePersistentProjectShell();
+  const lastPointerRef = useRef({ pointerType: "", button: -1, at: 0 });
   const isOk = shot.status === "ok";
   const isOmit = shot.status === "omit";
   const hasOverheadDiagram = hasShotOverheadContent(shot.overheadDiagram);
@@ -132,19 +141,41 @@ export const ShotCard = memo(function ShotCard({
     if (galleryIndex !== safeGalleryIndex) setGalleryIndex(safeGalleryIndex);
   }, [activeGallery, activeGalleryImages.length, galleryIndex, safeGalleryIndex]);
 
-  function shouldIgnoreCardOpen(target: EventTarget | null) {
-    return target instanceof HTMLElement && Boolean(target.closest("button, a, input, textarea, select, [data-no-drag]"));
+  function shouldIgnoreCardStatus(target: EventTarget | null) {
+    return target instanceof Element && Boolean(target.closest(
+      "button, a, input, textarea, select, option, label, [contenteditable='true'], [role='button'], [data-progress-interactive], [data-no-drag]"
+    ));
   }
 
-  function handleCardOpen(event: React.MouseEvent<HTMLElement>) {
-    if (cardOpenDisabled || shouldIgnoreCardOpen(event.target)) return;
-    onOpen(shot);
+  function handleCardBackgroundClick(event: React.MouseEvent<HTMLElement>) {
+    if (
+      !persistentInteraction
+      || statusReadOnly
+      || event.defaultPrevented
+      || event.button !== 0
+      || event.detail === 0
+      || event.ctrlKey
+      || shouldIgnoreCardStatus(event.target)
+    ) return;
+    const requestedStatus = resolveProgressCardHalfStatus(
+      event.clientX,
+      event.currentTarget.getBoundingClientRect()
+    );
+    if (!requestedStatus) return;
+    onStatusChange(shot, resolveProgressStatusToggle(shot.status, requestedStatus));
   }
 
-  function handleStatusClick(event: React.MouseEvent<HTMLButtonElement>, status: ShotStatus) {
+  function handleCardContextMenu(event: React.MouseEvent<HTMLElement>) {
+    event.preventDefault();
     event.stopPropagation();
-    if (statusReadOnly) return;
-    onStatusChange(shot, shot.status === status ? "pending" : status);
+    // A touch long-press can synthesize contextmenu on iPad/iPhone. Only the
+    // preceding physical mouse/trackpad pointer may enter the desktop editor.
+    const lastPointer = lastPointerRef.current;
+    const physicalMouseContext = lastPointer.pointerType === "mouse"
+      && Date.now() - lastPointer.at < 1_500
+      && (lastPointer.button === 2 || event.button === 2 || event.ctrlKey);
+    if (!persistentInteraction || cardOpenDisabled || !physicalMouseContext) return;
+    (onEdit ?? onOpen)(shot);
   }
 
   async function openGallery(event: React.MouseEvent<HTMLButtonElement>, category: ProgressMediaCategory) {
@@ -167,11 +198,26 @@ export const ShotCard = memo(function ShotCard({
   return (
     <>
       <article
-        onClick={handleCardOpen}
-        aria-label={cardOpenDisabled ? cutLabel : progressOnly ? `${cutLabel} 상세 보기` : `${cutLabel} 수정`}
+        data-progress-shot-card="true"
+        onPointerDownCapture={(event) => {
+          if (event.isPrimary) {
+            lastPointerRef.current = {
+              pointerType: event.pointerType,
+              button: event.button,
+              at: Date.now()
+            };
+          }
+        }}
+        onClick={handleCardBackgroundClick}
+        onContextMenu={handleCardContextMenu}
+        aria-label={statusReadOnly
+          ? cutLabel
+          : persistentInteraction
+            ? `${cutLabel}. 왼쪽 영역 OMIT, 오른쪽 영역 OK`
+            : `${cutLabel}. 오른쪽 스와이프 OK, 왼쪽 스와이프 OMIT`}
         className={cn(
-          "ui-motion-surface relative grid min-w-0 gap-2 overflow-hidden rounded-[var(--radius-card)] border p-2 text-center transition-[background-color,border-color,transform] md:grid-cols-[minmax(0,1fr)_6.5rem] md:items-center",
-          cardOpenDisabled ? "cursor-default" : "cursor-pointer active:scale-[0.995]",
+          "ui-motion-surface relative grid min-w-0 gap-2 overflow-hidden rounded-[var(--radius-card)] border p-2 text-center transition-[background-color,border-color,transform]",
+          persistentInteraction && !statusReadOnly ? "cursor-pointer active:scale-[0.995]" : "cursor-default",
           isOk
             ? "border-status-ok/80 bg-status-ok/10"
             : isOmit
@@ -181,16 +227,21 @@ export const ShotCard = memo(function ShotCard({
       >
         <div className="grid min-w-0 max-w-full gap-2 overflow-hidden">
           <div className="min-w-0 px-0.5">
-            <div className="relative flex min-w-0 flex-wrap items-center justify-center gap-1.5">
-              <h2 className="min-w-0 break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">
-                {cutLabel}
-              </h2>
-              <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
-                <span className="font-display">{statusLabel}</span>
-              </p>
-              {showMediaActions ? <div className="flex flex-wrap items-center justify-center gap-1 sm:ml-auto">
+            <div className="relative grid min-w-0 grid-cols-1 items-center gap-1.5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+              <span className="hidden sm:block" aria-hidden />
+              <div className="flex min-w-0 flex-wrap items-center justify-center gap-1.5 sm:col-start-2">
+                <h2 className="min-w-0 break-words text-sm font-bold leading-5 text-field-text [overflow-wrap:anywhere]">
+                  {cutLabel}
+                </h2>
+                <p className={cn("rounded-md px-2 py-1 text-[10px] font-semibold leading-[1.35]", isOk ? "border border-status-ok/70 bg-status-ok/10 text-status-ok" : isOmit ? "bg-field-danger text-field-text" : "border border-field-divider bg-field-input text-field-muted")}>
+                  <span className="font-display">{statusLabel}</span>
+                </p>
+              </div>
+              {showMediaActions ? <div className="flex flex-wrap items-center justify-center gap-1 justify-self-center sm:col-start-3 sm:justify-self-end">
                 <button
                   type="button"
+                  data-no-drag="true"
+                  data-progress-interactive="true"
                   onClick={(event) => {
                     event.stopPropagation();
                     onOpenMedia(shot, "storyboard");
@@ -206,6 +257,8 @@ export const ShotCard = memo(function ShotCard({
                 </button>
                 <button
                   type="button"
+                  data-no-drag="true"
+                  data-progress-interactive="true"
                   onClick={(event) => {
                     event.stopPropagation();
                     onOpenMedia(shot, "overhead");
@@ -223,10 +276,10 @@ export const ShotCard = memo(function ShotCard({
               </div> : null}
             </div>
 
-            <div className="mt-0.5 grid min-w-0 gap-1 text-center text-[11px] font-normal leading-4 text-field-muted sm:grid-cols-2">
-              {shot.characters.length > 0 ? <p className="min-w-0 break-words [overflow-wrap:anywhere]">등장 {shot.characters.join(", ")}</p> : null}
-              {shot.location ? <p className="min-w-0 break-words text-field-muted [overflow-wrap:anywhere]">장소 {shot.location}</p> : null}
-              {!shot.location && shot.memo ? <p className="min-w-0 break-words sm:col-span-2 [overflow-wrap:anywhere]">{shot.memo}</p> : null}
+            <div className="mt-0.5 grid min-w-0 grid-cols-2 gap-x-2 gap-y-1 text-[11px] font-normal leading-4 text-field-muted">
+              {shot.characters.length > 0 ? <p className="col-start-1 min-w-0 break-words text-left [overflow-wrap:anywhere]">등장 {shot.characters.join(", ")}</p> : null}
+              {shot.location ? <p className="col-start-2 min-w-0 break-words text-right text-field-muted [overflow-wrap:anywhere]">장소 {shot.location}</p> : null}
+              {!shot.location && shot.memo ? <p className="col-span-2 min-w-0 break-words text-center [overflow-wrap:anywhere]">{shot.memo}</p> : null}
             </div>
           </div>
 
@@ -262,34 +315,6 @@ export const ShotCard = memo(function ShotCard({
           ) : null}
         </div>
 
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-1">
-          <button
-            type="button"
-            data-no-drag="true"
-            disabled={statusReadOnly}
-            onClick={(event) => handleStatusClick(event, "ok")}
-            aria-pressed={isOk}
-            className={cn(
-              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-default disabled:opacity-55 disabled:active:scale-100",
-              isOk ? "border-status-ok/80 bg-status-ok/10 text-status-ok" : "border-field-divider bg-field-input text-field-text hover:border-field-subtle hover:bg-field-hover"
-            )}
-          >
-            <span className="font-display">OK</span>
-          </button>
-          <button
-            type="button"
-            data-no-drag="true"
-            disabled={statusReadOnly}
-            onClick={(event) => handleStatusClick(event, "omit")}
-            aria-pressed={isOmit}
-            className={cn(
-              "ui-density-control border text-xs font-bold leading-[1.25] transition-[background-color,transform] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary disabled:cursor-default disabled:opacity-55 disabled:active:scale-100",
-              isOmit ? "border-field-danger bg-field-danger text-field-text" : "border-field-danger/60 bg-field-input text-field-danger"
-            )}
-          >
-            <span className="font-display">OMIT</span>
-          </button>
-        </div>
       </article>
 
       {activeGallery && activeGalleryItem ? (

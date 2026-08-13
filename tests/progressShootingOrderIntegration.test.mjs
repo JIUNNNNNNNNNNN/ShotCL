@@ -21,12 +21,13 @@ test("Progress derives one current-round ordered view before every visible bucke
   );
   assert.doesNotMatch(derivation, /useEffect|fetch\(|router\.refresh/u);
 
-  for (const bucket of ["active", "ok", "omit"]) {
-    assert.match(
-      source,
-      new RegExp(`orderedShots\\.filter\\(\\(shot\\) => sessionBucketByShotId\\.get\\(shot\\.id\\) === "${bucket}"`, "u")
-    );
-  }
+  assert.match(source, /orderedShots\.filter\(\(shot\) => getPersistedStatusBucket\(shot\.status\) === "active"\)/u);
+  assert.match(source, /orderedShots\.filter\(\(shot\) => getPersistedStatusBucket\(shot\.status\) === "ok"\)/u);
+  assert.match(source, /orderedShots\.filter\(\(shot\) => getPersistedStatusBucket\(shot\.status\) === "omit"\)/u);
+  assert.match(source, /const processedShots = useMemo\([\s\S]*?getPersistedStatusBucket\(shot\.status\) !== "active"/u);
+  assert.equal((source.match(/<ProgressStatusSection/gu) ?? []).length, 1);
+  assert.match(source, /<ProgressStatusSection[\s\S]*?visibleShots=\{processedShots\}/u);
+  assert.doesNotMatch(source, /visibleShots=\{okShots\}|visibleShots=\{omitShots\}/u);
   assert.match(
     source,
     /placeScheduleRows\(orderedShots, selectedPlan\.mealTimes, selectedPrintMeta\.timetableRowOrder\)/u
@@ -35,30 +36,19 @@ test("Progress derives one current-round ordered view before every visible bucke
     source,
     /remapScheduleRowsForVisibleShots\(orderedShots, activeShots, scheduleRowsByIndex\)/u
   );
-  assert.equal((source.match(/allShots=\{orderedShots\}/gu) ?? []).length, 3);
+  assert.equal((source.match(/allShots=\{orderedShots\}/gu) ?? []).length, 2);
   assert.match(source, /calculateDailyProgress\(shots\)/u);
   assert.doesNotMatch(source, /calculateDailyProgress\(orderedShots\)/u);
 });
 
-test("Daily Plan order remains authoritative over the legacy Progress drag path", () => {
+test("long-press reorder updates the canonical Daily Plan shooting order", () => {
   const source = readSource("app/projects/[id]/page.tsx");
 
-  assert.match(
-    source,
-    /const isProgressOrderLocked = useMemo\([\s\S]*?shots\.some\(\(shot\) => \/\^\\d\+\$\/\.test/u
-  );
-  assert.match(
-    source,
-    /if \(!projectId \|\| !dailyPlanId \|\| role !== "admin" \|\| isReordering \|\| isProgressOrderLocked\) return;/u
-  );
-  assert.equal(
-    (source.match(/disabled=\{role !== "admin" \|\| isReordering \|\| isProgressOrderLocked\}/gu) ?? []).length,
-    3
-  );
-  assert.match(
-    source,
-    /if \(role !== "admin" \|\| isReordering \|\| isProgressOrderLocked\) return null;/u
-  );
+  assert.match(source, /hasCanonicalProgressOrder/u);
+  assert.match(source, /applyProgressOrderToTimetableScenes\([\s\S]*?nextShots/u);
+  assert.match(source, /updateDailyPlanProgressOrder\([\s\S]*?nextShots/u);
+  assert.doesNotMatch(source, /isProgressOrderLocked/u);
+  assert.equal((source.match(/disabled=\{role !== "admin" \|\| isReordering\}/gu) ?? []).length, 2);
 });
 
 test("Progress order stays derived and is never copied into the shot persistence transform", () => {

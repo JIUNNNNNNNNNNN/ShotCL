@@ -16,6 +16,7 @@ import type {
   ShotMediaLink,
   ShotMediaType
 } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type PickerAsset = {
   id: string;
@@ -43,12 +44,78 @@ export function ShotArchivePicker({
 }: {
   shot: Shot;
   initialType: ShotMediaType;
-  selectedLinks: ShotMediaLink[];
+  selectedLinks: readonly ShotMediaLink[];
   readOnly: boolean;
   onClose: () => void;
   onSaved: () => Promise<void> | void;
 }) {
   const [mediaType, setMediaType] = useState<ShotMediaType>(initialType);
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
+      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
+        <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="font-display break-words text-lg font-bold text-field-text">아카이브에서 선택</h2>
+            <p className="break-words text-xs font-normal text-field-muted [overflow-wrap:anywhere]">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
+          </div>
+          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
+            <X className="h-5 w-5" aria-hidden />
+          </button>
+        </header>
+
+        <div className="grid gap-3 border-b border-field-divider p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {(["overhead", "storyboard"] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setMediaType(type)}
+                className={`min-h-10 border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${mediaType === type ? "neon-selected" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
+              >
+                {type === "overhead" ? "부감도" : "콘티"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ShotArchiveSelector
+          key={mediaType}
+          shot={shot}
+          mediaType={mediaType}
+          selectedLinks={selectedLinks}
+          readOnly={readOnly}
+          onSaved={onSaved}
+          onLinked={onClose}
+          className="min-h-0 flex-1"
+        />
+      </section>
+    </div>
+  );
+}
+
+export type ShotArchiveSelectorProps = {
+  shot: Shot;
+  mediaType: ShotMediaType;
+  selectedLinks: readonly ShotMediaLink[];
+  readOnly: boolean;
+  onSaved: () => Promise<void> | void;
+  onLinked?: () => void;
+  compact?: boolean;
+  className?: string;
+};
+
+/** 아카이브 선택·연결·해제를 dialog와 컷 편집창이 같은 경로로 공유합니다. */
+export function ShotArchiveSelector({
+  shot,
+  mediaType,
+  selectedLinks,
+  readOnly,
+  onSaved,
+  onLinked,
+  compact = false,
+  className
+}: ShotArchiveSelectorProps) {
   const [assets, setAssets] = useState<PickerAsset[]>([]);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -103,7 +170,7 @@ export function ShotArchivePicker({
         asset ? { assetId: asset.id, source: asset.source } : null
       );
       await onSaved();
-      if (asset) onClose();
+      if (asset) onLinked?.();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "컷 자료 연결을 저장하지 못했습니다.");
     } finally {
@@ -112,92 +179,79 @@ export function ShotArchivePicker({
   }
 
   return (
-    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-field-bg/80 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="부감도와 콘티 아카이브 선택">
-      <section className="flex max-h-[90dvh] w-full max-w-4xl flex-col border border-field-divider bg-field-dialog shadow-dialog">
-        <header className="flex items-center justify-between gap-3 border-b border-field-divider px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="font-display break-words text-lg font-bold text-field-text">아카이브에서 선택</h2>
-            <p className="break-words text-xs font-normal text-field-muted [overflow-wrap:anywhere]">S#{shot.sceneNumber} · C#{shot.cutNumber}{readOnly ? " · 읽기 전용" : ""}</p>
-          </div>
-          <button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center border border-field-divider bg-field-panel text-field-muted transition-colors hover:border-field-subtle hover:bg-field-hover hover:text-field-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary" aria-label="자료 선택 닫기">
-            <X className="h-5 w-5" aria-hidden />
-          </button>
-        </header>
-
-        <div className="grid gap-3 border-b border-field-divider p-3">
-          <div className="grid grid-cols-2 gap-2">
-            {(["overhead", "storyboard"] as const).map((type) => (
+    <div className={cn("grid min-h-0 grid-rows-[auto_minmax(0,1fr)]", className)}>
+      <div className={cn("grid gap-2 border-b border-field-divider", compact ? "p-2" : "p-3")}>
+        <label className="relative block">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-disabled focus:border-field-primary focus:ring-1 focus:ring-field-primary"
+            placeholder="제목, 메모, 씬, 컷 검색"
+          />
+        </label>
+        {selected ? (
+          <div className="neon-selected flex items-center justify-between gap-2 rounded-[var(--radius-card)] border px-3 py-2">
+            <p className="min-w-0 truncate text-xs font-bold text-field-primary">현재 연결: {selected.filename}</p>
+            {!readOnly ? (
               <button
-                key={type}
                 type="button"
-                onClick={() => setMediaType(type)}
-                className={`min-h-10 border text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-primary ${mediaType === type ? "neon-selected" : "border-field-divider bg-field-panel text-field-text hover:border-field-subtle hover:bg-field-hover"}`}
+                disabled={isSaving}
+                onClick={() => selectAsset(null)}
+                className="inline-flex min-h-8 shrink-0 items-center gap-1 border border-field-danger/60 bg-field-panel px-2 text-[11px] font-bold text-field-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger disabled:cursor-wait disabled:opacity-55"
               >
-                {type === "overhead" ? "부감도" : "콘티"}
+                <Unlink className="h-3.5 w-3.5" aria-hidden />
+                연결 해제
               </button>
-            ))}
+            ) : null}
           </div>
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-field-muted" aria-hidden />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-h-10 w-full border border-field-divider bg-field-input pl-9 pr-3 text-sm font-normal text-field-text outline-none placeholder:text-field-disabled focus:border-field-primary focus:ring-1 focus:ring-field-primary" placeholder="제목, 메모, 씬, 컷 검색" />
-          </label>
-          {selected ? (
-            <div className="neon-selected flex items-center justify-between gap-2 rounded-[var(--radius-card)] border px-3 py-2">
-              <p className="min-w-0 truncate text-xs font-bold text-field-primary">현재 연결: {selected.filename}</p>
-              {!readOnly ? (
-                <button type="button" disabled={isSaving} onClick={() => selectAsset(null)} className="inline-flex min-h-8 shrink-0 items-center gap-1  border border-field-danger/60 bg-field-panel px-2 text-[11px] font-bold text-field-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-field-danger">
-                  <Unlink className="h-3.5 w-3.5" aria-hidden />
-                  선택 해제
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        ) : null}
+      </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          {isLoading ? <SectionLoader /> : errorMessage ? (
-            <p role="alert" className="border border-field-danger bg-field-danger/10 p-3 text-sm font-normal text-field-danger">{errorMessage}</p>
-          ) : filtered.length === 0 ? (
-            <p className="py-10 text-center text-sm font-normal text-field-muted">선택할 {mediaType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {filtered.map((asset) => {
-                const isSelected = selected?.assetId === asset.id && selected.source === asset.source;
-                return (
-                  <button
-                    key={`${asset.source}-${asset.id}`}
-                    type="button"
-                    disabled={readOnly || isSaving}
-                    aria-pressed={isSelected}
-                    onClick={() => selectAsset(asset)}
-                    className={`relative grid min-w-0 gap-1 rounded-[var(--radius-card)] border p-1.5 text-center transition-colors disabled:cursor-default ${isSelected ? "border-field-primary/80 bg-field-primary/10 ring-2 ring-field-primary/20" : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"}`}
-                  >
-                    <div className="grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft">
-                      {asset.publicUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={asset.thumbnailUrl || asset.publicUrl}
-                          alt={asset.title}
-                          loading="lazy"
-                          decoding="async"
-                          className="block h-full w-full  object-contain"
-                        />
-                      ) : asset.diagram ? (
-                        <ShotOverheadPreview diagram={asset.diagram} label={`${asset.title} 부감도`} />
-                      ) : null}
-                    </div>
-                    <p className="truncate px-1 text-center text-xs font-bold text-field-text">{asset.title}</p>
-                    <p className="truncate px-1 text-center text-[10px] font-normal text-field-muted">
-                      {[asset.sceneNo && `S#${asset.sceneNo}`, asset.cutNo && `C#${asset.cutNo}`, asset.memo].filter(Boolean).join(" · ") || "태그 없음"}
-                    </p>
-                    {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[var(--radius-control)] border border-field-primary/80 bg-field-elevated text-field-primary"><Check className="h-4 w-4" aria-hidden /></span> : null}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
+      <div className={cn("min-h-0 overflow-y-auto", compact ? "max-h-72 p-2" : "p-3")}>
+        {isSaving ? <p role="status" className="mb-2 text-center text-xs font-bold text-field-primary">연결 저장 중</p> : null}
+        {isLoading ? <SectionLoader /> : errorMessage ? (
+          <p role="alert" className="border border-field-danger bg-field-danger/10 p-3 text-sm font-normal text-field-danger">{errorMessage}</p>
+        ) : filtered.length === 0 ? (
+          <p className={cn("text-center text-sm font-normal text-field-muted", compact ? "py-6" : "py-10")}>선택할 {mediaType === "overhead" ? "부감도" : "콘티"} 자료가 없습니다.</p>
+        ) : (
+          <div className={cn("grid grid-cols-2 gap-2", !compact && "sm:grid-cols-3 lg:grid-cols-4")}>
+            {filtered.map((asset) => {
+              const isSelected = selected?.assetId === asset.id && selected.source === asset.source;
+              return (
+                <button
+                  key={`${asset.source}-${asset.id}`}
+                  type="button"
+                  disabled={readOnly || isSaving}
+                  aria-pressed={isSelected}
+                  onClick={() => selectAsset(asset)}
+                  className={`relative grid min-w-0 gap-1 rounded-[var(--radius-card)] border p-1.5 text-center transition-colors disabled:cursor-default ${isSelected ? "border-field-primary/80 bg-field-primary/10 ring-2 ring-field-primary/20" : "border-field-divider bg-field-panel hover:border-field-subtle hover:bg-field-hover"}`}
+                >
+                  <div className="grid aspect-[4/3] w-full place-items-center overflow-hidden rounded-[var(--radius-control)] bg-field-soft">
+                    {asset.publicUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={asset.thumbnailUrl || asset.publicUrl}
+                        alt={asset.title}
+                        loading="lazy"
+                        decoding="async"
+                        className="block h-full w-full object-contain"
+                      />
+                    ) : asset.diagram ? (
+                      <ShotOverheadPreview diagram={asset.diagram} label={`${asset.title} 부감도`} />
+                    ) : null}
+                  </div>
+                  <p className="truncate px-1 text-center text-xs font-bold text-field-text">{asset.title}</p>
+                  <p className="truncate px-1 text-center text-[10px] font-normal text-field-muted">
+                    {[asset.sceneNo && `S#${asset.sceneNo}`, asset.cutNo && `C#${asset.cutNo}`, asset.memo].filter(Boolean).join(" · ") || "태그 없음"}
+                  </p>
+                  {isSelected ? <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-[var(--radius-control)] border border-field-primary/80 bg-field-elevated text-field-primary"><Check className="h-4 w-4" aria-hidden /></span> : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

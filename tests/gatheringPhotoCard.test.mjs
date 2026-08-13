@@ -100,3 +100,11 @@ test("phone and low-height landscape keep the vertical 16:9 card contract", () =
   assert.match(componentCss, /aspect-ratio:\s*16 \/ 9/u);
   assert.match(componentCss, /@media \(max-height: 699px\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/u);
 });
+
+test("meeting photo frame centers only in the persistent project shell", () => {
+  assert.match(componentCss, /\.media\s*\{[^}]*justify-self:\s*start/su);
+  assert.match(
+    componentCss,
+    /:global\(\.project-shell\[data-project-shell-mode="persistent"\]\) \.media\s*\{[^}]*justify-self:\s*center/su
+  );
+});

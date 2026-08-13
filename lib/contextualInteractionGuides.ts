@@ -391,13 +391,13 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "컷 순서 바꾸기",
-        description: "컷 카드를 약 0.22초 동안 누른 뒤 위아래로 끌어 순서를 바꿀 수 있습니다.",
+        description: "카드 왼쪽은 OMIT, 오른쪽은 OK이며 우클릭하면 컷을 편집합니다. 순서는 약 0.22초 동안 누른 뒤 위아래로 끌어 바꿀 수 있습니다.",
         demo: "drag",
         durationMs: 220
       },
       coarse: {
         title: "컷 순서 바꾸기",
-        description: "컷 카드를 약 0.33초 동안 누른 뒤 위아래로 끌어 순서를 바꿀 수 있습니다.",
+        description: "오른쪽으로 밀면 OK, 왼쪽으로 밀면 OMIT입니다. 움직이지 않고 약 0.33초 동안 길게 누른 뒤 위아래로 끌면 순서를 바꿀 수 있습니다.",
         demo: "drag",
         durationMs: 330
       }

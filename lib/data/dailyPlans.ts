@@ -27,6 +27,7 @@ import {
 import { isSameDailyPlanIdentity } from "@/lib/dailyPlan/identity";
 import { isValidDatabaseProjectId } from "@/lib/projectId";
 import { calculateDailyProgressByPlan } from "@/lib/progress/dailyProgress";
+import { applyProgressOrderToTimetableScenes } from "@/lib/progress/shootingOrderMutation";
 import type {
   DailyPlan,
   DailyPlanDraft,
@@ -105,6 +106,11 @@ export type DailyPlanSceneDurationMutationResult = {
 
 export type DailyPlanScheduleItemMutationResult = {
   mealTimes: DailyPlanMealTime[];
+  updatedAt: string;
+};
+
+export type DailyPlanProgressOrderMutationResult = {
+  memo: string;
   updatedAt: string;
 };
 
@@ -524,6 +530,72 @@ export async function updateDailyPlanScheduleItem(
   }, projectId);
   const updatedAt = new Date().toISOString();
   return { mealTimes, updatedAt };
+}
+
+/** Progress long-press reorder를 canonical 일촬표 촬영 순서에 저장합니다. */
+export async function updateDailyPlanProgressOrder(
+  projectId: string,
+  dailyPlanId: string,
+  orderedShots: readonly Pick<import("@/lib/types").Shot, "id" | "sceneNumber" | "cutNumber">[],
+  expectedUpdatedAt: string
+): Promise<DailyPlanProgressOrderMutationResult> {
+  try {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/daily-plans/${encodeURIComponent(dailyPlanId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shootingOrder: {
+            shotIds: orderedShots.map((shot) => shot.id),
+            expectedUpdatedAt
+          }
+        })
+      }
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      memo?: unknown;
+      updatedAt?: unknown;
+      latestUpdatedAt?: unknown;
+      error?: string;
+    };
+    if (response.ok && typeof payload.memo === "string" && typeof payload.updatedAt === "string") {
+      return { memo: payload.memo, updatedAt: payload.updatedAt };
+    }
+    if (response.status === 409 && isValidDatabaseProjectId(projectId)) {
+      throw new AutosaveConflictError<DailyPlanProgressOrderMutationResult>(
+        "daily-plan",
+        payload.error || "촬영 순서가 다른 화면에서 변경되었습니다.",
+        typeof payload.latestUpdatedAt === "string"
+          ? { memo: "", updatedAt: payload.latestUpdatedAt }
+          : null
+      );
+    }
+    if (isValidDatabaseProjectId(projectId) || response.status === 403) {
+      throw new Error(payload.error || "촬영 순서를 저장하지 못했습니다.");
+    }
+  } catch (error) {
+    if (isValidDatabaseProjectId(projectId) || !(error instanceof TypeError)) throw error;
+  }
+
+  const buckets = readLocalBuckets();
+  const plan = buckets.dailyPlans.find((item) => item.projectId === projectId && item.id === dailyPlanId);
+  if (!plan) throw new Error("일촬표를 찾을 수 없습니다.");
+  if (plan.updatedAt !== expectedUpdatedAt) throw new Error("일촬표가 다른 화면에서 변경되었습니다.");
+  const meta = decodeDailyPlanMemo(plan.memo);
+  const memo = encodeDailyPlanMemo(normalizeDailyPlanPrintMeta({
+    ...meta,
+    timetableScenes: applyProgressOrderToTimetableScenes(meta.timetableScenes, orderedShots)
+  }));
+  const updatedAt = new Date().toISOString();
+  writeLocalBuckets({
+    dailyPlans: buckets.dailyPlans.map((item) => (
+      item.id === dailyPlanId && item.projectId === projectId
+        ? { ...item, memo, updatedAt }
+        : item
+    ))
+  }, projectId);
+  return { memo, updatedAt };
 }
 
 /** 진행도 화면에서 canonical 집합장소 주소를 명시적으로 저장합니다. */

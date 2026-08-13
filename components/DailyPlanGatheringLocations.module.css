@@ -52,6 +52,10 @@
   justify-self: start;
 }
 
+:global(.project-shell[data-project-shell-mode="persistent"]) .media {
+  justify-self: center;
+}
+
 .emptyMedia {
   display: flex;
   align-items: center;

@@ -45,6 +45,16 @@ test("Progress media merge and shooting-order rendering retain stable Shot linka
     source,
     /archiveMedia=\{archiveMediaByShotId\.get\(shot\.id\) \?\? EMPTY_PROGRESS_ARCHIVE_MEDIA\}/u
   );
+
+  const realtimeStart = source.indexOf("const handleRealtimeShotChanges");
+  const realtimeEnd = source.indexOf("const applyGuestRealtimeSnapshot", realtimeStart);
+  const realtimeHandler = source.slice(realtimeStart, realtimeEnd);
+  assert.notEqual(realtimeStart, -1);
+  assert.notEqual(realtimeEnd, -1);
+  assert.match(realtimeHandler, /const previous = nextById\.get\(remote\.id\)/u);
+  assert.match(realtimeHandler, /const enriched = preserveShotMedia\(remote, previous\)/u);
+  assert.match(realtimeHandler, /nextById\.set\(remote\.id, pendingStatus \? \{ \.\.\.enriched, status: pendingStatus\.status \} : enriched\)/u);
+  assert.match(realtimeHandler, /current\.get\(shot\.id\) \?\? \[\]/u);
 });
 
 test("ShotCard renders category-specific representatives and legacy URL fallback", () => {

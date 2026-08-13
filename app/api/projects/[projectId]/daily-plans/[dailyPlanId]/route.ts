@@ -17,6 +17,7 @@ import {
   verifyProjectDeleteReceipt
 } from "@/lib/projectDeleteReceipt.server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import { applyProgressOrderToTimetableScenes } from "@/lib/progress/shootingOrderMutation";
 import type { DailyPlanLocation } from "@/lib/types";
 
 type DailyPlanPatchBody = {
@@ -37,6 +38,10 @@ type DailyPlanPatchBody = {
   sceneDuration?: {
     rowId?: unknown;
     runtimeMinutes?: unknown;
+    expectedUpdatedAt?: unknown;
+  };
+  shootingOrder?: {
+    shotIds?: unknown;
     expectedUpdatedAt?: unknown;
   };
 };
@@ -99,17 +104,72 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ p
     const { projectId: routeProjectId, dailyPlanId } = await context.params;
     const projectId = normalizeProjectId(routeProjectId);
     if (!isValidDatabaseProjectId(projectId)) return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
+    if (!isValidDatabaseProjectId(dailyPlanId)) return NextResponse.json({ error: "일촬표 ID가 올바르지 않습니다." }, { status: 400 });
     const grant = await getAccessGrant(request, projectId);
     if (!grant || grant.role !== "admin") {
       return NextResponse.json({ error: "Key staff 권한이 필요합니다." }, { status: grant ? 403 : 401 });
     }
     const body = (await request.json()) as DailyPlanPatchBody;
-    const actionCount = [body.scheduleItem, body.gatheringAddress, body.sceneDuration]
+    const actionCount = [body.scheduleItem, body.gatheringAddress, body.sceneDuration, body.shootingOrder]
       .filter((value) => value !== undefined).length;
     if (actionCount !== 1) {
       return NextResponse.json({ error: "한 번에 하나의 일촬표 정보만 저장할 수 있습니다." }, { status: 400 });
     }
     const supabase = requireProjectAccessDb();
+
+    if (body.shootingOrder) {
+      failureMessage = "촬영 순서를 저장하지 못했습니다.";
+      const expectedUpdatedAt = requireExpectedUpdatedAt(body.shootingOrder.expectedUpdatedAt);
+      const shotIds = normalizeShotIdOrder(body.shootingOrder.shotIds);
+      const [{ data: planRow, error: planError }, { data: shotRows, error: shotsError }] = await Promise.all([
+        supabase
+          .from("daily_plans")
+          .select("memo,updated_at")
+          .eq("project_id", projectId)
+          .eq("id", dailyPlanId)
+          .maybeSingle(),
+        supabase
+          .from("shots")
+          .select("id,scene_number,cut_number")
+          .eq("project_id", projectId)
+          .eq("daily_plan_id", dailyPlanId)
+      ]);
+      if (planError) throw planError;
+      if (shotsError) throw shotsError;
+      if (!planRow) return NextResponse.json({ error: "일촬표를 찾을 수 없습니다." }, { status: 404 });
+      if (String(planRow.updated_at ?? "") !== expectedUpdatedAt) {
+        return NextResponse.json({
+          error: "일촬표가 다른 화면에서 변경되었습니다. 최신 내용을 확인한 뒤 다시 저장해주세요.",
+          latestUpdatedAt: String(planRow.updated_at ?? "") || null
+        }, { status: 409 });
+      }
+      const rows = (shotRows ?? []) as Array<Record<string, unknown>>;
+      const rowById = new Map(rows.map((row) => [String(row.id ?? "").trim(), row]));
+      if (shotIds.length !== rows.length || shotIds.some((id) => !rowById.has(id))) {
+        return NextResponse.json({ error: "현재 회차의 컷 순서가 올바르지 않습니다." }, { status: 409 });
+      }
+      const meta = decodeDailyPlanMemo(String(planRow.memo ?? ""));
+      const timetableScenes = applyProgressOrderToTimetableScenes(
+        meta.timetableScenes,
+        shotIds.map((id) => {
+          const row = rowById.get(id)!;
+          return { id, sceneNumber: row.scene_number, cutNumber: row.cut_number };
+        })
+      );
+      const memo = encodeDailyPlanMemo(normalizeDailyPlanPrintMeta({ ...meta, timetableScenes }));
+      const saved = await saveDailyPlanPatchWithCas({
+        supabase,
+        projectId,
+        dailyPlanId,
+        expectedUpdatedAt,
+        values: { memo },
+        columns: "memo,updated_at"
+      });
+      return NextResponse.json({
+        memo: String(saved.memo ?? ""),
+        updatedAt: String(saved.updated_at ?? "")
+      });
+    }
 
     if (body.scheduleItem) {
       failureMessage = "기타일정 정보를 저장하지 못했습니다.";
@@ -330,6 +390,17 @@ function buildGatheringAddressUpdate(
     shootingLocations,
     memo: encodeDailyPlanMemo(meta)
   };
+}
+
+function normalizeShotIdOrder(value: unknown) {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw createRouteError("현재 회차의 컷 순서가 올바르지 않습니다.", 400);
+  }
+  const ids = value.map((item) => String(item ?? "").trim());
+  if (ids.some((id) => !isValidDatabaseProjectId(id)) || new Set(ids).size !== ids.length) {
+    throw createRouteError("현재 회차의 컷 순서가 올바르지 않습니다.", 400);
+  }
+  return ids;
 }
 
 function buildSceneDurationUpdate(

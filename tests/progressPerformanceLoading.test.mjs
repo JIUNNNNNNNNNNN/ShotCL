@@ -92,7 +92,7 @@ test("Progress summary media and stable Cut links load in bounded background bat
   assert.equal((shotCard.match(/await onLoadGalleryMedia\(shot, category\)/gu) ?? []).length, 1);
 
   assert.match(source, /if \(!readOnly\) \{\s*return \(\s*<ShotReorderList/u);
-  assert.equal((source.match(/readOnly=\{isGuest\}/gu) ?? []).length, 3);
+  assert.equal((source.match(/readOnly=\{isGuest\}/gu) ?? []).length, 2);
   assert.doesNotMatch(
     source,
     /Promise\.all\(\[\s*import\("@\/components\/DailyPlanGatheringLocations"\)/u
@@ -100,7 +100,7 @@ test("Progress summary media and stable Cut links load in bounded background bat
   assert.match(source, /DailyPlanGatheringLocationsReadOnly = dynamic/u);
   assert.match(
     source,
-    /\{isGuest \? \(\s*<DailyPlanGatheringLocationsReadOnly plan=\{selectedPlan\} \/>/u
+    /\{isGuest \? \(\s*<StableDailyPlanGatheringLocationsReadOnly plan=\{selectedPlan\} \/>/u
   );
   const readOnlyGathering = readSource("components/DailyPlanGatheringLocationsReadOnly.tsx");
   assert.doesNotMatch(

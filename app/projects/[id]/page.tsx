@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -41,11 +42,12 @@ import {
 } from "@/lib/data/shotMediaArchive";
 import {
   getProgressDailyPlan,
+  updateDailyPlanProgressOrder,
   updateDailyPlanScheduleItem,
   type DailyPlanScheduleItemMutationResult
 } from "@/lib/data/dailyPlans";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
-import { decodeDailyPlanMemo } from "@/lib/dailyPlan/printMeta";
+import { decodeDailyPlanMemo, encodeDailyPlanMemo, normalizeDailyPlanPrintMeta } from "@/lib/dailyPlan/printMeta";
 import {
   deleteScheduleImageWithReceipt,
   finalizeScheduleImageDelete,
@@ -64,6 +66,7 @@ import {
 import { buildProgressMediaGalleryItems } from "@/lib/progress/mediaGallery";
 import { resolveRelevantProgressRound } from "@/lib/progress/resolveRelevantRound";
 import { orderProgressShotsByShootingOrder } from "@/lib/progress/shootingOrder";
+import { applyProgressOrderToTimetableScenes } from "@/lib/progress/shootingOrderMutation";
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
@@ -120,6 +123,8 @@ const DailyPlanGatheringLocations = dynamic(
 const DailyPlanGatheringLocationsReadOnly = dynamic(
   () => import("@/components/DailyPlanGatheringLocationsReadOnly").then((module) => module.DailyPlanGatheringLocationsReadOnly)
 );
+const StableDailyPlanGatheringLocations = memo(DailyPlanGatheringLocations);
+const StableDailyPlanGatheringLocationsReadOnly = memo(DailyPlanGatheringLocationsReadOnly);
 const ShotCard = dynamic(
   () => import("@/components/ShotCard").then((module) => module.ShotCard)
 );
@@ -132,8 +137,10 @@ type ProgressShotListProps = {
   visibleShots: Shot[];
   readOnly: boolean;
   disabled: boolean;
+  statusReadOnly: boolean;
   interactionGuideTarget: boolean;
   onReorder: (shots: Shot[]) => Promise<void> | void;
+  onStatusChange: (shot: Shot, status: ShotStatus) => Promise<void> | void;
   renderShot: (shot: Shot) => ReactNode;
   renderRowsBeforeIndex?: (index: number) => ReactNode;
 };
@@ -144,8 +151,10 @@ function ProgressShotList({
   visibleShots,
   readOnly,
   disabled,
+  statusReadOnly,
   interactionGuideTarget,
   onReorder,
+  onStatusChange,
   renderShot,
   renderRowsBeforeIndex
 }: ProgressShotListProps) {
@@ -155,8 +164,10 @@ function ProgressShotList({
         allShots={allShots}
         visibleShots={visibleShots}
         disabled={disabled}
+        statusReadOnly={statusReadOnly}
         interactionGuideTarget={interactionGuideTarget}
         onReorder={onReorder}
+        onStatusChange={onStatusChange}
         renderShot={renderShot}
         renderRowsBeforeIndex={renderRowsBeforeIndex}
       />
@@ -316,8 +327,7 @@ export default function ProjectDetailPage() {
     () => reconcileSessionBuckets(initialShots, new Map(), true)
   );
   const [archiveMediaByShotId, setArchiveMediaByShotId] = useState<Map<string, ProgressArchiveMediaAsset[]>>(() => new Map());
-  const [okExpanded, setOkExpanded] = useState(false);
-  const [omitExpanded, setOmitExpanded] = useState(false);
+  const [processedExpanded, setProcessedExpanded] = useState(true);
   const [isLoading, setIsLoading] = useState(
     () => Boolean(isProgressView && dailyPlanId && !seededProgress)
   );
@@ -406,13 +416,8 @@ export default function ProjectDetailPage() {
     () => orderProgressShotsByShootingOrder(shots, selectedPrintMeta.timetableScenes),
     [selectedPrintMeta.timetableScenes, shots]
   );
-  // Numeric Cut cards are governed by the Daily Plan order (or its numeric
-  // blank-order fallback). Keep the legacy drag path only for manual,
-  // non-numeric Progress entries so it cannot silently fight the source data.
-  const isProgressOrderLocked = useMemo(
-    () => shots.some((shot) => /^\d+$/.test(String(shot.cutNumber ?? "").trim())),
-    [shots]
-  );
+  const hasCanonicalProgressOrder = selectedPrintMeta.timetableScenes.length > 0
+    && shots.some((shot) => /^\d+$/.test(String(shot.cutNumber ?? "").trim()));
   const selectedPlanRef = useRef<DailyPlan | null>(selectedPlan);
   useLayoutEffect(() => {
     selectedPlanRef.current = selectedPlan;
@@ -673,8 +678,7 @@ export default function ProjectDetailPage() {
     archiveAssetsRef.current = [];
     setArchiveMediaByShotId(new Map());
     setMediaLinksByShotId(new Map());
-    setOkExpanded(false);
-    setOmitExpanded(false);
+    setProcessedExpanded(true);
     setEditingShot(null);
     setEditingSchedule(null);
     setSavingScheduleSessionId(null);
@@ -1064,22 +1068,25 @@ export default function ProjectDetailPage() {
   }, [commitSessionBuckets, dailyPlanId, mediaLinksByShotId, progressEntryKey, projectId, rebuildArchiveMedia]);
   const dailyProgress = useMemo(() => calculateDailyProgress(shots), [shots]);
   const activeShots = useMemo(
-    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "active"),
-    [orderedShots, sessionBucketByShotId]
+    () => orderedShots.filter((shot) => getPersistedStatusBucket(shot.status) === "active"),
+    [orderedShots]
   );
   const okShots = useMemo(
-    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "ok"),
-    [orderedShots, sessionBucketByShotId]
+    () => orderedShots.filter((shot) => getPersistedStatusBucket(shot.status) === "ok"),
+    [orderedShots]
   );
   const omitShots = useMemo(
-    () => orderedShots.filter((shot) => sessionBucketByShotId.get(shot.id) === "omit"),
-    [orderedShots, sessionBucketByShotId]
+    () => orderedShots.filter((shot) => getPersistedStatusBucket(shot.status) === "omit"),
+    [orderedShots]
+  );
+  const processedShots = useMemo(
+    () => orderedShots.filter((shot) => getPersistedStatusBucket(shot.status) !== "active"),
+    [orderedShots]
   );
   const visibleShotsForMediaGuide = useMemo(() => [
     ...activeShots,
-    ...(okExpanded ? okShots : []),
-    ...(omitExpanded ? omitShots : [])
-  ], [activeShots, okExpanded, okShots, omitExpanded, omitShots]);
+    ...(processedExpanded ? processedShots : [])
+  ], [activeShots, processedExpanded, processedShots]);
   const mediaGuideShotId = useMemo(() => (
     visibleShotsForMediaGuide.find((shot) => hasMultipleProgressGalleryItems(
       shot,
@@ -1087,12 +1094,11 @@ export default function ProjectDetailPage() {
     ))?.id ?? null
   ), [archiveMediaByShotId, visibleShotsForMediaGuide]);
   const reorderGuideBucket = useMemo<ProgressVisualBucket | null>(() => {
-    if (role !== "admin" || isReordering || isProgressOrderLocked) return null;
+    if (role !== "admin" || isReordering) return null;
     if (activeShots.length >= 2) return "active";
-    if (okExpanded && okShots.length >= 2) return "ok";
-    if (omitExpanded && omitShots.length >= 2) return "omit";
+    if (processedExpanded && processedShots.length >= 2) return "ok";
     return null;
-  }, [activeShots.length, isProgressOrderLocked, isReordering, okExpanded, okShots.length, omitExpanded, omitShots.length, role]);
+  }, [activeShots.length, isReordering, processedExpanded, processedShots.length, role]);
   const scheduleRowsByIndex = useMemo(
     () => selectedPlan ? placeScheduleRows(orderedShots, selectedPlan.mealTimes, selectedPrintMeta.timetableRowOrder) : new Map<number, DailyPlanMealTime[]>(),
     [orderedShots, selectedPlan, selectedPrintMeta.timetableRowOrder]
@@ -1169,6 +1175,7 @@ export default function ProjectDetailPage() {
     requestGuide("progress.status", "feature");
     const requestedEntryKey = activeProgressEntryKeyRef.current;
     const currentShot = shotsRef.current.find((shot) => shot.id === targetShot.id) ?? targetShot;
+    const persistedStatusBeforeMutation = persistedStatusByShotIdRef.current.get(targetShot.id) ?? currentShot.status;
     const mutationVersion = (statusMutationVersionByShotIdRef.current.get(targetShot.id) ?? 0) + 1;
     statusMutationVersionByShotIdRef.current.set(targetShot.id, mutationVersion);
     pendingStatusByShotIdRef.current.set(targetShot.id, { version: mutationVersion, status });
@@ -1211,13 +1218,17 @@ export default function ProjectDetailPage() {
         || pendingStatus?.version !== mutationVersion
       ) return;
       pendingStatusByShotIdRef.current.delete(targetShot.id);
-      // Keep the optimistic latest status visible. A transient network error
-      // must not erase the field user's on-set choice; pressing the same status
-      // again retries the canonical mutation.
+      const restoredStatus = persistedStatusByShotIdRef.current.get(targetShot.id)
+        ?? persistedStatusBeforeMutation;
+      const restoredShots = shotsRef.current.map((shot) => (
+        shot.id === targetShot.id ? { ...shot, status: restoredStatus } : shot
+      ));
+      shotsRef.current = restoredShots;
+      setShots(restoredShots);
       setErrorMessage(
         error instanceof Error
-          ? `${error.message} 상태 버튼을 다시 누르면 재시도합니다.`
-          : "상태를 저장하지 못했습니다. 상태 버튼을 다시 누르면 재시도합니다."
+          ? `${error.message} 이전 상태로 되돌렸습니다.`
+          : "상태를 저장하지 못해 이전 상태로 되돌렸습니다."
       );
     } finally {
       if (statusMutationQueueByShotIdRef.current.get(targetShot.id) === mutation) {
@@ -1282,7 +1293,7 @@ export default function ProjectDetailPage() {
   }
 
   async function handleSaveExistingShot(values: ShotEditorValues) {
-    if (!projectId || !editingShot) return;
+    if (!projectId || !editingShot || role !== "admin") return;
     const requestedEntryKey = activeProgressEntryKeyRef.current;
 
     setErrorMessage("");
@@ -1562,10 +1573,12 @@ export default function ProjectDetailPage() {
   ), [archiveMediaByShotId, canEditProgressStatus, handleOpenMedia, handleStatusChange, isGuest, loadShotGalleryMedia, mediaGuideShotId, progressOnly]);
 
   async function handleReorderShots(nextShots: Shot[]) {
-    if (!projectId || !dailyPlanId || role !== "admin" || isReordering || isProgressOrderLocked) return;
+    if (!projectId || !dailyPlanId || !selectedPlan || role !== "admin" || isReordering) return;
 
     const requestedEntryKey = activeProgressEntryKeyRef.current;
     const previousShots = shotsRef.current;
+    const previousPlan = selectedPlan;
+    let optimisticMemo: string | null = null;
     selectedShotsRefreshVersionRef.current += 1;
     setIsReordering(true);
     setErrorMessage("");
@@ -1573,17 +1586,48 @@ export default function ProjectDetailPage() {
     setShots(nextShots);
 
     try {
+      if (hasCanonicalProgressOrder) {
+        optimisticMemo = encodeDailyPlanMemo(normalizeDailyPlanPrintMeta({
+          ...selectedPrintMeta,
+          timetableScenes: applyProgressOrderToTimetableScenes(
+            selectedPrintMeta.timetableScenes,
+            nextShots
+          )
+        }));
+        commitDailyPlanPatch(dailyPlanId, {
+          memo: optimisticMemo,
+          updatedAt: selectedPlan.updatedAt
+        });
+        const saved = await updateDailyPlanProgressOrder(
+          projectId,
+          dailyPlanId,
+          nextShots,
+          selectedPlan.updatedAt
+        );
+        if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+        commitDailyPlanPatch(dailyPlanId, saved);
+        return;
+      }
       const savedShots = await reorderShots(projectId, dailyPlanId, nextShots.map((shot) => shot.id));
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
       const persistedShots = mergeShotOrder(shotsRef.current, savedShots);
       shotsRef.current = persistedShots;
       setShots(persistedShots);
-    } catch {
+    } catch (error) {
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
+      const currentPlan = dailyPlansRef.current.find((plan) => plan.id === dailyPlanId);
+      if (
+        hasCanonicalProgressOrder
+        && optimisticMemo
+        && currentPlan?.memo === optimisticMemo
+        && currentPlan.updatedAt === previousPlan.updatedAt
+      ) {
+        commitDailyPlanPatch(dailyPlanId, previousPlan);
+      }
       const restoredShots = mergeShotOrder(shotsRef.current, previousShots);
       shotsRef.current = restoredShots;
       setShots(restoredShots);
-      setErrorMessage("컷 순서를 저장하지 못했습니다.");
+      setErrorMessage(error instanceof Error ? error.message : "컷 순서를 저장하지 못했습니다.");
     } finally {
       setIsReordering(false);
     }
@@ -1678,9 +1722,9 @@ export default function ProjectDetailPage() {
       <DailyProgressSummary progress={dailyProgress} />
 
       {isGuest ? (
-        <DailyPlanGatheringLocationsReadOnly plan={selectedPlan} />
+        <StableDailyPlanGatheringLocationsReadOnly plan={selectedPlan} />
       ) : (
-        <DailyPlanGatheringLocations
+        <StableDailyPlanGatheringLocations
           projectId={project.id}
           plan={selectedPlan}
           canEdit={role === "admin"}
@@ -1721,9 +1765,11 @@ export default function ProjectDetailPage() {
                 allShots={orderedShots}
                 visibleShots={activeShots}
                 readOnly={isGuest}
-                disabled={role !== "admin" || isReordering || isProgressOrderLocked}
+                disabled={role !== "admin" || isReordering}
+                statusReadOnly={!canEditProgressStatus}
                 interactionGuideTarget={reorderGuideBucket === "active"}
                 onReorder={handleReorderShots}
+                onStatusChange={handleStatusChange}
                 renderShot={renderShot}
                 renderRowsBeforeIndex={(index) => activeScheduleRowsByIndex.get(index)?.map((item) => (
                   <ProgressScheduleCard
@@ -1745,41 +1791,24 @@ export default function ProjectDetailPage() {
             </section>
 
             <ProgressStatusSection
-              kind="ok"
-              count={okShots.length}
-              expanded={okExpanded}
-              onExpandedChange={setOkExpanded}
+              okCount={okShots.length}
+              omitCount={omitShots.length}
+              expanded={processedExpanded}
+              onExpandedChange={setProcessedExpanded}
             >
-              {okShots.length > 0 ? (
+              {processedShots.length > 0 ? (
                 <ProgressShotList
                   allShots={orderedShots}
-                  visibleShots={okShots}
+                  visibleShots={processedShots}
                   readOnly={isGuest}
-                  disabled={role !== "admin" || isReordering || isProgressOrderLocked}
-                  interactionGuideTarget={reorderGuideBucket === "ok"}
+                  disabled={role !== "admin" || isReordering}
+                  statusReadOnly={!canEditProgressStatus}
+                  interactionGuideTarget={reorderGuideBucket !== null && reorderGuideBucket !== "active"}
                   onReorder={handleReorderShots}
+                  onStatusChange={handleStatusChange}
                   renderShot={renderShot}
                 />
-              ) : <p className="px-1 py-2 text-xs text-field-muted">OK 컷이 없습니다.</p>}
-            </ProgressStatusSection>
-
-            <ProgressStatusSection
-              kind="omit"
-              count={omitShots.length}
-              expanded={omitExpanded}
-              onExpandedChange={setOmitExpanded}
-            >
-              {omitShots.length > 0 ? (
-                <ProgressShotList
-                  allShots={orderedShots}
-                  visibleShots={omitShots}
-                  readOnly={isGuest}
-                  disabled={role !== "admin" || isReordering || isProgressOrderLocked}
-                  interactionGuideTarget={reorderGuideBucket === "omit"}
-                  onReorder={handleReorderShots}
-                  renderShot={renderShot}
-                />
-              ) : <p className="px-1 py-2 text-xs text-field-muted">OMIT 컷이 없습니다.</p>}
+              ) : <p className="px-1 py-2 text-xs text-field-muted">처리된 컷이 없습니다.</p>}
             </ProgressStatusSection>
           </div>
         )}
@@ -1797,7 +1826,7 @@ export default function ProjectDetailPage() {
         </details>
       ) : null}
 
-      {!progressOnly && isAddOpen ? <ShotEditorModal
+      {role === "admin" && isAddOpen ? <ShotEditorModal
         mode="add"
         open
         shot={null}
@@ -1811,20 +1840,26 @@ export default function ProjectDetailPage() {
         key={editingShot.id}
         mode="edit"
         open
-        shot={editingShot}
+        shot={shots.find((shot) => shot.id === editingShot.id) ?? editingShot}
         defaultOrderIndex={nextOrderIndex}
         isSaving={isSaving}
-        readOnly={progressOnly}
+        readOnly={role !== "admin"}
         onClose={() => setEditingShot(null)}
         onAutoSave={handleSaveExistingShot}
-        onDelete={progressOnly ? undefined : handleDeleteShot}
+        onDelete={role === "admin" ? handleDeleteShot : undefined}
+        archiveMedia={archiveMediaByShotId.get(editingShot.id) ?? EMPTY_PROGRESS_ARCHIVE_MEDIA}
+        selectedMediaLinks={mediaLinksByShotId.get(editingShot.id) ?? []}
+        mediaContext={{ episodeNumber: parseEpisodeNumber(selectedPlan?.episode) }}
+        onMediaSaved={role === "admin" ? async () => {
+          await refreshSelectedShotMedia();
+        } : undefined}
       /> : null}
 
       {!isGuest && editingSchedule ? (
         <ProgressScheduleEditorModal
           key={`${editingSchedule.dailyPlanId}:${editingSchedule.item.id}:${editingSchedule.sessionId}`}
           item={editingSchedule.item}
-          readOnly={progressOnly}
+          readOnly={role !== "admin"}
           isSaving={savingScheduleSessionId === editingSchedule.sessionId}
           onClose={() => setEditingSchedule(null)}
           onSave={handleSaveSchedule}
@@ -1857,7 +1892,7 @@ export default function ProjectDetailPage() {
           shot={mediaPicker.shot}
           initialType={mediaPicker.type}
           selectedLinks={mediaLinksByShotId.get(mediaPicker.shot.id) ?? []}
-          readOnly={progressOnly}
+          readOnly={role !== "admin"}
           onClose={() => setMediaPicker(null)}
           onSaved={async () => {
             await refreshSelectedShotMedia();
