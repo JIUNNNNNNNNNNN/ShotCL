@@ -17,6 +17,7 @@ export type ProgressScheduleEditorValues = {
 };
 
 type ProgressScheduleEditorModalProps = {
+  projectId: string;
   item: DailyPlanMealTime;
   readOnly: boolean;
   isSaving: boolean;
@@ -28,6 +29,7 @@ type ProgressScheduleEditorModalProps = {
 
 /** 기타일정의 그림과 진행 메모만 명시적으로 저장하는 작은 팝업입니다. */
 export function ProgressScheduleEditorModal({
+  projectId,
   item,
   readOnly,
   isSaving,
@@ -36,7 +38,7 @@ export function ProgressScheduleEditorModal({
   onAutoSaveMemo,
   onDeleteImage
 }: ProgressScheduleEditorModalProps) {
-  const memoScopeKey = `progress-schedule-memo:${item.id}`;
+  const memoScopeKey = `progress-schedule-memo:${projectId}:${item.id}`;
   const [values, setValues] = useState<ProgressScheduleEditorValues>(() => ({
     progressMemo: getAutosaveDraft<string>(memoScopeKey)?.value ?? item.progressMemo ?? "",
     imageUrl: item.imageUrl ?? null,

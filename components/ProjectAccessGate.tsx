@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuthSession } from "@/components/AuthSessionProvider";
@@ -27,6 +27,11 @@ import {
   restoreDismissedProject
 } from "@/lib/projectAccess/dismissedProjects";
 import { isGuestDailyPlanReadPath } from "@/lib/projectNavigation";
+import {
+  isProjectDeletedInThisTab,
+  markProjectDeletedInThisTab
+} from "@/lib/projectAccess/deletedProjectMarker.client";
+import { isProjectPermanentDeletionInitiatedHere } from "@/lib/projectAccess/projectDeletionInitiator.client";
 
 type ProjectAccessContextValue = {
   role: SharedProjectRole | null;
@@ -35,6 +40,7 @@ type ProjectAccessContextValue = {
   isGuest: boolean;
   editorEligible: boolean;
   canEditProgressStatus: boolean;
+  isCreator: boolean;
   applyVerifiedRole: (role: SharedProjectRole) => void;
 };
 
@@ -47,6 +53,7 @@ const ProjectAccessContext = createContext<ProjectAccessContextValue>({
   isGuest: false,
   editorEligible: false,
   canEditProgressStatus: false,
+  isCreator: false,
   applyVerifiedRole: () => undefined
 });
 
@@ -56,6 +63,7 @@ export function ProjectAccessGate({
   role,
   accessMode,
   accountUserId,
+  isOwner,
   accessPreferenceScope,
   initialWorkspace,
   children
@@ -66,6 +74,7 @@ export function ProjectAccessGate({
   accessMode: ProjectAccessMode | null;
   editorEligible: boolean;
   accountUserId: string | null;
+  isOwner: boolean;
   accessPreferenceScope: string;
   initialWorkspace: ProjectWorkspaceSnapshot;
   children: React.ReactNode;
@@ -80,6 +89,9 @@ export function ProjectAccessGate({
     user: liveAccountUser
   } = useAuthSession();
   const [verifiedRoleOverride, setVerifiedRoleOverride] = useState<ProjectScopedRoleOverride>(null);
+  const [deletedInThisTab, setDeletedInThisTab] = useState(false);
+  const projectDeletionHandledRef = useRef(false);
+  const projectAccessProbeRef = useRef<Promise<void> | null>(null);
   const serverScopedRole = accessMode === "guest"
     ? "progress"
     : resolveProjectScopedRole(projectId, role, verifiedRoleOverride);
@@ -109,6 +121,14 @@ export function ProjectAccessGate({
     role: currentRole,
     editorEligible: effectiveEditorEligible
   });
+  const isCreator = Boolean(
+    isOwner
+    && accessMode === "member"
+    && currentRole === "admin"
+    && effectiveEditorEligible
+    && accountUserId
+    && liveAccountUser?.id === accountUserId
+  );
   const applyVerifiedRole = useCallback((nextRole: SharedProjectRole) => {
     // 이 client callback은 서버 승격 성공 응답만 반영하며 downgrade는 허용하지 않습니다.
     if (isGuest || !effectiveEditorEligible || !isKeyStaffProjectRole(nextRole)) return;
@@ -141,6 +161,53 @@ export function ProjectAccessGate({
       && !progressReadablePaths.has(pathname)
     );
   const deniedDestination = missingAccess ? "/" : isGuest ? progressHref : progressPath;
+  const progressOwnsDeletionBoundary = pathname === progressPath
+    && (
+      searchParams.get("view") === "progress"
+      || Boolean(searchParams.get("dailyPlanId"))
+    );
+
+  const leaveProjectAfterAccessEnds = useCallback((markAsDeleted: boolean) => {
+    if (
+      projectDeletionHandledRef.current
+      || isProjectPermanentDeletionInitiatedHere(projectId)
+    ) return;
+    projectDeletionHandledRef.current = true;
+    if (markAsDeleted) markProjectDeletedInThisTab(projectId);
+    void import("@/lib/projectAccess/projectDeletion.client")
+      .then(({ clearDeletedProjectClientState }) => clearDeletedProjectClientState(projectId))
+      .catch(() => undefined)
+      .finally(() => window.location.replace("/"));
+  }, [projectId]);
+
+  const handleProjectDeleted = useCallback((deletedProjectId: string) => {
+    if (deletedProjectId !== projectId) return;
+    leaveProjectAfterAccessEnds(true);
+  }, [leaveProjectAfterAccessEnds, projectId]);
+
+  const probeProjectAccess = useCallback(() => {
+    if (
+      projectDeletionHandledRef.current
+      || projectAccessProbeRef.current
+      || isProjectPermanentDeletionInitiatedHere(projectId)
+    ) return;
+    const probe = fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+      cache: "no-store",
+      credentials: "same-origin"
+    })
+      .then((response) => {
+        if (response.status === 410 || response.status === 404) {
+          leaveProjectAfterAccessEnds(true);
+        } else if (response.status === 401 || response.status === 403) {
+          leaveProjectAfterAccessEnds(false);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (projectAccessProbeRef.current === probe) projectAccessProbeRef.current = null;
+      });
+    projectAccessProbeRef.current = probe;
+  }, [leaveProjectAfterAccessEnds, projectId]);
 
   useEffect(() => {
     setVerifiedRoleOverride((current) => {
@@ -155,8 +222,65 @@ export function ProjectAccessGate({
   // 서버 layout이 확정한 현재 권한을 cache보다 우선합니다. layout effect는
   // 자식 페이지의 일반 data-loading effect보다 먼저 실행되며 render도 순수하게 유지합니다.
   useLayoutEffect(() => {
+    if (isProjectDeletedInThisTab(projectId)) {
+      setDeletedInThisTab(true);
+      window.location.replace("/");
+      return;
+    }
     clearProjectReadCache(projectId);
   }, [accessMode, effectiveEditorEligible, projectId, role]);
+
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (isProjectDeletedInThisTab(projectId)) {
+        setDeletedInThisTab(true);
+        window.location.replace("/");
+        return;
+      }
+      if (event.persisted) probeProjectAccess();
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, [probeProjectAccess, projectId]);
+
+  useEffect(() => {
+    if (
+      denied
+      || progressOwnsDeletionBoundary
+      || !currentRole
+      || !accessMode
+    ) return undefined;
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
+    void import("@/lib/realtime/subscribeToProjectDeletionBoundary")
+      .then((boundary) => {
+        if (cancelled) return;
+        const handlers = {
+          onProjectDeleted: handleProjectDeleted,
+          onConnectionError: probeProjectAccess
+        };
+        unsubscribe = accessMode === "member"
+          ? boundary.subscribeToMemberProjectDeletionBoundary(projectId, handlers)
+          : boundary.subscribeToServerProjectDeletionBoundary(projectId, handlers);
+      })
+      .catch(() => {
+        // BFCache pageshow and the next server request remain fail-closed fallbacks.
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [
+    accessMode,
+    currentRole,
+    denied,
+    handleProjectDeleted,
+    probeProjectAccess,
+    progressOwnsDeletionBoundary,
+    projectId
+  ]);
 
   useEffect(() => {
     if (!currentRole || isGuest) return;
@@ -182,8 +306,11 @@ export function ProjectAccessGate({
     isGuest,
     editorEligible: effectiveEditorEligible,
     canEditProgressStatus,
+    isCreator,
     applyVerifiedRole
-  }), [accessMode, applyVerifiedRole, canEditProgressStatus, currentRole, effectiveEditorEligible, isGuest]);
+  }), [accessMode, applyVerifiedRole, canEditProgressStatus, currentRole, effectiveEditorEligible, isCreator, isGuest]);
+
+  if (deletedInThisTab) return null;
 
   if (denied) {
     return (

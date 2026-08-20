@@ -76,6 +76,10 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
       && input.searchParams.size === 1;
   }
 
+  if (suffix === "/deletion-events") {
+    return input.searchParams.size === 0;
+  }
+
   if (suffix === "/reference-assets") {
     if (input.searchParams.get("media") === "1") {
       return Boolean(input.searchParams.get("dailyPlanId")?.trim());

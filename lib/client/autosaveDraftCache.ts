@@ -86,3 +86,12 @@ export function discardAutosaveDraft(key: string, writerId: number) {
   const current = draftCache.get(key);
   if (current && current.writerId <= writerId) draftCache.delete(key);
 }
+
+/** 영구 삭제된 프로젝트의 초안만 폐기하고 다른 프로젝트의 편집 복원 상태는 유지합니다. */
+export function clearAutosaveDraftsForProject(projectId: string) {
+  const stableProjectId = projectId.trim();
+  if (!stableProjectId) return;
+  for (const key of draftCache.keys()) {
+    if (key.split(":").includes(stableProjectId)) draftCache.delete(key);
+  }
+}

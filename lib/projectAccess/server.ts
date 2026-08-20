@@ -39,6 +39,8 @@ export type ProjectRequestProjectSnapshot = {
 export type ProjectRequestAccess = {
   grant: ProjectAccessGrant;
   mode: ProjectRequestAccessMode;
+  /** Server-computed immutable creator capability; never inferred from role. */
+  isOwner: boolean;
   editorEligible: boolean;
   accountUserId?: string;
   project?: ProjectRequestProjectSnapshot;
@@ -105,7 +107,18 @@ export function getAccountAccessPreferenceScope(userId: string | null) {
 
 export function getJoinAttemptKey(request: NextRequest, normalizedProjectName: string) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  return createHash("sha256").update(`${forwardedFor}:${normalizedProjectName}`).digest("hex");
+  return createHash("sha256")
+    .update(`${forwardedFor}:missing-project-name:${normalizedProjectName}`)
+    .digest("hex");
+}
+
+/** Existing projects use their immutable UUID, so deleting/recreating a name never inherits throttles. */
+export function getProjectJoinAttemptKey(request: NextRequest, projectId: string) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const databaseProjectId = normalizeProjectId(projectId);
+  return createHash("sha256")
+    .update(`${forwardedFor}:project-join:${databaseProjectId}`)
+    .digest("hex");
 }
 
 /** 기존 Join rate-limit 저장소를 프로젝트별 Key staff 승격에도 분리해 재사용합니다. */
@@ -124,7 +137,10 @@ export async function isJoinRateLimited(attemptKeyHash: string) {
   return Boolean(data?.blocked_until && new Date(data.blocked_until).getTime() > Date.now());
 }
 
-export async function recordJoinFailure(attemptKeyHash: string) {
+export async function recordJoinFailure(
+  attemptKeyHash: string,
+  projectId: string | null = null
+) {
   const supabase = requireProjectAccessDb();
   const { data, error } = await supabase.from("project_access_attempts").select("attempt_count,window_started_at").eq("attempt_key_hash", attemptKeyHash).maybeSingle();
   if (error) throw error;
@@ -133,6 +149,7 @@ export async function recordJoinFailure(attemptKeyHash: string) {
   const attemptCount = windowExpired ? 1 : data.attempt_count + 1;
   const { error: writeError } = await supabase.from("project_access_attempts").upsert({
     attempt_key_hash: attemptKeyHash,
+    project_id: projectId ? normalizeProjectId(projectId) : null,
     attempt_count: attemptCount,
     window_started_at: windowExpired ? new Date(now).toISOString() : data.window_started_at,
     blocked_until: attemptCount >= 8 ? new Date(now + 15 * 60 * 1000).toISOString() : null
@@ -469,7 +486,7 @@ async function resolveProjectRequestAccess(
     const [projectResult, membershipResult] = await Promise.all([
       supabase
         .from("projects")
-        .select("id,name,shoot_date,description,created_at,share_enabled,created_by")
+        .select("id,name,shoot_date,description,created_at,share_enabled,created_by,deletion_started_at")
         .eq("id", databaseProjectId)
         .maybeSingle(),
       supabase
@@ -496,9 +513,10 @@ async function resolveProjectRequestAccess(
       guestInviteActive: false,
       legacyGrantRole: null
     });
-    if (project && role) {
+    if (project && !project.deletion_started_at && role) {
       return {
         mode: "member",
+        isOwner,
         editorEligible: account.isEditor,
         accountUserId: account.userId,
         project: {
@@ -540,6 +558,7 @@ async function resolveProjectRequestAccess(
     if (invite?.projectId === databaseProjectId && guestRole) {
       return {
         mode: "guest",
+        isOwner: false,
         editorEligible: false,
         project: invite.project,
         grant: {
@@ -562,6 +581,6 @@ async function resolveProjectRequestAccess(
     legacyGrantRole: legacyGrant.role
   });
   return role
-    ? { mode: "legacy", editorEligible: false, grant: { ...legacyGrant, role } }
+    ? { mode: "legacy", isOwner: false, editorEligible: false, grant: { ...legacyGrant, role } }
     : null;
 }

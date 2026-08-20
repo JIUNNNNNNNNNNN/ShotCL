@@ -151,6 +151,7 @@ export function DailyPlanGatheringLocations({
     () => selectProgressGatheringPlace(plan),
     [plan.meetingLocation, plan.memo, plan.shootingLocations]
   );
+  const addressAutosaveScopeKey = `gathering-address:${projectId}:${plan.id}:${place?.id ?? "missing"}`;
   const [isEditingPhotos, setIsEditingPhotos] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [isPhotoManagementOpen, setIsPhotoManagementOpen] = useState(false);
@@ -247,7 +248,7 @@ export function DailyPlanGatheringLocations({
     value: addressDraft,
     enabled: Boolean(canEdit && isEditingAddress && place && !isComposingAddress),
     delayMs: 850,
-    scopeKey: `${plan.id}:${place?.id ?? "missing"}:address`,
+    scopeKey: addressAutosaveScopeKey,
     initialSavedFingerprint: JSON.stringify(place?.address ?? ""),
     restoreDraft: (address) => setAddressDraft(address),
     save: async (address) => {
@@ -310,8 +311,7 @@ export function DailyPlanGatheringLocations({
       if (!canEdit || !place || isPhotoBusy || uploadLockRef.current || isEditingPhotos) return;
       setMessage("");
       setAddressError("");
-      const scopeKey = `${plan.id}:${place.id}:address`;
-      const cached = getAutosaveDraft<string>(scopeKey);
+      const cached = getAutosaveDraft<string>(addressAutosaveScopeKey);
       // A failed non-blocking save remains the latest local draft when the
       // sheet is reopened. A clean open establishes the server baseline and
       // must not emit a mutation by itself.
@@ -330,6 +330,7 @@ export function DailyPlanGatheringLocations({
     editAddressDisabled: !canEdit || !place || isPhotoBusy || isEditingPhotos,
     editAddressPending: isSavingAddress
   }), [
+    addressAutosaveScopeKey,
     canAddPhotos,
     canEdit,
     canManagePhotos,

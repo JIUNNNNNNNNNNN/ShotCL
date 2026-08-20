@@ -110,6 +110,7 @@ export function ShotEditorModal({
   mediaContext,
   onMediaMutation
 }: ShotEditorModalProps) {
+  const autosaveScopeKey = shot ? `shot:${shot.projectId}:${shot.id}` : "new-shot";
   const [values, setValues] = useState<ShotEditorValues>(() => (
     shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex)
   ));
@@ -125,7 +126,7 @@ export function ShotEditorModal({
     value: values,
     enabled: Boolean(open && mode === "edit" && shot && !readOnly && onAutoSave && !isComposing),
     delayMs: 700,
-    scopeKey: shot?.id ?? "new-shot",
+    scopeKey: autosaveScopeKey,
     initialSavedFingerprint: shotEditorFingerprint(
       shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex)
     ),
@@ -139,12 +140,12 @@ export function ShotEditorModal({
     if (!open) return;
     const canonicalValues = shot ? valuesFromShot(shot) : emptyValues(defaultOrderIndex);
     const cached = mode === "edit" && shot
-      ? getAutosaveDraft<ShotEditorValues>(shot.id)
+      ? getAutosaveDraft<ShotEditorValues>(autosaveScopeKey)
       : null;
     const nextValues = cached?.value ?? canonicalValues;
     setValues(nextValues);
     setSavedFingerprint(shotEditorFingerprint(canonicalValues));
-  }, [defaultOrderIndex, mode, open, shot]);
+  }, [autosaveScopeKey, defaultOrderIndex, mode, open, shot]);
 
   useEffect(() => {
     if (!open) return undefined;

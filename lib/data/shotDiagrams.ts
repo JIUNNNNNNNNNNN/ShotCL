@@ -1,4 +1,4 @@
-import { normalizeProjectId } from "@/lib/projectId";
+import { getLocalProjectIdCandidates, normalizeProjectId } from "@/lib/projectId";
 import { normalizeShotOverheadDiagram } from "@/lib/shotOverhead";
 import type { Shot, ShotOverheadDiagram } from "@/lib/types";
 
@@ -204,4 +204,19 @@ function readLocalEntries(): LocalDiagramEntry[] {
 function writeLocalEntries(entries: LocalDiagramEntry[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(entries));
+}
+
+/** 삭제된 프로젝트의 legacy 부감도 entry만 제거합니다. */
+export function clearLocalProjectShotDiagrams(projectId: string) {
+  if (typeof window === "undefined") return;
+  const candidates = new Set(getLocalProjectIdCandidates(projectId));
+  const entries = readLocalEntries();
+  const remaining = entries.filter((entry) => !candidates.has(entry.projectId));
+  if (remaining.length === entries.length) return;
+  try {
+    if (remaining.length > 0) writeLocalEntries(remaining);
+    else window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+  } catch {
+    // Storage availability must not block the canonical server deletion result.
+  }
 }

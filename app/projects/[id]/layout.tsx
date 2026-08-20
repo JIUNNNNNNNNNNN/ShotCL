@@ -42,6 +42,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
   let accessMode: "member" | "guest" | "legacy" | null = null;
   let editorEligible = false;
   let accountUserId: string | null = null;
+  let isOwner = false;
   let initialWorkspace: ProjectWorkspaceSnapshot = {
     project: null,
     dailyPlans: [],
@@ -59,6 +60,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
     accessMode = access?.mode ?? null;
     editorEligible = access?.editorEligible ?? false;
     accountUserId = access?.accountUserId ?? null;
+    isOwner = access?.isOwner ?? false;
     if (access) {
       initialWorkspace = await loadInitialProjectWorkspace(
         projectId,
@@ -87,6 +89,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
       accessMode={accessMode}
       editorEligible={editorEligible}
       accountUserId={accountUserId}
+      isOwner={isOwner}
       initialWorkspace={initialWorkspace}
       accessPreferenceScope={accessMode === "member"
         ? getAccountAccessPreferenceScope(accountUserId)

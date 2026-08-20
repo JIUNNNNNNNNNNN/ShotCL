@@ -32,6 +32,7 @@ import {
   readRememberedProjectSelection,
   rememberProjectSelection
 } from "@/lib/projectAccess/recentProject";
+import { consumeProjectDeletionMainNotice } from "@/lib/projectAccess/projectDeletionNotice.client";
 import { setPendingProjectJoinNotice } from "@/lib/projectAccess/joinNotice.client";
 import {
   buildProgressRoundHref,
@@ -234,6 +235,11 @@ function MainHomeContent() {
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
       if (projectNavigationTimerRef.current) clearTimeout(projectNavigationTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const deletionNotice = consumeProjectDeletionMainNotice();
+    if (deletionNotice) showStatus(deletionNotice);
   }, []);
 
   useEffect(() => {

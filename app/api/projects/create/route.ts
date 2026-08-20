@@ -50,43 +50,28 @@ export async function POST(request: NextRequest) {
     if (duplicate.length) return NextResponse.json({ error: "이미 존재하는 프로젝트 이름입니다" }, { status: 409 });
 
     const [adminSecret, progressSecret] = await Promise.all([hashPasscode(adminPassword), hashPasscode(progressPassword)]);
-    const { data: project, error: projectError } = await supabase
-      .from("projects")
-      .insert({
-        name: projectName,
-        normalized_name: normalizedName,
-        shoot_date: body.shootDate || null,
-        description: "",
-        share_enabled: true,
-        created_by: account.userId
-      })
-      .select("id,name,shoot_date,description,created_at,share_enabled")
-      .single();
+    const projectId = crypto.randomUUID();
+    const { data: project, error: projectError } = await supabase.rpc(
+      "create_project_with_access",
+      {
+        p_project_id: projectId,
+        p_creator_user_id: account.userId,
+        p_project_name: projectName,
+        p_normalized_name: normalizedName,
+        p_shoot_date: body.shootDate || null,
+        p_admin_password_hash: adminSecret.hash,
+        p_admin_password_salt: adminSecret.salt,
+        p_progress_password_hash: progressSecret.hash,
+        p_progress_password_salt: progressSecret.salt
+      }
+    );
     if (projectError) {
       if (projectError.code === "23505") return NextResponse.json({ error: "이미 존재하는 프로젝트 이름입니다" }, { status: 409 });
       throw projectError;
     }
 
-    const { error: credentialError } = await supabase.from("project_access_credentials").insert({
-      project_id: project.id,
-      admin_password_hash: adminSecret.hash,
-      admin_password_salt: adminSecret.salt,
-      progress_password_hash: progressSecret.hash,
-      progress_password_salt: progressSecret.salt
-    });
-    if (credentialError) {
-      await supabase.from("projects").delete().eq("id", project.id);
-      throw credentialError;
-    }
-
-    const { error: membershipError } = await supabase.from("project_members").upsert({
-      project_id: project.id,
-      user_id: account.userId,
-      role: "admin"
-    }, { onConflict: "project_id,user_id" });
-    if (membershipError) {
-      await supabase.from("projects").delete().eq("id", project.id);
-      throw membershipError;
+    if (!project || typeof project !== "object" || Array.isArray(project)) {
+      throw new Error("Project creation RPC returned an invalid result.");
     }
     return NextResponse.json(
       { success: true, project: { ...project, access_role: "admin" }, role: "admin" },

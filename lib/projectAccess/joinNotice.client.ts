@@ -16,6 +16,11 @@ export function setPendingProjectJoinNotice(notice: ProjectJoinNotice | null) {
   pendingNotice = notice ? { ...notice, expiresAt: Date.now() + JOIN_NOTICE_TTL_MS } : null;
 }
 
+/** 영구 삭제된 프로젝트의 일회성 notice만 지우고 다른 navigation notice는 보존합니다. */
+export function clearPendingProjectJoinNotice(projectId: string) {
+  if (pendingNotice?.projectId === projectId) pendingNotice = null;
+}
+
 export function peekPendingProjectJoinNotice(projectId: string) {
   const notice = readPendingNotice(projectId);
   return notice ? { projectId: notice.projectId, reason: notice.reason } : null;

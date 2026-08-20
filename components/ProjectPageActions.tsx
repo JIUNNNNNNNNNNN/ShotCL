@@ -14,7 +14,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 
-export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail" | "scenario";
+export type ProjectPageActionMenuKey = "dailyPlan" | "archive" | "progressDetail" | "scenario" | "projectSettings";
 
 export type ProjectPageActionGroup = "view" | "document" | "manage";
 export type ProjectPageActionTone = "default" | "danger";
@@ -32,7 +32,8 @@ export type ProjectPageActionId =
   | "scenarioShare"
   | "scenarioDownload"
   | "scenarioRefresh"
-  | "scenarioDelete";
+  | "scenarioDelete"
+  | "projectPermanentDelete";
 
 export type ProjectPageActionOverride = {
   label?: string;
@@ -94,7 +95,13 @@ const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   scenarioShare: { label: "공유", icon: Share2, group: "document" },
   scenarioDownload: { label: "다운로드", icon: Download, group: "document" },
   scenarioRefresh: { label: "새로고침", icon: RefreshCw, group: "document" },
-  scenarioDelete: { label: "삭제", icon: Trash2, group: "manage", tone: "danger" }
+  scenarioDelete: { label: "삭제", icon: Trash2, group: "manage", tone: "danger" },
+  projectPermanentDelete: {
+    label: "프로젝트 영구 삭제",
+    icon: Trash2,
+    group: "manage",
+    tone: "danger"
+  }
 };
 
 const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
@@ -125,6 +132,11 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
       "scenarioRefresh",
       "scenarioDelete"
     ]
+  },
+  projectSettings: {
+    title: "프로젝트 설정",
+    ariaLabel: "프로젝트 설정 메뉴",
+    actionIds: ["projectPermanentDelete"]
   }
 };
 

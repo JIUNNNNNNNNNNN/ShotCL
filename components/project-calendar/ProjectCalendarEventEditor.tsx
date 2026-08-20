@@ -44,6 +44,7 @@ type EditorPosition = {
 };
 
 type ProjectCalendarEventEditorProps = {
+  projectId: string;
   event?: ProjectCalendarEvent | null;
   initialStartDate: string;
   initialEndDate: string;
@@ -68,6 +69,7 @@ const POPOVER_GAP = 10;
 const CLOSE_DURATION_MS = 140;
 
 export function ProjectCalendarEventEditor({
+  projectId,
   event,
   initialStartDate,
   initialEndDate,
@@ -89,7 +91,7 @@ export function ProjectCalendarEventEditor({
     location: event?.location ?? "",
     colorKey: event?.colorKey ?? ""
   }), [event, initialEndDate, initialStartDate]);
-  const autosaveScopeKey = event?.id ?? "new-project-calendar-event";
+  const autosaveScopeKey = `project-calendar:${projectId}:${event?.id ?? "new"}`;
   const [values, setValues] = useState(() => (
     event
       ? getAutosaveDraft<ProjectCalendarEventEditorValues>(autosaveScopeKey)?.value ?? initialValues

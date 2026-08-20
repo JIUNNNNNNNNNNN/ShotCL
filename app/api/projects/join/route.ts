@@ -12,6 +12,7 @@ import {
   clearJoinFailures,
   ensureSessionToken,
   getJoinAttemptKey,
+  getProjectJoinAttemptKey,
   isJoinRateLimited,
   ProjectAccessUnavailableError,
   requireProjectAccessDb,
@@ -37,10 +38,6 @@ export async function POST(request: NextRequest) {
 
     const supabase = requireProjectAccessDb();
     const normalizedName = normalizeProjectName(projectName);
-    const attemptKey = getJoinAttemptKey(request, normalizedName);
-    if (await isJoinRateLimited(attemptKey)) {
-      return NextResponse.json({ error: "잠시 후 다시 시도해주세요" }, { status: 429, headers: { "Retry-After": "900" } });
-    }
     const { data: project, error: projectError } = await supabase
       .from("projects")
       .select("id,name,shoot_date,description,created_at,share_enabled")
@@ -48,6 +45,12 @@ export async function POST(request: NextRequest) {
       .eq("share_enabled", true)
       .maybeSingle();
     if (projectError) throw projectError;
+    const attemptKey = project
+      ? getProjectJoinAttemptKey(request, project.id)
+      : getJoinAttemptKey(request, normalizedName);
+    if (await isJoinRateLimited(attemptKey)) {
+      return NextResponse.json({ error: "잠시 후 다시 시도해주세요" }, { status: 429, headers: { "Retry-After": "900" } });
+    }
     if (!project) {
       await burnPasscodeVerification(password);
       await recordJoinFailure(attemptKey);
@@ -58,7 +61,7 @@ export async function POST(request: NextRequest) {
     if (credentialError) throw credentialError;
     if (!credentials) {
       await burnPasscodeVerification(password);
-      await recordJoinFailure(attemptKey);
+      await recordJoinFailure(attemptKey, project.id);
       return NextResponse.json({ error: INVALID_MESSAGE }, { status: 401 });
     }
 
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest) {
     ]);
     const passwordRole: SharedProjectRole | null = matchesAdmin ? "admin" : matchesProgress ? "progress" : null;
     if (!passwordRole) {
-      await recordJoinFailure(attemptKey);
+      await recordJoinFailure(attemptKey, project.id);
       return NextResponse.json({ error: INVALID_MESSAGE }, { status: 401 });
     }
     await clearJoinFailures(attemptKey);

@@ -50,6 +50,6 @@ test("Progress normalizes delivered selected-round UPDATEs and reuses the guarde
   assert.match(realtimeSource, /!remotePlan\.updatedAt/u);
   assert.match(realtimeSource, /commitDailyPlanPatch\(remotePlan\.id, remotePlan\)/u);
   assert.match(guardedPatchSource, /compareUpdatedAt\(patch\.updatedAt, current\.updatedAt\) < 0/u);
-  assert.match(progressPageSource, /if \(isGuest \|\| !projectId \|\| !selectedDailyPlanId\)[\s\S]*import\("@\/lib\/realtime\/subscribeToProgressChanges"\)/u);
+  assert.match(progressPageSource, /if \(accessMode !== "member" \|\| !isProgressView \|\| !projectId \|\| !selectedDailyPlanId\)[\s\S]*import\("@\/lib\/realtime\/subscribeToProgressChanges"\)/u);
   assert.doesNotMatch(realtimeSource, /\bfetch\b|router\.refresh|refreshDailyPlans/u);
 });

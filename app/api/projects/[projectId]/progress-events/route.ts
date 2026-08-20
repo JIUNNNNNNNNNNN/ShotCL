@@ -8,6 +8,7 @@ import {
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import type {
   ProgressDailyPlanStreamEvent,
+  ProgressProjectDeletedStreamEvent,
   ProgressShotStreamEvent,
   ProgressSnapshotStreamEvent,
   ProgressStreamEvent
@@ -44,8 +45,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
     // Every EventSource connection and automatic reconnect revalidates the
     // active invite, including revoke and project scope, before opening Realtime.
     const access = await getProjectRequestAccess(request, projectId);
-    if (!access || access.mode !== "guest") {
-      return streamJson({ error: "게스트 진행도 접근 권한이 없습니다." }, 403);
+    if (!access || (access.mode !== "guest" && access.mode !== "legacy")) {
+      return streamJson({ error: "진행도 스트림 접근 권한이 없습니다." }, 403);
     }
 
     const supabase = requireProjectAccessDb();
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     let subscribeTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
     let snapshotReady = false;
+    let deletionProbeEmitted = false;
     let bufferedEvents: ProgressStreamEvent[] = [];
     const encoder = new TextEncoder();
 
@@ -84,6 +86,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
         return;
       }
       enqueueText(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+    const handleProjectDeletionSignal = (newRow: Record<string, unknown>) => {
+      if (
+        String(newRow.project_id ?? "") !== projectId
+        || !newRow.deletion_started_at
+      ) return;
+      const event = {
+        type: "project-deleted",
+        projectId
+      } satisfies ProgressProjectDeletedStreamEvent;
+      // This terminal signal must not wait behind the initial snapshot.
+      enqueueText(`event: project-deleted\ndata: ${JSON.stringify(event)}\n\n`);
+      void cleanup(true);
     };
     const abortStream = () => {
       void cleanup(false);
@@ -116,7 +131,43 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
         void (async () => {
           channel = supabase
-            .channel(`guest-progress:${projectId}:${dailyPlanId}:${crypto.randomUUID()}`)
+            .channel(`progress-project:${projectId}`, {
+              config: { private: true, broadcast: { ack: true } }
+            })
+            .on(
+              "broadcast",
+              { event: "project-deleted" },
+              ({ payload }) => {
+                if (
+                  deletionProbeEmitted
+                  || String(payload?.projectId ?? "") !== projectId
+                ) return;
+                deletionProbeEmitted = true;
+                // Broadcast is an untrusted low-latency wake-up. The Guest
+                // client probes the canonical root route before leaving.
+                enqueueText(`event: project-access-check\ndata: ${JSON.stringify({ projectId })}\n\n`);
+              }
+            )
+            .on(
+              "postgres_changes",
+              {
+                event: "INSERT",
+                schema: "public",
+                table: "project_deletion_events",
+                filter: `project_id=eq.${projectId}`
+              },
+              (payload) => handleProjectDeletionSignal(recordValue(payload.new))
+            )
+            .on(
+              "postgres_changes",
+              {
+                event: "UPDATE",
+                schema: "public",
+                table: "project_deletion_events",
+                filter: `project_id=eq.${projectId}`
+              },
+              (payload) => handleProjectDeletionSignal(recordValue(payload.new))
+            )
             .on(
               "postgres_changes",
               {

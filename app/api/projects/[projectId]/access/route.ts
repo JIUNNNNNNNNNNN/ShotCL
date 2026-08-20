@@ -109,7 +109,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     );
     const verifiedDecision = getKeyStaffUpgradeDecision(grant?.role ?? null, passwordMatches);
     if (verifiedDecision !== "upgrade") {
-      await recordJoinFailure(attemptKey);
+      await recordJoinFailure(attemptKey, projectId);
       return upgradeJson({ ok: false, error: "비밀번호가 올바르지 않습니다.", code: "PROJECT_ACCESS_PASSWORD_MISMATCH" }, 401);
     }
 

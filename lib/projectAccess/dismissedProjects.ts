@@ -60,6 +60,29 @@ export function getDismissedProjectStorageKey(ownerId: string) {
   return `${DISMISSED_PROJECT_IDS_KEY_PREFIX}:${ownerId}`;
 }
 
+/** 계정/초대 scope별 목록에서 삭제된 ID만 제거하고 다른 프로젝트 preference는 유지합니다. */
+export function forgetDismissedProjectEverywhere(projectId: string) {
+  const stableProjectId = normalizeStableProjectId(projectId);
+  if (typeof window === "undefined" || !stableProjectId) return;
+  try {
+    const keys = Array.from({ length: window.localStorage.length }, (_, index) => (
+      window.localStorage.key(index) ?? ""
+    )).filter((key) => key.startsWith(`${DISMISSED_PROJECT_IDS_KEY_PREFIX}:`));
+    for (const key of keys) {
+      const storedValue = JSON.parse(window.localStorage.getItem(key) ?? "[]") as unknown;
+      if (!Array.isArray(storedValue)) continue;
+      const remaining = storedValue.filter((value) => (
+        normalizeStableProjectId(typeof value === "string" ? value : "") !== stableProjectId
+      ));
+      if (remaining.length === storedValue.length) continue;
+      if (remaining.length > 0) window.localStorage.setItem(key, JSON.stringify(remaining));
+      else window.localStorage.removeItem(key);
+    }
+  } catch {
+    // 저장소가 차단되어도 서버의 영구 삭제 결과는 유지됩니다.
+  }
+}
+
 function writeDismissedProjectIds(ownerId: string, projectIds: Set<string>) {
   if (typeof window === "undefined" || !ownerId) return;
   try {

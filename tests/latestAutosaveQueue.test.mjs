@@ -3,6 +3,7 @@ import test from "node:test";
 import { LatestAutosaveQueue } from "../lib/client/latestAutosaveQueue.ts";
 import {
   canRestoreAutosaveDraft,
+  clearAutosaveDraftsForProject,
   createAutosaveDraftWriterId,
   discardAutosaveDraft,
   getAutosaveDraft,
@@ -223,4 +224,21 @@ test("saving an older snapshot rebases but preserves a newer same-writer draft",
     savedValue: "draft 1",
     writerId
   });
+});
+
+test("project deletion clears only autosave drafts carrying that project id", () => {
+  const deletedProjectId = "11111111-1111-4111-8111-111111111111";
+  const otherProjectId = "22222222-2222-4222-8222-222222222222";
+  const deletedKey = `shot:${deletedProjectId}:shot-a`;
+  const otherKey = `shot:${otherProjectId}:shot-b`;
+  const deletedWriter = createAutosaveDraftWriterId();
+  const otherWriter = createAutosaveDraftWriterId();
+  rememberAutosaveDraft(deletedKey, "deleted draft", "deleted draft", "base", "base", deletedWriter);
+  rememberAutosaveDraft(otherKey, "other draft", "other draft", "base", "base", otherWriter);
+
+  clearAutosaveDraftsForProject(deletedProjectId);
+
+  assert.equal(getAutosaveDraft(deletedKey), null);
+  assert.equal(getAutosaveDraft(otherKey)?.value, "other draft");
+  discardAutosaveDraft(otherKey, otherWriter);
 });

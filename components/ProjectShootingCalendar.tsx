@@ -217,6 +217,7 @@ export function ProjectShootingCalendar({
         </p>
       ) : null}
       <ProjectMonthlyCalendar
+        projectId={projectId}
         shootingStartDate={calendarInfo?.shootingStartDate}
         shootingEndDate={calendarInfo?.shootingEndDate}
         dailyPlans={calendarDailyPlans}

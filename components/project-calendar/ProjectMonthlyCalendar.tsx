@@ -100,6 +100,7 @@ type VisibleWeekRange = {
 };
 
 export type ProjectMonthlyCalendarProps = {
+  projectId: string;
   shootingStartDate?: string | null;
   shootingEndDate?: string | null;
   dailyPlans: readonly ProjectCalendarDailyPlan[];
@@ -118,6 +119,7 @@ export type ProjectMonthlyCalendarProps = {
  * 저장과 권한 검증은 외부 callback이 담당하며, 이 컴포넌트는 자동저장하지 않습니다.
  */
 export function ProjectMonthlyCalendar({
+  projectId,
   shootingStartDate,
   shootingEndDate,
   dailyPlans,
@@ -861,6 +863,7 @@ export function ProjectMonthlyCalendar({
       {editor ? (
         <ProjectCalendarEventEditor
           key={`${editor.event?.id ?? "new"}:${editor.startDate}:${editor.endDate}:${editor.presentation}`}
+          projectId={projectId}
           event={editor.event}
           initialStartDate={editor.startDate}
           initialEndDate={editor.endDate}

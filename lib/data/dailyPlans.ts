@@ -259,6 +259,11 @@ export function listDailyPlans(projectId: string): Promise<DailyPlanListItem[]> 
   return request;
 }
 
+/** 삭제된 프로젝트의 완료 전 목록 요청이 이후 화면에 재사용되지 않게 합니다. */
+export function clearDailyPlanReadCache(projectId: string) {
+  dailyPlanListRequests.delete(projectId);
+}
+
 async function loadDailyPlans(projectId: string): Promise<DailyPlanListItem[]> {
   try {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/daily-plans`, { cache: "no-store" });

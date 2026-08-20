@@ -280,6 +280,23 @@ function invalidateProjectCalendarReadCache(projectId: string) {
   }
 }
 
+/** 영구 삭제 뒤 해당 프로젝트의 calendar read와 legacy local rows만 폐기합니다. */
+export function clearProjectCalendarClientCache(projectId: string) {
+  invalidateProjectCalendarReadCache(projectId);
+  if (typeof window === "undefined") return;
+  const candidates = new Set(getLocalProjectIdCandidates(projectId));
+  const remaining = readLocalEvents().filter((event) => !candidates.has(event.projectId));
+  try {
+    if (remaining.length > 0) {
+      window.localStorage.setItem(LOCAL_CALENDAR_EVENTS_KEY, JSON.stringify(remaining));
+    } else {
+      window.localStorage.removeItem(LOCAL_CALENDAR_EVENTS_KEY);
+    }
+  } catch {
+    // Storage availability must not block the canonical server deletion result.
+  }
+}
+
 async function readMutationEvent(response: Response, fallback: string) {
   const payload = await readPayload(response);
   if (!response.ok) throw requestError(payload, response.status, fallback);

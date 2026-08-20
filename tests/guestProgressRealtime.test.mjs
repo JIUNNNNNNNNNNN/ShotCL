@@ -29,7 +29,7 @@ test("the readable Guest cookie is an exact non-authoritative bootstrap hint", (
   assert.match(authSource, /const refreshAccount[\s\S]*clearBrowserGuestModeHint\(\)/u);
 });
 
-test("Guest allowlist exposes only scoped GET progress streams", () => {
+test("Guest allowlist exposes only scoped GET progress and deletion streams", () => {
   const allowed = isGuestProjectApiRequestAllowed({
     method: "GET",
     pathname: `/api/projects/${projectId}/progress-events`,
@@ -54,6 +54,24 @@ test("Guest allowlist exposes only scoped GET progress streams", () => {
     pathname: `/api/projects/${projectId}/progress-events`,
     projectId,
     searchParams: new URLSearchParams({ dailyPlanId, extra: "1" })
+  }), false);
+  assert.equal(isGuestProjectApiRequestAllowed({
+    method: "GET",
+    pathname: `/api/projects/${projectId}/deletion-events`,
+    projectId,
+    searchParams: new URLSearchParams()
+  }), true);
+  assert.equal(isGuestProjectApiRequestAllowed({
+    method: "GET",
+    pathname: `/api/projects/${projectId}/deletion-events`,
+    projectId,
+    searchParams: new URLSearchParams({ extra: "1" })
+  }), false);
+  assert.equal(isGuestProjectApiRequestAllowed({
+    method: "POST",
+    pathname: `/api/projects/${projectId}/deletion-events`,
+    projectId,
+    searchParams: new URLSearchParams()
   }), false);
 });
 
@@ -90,7 +108,7 @@ test("secured SSE validates every connection, subscribes before snapshot, and cl
   const snapshotIndex = route.indexOf("const [shotsResult, planResult] = await Promise.all");
   assert.ok(accessIndex >= 0 && accessIndex < streamIndex);
   assert.ok(subscribeIndex >= 0 && subscribeIndex < snapshotIndex);
-  assert.match(route, /access\.mode !== "guest"/u);
+  assert.match(route, /access\.mode !== "guest" && access\.mode !== "legacy"/u);
   assert.match(route, /\.eq\("project_id", projectId\)[\s\S]*\.eq\("daily_plan_id", dailyPlanId\)/u);
   assert.equal((route.match(/\.channel\(/gu) ?? []).length, 1);
   assert.match(route, /table: "shots"/u);
@@ -112,10 +130,10 @@ test("Guest and member each own one selected-round connection and structural eve
   const guestSubscriber = readSource("lib/realtime/subscribeToGuestProgress.ts");
   const memberSubscriber = readSource("lib/realtime/subscribeToProgressChanges.ts");
   assert.equal((guestSubscriber.match(/new EventSource\(/gu) ?? []).length, 1);
-  assert.match(page, /if \(!isGuest \|\| !isProgressView[\s\S]*subscribeToGuestProgress/u);
+  assert.match(page, /usesServerProgressStream = isGuest \|\| accessMode === "legacy"[\s\S]*if \(!usesServerProgressStream \|\| !isProgressView[\s\S]*subscribeToGuestProgress/u);
   assert.match(page, /change\.eventType === "DELETE"[\s\S]*nextById\.delete\(deletedId\)/u);
   assert.match(page, /nextById\.set\(remote\.id/u);
-  assert.match(page, /if \(isGuest \|\| !projectId[\s\S]*import\("@\/lib\/realtime\/subscribeToProgressChanges"\)/u);
+  assert.match(page, /if \(accessMode !== "member" \|\| !isProgressView \|\| !projectId[\s\S]*import\("@\/lib\/realtime\/subscribeToProgressChanges"\)/u);
   assert.doesNotMatch(page, /import \{ subscribeToProgressChanges \} from/u);
   assert.equal((memberSubscriber.match(/\.channel\(/gu) ?? []).length, 1);
   assert.match(memberSubscriber, /queueMicrotask\(flushShotChanges\)/u);

@@ -18,14 +18,28 @@ export type ProgressSnapshotStreamEvent = {
   dailyPlan: Record<string, unknown> | null;
 };
 
+/** Terminal access event emitted when permanent deletion acquires its DB lock. */
+export type ProgressProjectDeletedStreamEvent = {
+  type: "project-deleted";
+  projectId: string;
+};
+
 export type ProgressStreamEvent =
   | ProgressShotStreamEvent
   | ProgressDailyPlanStreamEvent
-  | ProgressSnapshotStreamEvent;
+  | ProgressSnapshotStreamEvent
+  | ProgressProjectDeletedStreamEvent;
 
 export function parseProgressStreamEvent(value: unknown): ProgressStreamEvent | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
+  if (source.type === "project-deleted") {
+    if (typeof source.projectId !== "string" || !source.projectId.trim()) return null;
+    return {
+      type: "project-deleted",
+      projectId: source.projectId.trim()
+    };
+  }
   if (source.type === "snapshot") {
     if (!Array.isArray(source.shots)) return null;
     const shots = source.shots.filter(isRecord);

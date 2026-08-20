@@ -102,6 +102,8 @@ test("session and canonical-user lookups stay inside their declared owners", () 
   const allowedGetSessionOwners = new Set([
     "app/auth/callback/page.tsx",
     "components/AuthSessionProvider.tsx",
+    // Rare destructive action performs a fresh bearer check only on submit.
+    "lib/data/projectPermanentDeletion.ts",
     "lib/supabase/client.ts"
   ]);
   const unexpectedGetSession = productSources
@@ -133,7 +135,14 @@ test("same-project navigation never forces a refresh or hard document navigation
   // The account invite bridge is not same-project navigation: it must apply the
   // same-origin POST response's linked-membership cookies before entering the
   // project document. Ordinary project UI navigation stays soft.
-  const allowedHardNavigationOwners = new Set(["app/invite/[token]/route.ts"]);
+  const allowedHardNavigationOwners = new Set([
+    "app/invite/[token]/route.ts",
+    // Permanent project deletion/access loss must leave the dead document and
+    // make browser Back fail closed rather than perform same-project navigation.
+    "app/projects/[id]/basic-info/page.tsx",
+    "app/projects/[id]/page.tsx",
+    "components/ProjectAccessGate.tsx"
+  ]);
   const hardNavigationOwners = productSources
     .map((pathname) => [
       pathname,
@@ -229,6 +238,7 @@ test("all project mutation routes retain an explicit server access guard", () =>
     ["app/api/projects/[projectId]/daily-plans/[dailyPlanId]/staff-list/route.ts", /\bredirectToProjectStaffRoute\s*\(/u],
     ["app/api/projects/[projectId]/daily-plans/route.ts", /\bgetAccessGrant\s*\(/u],
     ["app/api/projects/[projectId]/reference-assets/route.ts", /\bgetMaterialRole\s*\(/u],
+    ["app/api/projects/[projectId]/route.ts", /\bresolveAuthenticatedGoogleAccount\s*\(/u],
     ["app/api/projects/[projectId]/schedule-images/route.ts", /\brequireAdminProject\s*\(/u],
     ["app/api/projects/[projectId]/scene-list/route.ts", /\brequireWriteScope\s*\(/u],
     ["app/api/projects/[projectId]/shot-diagrams/route.ts", /\bgetDiagramAccessRole\s*\(/u],
@@ -288,9 +298,9 @@ test("server access envelopes reuse one canonical account lookup and its authori
   );
   assert.match(
     accessServer,
-    /\.select\("id,name,shoot_date,description,created_at,share_enabled,created_by"\)/u
+    /\.select\("id,name,shoot_date,description,created_at,share_enabled,created_by,deletion_started_at"\)/u
   );
-  const memberAccessStart = accessServer.indexOf("if (project && role)");
+  const memberAccessStart = accessServer.indexOf("if (project && !project.deletion_started_at && role)");
   const projectSnapshotStart = accessServer.indexOf("project: {", memberAccessStart);
   const projectSnapshotEnd = accessServer.indexOf("grant: {", projectSnapshotStart);
   assert.ok(

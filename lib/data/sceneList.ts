@@ -1,4 +1,4 @@
-import { isValidDatabaseProjectId } from "@/lib/projectId";
+import { getLocalProjectIdCandidates, isValidDatabaseProjectId } from "@/lib/projectId";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { normalizeSceneCutCount } from "@/lib/sceneCutCount";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
@@ -780,6 +780,30 @@ function writeLocalSceneList(
   buckets[projectId] = sceneList;
   window.localStorage.setItem(LOCAL_SCENE_LIST_KEY, JSON.stringify(buckets));
   return sceneList;
+}
+
+/** 삭제된 프로젝트의 legacy scene-list bucket만 제거합니다. */
+export function clearLocalProjectSceneList(projectId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_SCENE_LIST_KEY);
+    if (!raw) return;
+    const buckets = JSON.parse(raw) as LocalSceneListBuckets;
+    let changed = false;
+    for (const candidate of getLocalProjectIdCandidates(projectId)) {
+      if (!Object.prototype.hasOwnProperty.call(buckets, candidate)) continue;
+      delete buckets[candidate];
+      changed = true;
+    }
+    if (!changed) return;
+    if (Object.keys(buckets).length > 0) {
+      window.localStorage.setItem(LOCAL_SCENE_LIST_KEY, JSON.stringify(buckets));
+    } else {
+      window.localStorage.removeItem(LOCAL_SCENE_LIST_KEY);
+    }
+  } catch {
+    // Storage availability must not block the canonical server deletion result.
+  }
 }
 
 function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCell> {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, Save, Trash2, X } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
@@ -35,6 +35,7 @@ type ProjectBasicInfoFormProps = {
   initialValue: ProjectBasicInfo;
   onAutoSave: (value: ProjectBasicInfo) => Promise<void>;
   onComplete: () => void;
+  headerAction?: ReactNode;
 };
 
 type ProjectBasicInfoDraft = {
@@ -46,7 +47,14 @@ const fieldClass =
   "min-h-11 w-full min-w-0 border border-field-border bg-field-input px-3 py-2 text-center text-sm text-field-text outline-none transition focus:border-field-primary focus:ring-2 focus:ring-field-primary/25";
 
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
-export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onAutoSave, onComplete }: ProjectBasicInfoFormProps) {
+export function ProjectBasicInfoForm({
+  projectId,
+  projectName,
+  initialValue,
+  onAutoSave,
+  onComplete,
+  headerAction
+}: ProjectBasicInfoFormProps) {
   const { deleteWithUndo } = useProjectDeleteUndo();
   const [value, setValue] = useState<ProjectBasicInfo>(() => normalizeProjectBasicInfoForForm(initialValue));
   const [totalEpisodesDraft, setTotalEpisodesDraft] = useState(String(initialValue.totalEpisodes));
@@ -454,14 +462,18 @@ export function ProjectBasicInfoForm({ projectId, projectName, initialValue, onA
       onCompositionEnd={() => setIsComposing(false)}
       className="mx-auto grid w-full max-w-4xl gap-4"
     >
-      <div className="flex flex-wrap items-center justify-center gap-2 px-1 text-center">
-        <div className="min-w-0 text-center">
-          <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>
-          <p className="mt-1 break-words text-sm text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
+      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-start gap-2 px-1 text-center">
+        <span aria-hidden />
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 text-center">
+          <div className="min-w-0 text-center">
+            <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>
+            <p className="mt-1 break-words text-sm text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
+          </div>
+          <span className="rounded-md border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
+            프로젝트 공통 정보
+          </span>
         </div>
-        <span className="rounded-md border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
-          프로젝트 공통 정보
-        </span>
+        <div className="flex min-h-10 items-start justify-end">{headerAction}</div>
       </div>
 
       <section className="ui-motion-surface rounded-[var(--radius-card)] border border-field-border bg-field-panel p-3 md:p-5">

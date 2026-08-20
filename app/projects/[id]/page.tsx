@@ -69,6 +69,7 @@ import { applyProgressOrderToTimetableScenes } from "@/lib/progress/shootingOrde
 import { hasShotOverheadContent } from "@/lib/shotOverhead";
 import { useProjectAccess } from "@/components/ProjectAccessGate";
 import { useProjectWorkspace } from "@/components/ProjectWorkspaceContext";
+import { markProjectDeletedInThisTab } from "@/lib/projectAccess/deletedProjectMarker.client";
 import {
   useAutoContextualGuide,
   useContextualGuide,
@@ -284,7 +285,7 @@ function isMeaningfulScheduleRow(row: DailyPlanMealTime) {
 
 /** 프로젝트 상세 화면: 일일촬영 진행표 + 컷 편집 모달을 담당합니다. */
 export default function ProjectDetailPage() {
-  const { role, isGuest, canEditProgressStatus } = useProjectAccess();
+  const { role, isGuest, accessMode, canEditProgressStatus } = useProjectAccess();
   const {
     projectId,
     project,
@@ -295,6 +296,7 @@ export default function ProjectDetailPage() {
     upsertDailyPlan
   } = useProjectWorkspace();
   const progressOnly = role === "progress";
+  const usesServerProgressStream = isGuest || accessMode === "legacy";
   const persistentProjectShell = usePersistentProjectShell();
   const searchParams = useSearchParams();
   const requestedDailyPlanId = searchParams.get("dailyPlanId") ?? "";
@@ -391,6 +393,8 @@ export default function ProjectDetailPage() {
   } | null>(null);
   const resetProgressEntryRef = useRef(progressEntryKey);
   const realtimeRefreshStateRef = useRef(new Map<string, { inFlight: boolean; queued: boolean }>());
+  const projectDeletionHandledRef = useRef(false);
+  const projectAccessProbeRef = useRef<Promise<void> | null>(null);
   const initializedBucketEntryRef = useRef(seededProgress ? progressEntryKey : "");
   const activeProgressEntryKeyRef = useRef(progressEntryKey);
   const editingScheduleRef = useRef(editingSchedule);
@@ -1110,8 +1114,45 @@ export default function ProjectDetailPage() {
     startProgressMediaLoad
   ]);
 
+  const leaveProjectAfterRealtimeAccessEnds = useCallback((markAsDeleted: boolean) => {
+    if (projectDeletionHandledRef.current) return;
+    projectDeletionHandledRef.current = true;
+    if (markAsDeleted) markProjectDeletedInThisTab(projectId);
+    void import("@/lib/projectAccess/projectDeletion.client")
+      .then(({ clearDeletedProjectClientState }) => clearDeletedProjectClientState(projectId))
+      .catch(() => undefined)
+      .finally(() => window.location.replace("/"));
+  }, [projectId]);
+
+  const handleRealtimeProjectDeleted = useCallback((deletedProjectId: string) => {
+    if (deletedProjectId !== projectId) return;
+    leaveProjectAfterRealtimeAccessEnds(true);
+  }, [leaveProjectAfterRealtimeAccessEnds, projectId]);
+
+  const handleRealtimeConnectionError = useCallback(() => {
+    if (projectDeletionHandledRef.current || projectAccessProbeRef.current) return;
+    const probe = fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+      cache: "no-store",
+      credentials: "same-origin"
+    })
+      .then((response) => {
+        if (response.status === 410 || response.status === 404) {
+          leaveProjectAfterRealtimeAccessEnds(true);
+        } else if (response.status === 401 || response.status === 403) {
+          leaveProjectAfterRealtimeAccessEnds(false);
+        }
+      })
+      .catch(() => {
+        // A network/5xx failure remains on the existing transport's automatic reconnect path.
+      })
+      .finally(() => {
+        if (projectAccessProbeRef.current === probe) projectAccessProbeRef.current = null;
+      });
+    projectAccessProbeRef.current = probe;
+  }, [leaveProjectAfterRealtimeAccessEnds, projectId]);
+
   useEffect(() => {
-    if (isGuest || !projectId || !selectedDailyPlanId) return undefined;
+    if (accessMode !== "member" || !isProgressView || !projectId || !selectedDailyPlanId) return undefined;
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
     void import("@/lib/realtime/subscribeToProgressChanges")
@@ -1119,7 +1160,9 @@ export default function ProjectDetailPage() {
         if (cancelled) return;
         unsubscribe = subscribeToProgressChanges(projectId, selectedDailyPlanId, {
           onShotChanges: handleRealtimeShotChanges,
-          onDailyPlanChange: (change) => handleRealtimeDailyPlanUpdate(change.newRow)
+          onDailyPlanChange: (change) => handleRealtimeDailyPlanUpdate(change.newRow),
+          onProjectDeleted: handleRealtimeProjectDeleted,
+          onConnectionError: handleRealtimeConnectionError
         });
       })
       .catch(() => {
@@ -1131,27 +1174,34 @@ export default function ProjectDetailPage() {
     };
   }, [
     handleRealtimeDailyPlanUpdate,
+    handleRealtimeConnectionError,
+    handleRealtimeProjectDeleted,
     handleRealtimeShotChanges,
-    isGuest,
+    accessMode,
+    isProgressView,
     projectId,
     selectedDailyPlanId
   ]);
 
   useEffect(() => {
-    if (!isGuest || !isProgressView || !projectId || !selectedDailyPlanId) return undefined;
+    if (!usesServerProgressStream || !isProgressView || !projectId || !selectedDailyPlanId) return undefined;
     return subscribeToGuestProgress(projectId, selectedDailyPlanId, {
       onSnapshot: applyGuestRealtimeSnapshot,
       onShot: (event) => handleRealtimeShotChanges([event]),
-      onDailyPlan: (event) => handleRealtimeDailyPlanUpdate(event.newRow)
+      onDailyPlan: (event) => handleRealtimeDailyPlanUpdate(event.newRow),
+      onProjectDeleted: handleRealtimeProjectDeleted,
+      onConnectionError: handleRealtimeConnectionError
     });
   }, [
     applyGuestRealtimeSnapshot,
     handleRealtimeDailyPlanUpdate,
+    handleRealtimeConnectionError,
+    handleRealtimeProjectDeleted,
     handleRealtimeShotChanges,
-    isGuest,
     isProgressView,
     projectId,
-    selectedDailyPlanId
+    selectedDailyPlanId,
+    usesServerProgressStream
   ]);
 
   const handleShotMediaMutation = useCallback((mutation: ShotMediaLinkMutation) => {
@@ -2022,6 +2072,7 @@ export default function ProjectDetailPage() {
       {!isGuest && editingSchedule ? (
         <ProgressScheduleEditorModal
           key={`${editingSchedule.dailyPlanId}:${editingSchedule.item.id}:${editingSchedule.sessionId}`}
+          projectId={projectId}
           item={editingSchedule.item}
           readOnly={role !== "admin"}
           isSaving={savingScheduleSessionId === editingSchedule.sessionId}

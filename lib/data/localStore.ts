@@ -8,6 +8,7 @@ import type {
   Shot,
   ShotStatusLog
 } from "@/lib/types";
+import { getLocalProjectIdCandidates } from "@/lib/projectId";
 
 const PROJECTS_KEY = "today-storyboard-projects";
 const SHOTS_KEY = "today-storyboard-shots";
@@ -85,6 +86,29 @@ export function writeLocalBuckets(next: Partial<LocalBuckets>, projectId?: strin
   if (next.projectStaffMembers) writeArray(PROJECT_STAFF_MEMBERS_KEY, next.projectStaffMembers);
   if (next.projectStaffDepartments) writeArray(PROJECT_STAFF_DEPARTMENTS_KEY, next.projectStaffDepartments);
   notifyLocalProjectChange(projectId);
+}
+
+/** 서버에서 영구 삭제된 프로젝트와 같은 ID를 가진 legacy fallback 데이터만 제거합니다. */
+export function clearLocalProjectBuckets(projectId: string) {
+  if (!canUseStorage()) return;
+  const candidates = new Set(getLocalProjectIdCandidates(projectId));
+  if (candidates.size === 0) return;
+  const buckets = readLocalBuckets();
+  const removedShotIds = new Set(
+    buckets.shots
+      .filter((shot) => candidates.has(shot.projectId))
+      .map((shot) => shot.id)
+  );
+  writeLocalBuckets({
+    projects: buckets.projects.filter((project) => !candidates.has(project.id)),
+    shots: buckets.shots.filter((shot) => !candidates.has(shot.projectId)),
+    logs: buckets.logs.filter((log) => !removedShotIds.has(log.shotId)),
+    dailyPlans: buckets.dailyPlans.filter((plan) => !candidates.has(plan.projectId)),
+    dailyPlanShots: buckets.dailyPlanShots.filter((shot) => !candidates.has(shot.projectId)),
+    dailyPlanStaffMembers: buckets.dailyPlanStaffMembers.filter((member) => !candidates.has(member.projectId)),
+    projectStaffMembers: buckets.projectStaffMembers.filter((member) => !candidates.has(member.projectId)),
+    projectStaffDepartments: buckets.projectStaffDepartments.filter((department) => !candidates.has(department.projectId))
+  }, projectId);
 }
 
 /** crypto API가 없는 환경까지 고려한 간단한 ID 생성기입니다. */
