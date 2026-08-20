@@ -104,14 +104,23 @@ export default function ProjectBasicInfoPage() {
 
   return (
     <>
-      <ProjectBasicInfoForm
-        projectId={project.id}
-        projectName={project.name}
-        initialValue={basicInfo}
-        onAutoSave={persistBasicInfo}
-        onComplete={completeBasicInfo}
-        headerAction={<ProjectPageActionsMenu registration={projectSettingsActionMenu} />}
-      />
+      <div className="mx-auto grid w-full max-w-4xl gap-4">
+        <header
+          className="flex min-h-11 w-full items-center justify-between gap-3 px-1"
+          data-basic-info-page-header
+        >
+          <h1 className="ui-density-heading font-display font-black text-field-text">기본정보</h1>
+          {projectSettingsActionMenu ? (
+            <ProjectPageActionsMenu registration={projectSettingsActionMenu} />
+          ) : null}
+        </header>
+        <ProjectBasicInfoForm
+          projectId={project.id}
+          initialValue={basicInfo}
+          onAutoSave={persistBasicInfo}
+          onComplete={completeBasicInfo}
+        />
+      </div>
       {isCreator && isDeleteDialogOpen ? (
         <ProjectPermanentDeleteDialog
           key={`${project.id}:permanent-delete`}

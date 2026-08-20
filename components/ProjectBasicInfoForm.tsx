@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Plus, Save, Trash2, X } from "lucide-react";
 import { AutosaveStatus } from "@/components/AutosaveStatus";
@@ -31,11 +31,9 @@ import {
 
 type ProjectBasicInfoFormProps = {
   projectId: string;
-  projectName: string;
   initialValue: ProjectBasicInfo;
   onAutoSave: (value: ProjectBasicInfo) => Promise<void>;
   onComplete: () => void;
-  headerAction?: ReactNode;
 };
 
 type ProjectBasicInfoDraft = {
@@ -49,11 +47,9 @@ const fieldClass =
 /** 일촬표와 분리된 프로젝트 단위 기본정보만 편집합니다. */
 export function ProjectBasicInfoForm({
   projectId,
-  projectName,
   initialValue,
   onAutoSave,
-  onComplete,
-  headerAction
+  onComplete
 }: ProjectBasicInfoFormProps) {
   const { deleteWithUndo } = useProjectDeleteUndo();
   const [value, setValue] = useState<ProjectBasicInfo>(() => normalizeProjectBasicInfoForForm(initialValue));
@@ -460,22 +456,8 @@ export function ProjectBasicInfoForm({
       }}
       onCompositionStart={() => setIsComposing(true)}
       onCompositionEnd={() => setIsComposing(false)}
-      className="mx-auto grid w-full max-w-4xl gap-4"
+      className="grid w-full gap-4"
     >
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-start gap-2 px-1 text-center">
-        <span aria-hidden />
-        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 text-center">
-          <div className="min-w-0 text-center">
-            <p className="ui-density-heading font-display font-black text-field-text">프로젝트 기본정보</p>
-            <p className="mt-1 break-words text-sm text-field-muted [overflow-wrap:anywhere]">{projectName}</p>
-          </div>
-          <span className="rounded-md border border-field-border bg-field-panel px-3 py-1.5 text-xs text-field-muted">
-            프로젝트 공통 정보
-          </span>
-        </div>
-        <div className="flex min-h-10 items-start justify-end">{headerAction}</div>
-      </div>
-
       <section className="ui-motion-surface rounded-[var(--radius-card)] border border-field-border bg-field-panel p-3 md:p-5">
         <div className="grid gap-3 md:grid-cols-[0.55fr_1fr_1fr]">
           <label className="grid gap-1.5">
