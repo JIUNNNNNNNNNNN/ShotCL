@@ -325,7 +325,7 @@ export function ProjectStaffInviteCard({
         스탭 초대
       </h3>
       <p id="project-staff-invite-description" className="mt-1 text-[11px] font-medium leading-[1.55] text-field-muted">
-        카카오톡으로 현장 진행도, 일촬표와 시나리오를 공유할 수 있습니다.
+        카카오톡으로 진행도 OK·OMIT 참여와 일촬표·시나리오 열람을 공유할 수 있습니다.
       </p>
 
       <div className="mt-3 grid min-w-0 gap-2" aria-busy={isBusy} aria-describedby="project-staff-invite-description">
@@ -532,7 +532,7 @@ function buildKakaoInviteMessage(projectName: string, inviteUrl: string) {
   return [
     `[ShotCL] ${projectName} 스탭 초대`,
     "",
-    "로그인 없이 진행도, 일촬표와 시나리오를 바로 확인할 수 있습니다.",
+    "로그인 없이 진행도에서 OK·OMIT를 처리하고, 일촬표와 시나리오를 확인할 수 있습니다.",
     inviteUrl,
   ].join("\n");
 }

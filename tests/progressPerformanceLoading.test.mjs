@@ -96,8 +96,9 @@ test("Progress summary media and stable Cut links load in bounded background bat
   assert.doesNotMatch(shotCard, /canLoad=|눌러서 보기/u);
   assert.equal((shotCard.match(/await onLoadGalleryMedia\(shot, category\)/gu) ?? []).length, 1);
 
-  assert.match(source, /if \(!readOnly\) \{\s*return \(\s*<ShotReorderList/u);
-  assert.equal((source.match(/readOnly=\{isGuest\}/gu) ?? []).length, 2);
+  assert.match(source, /if \(!reorderReadOnly \|\| !statusReadOnly\) \{\s*return \(\s*<ShotReorderList/u);
+  assert.match(source, /disabled=\{disabled \|\| reorderReadOnly\}/u);
+  assert.equal((source.match(/reorderReadOnly=\{isGuest\}/gu) ?? []).length, 2);
   assert.doesNotMatch(
     source,
     /Promise\.all\(\[\s*import\("@\/components\/DailyPlanGatheringLocations"\)/u

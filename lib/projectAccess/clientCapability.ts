@@ -2,6 +2,24 @@ import type { SharedProjectRole } from "@/lib/projectAccess/core";
 
 export type ClientProjectAccessMode = "member" | "guest" | "legacy";
 
+/**
+ * 진행 컷의 canonical OK/OMIT toggle만 허용하는 좁은 client capability입니다.
+ * Guest invite는 전체 editor eligibility 없이 이 상태 변경만 사용할 수 있습니다.
+ */
+export function canUpdateProjectProgressStatus({
+  accessMode,
+  role,
+  editorEligible
+}: {
+  accessMode: ClientProjectAccessMode | null;
+  role: SharedProjectRole | null;
+  editorEligible: boolean;
+}) {
+  if (role === "admin") return true;
+  if (role !== "progress") return false;
+  return accessMode === "guest" || editorEligible;
+}
+
 export function isMemberReadOnlyFallback({
   accessMode,
   serverRole,

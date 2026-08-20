@@ -16,6 +16,7 @@ import {
   type SharedProjectRole
 } from "@/lib/projectAccess/core";
 import {
+  canUpdateProjectProgressStatus,
   isMemberReadOnlyFallback,
   resolveLiveProjectCapability
 } from "@/lib/projectAccess/clientCapability";
@@ -103,8 +104,11 @@ export function ProjectAccessGate({
     resolvedRole: currentRole,
     accountStatus
   });
-  const canEditProgressStatus = currentRole === "admin"
-    || (effectiveEditorEligible && currentRole === "progress");
+  const canEditProgressStatus = canUpdateProjectProgressStatus({
+    accessMode,
+    role: currentRole,
+    editorEligible: effectiveEditorEligible
+  });
   const applyVerifiedRole = useCallback((nextRole: SharedProjectRole) => {
     // 이 client callback은 서버 승격 성공 응답만 반영하며 downgrade는 허용하지 않습니다.
     if (isGuest || !effectiveEditorEligible || !isKeyStaffProjectRole(nextRole)) return;
@@ -191,7 +195,7 @@ export function ProjectAccessGate({
           {missingAccess
             ? "Main에서 프로젝트를 다시 선택하거나 유효한 초대 링크를 열어주세요."
             : isGuest
-              ? "게스트 초대 링크에서는 진행도, 일촬표와 시나리오만 읽을 수 있습니다."
+              ? "게스트 초대 링크에서는 진행도 OK·OMIT만 변경할 수 있고, 일촬표와 시나리오는 읽기 전용입니다."
               : "Staff 권한은 진행도와 프로젝트 자료를 읽기 전용으로 이용할 수 있습니다."}
         </p>
         <Link

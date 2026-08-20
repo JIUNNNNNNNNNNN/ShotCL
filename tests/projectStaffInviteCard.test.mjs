@@ -42,7 +42,7 @@ test("Kakao sharing retains the canonical message clipboard flow", () => {
   assert.match(cardSource, /copyText\(buildKakaoInviteMessage\(projectName, inviteUrl\)\)/u);
   assert.match(cardSource, /초대 문구와 링크가 복사되었습니다\./u);
   assert.match(cardSource, /\[ShotCL\] \$\{projectName\} 스탭 초대/u);
-  assert.match(cardSource, /로그인 없이 진행도, 일촬표와 시나리오를 바로 확인할 수 있습니다\./u);
+  assert.match(cardSource, /로그인 없이 진행도에서 OK·OMIT를 처리하고, 일촬표와 시나리오를 확인할 수 있습니다\./u);
   assert.doesNotMatch(cardSource, /navigator\.share|Kakao\.init|getUserMedia/u);
 });
 

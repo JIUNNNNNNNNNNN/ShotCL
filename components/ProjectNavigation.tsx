@@ -479,7 +479,9 @@ function GuestProjectNavigation({
         <p className="break-words text-sm font-black leading-5 text-field-text [overflow-wrap:anywhere]" title={projectName}>
           {projectName}
         </p>
-        <p className="mt-1 text-[11px] font-bold text-field-primary">게스트 읽기 전용</p>
+        <p className="mt-1 text-[11px] font-bold leading-4 text-field-primary">
+          진행도 OK·OMIT 가능 · 일촬표/시나리오 열람
+        </p>
         {isLoading ? <p className="mt-1 text-[11px] text-field-muted">회차 불러오는 중</p> : null}
         {error ? <p className="mt-1 text-[11px] leading-4 text-field-danger">{getErrorMessage(error, "프로젝트를 불러오지 못했습니다.")}</p> : null}
       </div>

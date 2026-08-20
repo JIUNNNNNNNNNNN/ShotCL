@@ -318,7 +318,7 @@ test("server access envelopes reuse one canonical account lookup and its authori
   );
 });
 
-test("guest reads remain narrowly scoped and all guest mutations are denied", () => {
+test("guest reads stay scoped and only the exact Progress status mutation is added", () => {
   const projectId = "11111111-1111-4111-8111-111111111111";
   const request = (method, pathname, query = "") => isGuestProjectApiRequestAllowed({
     method,
@@ -332,6 +332,9 @@ test("guest reads remain narrowly scoped and all guest mutations are denied", ()
   assert.equal(request("GET", `/api/projects/${projectId}/shots`, "dailyPlanId=day-1"), true);
   assert.equal(request("GET", `/api/projects/${projectId}/shots`), false);
   assert.equal(request("GET", `/api/projects/${projectId}/staff-list`), false);
+  const shotId = "22222222-2222-4222-8222-222222222222";
+  assert.equal(request("PATCH", `/api/projects/${projectId}/shots/${shotId}/status`), true);
+  assert.equal(request("PATCH", `/api/projects/${projectId}/shots/${shotId}`), false);
   for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
     assert.equal(request(method, `/api/projects/${projectId}`), false);
     assert.equal(request(method, `/api/projects/${projectId}/shots`, "dailyPlanId=day-1"), false);

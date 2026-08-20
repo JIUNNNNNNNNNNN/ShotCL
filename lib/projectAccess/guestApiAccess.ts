@@ -5,6 +5,8 @@ export type GuestProjectApiRequest = {
   searchParams: URLSearchParams;
 };
 
+export type GuestProgressStatus = "pending" | "ok" | "omit";
+
 const LEGACY_PROJECT_ID_PATTERN = /^project_([0-9a-f-]{36})$/i;
 const DATABASE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_ARCHIVE_DAILY_PLAN_ID = "__project_archive__";
@@ -20,8 +22,6 @@ function normalizeGuestProjectId(value: string) {
  * server layout은 이 판정을 거치지 않고 token 기반 resolver로 프로젝트 shell만 엽니다.
  */
 export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
-  if (input.method.toUpperCase() !== "GET") return false;
-
   const matched = input.pathname.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
   if (!matched) return false;
 
@@ -34,6 +34,18 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
   if (normalizeGuestProjectId(pathProjectId) !== normalizeGuestProjectId(input.projectId)) return false;
 
   const suffix = (matched[2] || "").replace(/\/$/, "");
+  const method = input.method.toUpperCase();
+  if (method === "PATCH") {
+    const statusMutationMatch = suffix.match(/^\/shots\/([^/]+)\/status$/);
+    if (!statusMutationMatch || input.searchParams.size !== 0) return false;
+    try {
+      return DATABASE_UUID_PATTERN.test(decodeURIComponent(statusMutationMatch[1] ?? ""));
+    } catch {
+      return false;
+    }
+  }
+  if (method !== "GET") return false;
+
   if (!suffix) return true;
   if (suffix === "/daily-plans") return input.searchParams.size === 0;
 
@@ -81,4 +93,24 @@ export function isGuestProjectApiRequestAllowed(input: GuestProjectApiRequest) {
   }
 
   return false;
+}
+
+/** Status endpoint가 허용하는 유일한 JSON shape입니다. */
+export function parseProgressStatusMutationPayload(value: unknown): GuestProgressStatus | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== 1 || keys[0] !== "status") return null;
+  return record.status === "pending" || record.status === "ok" || record.status === "omit"
+    ? record.status
+    : null;
+}
+
+/** Guest는 OK/OMIT 지정과 기존 terminal status의 canonical 해제만 할 수 있습니다. */
+export function isGuestProgressStatusTransitionAllowed(
+  currentStatus: unknown,
+  requestedStatus: GuestProgressStatus
+) {
+  if (requestedStatus === "ok" || requestedStatus === "omit") return true;
+  return currentStatus === "ok" || currentStatus === "omit";
 }

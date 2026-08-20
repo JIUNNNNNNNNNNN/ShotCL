@@ -158,7 +158,7 @@ const ShotReorderList = dynamic(
 type ProgressShotListProps = {
   allShots: Shot[];
   visibleShots: Shot[];
-  readOnly: boolean;
+  reorderReadOnly: boolean;
   disabled: boolean;
   statusReadOnly: boolean;
   interactionGuideTarget: boolean;
@@ -168,11 +168,11 @@ type ProgressShotListProps = {
   renderRowsBeforeIndex?: (index: number) => ReactNode;
 };
 
-/** Guest readers do not hydrate pointer/drag state or download the reorder implementation. */
+/** 상태 변경과 정렬 권한을 분리해 Guest swipe에는 기존 gesture 구현만 재사용합니다. */
 function ProgressShotList({
   allShots,
   visibleShots,
-  readOnly,
+  reorderReadOnly,
   disabled,
   statusReadOnly,
   interactionGuideTarget,
@@ -181,12 +181,12 @@ function ProgressShotList({
   renderShot,
   renderRowsBeforeIndex
 }: ProgressShotListProps) {
-  if (!readOnly) {
+  if (!reorderReadOnly || !statusReadOnly) {
     return (
       <ShotReorderList
         allShots={allShots}
         visibleShots={visibleShots}
-        disabled={disabled}
+        disabled={disabled || reorderReadOnly}
         statusReadOnly={statusReadOnly}
         interactionGuideTarget={interactionGuideTarget}
         onReorder={onReorder}
@@ -1026,7 +1026,10 @@ export default function ProjectDetailPage() {
         return;
       }
       const previous = nextById.get(remote.id);
-      if (previous?.updatedAt === remote.updatedAt) continue;
+      // The status PATCH response and Realtime echo travel independently. An
+      // older/equal row must never replace a newer row that already reached
+      // this client through the other path.
+      if (previous && compareUpdatedAt(remote.updatedAt, previous.updatedAt) <= 0) continue;
       persistedStatusByShotIdRef.current.set(remote.id, remote.status);
       const enriched = preserveShotMedia(remote, previous);
       const pendingStatus = pendingStatusByShotIdRef.current.get(remote.id);
@@ -1338,23 +1341,37 @@ export default function ProjectDetailPage() {
     const mutation = (previousMutation
       ? previousMutation.catch(() => currentShot)
       : Promise.resolve(currentShot)
-    ).then((latestShot) => updateShotStatus(latestShot, status));
+    ).then((latestShot) => updateShotStatus(latestShot, status, { apiOnly: isGuest }));
     statusMutationQueueByShotIdRef.current.set(targetShot.id, mutation);
 
     try {
       const savedShot = await mutation;
       if (activeProgressEntryKeyRef.current !== requestedEntryKey) return;
-      persistedStatusByShotIdRef.current.set(targetShot.id, savedShot.status);
+      const currentAfterMutation = shotsRef.current.find((shot) => shot.id === targetShot.id);
+      const savedResponseIsStale = Boolean(
+        currentAfterMutation
+        && compareUpdatedAt(savedShot.updatedAt, currentAfterMutation.updatedAt) < 0
+      );
+      if (!savedResponseIsStale) {
+        persistedStatusByShotIdRef.current.set(targetShot.id, savedShot.status);
+      }
       selectedShotsRefreshVersionRef.current += 1;
       const pendingStatus = pendingStatusByShotIdRef.current.get(targetShot.id);
       if (
         pendingStatus?.version !== mutationVersion
       ) return;
       pendingStatusByShotIdRef.current.delete(targetShot.id);
+      const latestPersistedStatus = persistedStatusByShotIdRef.current.get(targetShot.id)
+        ?? persistedStatusBeforeMutation;
       const persistedShots = shotsRef.current.map((shot) => (
-        shot.id === savedShot.id
-          ? { ...shot, status: savedShot.status, updatedAt: savedShot.updatedAt }
-          : shot
+        shot.id !== targetShot.id
+          ? shot
+          : savedResponseIsStale
+            // Realtime already supplied a newer row. Remove only this
+            // mutation's optimistic status overlay; keep that row's
+            // updatedAt, media, metadata, and shooting-order fields intact.
+            ? { ...shot, status: latestPersistedStatus }
+            : { ...shot, status: savedShot.status, updatedAt: savedShot.updatedAt }
       ));
       shotsRef.current = persistedShots;
       setShots(persistedShots);
@@ -1382,7 +1399,7 @@ export default function ProjectDetailPage() {
         statusMutationQueueByShotIdRef.current.delete(targetShot.id);
       }
     }
-  }, [canEditProgressStatus, completeGuide, requestGuide]);
+  }, [canEditProgressStatus, completeGuide, isGuest, requestGuide]);
 
   async function handleSaveNewShot(values: ShotEditorValues) {
     if (!projectId || !dailyPlanId) return;
@@ -1913,7 +1930,7 @@ export default function ProjectDetailPage() {
               <ProgressShotList
                 allShots={orderedShots}
                 visibleShots={activeShots}
-                readOnly={isGuest}
+                reorderReadOnly={isGuest}
                 disabled={role !== "admin" || isReordering}
                 statusReadOnly={!canEditProgressStatus}
                 interactionGuideTarget={reorderGuideBucket === "active"}
@@ -1949,7 +1966,7 @@ export default function ProjectDetailPage() {
                 <ProgressShotList
                   allShots={orderedShots}
                   visibleShots={processedShots}
-                  readOnly={isGuest}
+                  reorderReadOnly={isGuest}
                   disabled={role !== "admin" || isReordering}
                   statusReadOnly={!canEditProgressStatus}
                   interactionGuideTarget={reorderGuideBucket !== null && reorderGuideBucket !== "active"}

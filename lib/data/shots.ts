@@ -268,7 +268,11 @@ export async function updateShot(shotId: string, patch: Partial<Shot>, projectId
 }
 
 /** 상태 변경은 별도 함수로 두어 로그를 남기고, 버튼 동작을 단순하게 유지합니다. */
-export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promise<Shot> {
+export async function updateShotStatus(
+  shot: Shot,
+  newStatus: ShotStatus,
+  options: { apiOnly?: boolean } = {}
+): Promise<Shot> {
   if (shot.status === newStatus) {
     return shot;
   }
@@ -281,10 +285,16 @@ export async function updateShotStatus(shot: Shot, newStatus: ShotStatus): Promi
     });
     const payload = (await response.json().catch(() => ({}))) as { shot?: Record<string, unknown>; error?: string };
     if (response.ok && payload.shot) return shotFromRow(payload.shot);
+    if (options.apiOnly) {
+      throw new Error(payload.error || "상태를 변경하지 못했습니다.");
+    }
     if (![400, 401, 404, 503].includes(response.status)) {
       throw new Error(payload.error || "상태를 변경하지 못했습니다.");
     }
   } catch (error) {
+    if (options.apiOnly) {
+      throw error instanceof Error ? error : new Error("상태를 변경하지 못했습니다.");
+    }
     if (!(error instanceof TypeError)) throw error;
   }
 

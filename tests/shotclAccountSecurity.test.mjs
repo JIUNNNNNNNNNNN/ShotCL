@@ -396,7 +396,7 @@ test("guest API access is limited to the project shell and bounded read collecti
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(`${root}/shot-diagrams`, "dailyPlanId=plan-1")), true);
 });
 
-test("guest API access denies mutations, private collections, and unbounded reads", () => {
+test("guest API access denies non-status mutations, private collections, and unbounded reads", () => {
   const root = "/api/projects/11111111-1111-4111-8111-111111111111";
   const dailyPlanId = "22222222-2222-4222-8222-222222222222";
   assert.equal(isGuestProjectApiRequestAllowed(guestRequest(root, "", "POST")), false);
