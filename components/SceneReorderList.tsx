@@ -27,7 +27,7 @@ type PendingDrag = {
   pointerType: string;
   startX: number;
   startY: number;
-  captureTarget: HTMLTableRowElement;
+  captureTarget: HTMLButtonElement;
   timer: number | null;
 };
 
@@ -45,23 +45,27 @@ export type SceneReorderCommitResult =
 
 export type SceneReorderRowProps = {
   ref: RefCallback<HTMLTableRowElement>;
-  onPointerDown: (event: ReactPointerEvent<HTMLTableRowElement>) => void;
   onClickCapture: (event: React.MouseEvent<HTMLTableRowElement>) => void;
   className: string;
   style: CSSProperties;
-  "aria-grabbed": boolean;
   "data-scene-reorder-state": "idle" | "dragging" | "drop-target";
+};
+
+export type SceneReorderHandleProps = {
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  disabled: boolean;
+  "aria-grabbed": boolean;
+  "data-scene-reorder-handle": "";
 };
 
 export type SceneReorderRenderState = {
   trProps: SceneReorderRowProps;
+  dragHandleProps: SceneReorderHandleProps;
   isDragging: boolean;
   isDropTarget: boolean;
   insertAfter: boolean;
 };
 
-const interactiveSelector = "input, textarea, select, button, a, [role='button']";
-const sceneReorderHandleSelector = "[data-scene-reorder-handle]";
 const mobileLongPressMs = 480;
 
 function getErrorMessage(error: unknown) {
@@ -189,6 +193,11 @@ export function SceneReorderList({
       if (pendingRef.current === pending) clearPending();
       return;
     }
+    try {
+      pending.captureTarget.setPointerCapture(pending.pointerId);
+    } catch {
+      // Window listeners below keep the active drag alive when capture is unavailable.
+    }
     rowDropMetricsRef.current = itemsRef.current.flatMap((item) => {
       const row = rowRefs.current.get(item.id);
       if (!row) return [];
@@ -294,7 +303,7 @@ export function SceneReorderList({
   }
 
   function handlePointerDown(
-    event: ReactPointerEvent<HTMLTableRowElement>,
+    event: ReactPointerEvent<HTMLButtonElement>,
     itemId: string
   ) {
     if (
@@ -307,11 +316,6 @@ export function SceneReorderList({
       return;
     }
 
-    const target = event.target as HTMLElement;
-    const handle = target.closest(sceneReorderHandleSelector);
-    if (!handle || !event.currentTarget.contains(handle)) return;
-    if (target.closest(interactiveSelector)) return;
-
     const pending: PendingDrag = {
       itemId,
       pointerId: event.pointerId,
@@ -322,12 +326,6 @@ export function SceneReorderList({
       timer: null
     };
     pendingRef.current = pending;
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Window-level listeners below still keep the drag alive.
-    }
 
     if (event.pointerType === "touch") {
       pending.timer = window.setTimeout(() => beginDrag(pending), mobileLongPressMs);
@@ -417,7 +415,6 @@ export function SceneReorderList({
             if (node) rowRefs.current.set(item.id, node);
             else rowRefs.current.delete(item.id);
           },
-          onPointerDown: (event) => handlePointerDown(event, item.id),
           onClickCapture: (event) => {
             if (suppressClickRef.current) {
               event.preventDefault();
@@ -433,18 +430,24 @@ export function SceneReorderList({
             zIndex: isDragging ? 20 : undefined,
             touchAction: isDragging ? "none" : undefined
           },
-          "aria-grabbed": isDragging,
           "data-scene-reorder-state": isDragging
             ? "dragging"
             : isDropTarget
               ? "drop-target"
               : "idle"
         };
+        const dragHandleProps: SceneReorderHandleProps = {
+          onPointerDown: (event) => handlePointerDown(event, item.id),
+          disabled,
+          "aria-grabbed": isDragging,
+          "data-scene-reorder-handle": ""
+        };
 
         return (
           <Fragment key={item.id}>
             {renderRow(item, index, {
               trProps,
+              dragHandleProps,
               isDragging,
               isDropTarget,
               insertAfter
