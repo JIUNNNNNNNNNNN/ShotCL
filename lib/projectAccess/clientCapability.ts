@@ -3,6 +3,55 @@ import type { SharedProjectRole } from "@/lib/projectAccess/core";
 export type ClientProjectAccessMode = "member" | "guest" | "legacy";
 
 /**
+ * 영구 삭제 entry point의 좁은 creator capability입니다. 기존 owner는 서버가
+ * 계산한 immutable owner flag와 현재 live account가 일치해야 하고, legacy
+ * 복구 직후에는 서버가 서명한 exact project claim만 stale RSC를 보완합니다.
+ */
+export function resolveProjectCreatorCapability({
+  projectId,
+  accessMode,
+  serverRole,
+  serverEditorEligible,
+  serverAccountUserId,
+  serverIsOwner,
+  accountStatus,
+  liveAccountUserId,
+  isGoogle,
+  liveAccountEditorEligible,
+  creatorClaimedProjectId
+}: {
+  projectId: string;
+  accessMode: ClientProjectAccessMode | null;
+  serverRole: SharedProjectRole | null;
+  serverEditorEligible: boolean;
+  serverAccountUserId: string | null;
+  serverIsOwner: boolean;
+  accountStatus: string;
+  liveAccountUserId: string | null;
+  isGoogle: boolean;
+  liveAccountEditorEligible: boolean;
+  creatorClaimedProjectId: string | null;
+}) {
+  const liveEditorAccountVerified = accountStatus === "authenticated"
+    && Boolean(liveAccountUserId)
+    && isGoogle
+    && liveAccountEditorEligible;
+  const serverResolvedCreator = serverIsOwner
+    && accessMode === "member"
+    && serverRole === "admin"
+    && serverEditorEligible
+    && Boolean(serverAccountUserId)
+    && liveEditorAccountVerified
+    && liveAccountUserId === serverAccountUserId;
+  const freshlyClaimedCreator = (
+    accessMode === "member" || accessMode === "legacy"
+  )
+    && creatorClaimedProjectId === projectId
+    && liveEditorAccountVerified;
+  return serverResolvedCreator || freshlyClaimedCreator;
+}
+
+/**
  * 진행 컷의 canonical OK/OMIT toggle만 허용하는 좁은 client capability입니다.
  * Guest invite는 전체 editor eligibility 없이 이 상태 변경만 사용할 수 있습니다.
  */

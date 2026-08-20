@@ -24,6 +24,7 @@ export { PROJECT_GUEST_MODE_COOKIE } from "@/lib/auth/guestMode";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const GUEST_PROGRESS_TARGET_MAX_AGE_SECONDS = 60 * 5;
 const STAFF_INVITE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const PROJECT_SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 export class ProjectAccessUnavailableError extends Error {}
 
@@ -351,6 +352,35 @@ export async function getAccessGrant(request: NextRequest, projectId: string): P
  */
 export async function getLegacyAccessGrant(request: NextRequest, projectId: string) {
   return getLegacyAccessGrantByToken(getSessionToken(request), projectId);
+}
+
+/**
+ * Recover a legacy NULL creator only from the exact browser grant written with
+ * the project itself. The service-only RPC rechecks the active admin role,
+ * two-second creation receipt, editor account, uniqueness, and deletion lock.
+ */
+export async function claimLegacyProjectCreatorFromCreationSession(input: {
+  projectId: string;
+  creatorUserId: string;
+  legacySessionToken: string | null;
+}) {
+  const projectId = normalizeProjectId(input.projectId);
+  const creatorUserId = normalizeProjectId(input.creatorUserId);
+  if (
+    !isValidDatabaseProjectId(projectId)
+    || !isValidDatabaseProjectId(creatorUserId)
+    || !input.legacySessionToken
+    || !PROJECT_SESSION_TOKEN_PATTERN.test(input.legacySessionToken)
+  ) return null;
+
+  const supabase = requireProjectAccessDb();
+  const { data, error } = await supabase.rpc("claim_legacy_project_creator", {
+    p_project_id: projectId,
+    p_creator_user_id: creatorUserId,
+    p_legacy_session_hash: hashProjectSessionToken(input.legacySessionToken)
+  });
+  if (error) throw error;
+  return data === "claimed" || data === "already_creator" ? projectId : null;
 }
 
 export async function getProjectRequestAccess(request: NextRequest, projectId: string) {

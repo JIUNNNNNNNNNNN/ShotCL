@@ -20,10 +20,13 @@ test("Basic Info exposes permanent deletion only through the server-derived crea
 
   assert.match(layout, /isOwner = access\?\.isOwner \?\? false/u);
   assert.match(layout, /isOwner=\{isOwner\}/u);
-  assert.match(gate, /isOwner[\s\S]*accessMode === "member"[\s\S]*currentRole === "admin"[\s\S]*effectiveEditorEligible[\s\S]*liveAccountUser\?\.id === accountUserId/u);
+  assert.match(layout, /editorEligible=\{editorEligible\}/u);
+  assert.match(gate, /editorEligible: serverEditorEligible/u);
+  assert.match(gate, /const isCreator = resolveProjectCreatorCapability\(\{[\s\S]*projectId,[\s\S]*accessMode,[\s\S]*serverRole: role,[\s\S]*serverEditorEligible,[\s\S]*serverAccountUserId: accountUserId,[\s\S]*serverIsOwner: isOwner,[\s\S]*liveAccountUserId: liveAccountUser\?\.id \?\? null,[\s\S]*creatorClaimedProjectId/u);
   assert.match(page, /isCreator && project[\s\S]*key: "projectSettings"[\s\S]*projectPermanentDelete/u);
   assert.match(actions, /projectPermanentDelete:[\s\S]*label: "프로젝트 영구 삭제"[\s\S]*tone: "danger"/u);
   assert.doesNotMatch(page, /created_by|createdBy|fetch\(/u);
+  assert.doesNotMatch(gate, /router\.refresh\(/u);
 });
 
 test("Permanent deletion uses the dedicated two-phrase dialog and never joins normal Undo", () => {

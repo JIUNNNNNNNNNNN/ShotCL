@@ -10,11 +10,13 @@ import {
   setShotclAccountSessionCookie
 } from "@/lib/projectAccess/accountServer";
 import {
+  claimLegacyProjectCreatorFromCreationSession,
   clearProjectGuestInviteCookie,
   clearProjectGuestModeCookie,
   clearProjectGuestProgressTargetCookie,
   getLegacyAccessGrant,
-  getProjectGuestInviteToken
+  getProjectGuestInviteToken,
+  getSessionToken
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { inspectProjectStaffInvite } from "@/lib/projectStaffInvites.server";
@@ -74,6 +76,7 @@ export async function POST(request: NextRequest) {
 
     let destination: string | null = null;
     let joinedProjectId: string | null = null;
+    let creatorClaimedProjectId: string | null = null;
     const requestedProjectId = typeof body?.projectId === "string"
       ? normalizeProjectId(body.projectId)
       : "";
@@ -89,6 +92,23 @@ export async function POST(request: NextRequest) {
       // 프로젝트 안에서 OAuth를 시작한 경우에는 현재 URL에서 온 한 프로젝트의
       // passcode grant를 먼저 연결합니다. 과거 guest cookie가 남아 있어도 현재
       // 사용자의 명시적 흐름을 가로채지 않습니다.
+      if (legacyGrant.role === "admin" && created.account.isEditor) {
+        try {
+          creatorClaimedProjectId = await claimLegacyProjectCreatorFromCreationSession({
+            projectId: requestedProjectId,
+            creatorUserId: created.account.userId,
+            legacySessionToken: getSessionToken(request)
+          });
+        } catch (claimError) {
+          // Legacy creator recovery is additive. A missing/temporarily
+          // unavailable purpose migration must not invalidate Google login;
+          // the RPC is atomic, so retrying the same sync is safe.
+          console.error("[shotcl-auth-session:legacy-creator-claim]", {
+            projectId: requestedProjectId,
+            error: safeErrorMessage(claimError)
+          });
+        }
+      }
       await linkShotclAccountProjectMembership(created.account.userId, requestedProjectId);
       joinedProjectId = requestedProjectId;
     } else {
@@ -110,6 +130,7 @@ export async function POST(request: NextRequest) {
       editorEligible: created.account.isEditor,
       editorAllowed: created.account.isEditor,
       joinedProjectId,
+      creatorClaimedProjectId,
       destination
     });
     setShotclAccountSessionCookie(response, created.token);

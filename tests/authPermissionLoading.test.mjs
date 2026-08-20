@@ -8,7 +8,8 @@ import {
   normalizeTrustedGoogleIdentity
 } from "../lib/projectAccess/accountCore.ts";
 import {
-  resolveLiveProjectCapability
+  resolveLiveProjectCapability,
+  resolveProjectCreatorCapability
 } from "../lib/projectAccess/clientCapability.ts";
 import { isGuestProjectApiRequestAllowed } from "../lib/projectAccess/guestApiAccess.ts";
 
@@ -75,7 +76,10 @@ test("auth bootstrap keys only on Guest-project scope and project pages reuse th
   assert.ok(authEffectStart >= 0 && refreshAccountStart > authEffectStart);
   const authEffect = authProvider.slice(authEffectStart, refreshAccountStart);
   assert.doesNotMatch(authEffect, /\bpathname\b/u);
+  assert.equal(countMatches(authEffect, /projectId: getCurrentSessionSyncProjectId\(\)/gu), 2);
   assert.match(authEffect, /\}, \[applySession, guestProjectRoute\]\);/u);
+  assert.match(authProvider, /function getCurrentSessionSyncProjectId\(\)[\s\S]*getCurrentCallbackProjectId\(\)[\s\S]*getProjectIdFromInternalPath\([\s\S]*window\.location\.pathname/u);
+  assert.match(authProvider, /creatorClaim && user && creatorClaim\.userId === user\.id[\s\S]*\? creatorClaim\.projectId[\s\S]*: null/u);
 
   const directProjectReads = projectPageSources
     .map((pathname) => [
@@ -396,6 +400,55 @@ test("client capability is fail-closed and linked Google proof cannot use the pr
     accountStatus: "authenticated",
     liveAccountUserId: "user-2"
   }), { role: null, editorEligible: false });
+});
+
+test("creator capability distinguishes owner, non-owner admin, Staff, Guest, and account mismatch", () => {
+  const owner = {
+    projectId: "11111111-1111-4111-8111-111111111111",
+    accessMode: "member",
+    serverRole: "admin",
+    serverEditorEligible: true,
+    serverAccountUserId: "owner-user",
+    serverIsOwner: true,
+    accountStatus: "authenticated",
+    liveAccountUserId: "owner-user",
+    isGoogle: true,
+    liveAccountEditorEligible: true,
+    creatorClaimedProjectId: null
+  };
+  assert.equal(resolveProjectCreatorCapability(owner), true);
+  assert.equal(resolveProjectCreatorCapability({ ...owner, serverIsOwner: false }), false);
+  assert.equal(resolveProjectCreatorCapability({
+    ...owner,
+    serverRole: "progress",
+    serverIsOwner: false
+  }), false);
+  assert.equal(resolveProjectCreatorCapability({
+    ...owner,
+    accessMode: "guest",
+    serverRole: "progress",
+    serverAccountUserId: null,
+    serverIsOwner: false,
+    creatorClaimedProjectId: owner.projectId
+  }), false);
+  assert.equal(resolveProjectCreatorCapability({
+    ...owner,
+    liveAccountUserId: "different-user"
+  }), false);
+  assert.equal(resolveProjectCreatorCapability({
+    ...owner,
+    serverIsOwner: false,
+    accessMode: "legacy",
+    serverAccountUserId: null,
+    creatorClaimedProjectId: owner.projectId
+  }), true);
+  assert.equal(resolveProjectCreatorCapability({
+    ...owner,
+    serverIsOwner: false,
+    accessMode: "legacy",
+    serverAccountUserId: null,
+    creatorClaimedProjectId: "22222222-2222-4222-8222-222222222222"
+  }), false);
 });
 
 test("account tables and project mutations remain protected by RLS contracts", () => {

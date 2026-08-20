@@ -62,17 +62,57 @@ test("account sync sends the validated current project and exact internal return
   let captured = null;
   globalThis.fetch = async (input, init) => {
     captured = { input, init };
-    return new Response(JSON.stringify({ editorEligible: true, destination: null }), {
+    return new Response(JSON.stringify({
+      editorEligible: true,
+      destination: null,
+      creatorClaimedProjectId: projectId
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
   };
   try {
     const result = await syncAccountSession("token", projectId, returnTo);
-    assert.deepEqual(result, { editorEligible: true, destination: null });
+    assert.deepEqual(result, {
+      editorEligible: true,
+      destination: null,
+      creatorClaimedProjectId: projectId
+    });
     assert.equal(captured.input, "/api/auth/session");
     assert.deepEqual(JSON.parse(captured.init.body), { action: "sync", projectId, returnTo });
     assert.equal(captured.init.headers.Authorization, "Bearer token");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("account sync accepts only an exact canonical creator-claim project UUID", async () => {
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    "11111111-1111-4111-8111-111111111111".toUpperCase(),
+    "project_11111111-1111-4111-8111-111111111111",
+    "not-a-project-id",
+    null
+  ];
+  try {
+    const results = [];
+    for (const creatorClaimedProjectId of responses) {
+      globalThis.fetch = async () => new Response(JSON.stringify({
+        editorEligible: true,
+        destination: null,
+        creatorClaimedProjectId
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+      results.push((await syncAccountSession("token")).creatorClaimedProjectId);
+    }
+    assert.deepEqual(results, [
+      "11111111-1111-4111-8111-111111111111",
+      null,
+      null,
+      null
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

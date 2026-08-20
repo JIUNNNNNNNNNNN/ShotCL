@@ -18,7 +18,8 @@ import {
 import {
   canUpdateProjectProgressStatus,
   isMemberReadOnlyFallback,
-  resolveLiveProjectCapability
+  resolveLiveProjectCapability,
+  resolveProjectCreatorCapability
 } from "@/lib/projectAccess/clientCapability";
 import type { ProjectWorkspaceSnapshot } from "@/lib/projectWorkspaceSnapshot";
 import { rememberProjectSelection } from "@/lib/projectAccess/recentProject";
@@ -62,6 +63,7 @@ export function ProjectAccessGate({
   projectName,
   role,
   accessMode,
+  editorEligible: serverEditorEligible,
   accountUserId,
   isOwner,
   accessPreferenceScope,
@@ -86,7 +88,8 @@ export function ProjectAccessGate({
     isEditorEligible: liveAccountEditorEligible,
     isGoogle,
     status: accountStatus,
-    user: liveAccountUser
+    user: liveAccountUser,
+    creatorClaimedProjectId
   } = useAuthSession();
   const [verifiedRoleOverride, setVerifiedRoleOverride] = useState<ProjectScopedRoleOverride>(null);
   const [deletedInThisTab, setDeletedInThisTab] = useState(false);
@@ -121,14 +124,22 @@ export function ProjectAccessGate({
     role: currentRole,
     editorEligible: effectiveEditorEligible
   });
-  const isCreator = Boolean(
-    isOwner
-    && accessMode === "member"
-    && currentRole === "admin"
-    && effectiveEditorEligible
-    && accountUserId
-    && liveAccountUser?.id === accountUserId
-  );
+  // 생성 세션 proof가 방금 확인된 프로젝트는 현재 RSC snapshot이 legacy/member
+  // 전환 전이어도 같은 탭에서 owner action을 즉시 노출합니다. 이 값은 서버가
+  // 검증한 exact UUID 한 개뿐이며 Guest 및 다른 프로젝트에는 전파되지 않습니다.
+  const isCreator = resolveProjectCreatorCapability({
+    projectId,
+    accessMode,
+    serverRole: role,
+    serverEditorEligible,
+    serverAccountUserId: accountUserId,
+    serverIsOwner: isOwner,
+    accountStatus,
+    liveAccountUserId: liveAccountUser?.id ?? null,
+    isGoogle,
+    liveAccountEditorEligible,
+    creatorClaimedProjectId
+  });
   const applyVerifiedRole = useCallback((nextRole: SharedProjectRole) => {
     // 이 client callback은 서버 승격 성공 응답만 반영하며 downgrade는 허용하지 않습니다.
     if (isGuest || !effectiveEditorEligible || !isKeyStaffProjectRole(nextRole)) return;

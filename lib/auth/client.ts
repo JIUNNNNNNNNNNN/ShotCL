@@ -1,9 +1,11 @@
 const ACCOUNT_SESSION_ENDPOINT = "/api/auth/session";
 const SAFE_PATH_ORIGIN = "https://shotcl.local";
+const CANONICAL_PROJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type AccountSessionSyncResult = {
   editorEligible: boolean;
   destination: string | null;
+  creatorClaimedProjectId: string | null;
 };
 
 /** OAuth의 next 값은 현재 앱 안의 절대 경로만 허용합니다. */
@@ -33,9 +35,7 @@ export function getProjectIdFromInternalPath(value: unknown) {
   } catch {
     return null;
   }
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(candidate)
-    ? candidate
-    : null;
+  return getCanonicalProjectId(candidate);
 }
 
 export function getAccountSessionSyncKey(
@@ -77,7 +77,8 @@ export async function syncAccountSession(
     editorEligible: payload.editorEligible === true,
     destination: payload.destination
       ? getSafeInternalPath(payload.destination, "/")
-      : null
+      : null,
+    creatorClaimedProjectId: getCanonicalProjectId(payload.creatorClaimedProjectId)
   };
 }
 
@@ -114,6 +115,12 @@ function normalizeInternalPath(value: string) {
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
+function getCanonicalProjectId(value: unknown) {
+  if (typeof value !== "string") return null;
+  const candidate = value.trim().toLowerCase();
+  return CANONICAL_PROJECT_ID_PATTERN.test(candidate) ? candidate : null;
+}
+
 async function readAccountPayload(response: Response) {
   try {
     const value = await response.json() as unknown;
@@ -122,6 +129,7 @@ async function readAccountPayload(response: Response) {
     return {
       editorEligible: payload.editorEligible,
       destination: typeof payload.destination === "string" ? payload.destination : "",
+      creatorClaimedProjectId: payload.creatorClaimedProjectId,
       error: typeof payload.error === "string" ? payload.error : ""
     };
   } catch {

@@ -43,6 +43,7 @@ type AuthSessionContextValue = {
   email: string | null;
   isGoogle: boolean;
   isEditorEligible: boolean;
+  creatorClaimedProjectId: string | null;
   status: AuthSessionStatus;
   errorMessage: string;
   accountGeneration: number;
@@ -72,6 +73,10 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
   const guestProjectRoute = /^\/projects\/[^/]+(?:\/|$)/u.test(pathname);
   const [user, setUser] = useState<User | null>(null);
   const [isEditorEligible, setIsEditorEligible] = useState(false);
+  const [creatorClaim, setCreatorClaim] = useState<{
+    userId: string;
+    projectId: string;
+  } | null>(null);
   const [status, setStatus] = useState<AuthSessionStatus>("loading");
   const [errorMessage, setErrorMessage] = useState("");
   const [accountGeneration, setAccountGeneration] = useState(0);
@@ -124,6 +129,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       if (!force && alreadyCleared) {
         if (mountedRef.current) {
           setIsEditorEligible(false);
+          setCreatorClaim(null);
           setStatus("anonymous");
           setErrorMessage("");
         }
@@ -144,6 +150,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       lastSyncResultRef.current = null;
       synchronizedUserIdRef.current = "";
       setIsEditorEligible(false);
+      setCreatorClaim(null);
       setStatus("anonymous");
       setAccountGeneration((current) => current + 1);
       return null;
@@ -152,6 +159,9 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     const token = session.access_token;
     const previousSynchronizedUserId = synchronizedUserIdRef.current;
     const previousEditorEligible = lastSyncResultRef.current?.editorEligible ?? null;
+    if (mountedRef.current) {
+      setCreatorClaim((current) => current?.userId === session.user.id ? current : null);
+    }
     const backgroundSync = !force && shouldUseBackgroundAccountSync({
       authEvent,
       requestedProjectId: projectId,
@@ -169,6 +179,12 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     ) {
       if (mountedRef.current) {
         setIsEditorEligible(lastSyncResultRef.current.editorEligible);
+        setCreatorClaim(lastSyncResultRef.current.creatorClaimedProjectId
+          ? {
+              userId: session.user.id,
+              projectId: lastSyncResultRef.current.creatorClaimedProjectId
+            }
+          : null);
         setStatus("authenticated");
         setErrorMessage("");
       }
@@ -198,6 +214,9 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       lastSyncResultRef.current = result;
       synchronizedUserIdRef.current = session.user.id;
       setIsEditorEligible(result.editorEligible);
+      setCreatorClaim(result.creatorClaimedProjectId
+        ? { userId: session.user.id, projectId: result.creatorClaimedProjectId }
+        : null);
       setStatus("authenticated");
       setErrorMessage("");
       if (shouldAdvanceAccountGeneration({
@@ -218,6 +237,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         lastSyncResultRef.current = null;
         synchronizedUserIdRef.current = "";
         setIsEditorEligible(false);
+        setCreatorClaim(null);
         setStatus("error");
         setErrorMessage(GOOGLE_LOGIN_ERROR_MESSAGE);
       }
@@ -237,6 +257,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
       lastSynchronizedTokenRef.current = "";
       setUser(null);
       setIsEditorEligible(false);
+      setCreatorClaim(null);
       setStatus("anonymous");
       setErrorMessage("");
       return () => {
@@ -256,6 +277,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         setStatus("unavailable");
         setUser(null);
         setIsEditorEligible(false);
+        setCreatorClaim(null);
         return;
       }
 
@@ -271,7 +293,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
           return;
         }
         void applySession(data.session, {
-          projectId: getCurrentCallbackProjectId(),
+          projectId: getCurrentSessionSyncProjectId(),
           returnTo: getCurrentCallbackReturnTo()
         });
       });
@@ -282,7 +304,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
         window.setTimeout(() => {
           if (!cancelled && mountedRef.current) {
             void applySession(session, {
-              projectId: getCurrentCallbackProjectId(),
+              projectId: getCurrentSessionSyncProjectId(),
               returnTo: getCurrentCallbackReturnTo(),
               authEvent: event
             });
@@ -325,6 +347,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     if (!supabase) throw new Error("Google 로그인을 사용할 수 없습니다.");
     const previousEditorEligible = isEditorEligible;
     setIsEditorEligible(false);
+    setCreatorClaim(null);
     setStatus("syncing");
     setErrorMessage("");
     const redirectTo = buildGoogleOAuthCallbackUrl(
@@ -350,6 +373,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     // 다시 확정하지 못하게, 로그아웃 동작이 먼저 최신 operation을 소유합니다.
     operationRef.current += 1;
     setIsEditorEligible(false);
+    setCreatorClaim(null);
     setStatus("syncing");
     setErrorMessage("");
     if (!supabase) {
@@ -396,11 +420,15 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
 
   const email = user?.email?.trim() || null;
   const isGoogle = hasGoogleIdentity(user);
+  const creatorClaimedProjectId = creatorClaim && user && creatorClaim.userId === user.id
+    ? creatorClaim.projectId
+    : null;
   const value = useMemo<AuthSessionContextValue>(() => ({
     user,
     email,
     isGoogle,
     isEditorEligible,
+    creatorClaimedProjectId,
     status,
     errorMessage,
     accountGeneration,
@@ -409,6 +437,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     refreshAccount
   }), [
     accountGeneration,
+    creatorClaimedProjectId,
     email,
     errorMessage,
     isEditorEligible,
@@ -431,6 +460,14 @@ export function useAuthSession() {
 
 function getCurrentCallbackProjectId() {
   return getProjectIdFromInternalPath(getCurrentCallbackReturnTo());
+}
+
+function getCurrentSessionSyncProjectId() {
+  const callbackProjectId = getCurrentCallbackProjectId();
+  if (callbackProjectId || typeof window === "undefined") return callbackProjectId;
+  return getProjectIdFromInternalPath(
+    `${window.location.pathname}${window.location.search}${window.location.hash}`
+  );
 }
 
 function getCurrentCallbackReturnTo() {
