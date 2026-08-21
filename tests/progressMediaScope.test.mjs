@@ -183,6 +183,36 @@ test("duplicate display Scene numbers remain independently addressable by stable
   ].join(","));
 });
 
+test("hyphenated Scene numbers remain string identities in Progress media scope", () => {
+  const selectedPlan = plan(
+    timetableScene({
+      rowId: "row-1-1",
+      sceneId: null,
+      sceneNumber: "S#1-1",
+      selectedCutNumbers: [1]
+    }),
+    timetableScene({
+      rowId: "row-2",
+      sceneId: null,
+      sceneNumber: "2",
+      selectedCutNumbers: [1]
+    })
+  );
+  const selectedScope = createProgressMediaPlanScope(selectedPlan);
+
+  assert.deepEqual([...selectedScope.sceneNumbers], ["1-1", "2"]);
+  assert.equal(isProgressMediaAssetInPlanScope(asset({
+    sceneId: null,
+    sceneNumber: "1-1",
+    episodeNumber: 2
+  }), selectedScope), true);
+  assert.equal(progressMediaCandidateDatabaseFilter(selectedScope), [
+    `daily_plan_id.eq.${planId}`,
+    "and(daily_plan_id.is.null,scene_no.in.(1-1,2))",
+    "and(daily_plan_id.is.null,crop_data->>sceneNumber.in.(1-1,2))"
+  ].join(","));
+});
+
 test("candidate scope has a fixed safety bound instead of building an unbounded PostgREST expression", () => {
   const timetableScenes = Array.from(
     { length: MAX_PROGRESS_MEDIA_SCENE_SCOPE + 1 },

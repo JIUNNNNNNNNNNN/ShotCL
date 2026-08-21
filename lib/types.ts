@@ -569,6 +569,8 @@ export type ProjectStaffDepartment = {
 export type ProjectSceneActorCell = {
   mode: "color" | "text";
   text?: string;
+  /** Basic Info actor stable ID. Legacy/manual cells may omit it. */
+  actorId?: string;
 };
 
 /**

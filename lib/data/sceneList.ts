@@ -30,6 +30,17 @@ type SceneListPayload = {
   error?: string;
 };
 
+export type ProjectScenarioSceneClassificationResult = {
+  ok: true;
+  totalProcessedCount: number;
+  createdCount: number;
+  enrichedCount: number;
+  actorLinkedSceneCount: number;
+  actorLinkCount: number;
+  skippedDuplicateCount: number;
+  conflictCount: number;
+};
+
 export type ProjectSceneReferenceAutosaveResult = {
   scenarioReference: string;
   updatedAt: string | null;
@@ -166,6 +177,58 @@ export async function getProjectSceneList(projectId: string): Promise<ProjectSce
   }
 
   return { ...readLocalSceneList(projectId), actorRoles: [] };
+}
+
+/** Server-loaded parsed Scenario scenes are merged into the canonical Scene List. */
+export async function classifyProjectScenarioScenes(
+  projectId: string,
+  scenarioAssetId: string
+): Promise<ProjectScenarioSceneClassificationResult> {
+  if (!isValidDatabaseProjectId(projectId) || !isValidDatabaseProjectId(scenarioAssetId)) {
+    throw new Error("씬리스트 자동 분류 대상이 올바르지 않습니다.");
+  }
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/scene-list`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "classify-scenario-scenes",
+        scenarioAssetId
+      })
+    }
+  );
+  const payload = (await response.json().catch(() => ({}))) as Partial<
+    ProjectScenarioSceneClassificationResult
+  > & { error?: string };
+  if (!response.ok || payload.ok !== true) {
+    throw new Error(payload.error || "씬리스트 자동 분류를 완료하지 못했습니다.");
+  }
+  const count = (value: unknown) => {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  };
+  const counts = {
+    totalProcessedCount: count(payload.totalProcessedCount),
+    createdCount: count(payload.createdCount),
+    enrichedCount: count(payload.enrichedCount),
+    actorLinkedSceneCount: count(payload.actorLinkedSceneCount),
+    actorLinkCount: count(payload.actorLinkCount),
+    skippedDuplicateCount: count(payload.skippedDuplicateCount),
+    conflictCount: count(payload.conflictCount)
+  };
+  if (Object.values(counts).some((value) => value === null)) {
+    throw new Error("씬리스트 자동 분류 응답이 올바르지 않습니다.");
+  }
+  return {
+    ok: true,
+    totalProcessedCount: counts.totalProcessedCount!,
+    createdCount: counts.createdCount!,
+    enrichedCount: counts.enrichedCount!,
+    actorLinkedSceneCount: counts.actorLinkedSceneCount!,
+    actorLinkCount: counts.actorLinkCount!,
+    skippedDuplicateCount: counts.skippedDuplicateCount!,
+    conflictCount: counts.conflictCount!
+  };
 }
 
 /** 저장 버튼을 누른 시점의 씬 행과 메모만 한 번에 반영합니다. */
@@ -818,13 +881,21 @@ function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCe
     }
     if (typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
     const record = rawCell as Record<string, unknown>;
+    const actorId = String(record.actorId ?? "").trim().slice(0, 160);
+    const stableActorId = /^project_actor_[0-9a-z-]+$/i.test(actorId) ? actorId : undefined;
     if (isPresentMode(record.mode)) {
-      normalized[role] = { mode: "color" };
+      normalized[role] = { mode: "color", ...(stableActorId ? { actorId: stableActorId } : {}) };
       continue;
     }
     if (record.mode === "text") {
       const text = String(record.text ?? "").replace(/\r\n?/g, "\n").slice(0, 120);
-      if (text.trim()) normalized[role] = { mode: "text", text };
+      if (text.trim()) {
+        normalized[role] = {
+          mode: "text",
+          text,
+          ...(stableActorId ? { actorId: stableActorId } : {})
+        };
+      }
     }
   }
   return normalized;

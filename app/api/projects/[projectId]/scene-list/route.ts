@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   canAdministerProject,
   getAccessGrant,
+  getProjectRequestAccess,
   ProjectAccessUnavailableError,
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
+import { MAX_SCENARIO_SCENE_TEXT_LENGTH } from "@/lib/scenarioSceneMarker";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { validateSceneCutCountInput } from "@/lib/sceneCutCount";
+import { planSceneListAutoClassification } from "@/lib/sceneListAutoClassification";
+import { createDeterministicSceneListId } from "@/lib/server/deterministicSceneListId";
 import {
   parseSceneListCellMerges,
   SCENE_LIST_REORDER_MERGE_ERROR,
@@ -19,7 +23,7 @@ import {
   ProjectDeleteReceiptError,
   verifyProjectDeleteReceipt
 } from "@/lib/projectDeleteReceipt.server";
-import type { ProjectSceneMergeColumn } from "@/lib/types";
+import type { ProjectSceneActorCell, ProjectSceneMergeColumn } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -339,6 +343,33 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (scope instanceof NextResponse) return scope;
     const { projectId, supabase } = scope;
     const body = (await request.json()) as Record<string, unknown>;
+
+    if (body.action === "classify-scenario-scenes") {
+      if (
+        scope.access?.mode !== "member"
+        || scope.access.editorEligible !== true
+        || scope.access.grant.role !== "admin"
+      ) {
+        return NextResponse.json(
+          { error: "씬리스트 자동 분류는 인증된 Key staff만 실행할 수 있습니다." },
+          { status: 403 }
+        );
+      }
+      const expectedKeys = ["action", "scenarioAssetId"];
+      const actualKeys = Object.keys(body).sort();
+      const scenarioAssetId = normalizeText(body.scenarioAssetId, 36);
+      if (
+        actualKeys.length !== expectedKeys.length
+        || actualKeys.some((key, index) => key !== expectedKeys[index])
+        || !isUuid(scenarioAssetId)
+      ) {
+        return NextResponse.json(
+          { error: "씬리스트 자동 분류 요청이 올바르지 않습니다." },
+          { status: 400 }
+        );
+      }
+      return classifyScenarioScenes(supabase, projectId, scenarioAssetId);
+    }
 
     if (body.action === "delete-item") {
       const itemId = String(body.itemId ?? "").trim();
@@ -859,6 +890,120 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
+async function classifyScenarioScenes(
+  supabase: ReturnType<typeof requireProjectAccessDb>,
+  projectId: string,
+  scenarioAssetId: string
+) {
+  const [assetResult, rowsResult, basicInfoResult] = await Promise.all([
+    supabase
+      .from("project_reference_assets")
+      .select("id,scenario_scenes")
+      .eq("project_id", projectId)
+      .eq("id", scenarioAssetId)
+      .eq("asset_type", "scenario")
+      .maybeSingle(),
+    supabase
+      .from("project_scene_items")
+      .select("id,scene_no,characters,actor_cells,sort_order,updated_at")
+      .eq("project_id", projectId)
+      .order("sort_order")
+      .order("created_at"),
+    supabase
+      .from("project_basic_info")
+      .select("actors")
+      .eq("project_id", projectId)
+      .maybeSingle()
+  ]);
+  if (assetResult.error) throw assetResult.error;
+  if (rowsResult.error) throw rowsResult.error;
+  if (basicInfoResult.error) throw basicInfoResult.error;
+  if (!assetResult.data) {
+    return NextResponse.json({ error: "분류할 시나리오를 찾을 수 없습니다." }, { status: 404 });
+  }
+
+  const scenarioScenes = normalizeStoredScenarioScenes(assetResult.data.scenario_scenes);
+  if (scenarioScenes.length === 0) {
+    return NextResponse.json(
+      { error: "먼저 시나리오 Scene 분리를 완료해주세요." },
+      { status: 409 }
+    );
+  }
+
+  const plan = planSceneListAutoClassification({
+    projectId,
+    scenarioScenes,
+    existingRows: (rowsResult.data ?? []).map((row) => ({
+      id: String(row.id),
+      sceneNo: row.scene_no,
+      characters: String(row.characters ?? ""),
+      actorCells: normalizeActorCells(row.actor_cells),
+      sortOrder: Number(row.sort_order) || 0,
+      updatedAt: String(row.updated_at ?? "")
+    })),
+    actors: extractRegisteredActors(basicInfoResult.data?.actors),
+    normalizeSceneNumber,
+    createSceneId: (sceneNo) => createDeterministicSceneListId(projectId, sceneNo)
+  });
+
+  const insertedIds = new Set<string>();
+  if (plan.newRows.length > 0) {
+    const { data: inserted, error } = await supabase
+      .from("project_scene_items")
+      .upsert(plan.newRows, { onConflict: "id", ignoreDuplicates: true })
+      .select("id");
+    if (error) throw error;
+    for (const row of inserted ?? []) insertedIds.add(String(row.id));
+  }
+
+  const updateResults = await settleWithConcurrency(plan.existingUpdates, 8, async (update) => {
+    const { data, error } = await supabase
+      .from("project_scene_items")
+      .update({
+        characters: update.characters,
+        actor_cells: update.actorCells
+      })
+      .eq("project_id", projectId)
+      .eq("id", update.id)
+      .eq("updated_at", update.expectedUpdatedAt)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    return data ? update : null;
+  });
+  const successfulUpdates = updateResults.filter((update): update is NonNullable<typeof update> => (
+    update !== null
+  ));
+  const createdCount = insertedIds.size;
+  const enrichedCount = successfulUpdates.length;
+  const newActorLinkCount = [...insertedIds].reduce((total, id) => (
+    total + (plan.actorLinkCountByNewRowId.get(id) ?? 0)
+  ), 0);
+  const updatedActorLinkCount = successfulUpdates.reduce(
+    (total, update) => total + update.actorLinkCount,
+    0
+  );
+  const newActorLinkedSceneCount = [...insertedIds].filter((id) => (
+    (plan.actorLinkCountByNewRowId.get(id) ?? 0) > 0
+  )).length;
+  const updatedActorLinkedSceneCount = successfulUpdates.filter((update) => (
+    update.actorLinkCount > 0
+  )).length;
+  const conflictCount = (plan.newRows.length - createdCount)
+    + (plan.existingUpdates.length - enrichedCount);
+
+  return NextResponse.json({
+    ok: true,
+    totalProcessedCount: plan.totalProcessedCount,
+    createdCount,
+    enrichedCount,
+    actorLinkedSceneCount: newActorLinkedSceneCount + updatedActorLinkedSceneCount,
+    actorLinkCount: newActorLinkCount + updatedActorLinkCount,
+    skippedDuplicateCount: plan.skippedDuplicateCount,
+    conflictCount
+  });
+}
+
 async function requireReadScope(request: NextRequest, context: RouteContext) {
   const projectId = await getProjectId(context);
   if (!projectId) {
@@ -876,7 +1021,11 @@ async function requireWriteScope(request: NextRequest, context: RouteContext) {
   if (!projectId) {
     return NextResponse.json({ error: "프로젝트 ID가 올바르지 않습니다." }, { status: 400 });
   }
-  const grant = await getAccessGrant(request, projectId);
+  // getAccessGrant is a projection of this same resolver. Keep the full result
+  // so explicit high-trust actions can inspect mode/editor eligibility without
+  // repeating account, project, and membership queries.
+  const access = await getProjectRequestAccess(request, projectId);
+  const grant = access?.grant ?? null;
   const canWrite = grant?.role === "admin" || (!grant && await canAdministerProject(request, projectId));
   if (!canWrite) {
     return NextResponse.json(
@@ -884,7 +1033,7 @@ async function requireWriteScope(request: NextRequest, context: RouteContext) {
       { status: grant ? 403 : 401 }
     );
   }
-  return { projectId, supabase: requireProjectAccessDb() };
+  return { projectId, supabase: requireProjectAccessDb(), access };
 }
 
 async function getProjectId(context: RouteContext) {
@@ -930,6 +1079,35 @@ function extractActorRoles(value: unknown): string[] {
   ));
 }
 
+function extractRegisteredActors(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set<string>();
+  return value.slice(0, 200).flatMap((actor) => {
+    if (!actor || typeof actor !== "object" || Array.isArray(actor)) return [];
+    const record = actor as Record<string, unknown>;
+    const id = normalizeText(record.id, 160);
+    const role = normalizeText(record.role, 120);
+    const name = normalizeText(record.name, 120);
+    if (!/^project_actor_[0-9a-z-]+$/i.test(id) || (!role && !name) || seenIds.has(id)) return [];
+    seenIds.add(id);
+    return [{ id, role, name }];
+  });
+}
+
+function normalizeStoredScenarioScenes(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2_000).flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const source = entry as Record<string, unknown>;
+    const sceneNo = normalizeSceneNumber(source.sceneNo);
+    if (!sceneNo) return [];
+    return [{
+      sceneNo,
+      text: normalizeMultilineText(source.text, MAX_SCENARIO_SCENE_TEXT_LENGTH)
+    }];
+  });
+}
+
 function normalizeText(value: unknown, maxLength: number) {
   return String(value ?? "").trim().slice(0, maxLength);
 }
@@ -938,20 +1116,37 @@ function normalizeMultilineText(value: unknown, maxLength: number) {
   return String(value ?? "").replace(/\r\n?/g, "\n").slice(0, maxLength);
 }
 
-function normalizeActorCells(value: unknown) {
+function normalizeActorCells(value: unknown): Record<string, ProjectSceneActorCell> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const normalized: Record<string, { mode: "color" | "text"; text?: string }> = {};
+  const normalized: Record<string, ProjectSceneActorCell> = {};
   for (const [rawRole, rawCell] of Object.entries(value)) {
     const role = normalizeText(rawRole, 120);
-    if (!role || !rawCell || typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
-    const record = rawCell as Record<string, unknown>;
-    if (record.mode === "color") {
+    if (!role || !rawCell) continue;
+    const legacyValue = typeof rawCell === "string" || typeof rawCell === "boolean"
+      ? String(rawCell).trim().toLocaleLowerCase()
+      : "";
+    if (["o", "true", "present", "color", "colored"].includes(legacyValue)) {
       normalized[role] = { mode: "color" };
+      continue;
+    }
+    if (typeof rawCell !== "object" || Array.isArray(rawCell)) continue;
+    const record = rawCell as Record<string, unknown>;
+    const actorId = normalizeText(record.actorId, 160);
+    const stableActorId = /^project_actor_[0-9a-z-]+$/i.test(actorId) ? actorId : undefined;
+    const mode = normalizeText(record.mode, 20).toLocaleLowerCase();
+    if (mode === "color" || mode === "colored" || mode === "present") {
+      normalized[role] = { mode: "color", ...(stableActorId ? { actorId: stableActorId } : {}) };
       continue;
     }
     if (record.mode === "text") {
       const text = normalizeMultilineText(record.text, 120);
-      if (text.trim()) normalized[role] = { mode: "text", text };
+      if (text.trim()) {
+        normalized[role] = {
+          mode: "text",
+          text,
+          ...(stableActorId ? { actorId: stableActorId } : {})
+        };
+      }
     }
   }
   return normalized;

@@ -3,6 +3,7 @@ import {
   Download,
   FileText,
   List,
+  ListPlus,
   Map,
   Pencil,
   Plus,
@@ -29,6 +30,7 @@ export type ProjectPageActionId =
   | "scenarioScenesView"
   | "scenarioFullView"
   | "scenarioEdit"
+  | "scenarioClassifySceneList"
   | "scenarioShare"
   | "scenarioDownload"
   | "scenarioRefresh"
@@ -92,6 +94,11 @@ const ACTION_DEFINITIONS: Record<ProjectPageActionId, ActionDefinition> = {
   scenarioScenesView: { label: "씬별 보기", icon: List, group: "view" },
   scenarioFullView: { label: "전체 보기", icon: FileText, group: "view" },
   scenarioEdit: { label: "편집", icon: Pencil, group: "document" },
+  scenarioClassifySceneList: {
+    label: "씬리스트 자동 분류",
+    icon: ListPlus,
+    group: "document"
+  },
   scenarioShare: { label: "공유", icon: Share2, group: "document" },
   scenarioDownload: { label: "다운로드", icon: Download, group: "document" },
   scenarioRefresh: { label: "새로고침", icon: RefreshCw, group: "document" },
@@ -127,6 +134,7 @@ const MENU_DEFINITIONS: Record<ProjectPageActionMenuKey, MenuDefinition> = {
       "scenarioScenesView",
       "scenarioFullView",
       "scenarioEdit",
+      "scenarioClassifySceneList",
       "scenarioShare",
       "scenarioDownload",
       "scenarioRefresh",

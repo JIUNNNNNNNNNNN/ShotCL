@@ -111,3 +111,24 @@ test("save boundary prevents submitted shots from expanding a split allocation",
     { rowSnapshot: { sceneNumber: "12", totalCuts: 4, shootingOrder: "1-2-3-4" } }
   ], [{ sceneNumber: "12", cutNumber: "2" }]), "");
 });
+
+test("hyphenated Scene identities remain distinct at the Daily Plan save boundary", () => {
+  const scenes = [
+    {
+      selectedCutNumbers: [1],
+      rowSnapshot: { sceneNumber: "S#1-1", totalCuts: 2, shootingOrder: "1" }
+    },
+    {
+      selectedCutNumbers: [2],
+      rowSnapshot: { sceneNumber: "1-01", totalCuts: 2, shootingOrder: "2" }
+    }
+  ];
+
+  assert.equal(getSplitShotAllocationSaveError(scenes, [
+    { sceneNumber: "1-1", cutNumber: "1" },
+    { sceneNumber: "S#1-01", cutNumber: "2" }
+  ]), "");
+  assert.match(getSplitShotAllocationSaveError(scenes, [
+    { sceneNumber: "1-1", cutNumber: "2" }
+  ]), /분할 촬영에 배정되지 않은 컷/u);
+});

@@ -179,6 +179,22 @@ test("suffix-bearing scene labels keep their distinct Daily Plan linkage", () =>
   ]);
 });
 
+test("hyphenated Scene labels keep distinct Progress grouping and display identity", () => {
+  const sceneOneOne = shot("S#1-1", 1);
+  const sceneOneZeroOne = shot("1-01", 1);
+  const baseScene = shot("1", 1);
+  const ordered = orderProgressShotsByShootingOrder(
+    [baseScene, sceneOneZeroOne, sceneOneOne],
+    [
+      sceneRow("1-1", 1, "1"),
+      sceneRow("S#1-01", 1, "1"),
+      sceneRow("1", 1, "1")
+    ]
+  );
+
+  assert.deepEqual(ordered.map((item) => item.sceneNumber), ["S#1-1", "1-01", "1"]);
+});
+
 test("multiple rows for one scene consume stable shots once in row order", () => {
   const shots = [1, 2, 3, 4].map((cut) => shot("1", cut));
   const ordered = orderProgressShotsByShootingOrder(shots, [

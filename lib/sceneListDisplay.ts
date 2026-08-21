@@ -59,6 +59,9 @@ export function setActorCellState(
   const normalizedRole = role.trim();
   const roleKey = normalizedRole.toLocaleLowerCase();
   const actorCells: Record<string, ProjectSceneActorCell> = { ...(item.actorCells ?? {}) };
+  const existingActorId = Object.entries(actorCells).find(
+    ([key]) => key.trim().toLocaleLowerCase() === roleKey
+  )?.[1].actorId;
   Object.keys(actorCells).forEach((key) => {
     if (key.trim().toLocaleLowerCase() === roleKey) delete actorCells[key];
   });
@@ -66,10 +69,17 @@ export function setActorCellState(
     (character) => character.toLocaleLowerCase() !== roleKey
   );
   if (state.mode === "color") {
-    actorCells[normalizedRole] = { mode: "color" };
+    actorCells[normalizedRole] = {
+      mode: "color",
+      ...(existingActorId ? { actorId: existingActorId } : {})
+    };
     characters = [...characters, normalizedRole];
   } else if (state.mode === "text" && state.text.trim()) {
-    actorCells[normalizedRole] = { mode: "text", text: state.text.slice(0, 120) };
+    actorCells[normalizedRole] = {
+      mode: "text",
+      text: state.text.slice(0, 120),
+      ...(existingActorId ? { actorId: existingActorId } : {})
+    };
   }
   return { ...item, actorCells, characters: characters.join(", ") };
 }

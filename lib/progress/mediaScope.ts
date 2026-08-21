@@ -6,6 +6,10 @@ import { normalizeSceneNumber } from "@/lib/sceneNumber";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const MAX_PROGRESS_MEDIA_SCENE_SCOPE = 500;
+const SCENE_NUMBER_COLLATOR = new Intl.Collator("ko-KR", {
+  numeric: true,
+  sensitivity: "base"
+});
 
 export type ProgressMediaScopePlan = {
   id: string;
@@ -51,7 +55,7 @@ export function createProgressMediaPlanScope(
 
 /**
  * Keep the Storage metadata read bounded to the selected plan's Scene scope.
- * The values are canonical numeric Scene numbers and validated UUIDs, so they
+ * The values are canonical Scene-number tokens and validated UUIDs, so they
  * are safe to embed in PostgREST's server-side logic expression.
  */
 export function progressMediaCandidateDatabaseFilter(
@@ -60,7 +64,7 @@ export function progressMediaCandidateDatabaseFilter(
   const filters = [`daily_plan_id.eq.${plan.id}`];
   const sceneIds = [...plan.sceneIds].sort();
   const sceneNumbers = [...plan.sceneNumbers].sort((left, right) => (
-    Number(left) - Number(right)
+    SCENE_NUMBER_COLLATOR.compare(left, right)
   ));
   if (sceneIds.length > 0) {
     filters.push(

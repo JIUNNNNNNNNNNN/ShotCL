@@ -43,6 +43,7 @@ import {
   uploadProjectReferenceAsset
 } from "@/lib/data/projectReferenceAssets";
 import { AutosaveConflictError } from "@/lib/data/autosaveConflict";
+import type { ProjectScenarioSceneClassificationResult } from "@/lib/data/sceneList";
 import { auditQuery } from "@/lib/queryAudit";
 import { useUnsavedChangesGuard } from "@/hooks/useUnsavedChangesGuard";
 import { useAutosave } from "@/hooks/useAutosave";
@@ -60,12 +61,14 @@ const ScenarioPdfSceneSegments = dynamic(
 
 export default function ProjectScenarioPage() {
   const { projectId, projectName } = useProjectWorkspace();
-  const { role, isGuest } = useProjectAccess();
+  const { role, isGuest, accessMode, editorEligible } = useProjectAccess();
   const { deleteWithUndo } = useProjectDeleteUndo();
   const canEdit = role === "admin" && !isGuest;
+  const canClassifySceneList = canEdit && accessMode === "member" && editorEligible;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const selectedAssetIdRef = useRef("");
   const uploadInFlightRef = useRef(false);
+  const sceneListClassificationInFlightRef = useRef(false);
   const uploadSuccessTimerRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
   const [assets, setAssets] = useState<ProjectReferenceAsset[]>([]);
@@ -85,6 +88,7 @@ export default function ProjectScenarioPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isClassifyingSceneList, setIsClassifyingSceneList] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const scenarioUpdatedAtRef = useRef("");
@@ -96,6 +100,7 @@ export default function ProjectScenarioPage() {
     viewScenes: () => {},
     viewPdf: () => {},
     edit: () => {},
+    classifySceneList: () => {},
     share: () => {},
     refresh: () => {},
     delete: () => {}
@@ -268,11 +273,12 @@ export default function ProjectScenarioPage() {
           setUploadProgress(createUploadProgress("analyzing", file, index, files.length));
         }
 
-        let imageScenes: ProjectScenarioScene[] = uploadedAsset.scenarioScenes ?? [];
+        let mergedScenes: ProjectScenarioScene[] = uploadedAsset.scenarioScenes ?? [];
         let analysisWarning = "";
         try {
           const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
-          imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
+          const imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
+          mergedScenes = mergeScenarioSceneImages(uploadedAsset.scenarioScenes ?? [], imageScenes);
         } catch (analysisError) {
           console.error("[scenario:pdf-analysis]", { filename: file.name, error: analysisError });
           analysisWarning = getSafeScenarioAnalysisWarning(analysisError);
@@ -283,7 +289,7 @@ export default function ProjectScenarioPage() {
           setUploadProgress(createUploadProgress("saving", file, index, files.length));
         }
         await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
-          scenarioScenes: imageScenes,
+          scenarioScenes: mergedScenes,
           scenarioParseError: analysisWarning || null
         });
       }
@@ -436,6 +442,42 @@ export default function ProjectScenarioPage() {
     const refreshed = await load({ withLoader: false });
     if (refreshed) setStatusMessage("시나리오 자료를 새로고침했습니다.");
     setIsRefreshing(false);
+  }
+
+  async function handleClassifySceneList() {
+    if (
+      !projectId
+      || !selectedAsset
+      || !canClassifySceneList
+      || selectedAsset.scenarioScenes.length === 0
+      || hasStructuralChanges
+      || sceneListClassificationInFlightRef.current
+    ) return;
+
+    sceneListClassificationInFlightRef.current = true;
+    setIsClassifyingSceneList(true);
+    setErrorMessage("");
+    setStatusMessage("씬리스트를 분류하고 있습니다…");
+    try {
+      if (isEditing && !await scenarioAutosave.flush()) {
+        setStatusMessage("");
+        setErrorMessage("자동 저장에 실패한 씬 입력값을 먼저 확인해주세요.");
+        return;
+      }
+      const { classifyProjectScenarioScenes } = await import("@/lib/data/sceneList");
+      const result = await classifyProjectScenarioScenes(projectId, selectedAsset.id);
+      if (!isMountedRef.current) return;
+      setStatusMessage(formatScenarioClassificationResult(result));
+    } catch (error) {
+      if (!isMountedRef.current) return;
+      setStatusMessage("");
+      setErrorMessage(error instanceof Error
+        ? error.message
+        : "씬리스트 자동 분류를 완료하지 못했습니다.");
+    } finally {
+      sceneListClassificationInFlightRef.current = false;
+      if (isMountedRef.current) setIsClassifyingSceneList(false);
+    }
   }
 
   async function handleShare() {
@@ -651,6 +693,7 @@ export default function ProjectScenarioPage() {
       setViewMode("scenes");
       setIsEditing(true);
     },
+    classifySceneList: () => void handleClassifySceneList(),
     share: () => void handleShare(),
     refresh: () => void handleRefresh(),
     delete: () => {
@@ -679,6 +722,18 @@ export default function ProjectScenarioPage() {
         hidden: !canEdit,
         disabled: !selectedAsset || isSaving || isUploading || isRefreshing
       },
+      scenarioClassifySceneList: {
+        onSelect: () => actionHandlersRef.current.classifySceneList(),
+        hidden: !canClassifySceneList,
+        disabled: !selectedAsset
+          || selectedAsset.scenarioScenes.length === 0
+          || hasStructuralChanges
+          || isSaving
+          || isUploading
+          || isRefreshing
+          || isClassifyingSceneList,
+        pending: isClassifyingSceneList
+      },
       scenarioShare: {
         onSelect: () => actionHandlersRef.current.share(),
         hidden: isGuest,
@@ -704,9 +759,11 @@ export default function ProjectScenarioPage() {
       }
     }
   }), [
+    canClassifySceneList,
     canEdit,
     isDownloading,
     isEditing,
+    isClassifyingSceneList,
     isRefreshing,
     isSaving,
     isSharing,
@@ -1157,6 +1214,74 @@ function createBlankScene(index: number): ProjectScenarioScene {
     text: "",
     imageSegments: []
   };
+}
+
+/**
+ * 좌표 기반 브라우저 분석의 기존 split/문서 순서를 유지하면서, 같은 번호의
+ * 서버 scene이 있으면 stable id/title/text만 보존합니다. 브라우저 분석이 비면
+ * 서버 결과를 fallback으로 사용합니다.
+ */
+function mergeScenarioSceneImages(
+  canonicalScenes: ProjectScenarioScene[],
+  imageScenes: ProjectScenarioScene[]
+): ProjectScenarioScene[] {
+  if (imageScenes.length === 0) return canonicalScenes.map(cloneScenarioScene);
+  if (canonicalScenes.length === 0) return imageScenes.map(cloneScenarioScene);
+
+  const canonicalScenesByNumber = new Map<string, ProjectScenarioScene[]>();
+  canonicalScenes.forEach((scene) => {
+    const sceneNo = scene.sceneNo.trim();
+    const matches = canonicalScenesByNumber.get(sceneNo) ?? [];
+    matches.push(scene);
+    canonicalScenesByNumber.set(sceneNo, matches);
+  });
+  return imageScenes.map((imageScene) => {
+    const matches = canonicalScenesByNumber.get(imageScene.sceneNo.trim());
+    const canonicalScene = matches?.shift();
+    if (!canonicalScene) return cloneScenarioScene(imageScene);
+    return {
+      ...imageScene,
+      ...canonicalScene,
+      pageStart: imageScene.pageStart ?? canonicalScene.pageStart,
+      pageEnd: imageScene.pageEnd ?? canonicalScene.pageEnd,
+      imageSegments: imageScene.imageSegments.length > 0
+        ? imageScene.imageSegments.map((segment) => ({ ...segment }))
+        : canonicalScene.imageSegments.map((segment) => ({ ...segment }))
+    };
+  });
+}
+
+function cloneScenarioScene(scene: ProjectScenarioScene): ProjectScenarioScene {
+  return {
+    ...scene,
+    imageSegments: scene.imageSegments.map((segment) => ({ ...segment }))
+  };
+}
+
+function formatScenarioClassificationResult(
+  result: ProjectScenarioSceneClassificationResult
+) {
+  const changes = result.createdCount + result.enrichedCount;
+  if (
+    changes === 0
+    && result.actorLinkCount === 0
+    && result.conflictCount === 0
+    && result.skippedDuplicateCount === 0
+  ) {
+    return `${result.totalProcessedCount}개 씬을 확인했습니다. 씬리스트가 이미 최신 상태입니다.`;
+  }
+  const details = [
+    result.createdCount > 0 ? `신규 ${result.createdCount}개` : "",
+    result.enrichedCount > 0 ? `기존 ${result.enrichedCount}개 보완` : "",
+    result.actorLinkCount > 0
+      ? `${result.actorLinkedSceneCount}개 씬에 등장인물 ${result.actorLinkCount}건 연결`
+      : "",
+    result.conflictCount > 0 ? `동시 수정 ${result.conflictCount}개 보존` : "",
+    result.skippedDuplicateCount > 0
+      ? `중복 씬 번호 ${result.skippedDuplicateCount}개 제외`
+      : ""
+  ].filter(Boolean);
+  return `${result.totalProcessedCount}개 씬을 확인했습니다. ${details.join(" · ")}`;
 }
 
 function insertScenarioSceneByAnchors(

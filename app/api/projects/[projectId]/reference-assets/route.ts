@@ -13,7 +13,10 @@ import {
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneCutMetadata } from "@/lib/archiveAssetMetadata";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
-import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
+import {
+  MAX_SCENARIO_SCENE_TEXT_LENGTH,
+  SCENARIO_MARKER_NOT_FOUND_MESSAGE
+} from "@/lib/scenarioSceneMarker";
 import { progressMediaSummaryDisplayUrl } from "@/lib/progress/mediaGallery";
 import {
   createProgressMediaPlanScope,
@@ -2803,6 +2806,12 @@ function cleanText(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function cleanMultilineText(value: unknown, max: number) {
+  return typeof value === "string"
+    ? value.replace(/\r\n?/g, "\n").trim().slice(0, max)
+    : "";
+}
+
 function toInteger(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0;
@@ -3072,7 +3081,7 @@ function normalizeScenarioScenes(value: unknown): ProjectScenarioScene[] {
       title: cleanText(source.title, 240) || `Scene ${index + 1}`,
       pageStart,
       pageEnd: pageEnd ?? pageStart,
-      text: "",
+      text: cleanMultilineText(source.text, MAX_SCENARIO_SCENE_TEXT_LENGTH),
       imageSegments
     }];
   });

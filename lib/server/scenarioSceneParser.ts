@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { parseScenarioSceneMarker } from "../scenarioSceneMarker";
+import {
+  MAX_SCENARIO_SCENE_TEXT_LENGTH,
+  parseScenarioSceneMarker
+} from "../scenarioSceneMarker";
 import type { ProjectScenarioScene } from "../types";
 
 export type ScenarioPageText = {
@@ -47,7 +50,14 @@ export function splitScenarioScenesByNumber(
       title: marker.originalLine.slice(0, 240),
       pageStart: marker.page,
       pageEnd: lastLine?.page ?? marker.page,
-      text: "",
+      // title이 heading 원문을 보존하므로 body에는 다음 줄부터 다음 marker
+      // 직전까지만 담습니다. 내부 줄 순서는 바꾸지 않습니다.
+      text: blockLines
+        .slice(1)
+        .map(({ line }) => line.trimEnd())
+        .join("\n")
+        .trim()
+        .slice(0, MAX_SCENARIO_SCENE_TEXT_LENGTH),
       imageSegments: []
     };
   });
