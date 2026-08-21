@@ -9,6 +9,7 @@ const pageSource = readSource("app/projects/[id]/scenario/page.tsx");
 const actionsSource = readSource("components/ProjectPageActions.tsx");
 const menuSource = readSource("components/ProjectPageActionsMenu.tsx");
 const globalCss = readSource("app/globals.css");
+const referenceAssetDataSource = readSource("lib/data/projectReferenceAssets.ts");
 
 function sourceBetween(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -73,7 +74,7 @@ test("only write-capable admin Scenario viewers receive the classification actio
     /const canClassifySceneList = canEdit && accessMode === "member" && editorEligible;/u
   );
   assert.match(pageSource, /scenarioClassifySceneList:\s*\{[\s\S]*hidden: !canClassifySceneList/u);
-  assert.match(pageSource, /selectedAsset\.scenarioScenes\.length === 0/u);
+  assert.doesNotMatch(pageSource, /selectedAsset\.scenarioScenes\.length === 0/u);
   assert.match(pageSource, /hasStructuralChanges[\s\S]*isClassifyingSceneList/u);
   assert.doesNotMatch(
     sourceBetween(pageSource, "scenarioClassifySceneList: {", "scenarioShare: {"),
@@ -101,7 +102,7 @@ test("the one overflow trigger remains reachable on desktop, iPad, and phone", (
   assert.match(pageSource, /<p role="status" className="[^"]*min-w-0[^"]*break-words[^"]*\[overflow-wrap:anywhere\]"/u);
 });
 
-test("classification sends only the selected asset id and rejects duplicate clicks", () => {
+test("classification safely recovers legacy empty bodies and rejects duplicate clicks", () => {
   const handler = sourceBetween(
     pageSource,
     "async function handleClassifySceneList()",
@@ -111,8 +112,19 @@ test("classification sends only the selected asset id and rejects duplicate clic
   assert.match(handler, /sceneListClassificationInFlightRef\.current/u);
   assert.match(handler, /sceneListClassificationInFlightRef\.current = true[\s\S]*await import\("@\/lib\/data\/sceneList"\)[\s\S]*classifyProjectScenarioScenes\(projectId, selectedAsset\.id\)/u);
   assert.match(handler, /scenarioAutosave\.flush\(\)/u);
+  assert.match(handler, /if \(!hasScenarioSceneBodyText\(classificationAsset\.scenarioScenes\)\)/u);
+  assert.match(handler, /recoverProjectScenarioSceneText\([\s\S]*scenarioUpdatedAtRef\.current \|\| classificationAsset\.updatedAt/u);
+  assert.match(handler, /recoverProjectScenarioSceneText[\s\S]*classifyProjectScenarioScenes/u);
   assert.match(handler, /finally[\s\S]*sceneListClassificationInFlightRef\.current = false/u);
-  assert.doesNotMatch(handler, /draftScenes|scenarioScenes\s*:|fetch\(|router\.refresh|push\(|replace\(/u);
+  assert.doesNotMatch(handler, /fetch\(|router\.refresh|push\(/u);
+  const recoveryHelper = sourceBetween(
+    referenceAssetDataSource,
+    "export async function recoverProjectScenarioSceneText(",
+    "export type ProjectScenarioScenesUpdate"
+  );
+  assert.match(recoveryHelper, /reanalyzeScenario: true/u);
+  assert.match(recoveryHelper, /expectedUpdatedAt/u);
+  assert.doesNotMatch(recoveryHelper, /scenarioScenes|scene\.text|body:/u);
 });
 
 test("classification exposes compact pending, factual result, and inline error feedback", () => {
@@ -127,7 +139,7 @@ test("classification exposes compact pending, factual result, and inline error f
     "function insertScenarioSceneByAnchors("
   );
 
-  assert.match(handler, /setStatusMessage\("씬리스트를 분류하고 있습니다…"\)/u);
+  assert.match(handler, /setStatusMessage\("씬·등장인물 분류와 AI 내용 생성 중…"\)/u);
   assert.match(handler, /setErrorMessage\(error instanceof Error/u);
   assert.match(pageSource, /pending: isClassifyingSceneList/u);
   assert.match(pageSource, /<p role="alert"/u);
@@ -139,7 +151,13 @@ test("classification exposes compact pending, factual result, and inline error f
   assert.match(formatter, /actorLinkCount/u);
   assert.match(formatter, /conflictCount/u);
   assert.match(formatter, /skippedDuplicateCount/u);
-  assert.doesNotMatch(formatter, /AI|요약|%/u);
+  assert.match(formatter, /summarySavedCount/u);
+  assert.match(formatter, /summaryFailedCount/u);
+  assert.match(formatter, /summaryConflictCount/u);
+  assert.match(formatter, /summarySkippedContentCount/u);
+  assert.match(formatter, /summaryWarning/u);
+  assert.match(formatter, /AI 내용/u);
+  assert.doesNotMatch(formatter, /%/u);
 });
 
 test("upload keeps browser split order and enriches matches without losing client-only scenes", () => {
@@ -153,11 +171,12 @@ test("upload keeps browser split order and enriches matches without losing clien
   assert.match(upload, /const imageScenes = await analyzeScenarioPdfImages\(uploadedAsset\.publicUrl\)/u);
   assert.match(upload, /mergeScenarioSceneImages\(serverScenes, imageScenes\)/u);
   assert.match(upload, /scenarioScenes: mergedScenes/u);
+  assert.match(upload, /expectedUpdatedAt: uploadedAsset\.updatedAt/u);
   assert.match(upload, /const serverScenes = uploadedAsset\.scenarioScenes \?\? \[\]/u);
   assert.match(upload, /scenarioParseError = serverScenes\.length > 0[\s\S]*uploadedAsset\.scenarioParseError/u);
   assert.match(upload, /if \(serverScenes\.length > 0\) \{[\s\S]*imageSegmentWarnings\.push[\s\S]*scenarioParseError = null/u);
   assert.match(upload, /getSafeScenarioAnalysisWarning\([\s\S]*uploadedAsset\.scenarioParseError[\s\S]*scenarioParseError = analysisWarning/u);
-  assert.match(upload, /scenarioParseError\n\s*\}\);/u);
+  assert.match(upload, /scenarioParseError,[\s\S]*expectedUpdatedAt: uploadedAsset\.updatedAt[\s\S]*\}\);/u);
   assert.match(merge, /if \(imageScenes\.length === 0\) return canonicalScenes\.map\(cloneScenarioScene\)/u);
   assert.match(merge, /return imageScenes\.map\(\(imageScene\) =>/u);
   assert.match(merge, /if \(!canonicalScene\) return cloneScenarioScene\(imageScene\)/u);

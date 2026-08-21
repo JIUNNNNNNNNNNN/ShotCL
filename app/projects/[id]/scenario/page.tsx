@@ -36,6 +36,7 @@ import {
   finalizeDeletedProjectReferenceAssets,
   finalizeDeletedProjectScenarioScene,
   listProjectReferenceAssets,
+  recoverProjectScenarioSceneText,
   restoreDeletedProjectReferenceAssets,
   restoreDeletedProjectScenarioScene,
   updateProjectReferenceAsset,
@@ -308,7 +309,8 @@ export default function ProjectScenarioPage() {
         }
         await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
           scenarioScenes: mergedScenes,
-          scenarioParseError
+          scenarioParseError,
+          expectedUpdatedAt: uploadedAsset.updatedAt
         });
       }
       const finalFile = files[files.length - 1];
@@ -480,7 +482,6 @@ export default function ProjectScenarioPage() {
       !projectId
       || !selectedAsset
       || !canClassifySceneList
-      || selectedAsset.scenarioScenes.length === 0
       || hasStructuralChanges
       || sceneListClassificationInFlightRef.current
     ) return;
@@ -495,6 +496,29 @@ export default function ProjectScenarioPage() {
         setErrorMessage("자동 저장에 실패한 씬 입력값을 먼저 확인해주세요.");
         return;
       }
+      let classificationAsset = assetsRef.current.find((asset) => (
+        asset.id === selectedAsset.id
+      )) ?? selectedAsset;
+      if (!hasScenarioSceneBodyText(classificationAsset.scenarioScenes)) {
+        setStatusMessage("시나리오 Scene 본문을 복구하고 있습니다…");
+        classificationAsset = await recoverProjectScenarioSceneText(
+          projectId,
+          classificationAsset.id,
+          scenarioUpdatedAtRef.current || classificationAsset.updatedAt
+        );
+        if (!isMountedRef.current) return;
+        scenarioUpdatedAtRef.current = classificationAsset.updatedAt;
+        replaceAsset(classificationAsset);
+        const recoveredScenes = classificationAsset.scenarioScenes.map((scene) => ({ ...scene }));
+        draftScenesRef.current = recoveredScenes;
+        setDraftScenes(recoveredScenes);
+        setHasChanges(false);
+        scenarioAutosave.markSaved(recoveredScenes);
+        if (!hasScenarioSceneBodyText(recoveredScenes)) {
+          throw new Error("시나리오 Scene 본문을 복구하지 못했습니다. PDF 원문을 확인해주세요.");
+        }
+      }
+      setStatusMessage("씬·등장인물 분류와 AI 내용 생성 중…");
       const { classifyProjectScenarioScenes } = await import("@/lib/data/sceneList");
       const result = await classifyProjectScenarioScenes(projectId, selectedAsset.id);
       if (!isMountedRef.current) return;
@@ -757,7 +781,6 @@ export default function ProjectScenarioPage() {
         onSelect: () => actionHandlersRef.current.classifySceneList(),
         hidden: !canClassifySceneList,
         disabled: !selectedAsset
-          || selectedAsset.scenarioScenes.length === 0
           || hasStructuralChanges
           || isSaving
           || isUploading
@@ -1291,6 +1314,10 @@ function cloneScenarioScene(scene: ProjectScenarioScene): ProjectScenarioScene {
   };
 }
 
+function hasScenarioSceneBodyText(scenes: ProjectScenarioScene[]) {
+  return scenes.some((scene) => scene.text.trim().length > 0);
+}
+
 function formatScenarioClassificationResult(
   result: ProjectScenarioSceneClassificationResult
 ) {
@@ -1300,6 +1327,11 @@ function formatScenarioClassificationResult(
     && result.actorLinkCount === 0
     && result.conflictCount === 0
     && result.skippedDuplicateCount === 0
+    && result.summarySavedCount === 0
+    && result.summaryFailedCount === 0
+    && result.summaryConflictCount === 0
+    && result.summarySkippedContentCount === 0
+    && !result.summaryWarning
   ) {
     return `${result.totalProcessedCount}개 씬을 확인했습니다. 씬리스트가 이미 최신 상태입니다.`;
   }
@@ -1312,7 +1344,16 @@ function formatScenarioClassificationResult(
     result.conflictCount > 0 ? `동시 수정 ${result.conflictCount}개 보존` : "",
     result.skippedDuplicateCount > 0
       ? `중복 씬 번호 ${result.skippedDuplicateCount}개 제외`
-      : ""
+      : "",
+    result.summarySavedCount > 0 ? `AI 내용 ${result.summarySavedCount}개 생성` : "",
+    result.summaryFailedCount > 0 ? `AI 내용 ${result.summaryFailedCount}개 실패` : "",
+    result.summaryConflictCount > 0
+      ? `AI 내용 동시 수정 ${result.summaryConflictCount}개 보존`
+      : "",
+    result.summarySkippedContentCount > 0
+      ? `기존 내용 ${result.summarySkippedContentCount}개 보존`
+      : "",
+    result.summaryWarning
   ].filter(Boolean);
   return `${result.totalProcessedCount}개 씬을 확인했습니다. ${details.join(" · ")}`;
 }

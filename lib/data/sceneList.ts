@@ -39,6 +39,13 @@ export type ProjectScenarioSceneClassificationResult = {
   actorLinkCount: number;
   skippedDuplicateCount: number;
   conflictCount: number;
+  summaryTargetCount: number;
+  summarySavedCount: number;
+  summaryFailedCount: number;
+  summaryConflictCount: number;
+  summarySkippedContentCount: number;
+  summaryStatus: "not_needed" | "completed" | "partial" | "configuration_error";
+  summaryWarning: string;
 };
 
 export type ProjectSceneReferenceAutosaveResult = {
@@ -214,9 +221,31 @@ export async function classifyProjectScenarioScenes(
     actorLinkedSceneCount: count(payload.actorLinkedSceneCount),
     actorLinkCount: count(payload.actorLinkCount),
     skippedDuplicateCount: count(payload.skippedDuplicateCount),
-    conflictCount: count(payload.conflictCount)
+    conflictCount: count(payload.conflictCount),
+    summaryTargetCount: count(payload.summaryTargetCount),
+    summarySavedCount: count(payload.summarySavedCount),
+    summaryFailedCount: count(payload.summaryFailedCount),
+    summaryConflictCount: count(payload.summaryConflictCount),
+    summarySkippedContentCount: count(payload.summarySkippedContentCount)
   };
-  if (Object.values(counts).some((value) => value === null)) {
+  const summaryStatuses = new Set<ProjectScenarioSceneClassificationResult["summaryStatus"]>([
+    "not_needed",
+    "completed",
+    "partial",
+    "configuration_error"
+  ]);
+  const summaryStatus = typeof payload.summaryStatus === "string"
+    && summaryStatuses.has(payload.summaryStatus as ProjectScenarioSceneClassificationResult["summaryStatus"])
+    ? payload.summaryStatus as ProjectScenarioSceneClassificationResult["summaryStatus"]
+    : null;
+  const summaryWarning = typeof payload.summaryWarning === "string"
+    ? payload.summaryWarning.trim().slice(0, 500)
+    : null;
+  if (
+    Object.values(counts).some((value) => value === null)
+    || summaryStatus === null
+    || summaryWarning === null
+  ) {
     throw new Error("씬리스트 자동 분류 응답이 올바르지 않습니다.");
   }
   return {
@@ -227,7 +256,14 @@ export async function classifyProjectScenarioScenes(
     actorLinkedSceneCount: counts.actorLinkedSceneCount!,
     actorLinkCount: counts.actorLinkCount!,
     skippedDuplicateCount: counts.skippedDuplicateCount!,
-    conflictCount: counts.conflictCount!
+    conflictCount: counts.conflictCount!,
+    summaryTargetCount: counts.summaryTargetCount!,
+    summarySavedCount: counts.summarySavedCount!,
+    summaryFailedCount: counts.summaryFailedCount!,
+    summaryConflictCount: counts.summaryConflictCount!,
+    summarySkippedContentCount: counts.summarySkippedContentCount!,
+    summaryStatus,
+    summaryWarning
   };
 }
 

@@ -33,6 +33,12 @@ const {
 const { splitScenarioScenesByNumber } = await import("../lib/server/scenarioSceneParser.ts");
 const { extractScenarioScenesFromPdf } = await import("../lib/server/scenarioPdf.ts");
 const {
+  hasStoredScenarioSceneText,
+  normalizeStoredProjectScenarioScenes,
+  reconcileRecoveredScenarioSceneText
+} = await import("../lib/server/scenarioSceneTextRecovery.ts");
+const { hasClassifiableScenarioText } = await import("../lib/sceneListAutoClassification.ts");
+const {
   isScenarioPdfAnalysisRangeExceeded,
   MAX_SCENARIO_PDF_PAGES,
   MAX_SCENARIO_PDF_TEXT_CHARACTERS,
@@ -109,6 +115,11 @@ test("reference-assets awaits both lazy server PDF extraction call sites", async
   ) ?? [];
   assert.equal(awaitedLazyCalls.length, 2);
   assert.doesNotMatch(route, /^import[^\n]+scenarioPdf/mu);
+  assert.match(route, /normalizeStoredProjectScenarioScenes/u);
+  assert.match(route, /reconcileRecoveredScenarioSceneText\([\s\S]*existing\.scenario_scenes,[\s\S]*extraction\.scenes/u);
+  assert.match(route, /const scenarioMutationRequested = "scenarioScenes" in body \|\| body\.reanalyzeScenario === true/u);
+  assert.match(route, /expectedScenarioUpdatedAt[\s\S]*\.eq\("updated_at", expectedScenarioUpdatedAt\)/u);
+  assert.match(route, /if \(!hasStoredScenarioSceneText\(recovery\.scenes\)\)/u);
 });
 
 test("dates, numeric ranges, phones, and a third numeric segment do not become scene markers", () => {
@@ -219,6 +230,77 @@ test("actual server PDF extraction path recognizes bare markers in visual line o
   assert.match(extraction.scenes[0].text, /Yuri Sword action/);
 });
 
+test("28-scene PDF bodies survive extraction and the canonical storage boundary", async () => {
+  const extraction = await extractScenarioScenesFromPdf(await createTwentyEightSceneScenarioPdf());
+  assert.equal(extraction.error, null);
+  assert.equal(extraction.scenes.length, 28);
+  assert.deepEqual(
+    extraction.scenes.map((scene) => scene.sceneNo),
+    Array.from({ length: 28 }, (_, index) => String(index + 1))
+  );
+
+  const storedScenes = normalizeStoredProjectScenarioScenes(extraction.scenes);
+  assert.equal(storedScenes.length, 28);
+  assert.equal(storedScenes.every((scene) => scene.text.trim().length > 0), true);
+  assert.equal(storedScenes[0].text, "Actor 1 crosses the room.\nDialogue body 1.");
+  assert.equal(storedScenes[27].text, "Actor 28 crosses the room.\nDialogue body 28.");
+  assert.equal(hasStoredScenarioSceneText(storedScenes), true);
+  assert.equal(hasClassifiableScenarioText(storedScenes), true);
+});
+
+test("text recovery preserves stable metadata and non-empty manual bodies", () => {
+  const storedScenes = [
+    {
+      id: "stable-scene-1",
+      sceneNo: "S#1",
+      title: "사용자가 수정한 제목",
+      pageStart: 8,
+      pageEnd: 9,
+      text: "",
+      imageSegments: [{ pageIndex: 7, startYRatio: 0.1, endYRatio: 0.8 }]
+    },
+    {
+      id: "stable-scene-2",
+      sceneNo: "2",
+      title: "수동 제목 2",
+      pageStart: 10,
+      pageEnd: 10,
+      text: "사용자가 직접 적은 본문",
+      imageSegments: [{ pageIndex: 9, startYRatio: 0.2, endYRatio: 0.7 }]
+    }
+  ];
+  const recovered = reconcileRecoveredScenarioSceneText(storedScenes, [
+    {
+      id: "new-parser-id-1",
+      sceneNo: "1",
+      title: "S#1. INT. 방 / 낮",
+      pageStart: 1,
+      pageEnd: 1,
+      text: "유리가 방으로 들어온다.",
+      imageSegments: []
+    },
+    {
+      id: "new-parser-id-2",
+      sceneNo: "2",
+      title: "S#2. EXT. 길 / 밤",
+      pageStart: 2,
+      pageEnd: 2,
+      text: "덮어쓰면 안 되는 새 추출 본문",
+      imageSegments: []
+    }
+  ]);
+
+  assert.equal(recovered.changed, true);
+  assert.equal(recovered.recoveredTextCount, 1);
+  assert.equal(recovered.scenes[0].id, "stable-scene-1");
+  assert.equal(recovered.scenes[0].title, "사용자가 수정한 제목");
+  assert.equal(recovered.scenes[0].pageStart, 8);
+  assert.deepEqual(recovered.scenes[0].imageSegments, storedScenes[0].imageSegments);
+  assert.equal(recovered.scenes[0].text, "유리가 방으로 들어온다.");
+  assert.equal(recovered.scenes[1].id, "stable-scene-2");
+  assert.equal(recovered.scenes[1].text, "사용자가 직접 적은 본문");
+});
+
 test("scenario splitting preserves document order, distinct suffixes, and body source order", () => {
   const scenes = splitScenarioScenesByNumber([{
     page: 1,
@@ -269,5 +351,19 @@ async function createMinimalScenarioPdf() {
   document.text("Second scene body words", 72, 156);
   document.text("1 - 3", 72, 192);
   document.text("Third scene body words", 72, 216);
+  return Buffer.from(document.output("arraybuffer"));
+}
+
+async function createTwentyEightSceneScenarioPdf() {
+  const { jsPDF } = await import("jspdf");
+  const document = new jsPDF({ unit: "pt", format: "a4" });
+  for (let sceneNumber = 1; sceneNumber <= 28; sceneNumber += 1) {
+    if (sceneNumber > 1 && (sceneNumber - 1) % 4 === 0) document.addPage();
+    const positionOnPage = (sceneNumber - 1) % 4;
+    const top = 72 + positionOnPage * 150;
+    document.text(`S#${sceneNumber}. INT. SET ${sceneNumber} / DAY`, 72, top);
+    document.text(`Actor ${sceneNumber} crosses the room.`, 72, top + 24);
+    document.text(`Dialogue body ${sceneNumber}.`, 72, top + 48);
+  }
   return Buffer.from(document.output("arraybuffer"));
 }

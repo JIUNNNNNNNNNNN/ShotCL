@@ -417,6 +417,21 @@ export async function updateProjectReferenceAsset(
   return payload.asset;
 }
 
+/**
+ * Re-extracts the original PDF server-side and fills only missing canonical
+ * Scene bodies. The server preserves every existing non-empty/manual field.
+ */
+export async function recoverProjectScenarioSceneText(
+  projectId: string,
+  id: string,
+  expectedUpdatedAt: string
+): Promise<ProjectReferenceAsset> {
+  return updateProjectReferenceAsset(projectId, id, {
+    reanalyzeScenario: true,
+    expectedUpdatedAt
+  });
+}
+
 export type ProjectScenarioScenesUpdate = Pick<
   ProjectReferenceAsset,
   "id" | "scenarioScenes" | "scenarioParseError" | "updatedAt"

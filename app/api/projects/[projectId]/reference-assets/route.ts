@@ -13,10 +13,12 @@ import {
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
 import { normalizeSceneCutMetadata } from "@/lib/archiveAssetMetadata";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
+import { SCENARIO_MARKER_NOT_FOUND_MESSAGE } from "@/lib/scenarioSceneMarker";
 import {
-  MAX_SCENARIO_SCENE_TEXT_LENGTH,
-  SCENARIO_MARKER_NOT_FOUND_MESSAGE
-} from "@/lib/scenarioSceneMarker";
+  hasStoredScenarioSceneText,
+  normalizeStoredProjectScenarioScenes,
+  reconcileRecoveredScenarioSceneText
+} from "@/lib/server/scenarioSceneTextRecovery";
 import { progressMediaSummaryDisplayUrl } from "@/lib/progress/mediaGallery";
 import {
   createProgressMediaPlanScope,
@@ -957,15 +959,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "자료를 찾을 수 없습니다." }, { status: 404 });
     }
 
-    const expectedScenarioUpdatedAt = "scenarioScenes" in body
-      && body.reanalyzeScenario !== true
+    const scenarioMutationRequested = "scenarioScenes" in body || body.reanalyzeScenario === true;
+    const expectedScenarioUpdatedAt = scenarioMutationRequested
       && body.expectedUpdatedAt !== undefined
       ? cleanText(body.expectedUpdatedAt, 80)
       : "";
     if (
-      "scenarioScenes" in body
-      && body.reanalyzeScenario !== true
-      && body.expectedUpdatedAt !== undefined
+      scenarioMutationRequested
       && (!expectedScenarioUpdatedAt || Number.isNaN(Date.parse(expectedScenarioUpdatedAt)))
     ) {
       return NextResponse.json({ error: "시나리오 버전 정보가 올바르지 않습니다." }, { status: 400 });
@@ -1152,8 +1152,24 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         if (downloadError || !storedFile) throw downloadError ?? new Error("PDF 파일을 내려받지 못했습니다.");
         const extraction = await (await import("@/lib/server/scenarioPdf"))
           .extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
-        updatePayload.scenario_scenes = extraction.scenes;
-        updatePayload.scenario_parse_error = extraction.error;
+        if (extraction.error || extraction.scenes.length === 0) {
+          return NextResponse.json(
+            { error: extraction.error || SCENARIO_MARKER_NOT_FOUND_MESSAGE },
+            { status: 422 }
+          );
+        }
+        const recovery = reconcileRecoveredScenarioSceneText(
+          existing.scenario_scenes,
+          extraction.scenes
+        );
+        if (!hasStoredScenarioSceneText(recovery.scenes)) {
+          return NextResponse.json(
+            { error: "시나리오 Scene 본문을 복구하지 못했습니다. PDF 원문을 확인해주세요." },
+            { status: 422 }
+          );
+        }
+        updatePayload.scenario_scenes = recovery.scenes;
+        updatePayload.scenario_parse_error = null;
       } else {
         const scenes = normalizeScenarioScenes(body.scenarioScenes);
         updatePayload.scenario_scenes = scenes;
@@ -3066,48 +3082,7 @@ function mapProgressMediaRow(row: Record<string, unknown>): ReturnType<typeof ma
   };
 }
 
-function normalizeScenarioScenes(value: unknown): ProjectScenarioScene[] {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 2_000).flatMap((entry, index) => {
-    if (!entry || typeof entry !== "object") return [];
-    const source = entry as Record<string, unknown>;
-    const pageStart = nullablePositiveInteger(source.pageStart);
-    const pageEnd = nullablePositiveInteger(source.pageEnd);
-    const rawSceneNo = cleanText(source.sceneNo, 100);
-    const imageSegments = normalizeScenarioImageSegments(source.imageSegments);
-    return [{
-      id: cleanText(source.id, 100) || randomUUID(),
-      sceneNo: normalizeSceneNumber(rawSceneNo) || rawSceneNo || String(index + 1),
-      title: cleanText(source.title, 240) || `Scene ${index + 1}`,
-      pageStart,
-      pageEnd: pageEnd ?? pageStart,
-      text: cleanMultilineText(source.text, MAX_SCENARIO_SCENE_TEXT_LENGTH),
-      imageSegments
-    }];
-  });
-}
-
-function normalizeScenarioImageSegments(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 5_000).flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const source = entry as Record<string, unknown>;
-    const pageIndex = Number(source.pageIndex);
-    const startYRatio = Number(source.startYRatio);
-    const endYRatio = Number(source.endYRatio);
-    if (
-      !Number.isInteger(pageIndex)
-      || pageIndex < 0
-      || !Number.isFinite(startYRatio)
-      || !Number.isFinite(endYRatio)
-    ) {
-      return [];
-    }
-    const start = Math.min(1, Math.max(0, startYRatio));
-    const end = Math.min(1, Math.max(0, endYRatio));
-    return end > start ? [{ pageIndex, startYRatio: start, endYRatio: end }] : [];
-  });
-}
+const normalizeScenarioScenes = normalizeStoredProjectScenarioScenes;
 
 function nullablePositiveInteger(value: unknown) {
   if (value === null || value === undefined || value === "") return null;

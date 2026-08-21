@@ -47,7 +47,10 @@ export type SceneListClassificationExistingUpdate = {
   expectedUpdatedAt: string;
   characters: string;
   actorCells: Record<string, SceneListClassificationActorCell>;
+  sortOrder: number;
   actorLinkCount: number;
+  actorChanged: boolean;
+  orderChanged: boolean;
 };
 
 export type SceneListAutoClassificationPlan = {
@@ -71,6 +74,18 @@ type MatchableActor = SceneListClassificationActor & {
   displayRole: string;
   aliases: string[];
 };
+
+type ActorMatchCandidate = {
+  actor: MatchableActor;
+  actorIndex: number;
+  start: number;
+  end: number;
+  aliasLength: number;
+};
+
+type DesiredOrderEntry =
+  | { kind: "existing"; row: SceneListClassificationExistingRow }
+  | { kind: "new"; source: { sceneNo: string; text: string } };
 
 const KOREAN_PARTICLES = [
   "에게서는",
@@ -141,20 +156,61 @@ export function planSceneListAutoClassification(
   }
 
   const actors = prepareActors(input.actors);
-  const maxSortOrder = input.existingRows.reduce(
-    (maximum, row) => Math.max(maximum, Number.isFinite(row.sortOrder) ? row.sortOrder : 0),
-    0
-  );
+  const canonicalExistingRows = sourceScenes.flatMap((source) => {
+    const existing = existingBySceneNumber.get(source.sceneNo);
+    return existing ? [existing] : [];
+  });
+  const canonicalExistingIds = new Set(canonicalExistingRows.map((row) => row.id));
+  let canonicalExistingIndex = 0;
+  const desiredOrder: DesiredOrderEntry[] = input.existingRows.map((row) => {
+    if (!canonicalExistingIds.has(row.id)) return { kind: "existing", row };
+    const canonicalRow = canonicalExistingRows[canonicalExistingIndex] ?? row;
+    canonicalExistingIndex += 1;
+    return { kind: "existing", row: canonicalRow };
+  });
+
+  // Insert each missing Scene immediately before its next canonical anchor.
+  // Existing non-canonical/manual rows keep their relative placement, while
+  // canonical rows themselves follow parser source order rather than numeric
+  // Scene sorting. When no later anchor exists, append without moving manual
+  // rows that the user already placed after the last canonical Scene.
+  for (const [sourceIndex, source] of sourceScenes.entries()) {
+    if (existingBySceneNumber.has(source.sceneNo)) continue;
+    const nextExisting = sourceScenes
+      .slice(sourceIndex + 1)
+      .map((candidate) => existingBySceneNumber.get(candidate.sceneNo))
+      .find((candidate): candidate is SceneListClassificationExistingRow => Boolean(candidate));
+    const insertionIndex = nextExisting
+      ? desiredOrder.findIndex((entry) => (
+        entry.kind === "existing" && entry.row.id === nextExisting.id
+      ))
+      : -1;
+    const entry: DesiredOrderEntry = { kind: "new", source };
+    if (insertionIndex >= 0) desiredOrder.splice(insertionIndex, 0, entry);
+    else desiredOrder.push(entry);
+  }
+
+  const desiredSortOrderByExistingId = new Map<string, number>();
+  const desiredSortOrderByNewSceneNumber = new Map<string, number>();
+  for (const [orderIndex, entry] of desiredOrder.entries()) {
+    if (entry.kind === "existing") {
+      desiredSortOrderByExistingId.set(entry.row.id, orderIndex + 1);
+    } else {
+      desiredSortOrderByNewSceneNumber.set(entry.source.sceneNo, orderIndex + 1);
+    }
+  }
+
   const newRows: SceneListClassificationNewRow[] = [];
   const existingUpdates: SceneListClassificationExistingUpdate[] = [];
   const actorLinkCountByNewRowId = new Map<string, number>();
+  const usedExistingRowIds = new Set<string>();
 
   for (const source of sourceScenes) {
-    const detectedActors = actors.filter((actor) => (
-      actor.aliases.some((alias) => containsExactActorName(source.text, alias))
-    ));
+    const detectedActors = detectActors(source.text, actors);
     const existing = existingBySceneNumber.get(source.sceneNo);
     if (!existing) {
+      const sortOrder = desiredSortOrderByNewSceneNumber.get(source.sceneNo)
+        ?? desiredOrder.length + newRows.length + 1;
       const actorCells = createActorCells(detectedActors);
       const id = input.createSceneId(source.sceneNo);
       newRows.push({
@@ -172,22 +228,49 @@ export function planSceneListAutoClassification(
         actor_cells: actorCells,
         props: "",
         cut_count: null,
-        sort_order: maxSortOrder + newRows.length + 1
+        sort_order: sortOrder
       });
       actorLinkCountByNewRowId.set(id, countStableActorIds(actorCells));
       continue;
     }
 
+    usedExistingRowIds.add(existing.id);
     const merged = mergeDetectedActors(existing, detectedActors);
-    if (merged.changed) {
+    const sortOrder = desiredSortOrderByExistingId.get(existing.id) ?? existing.sortOrder;
+    const orderChanged = existing.sortOrder !== sortOrder;
+    if (merged.changed || orderChanged) {
       existingUpdates.push({
         id: existing.id,
         expectedUpdatedAt: existing.updatedAt,
         characters: merged.characters,
         actorCells: merged.actorCells,
-        actorLinkCount: merged.actorLinkCount
+        sortOrder,
+        actorLinkCount: merged.actorLinkCount,
+        actorChanged: merged.changed,
+        orderChanged
       });
     }
+  }
+
+  // Existing rows that are not part of this canonical Scenario snapshot are
+  // never deleted or enriched. They are only renumbered if a canonical Scene
+  // was inserted before them.
+  const remainingExistingRows = input.existingRows.filter((row) => (
+    !usedExistingRowIds.has(row.id)
+  ));
+  for (const existing of remainingExistingRows) {
+    const sortOrder = desiredSortOrderByExistingId.get(existing.id) ?? existing.sortOrder;
+    if (existing.sortOrder === sortOrder) continue;
+    existingUpdates.push({
+      id: existing.id,
+      expectedUpdatedAt: existing.updatedAt,
+      characters: existing.characters,
+      actorCells: cloneActorCells(existing.actorCells),
+      sortOrder,
+      actorLinkCount: 0,
+      actorChanged: false,
+      orderChanged: true
+    });
   }
 
   return {
@@ -199,11 +282,36 @@ export function planSceneListAutoClassification(
   };
 }
 
+export function hasClassifiableScenarioText(
+  scenes: SceneListClassificationSourceScene[]
+) {
+  return scenes.some((scene) => normalizeSearchText(scene.text).length > 0);
+}
+
+/** Stable AI mapping key for legacy parsed scenes that predate persisted IDs. */
+export function createStableScenarioSceneSourceId(
+  scenarioAssetId: unknown,
+  sceneNo: unknown,
+  storedSceneId: unknown
+) {
+  const storedId = String(storedSceneId ?? "").trim().slice(0, 160);
+  if (storedId) return storedId;
+  const assetId = String(scenarioAssetId ?? "").trim().slice(0, 100);
+  const canonicalSceneNo = String(sceneNo ?? "").normalize("NFKC").trim().slice(0, 30);
+  return assetId && canonicalSceneNo ? `shotcl:${assetId}:scene:${canonicalSceneNo}` : "";
+}
+
 /** Exact Unicode token matching with a conservative Korean-particle suffix. */
 export function containsExactActorName(body: unknown, rawName: unknown) {
   const text = normalizeSearchText(body);
   const name = normalizeSearchText(rawName);
   if (!text || !name) return false;
+
+  return findExactActorNameRanges(text, name).length > 0;
+}
+
+function findExactActorNameRanges(text: string, name: string) {
+  const ranges: Array<{ start: number; end: number }> = [];
 
   let offset = text.indexOf(name);
   while (offset >= 0) {
@@ -216,11 +324,52 @@ export function containsExactActorName(body: unknown, rawName: unknown) {
       || !WORD_CHARACTER.test(after)
       || hasAllowedParticleBoundary(text, afterOffset)
     )) {
-      return true;
+      ranges.push({ start: offset, end: afterOffset });
     }
     offset = text.indexOf(name, offset + name.length);
   }
-  return false;
+  return ranges;
+}
+
+function detectActors(text: string, actors: MatchableActor[]) {
+  const candidates: ActorMatchCandidate[] = [];
+  for (const [actorIndex, actor] of actors.entries()) {
+    for (const alias of actor.aliases) {
+      for (const range of findExactActorNameRanges(text, alias)) {
+        candidates.push({
+          actor,
+          actorIndex,
+          start: range.start,
+          end: range.end,
+          aliasLength: alias.length
+        });
+      }
+    }
+  }
+  candidates.sort((left, right) => (
+    right.aliasLength - left.aliasLength
+    || left.start - right.start
+    || left.actorIndex - right.actorIndex
+  ));
+
+  const claimedRanges: Array<{ actorId: string; start: number; end: number }> = [];
+  const detectedActorIds = new Set<string>();
+  for (const candidate of candidates) {
+    const collidesWithLongerActor = claimedRanges.some((claimed) => (
+      claimed.actorId !== candidate.actor.id
+      && candidate.start < claimed.end
+      && claimed.start < candidate.end
+    ));
+    if (collidesWithLongerActor) continue;
+    detectedActorIds.add(candidate.actor.id);
+    claimedRanges.push({
+      actorId: candidate.actor.id,
+      start: candidate.start,
+      end: candidate.end
+    });
+  }
+
+  return actors.filter((actor) => detectedActorIds.has(actor.id));
 }
 
 function prepareActors(actors: SceneListClassificationActor[]): MatchableActor[] {
@@ -313,9 +462,16 @@ function appendCharacterRoles(existing: string, additions: string[]) {
 }
 
 function hasAllowedParticleBoundary(text: string, afterNameOffset: number) {
-  for (const particle of KOREAN_PARTICLES) {
-    if (!text.startsWith(particle, afterNameOffset)) continue;
-    const boundaryOffset = afterNameOffset + particle.length;
+  let boundaryOffset = afterNameOffset;
+  // Compound particles are written without whitespace (에게+도, 와+는).
+  // Consume only a short chain from the explicit allowlist so ordinary word
+  // suffixes such as `민수` remain rejected.
+  for (let partCount = 0; partCount < 3; partCount += 1) {
+    const particle = KOREAN_PARTICLES.find((candidate) => (
+      text.startsWith(candidate, boundaryOffset)
+    ));
+    if (!particle) return false;
+    boundaryOffset += particle.length;
     const following = boundaryOffset < text.length ? text[boundaryOffset] : "";
     if (!following || !WORD_CHARACTER.test(following)) return true;
   }

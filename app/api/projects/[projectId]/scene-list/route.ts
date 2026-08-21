@@ -6,12 +6,24 @@ import {
   ProjectAccessUnavailableError,
   requireProjectAccessDb
 } from "@/lib/projectAccess/server";
+import { normalizeProjectBasicInfo } from "@/lib/projectBasicInfo";
 import { isValidDatabaseProjectId, normalizeProjectId } from "@/lib/projectId";
-import { MAX_SCENARIO_SCENE_TEXT_LENGTH } from "@/lib/scenarioSceneMarker";
 import { normalizeSceneNumber } from "@/lib/sceneNumber";
 import { validateSceneCutCountInput } from "@/lib/sceneCutCount";
-import { planSceneListAutoClassification } from "@/lib/sceneListAutoClassification";
+import {
+  createStableScenarioSceneSourceId,
+  hasClassifiableScenarioText,
+  planSceneListAutoClassification
+} from "@/lib/sceneListAutoClassification";
 import { createDeterministicSceneListId } from "@/lib/server/deterministicSceneListId";
+import {
+  OpenAiSceneSummaryConfigurationError,
+  summarizeScenarioScenesWithOpenAi
+} from "@/lib/server/openAiSceneSummaryRuntime";
+import {
+  normalizeStoredProjectScenarioScenes,
+  reconcileRecoveredScenarioSceneText
+} from "@/lib/server/scenarioSceneTextRecovery";
 import {
   parseSceneListCellMerges,
   SCENE_LIST_REORDER_MERGE_ERROR,
@@ -23,7 +35,15 @@ import {
   ProjectDeleteReceiptError,
   verifyProjectDeleteReceipt
 } from "@/lib/projectDeleteReceipt.server";
-import type { ProjectSceneActorCell, ProjectSceneMergeColumn } from "@/lib/types";
+import type {
+  ProjectScenarioScene,
+  ProjectSceneActorCell,
+  ProjectSceneMergeColumn
+} from "@/lib/types";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 type RouteContext = { params: Promise<{ projectId: string }> };
 
@@ -368,7 +388,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           { status: 400 }
         );
       }
-      return classifyScenarioScenes(supabase, projectId, scenarioAssetId);
+      return await classifyScenarioScenes(supabase, projectId, scenarioAssetId);
     }
 
     if (body.action === "delete-item") {
@@ -898,14 +918,14 @@ async function classifyScenarioScenes(
   const [assetResult, rowsResult, basicInfoResult] = await Promise.all([
     supabase
       .from("project_reference_assets")
-      .select("id,scenario_scenes")
+      .select("id,storage_path,scenario_scenes,updated_at")
       .eq("project_id", projectId)
       .eq("id", scenarioAssetId)
       .eq("asset_type", "scenario")
       .maybeSingle(),
     supabase
       .from("project_scene_items")
-      .select("id,scene_no,characters,actor_cells,sort_order,updated_at")
+      .select("id,scene_no,scene_content,characters,actor_cells,sort_order,updated_at")
       .eq("project_id", projectId)
       .order("sort_order")
       .order("created_at"),
@@ -922,10 +942,23 @@ async function classifyScenarioScenes(
     return NextResponse.json({ error: "분류할 시나리오를 찾을 수 없습니다." }, { status: 404 });
   }
 
-  const scenarioScenes = normalizeStoredScenarioScenes(assetResult.data.scenario_scenes);
+  const recovery = await recoverScenarioSceneTextBeforeClassification({
+    supabase,
+    projectId,
+    scenarioAssetId,
+    asset: assetResult.data as Record<string, unknown>
+  });
+  if (!recovery.ok) return recovery.response;
+  const scenarioScenes = normalizeStoredScenarioScenes(recovery.scenes, scenarioAssetId);
   if (scenarioScenes.length === 0) {
     return NextResponse.json(
       { error: "먼저 시나리오 Scene 분리를 완료해주세요." },
+      { status: 409 }
+    );
+  }
+  if (!hasClassifiableScenarioText(scenarioScenes)) {
+    return NextResponse.json(
+      { error: "분리된 Scene 본문이 모두 비어 있습니다. 시나리오 PDF의 Scene 본문 추출 결과를 확인해주세요." },
       { status: 409 }
     );
   }
@@ -941,7 +974,9 @@ async function classifyScenarioScenes(
       sortOrder: Number(row.sort_order) || 0,
       updatedAt: String(row.updated_at ?? "")
     })),
-    actors: extractRegisteredActors(basicInfoResult.data?.actors),
+    // Reuse the same canonical normalization as Basic Info so legacy actors
+    // without an ID receive the exact stable project_actor_* ID the UI uses.
+    actors: normalizeProjectBasicInfo({ actors: basicInfoResult.data?.actors }).actors,
     normalizeSceneNumber,
     createSceneId: (sceneNo) => createDeterministicSceneListId(projectId, sceneNo)
   });
@@ -961,7 +996,8 @@ async function classifyScenarioScenes(
       .from("project_scene_items")
       .update({
         characters: update.characters,
-        actor_cells: update.actorCells
+        actor_cells: update.actorCells,
+        sort_order: update.sortOrder
       })
       .eq("project_id", projectId)
       .eq("id", update.id)
@@ -990,7 +1026,16 @@ async function classifyScenarioScenes(
     update.actorLinkCount > 0
   )).length;
   const conflictCount = (plan.newRows.length - createdCount)
-    + (plan.existingUpdates.length - enrichedCount);
+    + (plan.existingUpdates.length - successfulUpdates.length);
+
+  const summaryCounts = await summarizeEmptySceneContents({
+    supabase,
+    projectId,
+    scenarioAssetId,
+    scenarioScenes,
+    existingRows: rowsResult.data ?? [],
+    newRows: plan.newRows
+  });
 
   return NextResponse.json({
     ok: true,
@@ -1000,8 +1045,313 @@ async function classifyScenarioScenes(
     actorLinkedSceneCount: newActorLinkedSceneCount + updatedActorLinkedSceneCount,
     actorLinkCount: newActorLinkCount + updatedActorLinkCount,
     skippedDuplicateCount: plan.skippedDuplicateCount,
-    conflictCount
+    conflictCount,
+    ...summaryCounts
   });
+}
+
+async function recoverScenarioSceneTextBeforeClassification(input: {
+  supabase: ReturnType<typeof requireProjectAccessDb>;
+  projectId: string;
+  scenarioAssetId: string;
+  asset: Record<string, unknown>;
+}): Promise<
+  | { ok: true; scenes: ProjectScenarioScene[] }
+  | { ok: false; response: NextResponse }
+> {
+  const storedScenes = normalizeStoredProjectScenarioScenes(
+    addStableLegacyScenarioSceneIds(input.asset.scenario_scenes, input.scenarioAssetId)
+  );
+  if (storedScenes.some((scene) => scene.text.trim())) {
+    return { ok: true, scenes: storedScenes };
+  }
+
+  const storagePath = normalizeText(input.asset.storage_path, 1_000);
+  const expectedUpdatedAt = normalizeText(input.asset.updated_at, 100);
+  if (!storagePath || !expectedUpdatedAt) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "시나리오 PDF 원본 또는 버전 정보를 확인할 수 없습니다." },
+        { status: 422 }
+      )
+    };
+  }
+
+  const { data: storedFile, error: downloadError } = await input.supabase.storage
+    .from("storyboards")
+    .download(storagePath);
+  if (downloadError || !storedFile) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "시나리오 PDF 원본을 불러오지 못해 Scene 본문을 복구하지 못했습니다." },
+        { status: 422 }
+      )
+    };
+  }
+
+  const extraction = await (await import("@/lib/server/scenarioPdf"))
+    .extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
+  if (extraction.error || extraction.scenes.length === 0) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: extraction.error || "시나리오 Scene 본문을 추출하지 못했습니다." },
+        { status: 422 }
+      )
+    };
+  }
+  const reconciled = reconcileRecoveredScenarioSceneText(storedScenes, extraction.scenes);
+  if (!reconciled.changed || !reconciled.scenes.some((scene) => scene.text.trim())) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "시나리오 Scene 본문을 복구하지 못했습니다. PDF 원문을 확인해주세요." },
+        { status: 422 }
+      )
+    };
+  }
+
+  const { data: saved, error: saveError } = await input.supabase
+    .from("project_reference_assets")
+    .update({
+      scenario_scenes: reconciled.scenes,
+      scenario_parse_error: null
+    })
+    .eq("project_id", input.projectId)
+    .eq("id", input.scenarioAssetId)
+    .eq("asset_type", "scenario")
+    .eq("updated_at", expectedUpdatedAt)
+    .select("id")
+    .maybeSingle();
+  if (saveError) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "복구한 시나리오 Scene 본문을 저장하지 못했습니다." },
+        { status: 503 }
+      )
+    };
+  }
+  if (!saved) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "시나리오가 다른 화면에서 변경되어 자동 분류를 시작하지 않았습니다." },
+        { status: 409 }
+      )
+    };
+  }
+  return { ok: true, scenes: reconciled.scenes };
+}
+
+type SceneSummaryPhaseInput = {
+  supabase: ReturnType<typeof requireProjectAccessDb>;
+  projectId: string;
+  scenarioAssetId: string;
+  scenarioScenes: Array<{
+    sourceSceneId: string;
+    sceneNo: string;
+    heading: string;
+    text: string;
+  }>;
+  existingRows: Array<Record<string, unknown>>;
+  newRows: Array<{ id: string; scene_no: string }>;
+};
+
+async function summarizeEmptySceneContents(input: SceneSummaryPhaseInput) {
+  try {
+    return await summarizeEmptySceneContentsUnsafe(input);
+  } catch {
+    const seenSceneNumbers = new Set<string>();
+    const summaryTargetCount = input.scenarioScenes.filter((scene) => {
+      if (seenSceneNumbers.has(scene.sceneNo) || !scene.text.trim()) return false;
+      seenSceneNumbers.add(scene.sceneNo);
+      return true;
+    }).length;
+    return {
+      summaryTargetCount,
+      summarySavedCount: 0,
+      summaryFailedCount: summaryTargetCount,
+      summaryConflictCount: 0,
+      summarySkippedContentCount: 0,
+      summaryStatus: "partial" as const,
+      summaryWarning: "AI 내용 생성 단계에 실패했습니다. 씬과 등장인물 분류는 유지됩니다."
+    };
+  }
+}
+
+async function summarizeEmptySceneContentsUnsafe(input: SceneSummaryPhaseInput) {
+  const rowIdBySceneNumber = new Map<string, string>();
+  for (const row of input.existingRows) {
+    const sceneNo = normalizeSceneNumber(row.scene_no);
+    const id = normalizeText(row.id, 36);
+    if (sceneNo && isUuid(id) && !rowIdBySceneNumber.has(sceneNo)) {
+      rowIdBySceneNumber.set(sceneNo, id);
+    }
+  }
+  for (const row of input.newRows) {
+    if (!rowIdBySceneNumber.has(row.scene_no)) rowIdBySceneNumber.set(row.scene_no, row.id);
+  }
+
+  const sourceTargets: Array<{
+    sourceSceneId: string;
+    sceneListItemId: string;
+    sceneNo: string;
+    heading: string;
+    text: string;
+  }> = [];
+  const seenSceneNumbers = new Set<string>();
+  const seenSourceSceneIds = new Set<string>();
+  for (const scene of input.scenarioScenes) {
+    if (seenSceneNumbers.has(scene.sceneNo)) continue;
+    seenSceneNumbers.add(scene.sceneNo);
+    const sceneListItemId = rowIdBySceneNumber.get(scene.sceneNo)
+      ?? createDeterministicSceneListId(input.projectId, scene.sceneNo);
+    let sourceSceneId = scene.sourceSceneId;
+    if (seenSourceSceneIds.has(sourceSceneId)) {
+      sourceSceneId = `shotcl:${input.scenarioAssetId}:scene:${scene.sceneNo}`;
+    }
+    while (seenSourceSceneIds.has(sourceSceneId)) sourceSceneId = `${sourceSceneId}:canonical`;
+    seenSourceSceneIds.add(sourceSceneId);
+    sourceTargets.push({
+      sourceSceneId,
+      sceneListItemId,
+      sceneNo: scene.sceneNo,
+      heading: scene.heading,
+      text: scene.text
+    });
+  }
+
+  const targetIds = Array.from(new Set(sourceTargets.map((target) => target.sceneListItemId)));
+  const rowBatches = chunkValues(targetIds, 100);
+  let rowResults: Array<Array<Record<string, unknown>>>;
+  try {
+    rowResults = await settleWithConcurrency(rowBatches, 4, async (ids) => {
+      const { data, error } = await input.supabase
+        .from("project_scene_items")
+        .select("id,scene_content,updated_at")
+        .eq("project_id", input.projectId)
+        .in("id", ids);
+      if (error) throw error;
+      return (data ?? []) as Array<Record<string, unknown>>;
+    });
+  } catch {
+    const summaryTargetCount = sourceTargets.filter((target) => target.text.trim()).length;
+    return {
+      summaryTargetCount,
+      summarySavedCount: 0,
+      summaryFailedCount: summaryTargetCount,
+      summaryConflictCount: 0,
+      summarySkippedContentCount: 0,
+      summaryStatus: "partial" as const,
+      summaryWarning: "AI 내용 생성 대상을 확인하지 못했습니다. 씬과 등장인물 분류는 유지됩니다."
+    };
+  }
+  const currentRowsById = new Map(
+    rowResults.flat().map((row) => [String(row.id), {
+      sceneContent: String(row.scene_content ?? ""),
+      updatedAt: String(row.updated_at ?? "")
+    }])
+  );
+
+  let summarySkippedContentCount = 0;
+  const candidates = sourceTargets.flatMap((target) => {
+    const row = currentRowsById.get(target.sceneListItemId);
+    if (!row) return [];
+    if (row.sceneContent !== "") {
+      summarySkippedContentCount += 1;
+      return [];
+    }
+    if (!target.text.trim()) return [];
+    return [{ ...target, expectedUpdatedAt: row.updatedAt }];
+  });
+
+  if (candidates.length === 0) {
+    return {
+      summaryTargetCount: 0,
+      summarySavedCount: 0,
+      summaryFailedCount: 0,
+      summaryConflictCount: 0,
+      summarySkippedContentCount,
+      summaryStatus: "not_needed" as const,
+      summaryWarning: ""
+    };
+  }
+
+  let generated;
+  try {
+    generated = await summarizeScenarioScenesWithOpenAi(
+      candidates.map((candidate) => ({
+        sceneId: candidate.sourceSceneId,
+        sceneNo: candidate.sceneNo,
+        heading: candidate.heading,
+        text: candidate.text
+      }))
+    );
+  } catch (error) {
+    if (error instanceof OpenAiSceneSummaryConfigurationError) {
+      return {
+        summaryTargetCount: candidates.length,
+        summarySavedCount: 0,
+        summaryFailedCount: candidates.length,
+        summaryConflictCount: 0,
+        summarySkippedContentCount,
+        summaryStatus: "configuration_error" as const,
+        summaryWarning: error.message
+      };
+    }
+    return {
+      summaryTargetCount: candidates.length,
+      summarySavedCount: 0,
+      summaryFailedCount: candidates.length,
+      summaryConflictCount: 0,
+      summarySkippedContentCount,
+      summaryStatus: "partial" as const,
+      summaryWarning: "AI 내용 생성 요청에 실패했습니다. 씬과 등장인물 분류는 유지됩니다."
+    };
+  }
+  const candidateBySourceId = new Map(
+    candidates.map((candidate) => [candidate.sourceSceneId, candidate])
+  );
+  const writeResults = await settleWithConcurrency(generated.summaries, 8, async (summary) => {
+    const candidate = candidateBySourceId.get(summary.sceneId);
+    if (!candidate) return "failed" as const;
+    try {
+      const { data, error } = await input.supabase
+        .from("project_scene_items")
+        .update({ scene_content: summary.summary })
+        .eq("project_id", input.projectId)
+        .eq("id", candidate.sceneListItemId)
+        .eq("updated_at", candidate.expectedUpdatedAt)
+        .eq("scene_content", "")
+        .select("id")
+        .maybeSingle();
+      if (error) return "failed" as const;
+      return data ? "saved" as const : "conflict" as const;
+    } catch {
+      return "failed" as const;
+    }
+  });
+
+  const summarySavedCount = writeResults.filter((result) => result === "saved").length;
+  const summaryFailedCount = generated.failures.length
+    + writeResults.filter((result) => result === "failed").length;
+  const summaryConflictCount = writeResults.filter((result) => result === "conflict").length;
+  return {
+    summaryTargetCount: candidates.length,
+    summarySavedCount,
+    summaryFailedCount,
+    summaryConflictCount,
+    summarySkippedContentCount,
+    summaryStatus: summaryFailedCount > 0 || summaryConflictCount > 0
+      ? "partial" as const
+      : "completed" as const,
+    summaryWarning: summaryFailedCount > 0
+      ? "일부 Scene의 AI 내용 생성에 실패했습니다."
+      : ""
+  };
 }
 
 async function requireReadScope(request: NextRequest, context: RouteContext) {
@@ -1079,32 +1429,32 @@ function extractActorRoles(value: unknown): string[] {
   ));
 }
 
-function extractRegisteredActors(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  const seenIds = new Set<string>();
-  return value.slice(0, 200).flatMap((actor) => {
-    if (!actor || typeof actor !== "object" || Array.isArray(actor)) return [];
-    const record = actor as Record<string, unknown>;
-    const id = normalizeText(record.id, 160);
-    const role = normalizeText(record.role, 120);
-    const name = normalizeText(record.name, 120);
-    if (!/^project_actor_[0-9a-z-]+$/i.test(id) || (!role && !name) || seenIds.has(id)) return [];
-    seenIds.add(id);
-    return [{ id, role, name }];
+function normalizeStoredScenarioScenes(value: unknown, scenarioAssetId: string) {
+  return normalizeStoredProjectScenarioScenes(value).flatMap((scene) => {
+    const sceneNo = normalizeSceneNumber(scene.sceneNo);
+    if (!sceneNo) return [];
+    return [{
+      sourceSceneId: createStableScenarioSceneSourceId(
+        scenarioAssetId,
+        sceneNo,
+        scene.id
+      ),
+      sceneNo,
+      heading: normalizeText(scene.title, 300),
+      text: scene.text
+    }];
   });
 }
 
-function normalizeStoredScenarioScenes(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 2_000).flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+function addStableLegacyScenarioSceneIds(value: unknown, scenarioAssetId: string) {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return entry;
     const source = entry as Record<string, unknown>;
+    if (normalizeText(source.id, 160)) return entry;
     const sceneNo = normalizeSceneNumber(source.sceneNo);
-    if (!sceneNo) return [];
-    return [{
-      sceneNo,
-      text: normalizeMultilineText(source.text, MAX_SCENARIO_SCENE_TEXT_LENGTH)
-    }];
+    const sourceSceneId = createStableScenarioSceneSourceId(scenarioAssetId, sceneNo, "");
+    return sourceSceneId ? { ...source, id: sourceSceneId } : entry;
   });
 }
 
@@ -1208,6 +1558,14 @@ async function settleWithConcurrency<T, R>(
   }
   await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, run));
   return results;
+}
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function normalizeOrderedSceneIds(value: unknown): string[] | null {
