@@ -237,7 +237,8 @@ export default function ProjectScenarioPage() {
     event.target.value = "";
     if (!projectId || files.length === 0 || uploadInFlightRef.current) return;
     const uploadedIds: string[] = [];
-    const analysisWarnings: string[] = [];
+    const sceneDetectionWarnings: string[] = [];
+    const imageSegmentWarnings: string[] = [];
     let uploadedId = "";
     uploadInFlightRef.current = true;
     if (uploadSuccessTimerRef.current !== null) {
@@ -273,16 +274,33 @@ export default function ProjectScenarioPage() {
           setUploadProgress(createUploadProgress("analyzing", file, index, files.length));
         }
 
-        let mergedScenes: ProjectScenarioScene[] = uploadedAsset.scenarioScenes ?? [];
-        let analysisWarning = "";
+        const serverScenes = uploadedAsset.scenarioScenes ?? [];
+        let mergedScenes: ProjectScenarioScene[] = serverScenes;
+        let scenarioParseError = serverScenes.length > 0
+          ? null
+          : uploadedAsset.scenarioParseError;
         try {
           const { analyzeScenarioPdfImages } = await import("@/lib/client/scenarioPdfImages");
           const imageScenes = await analyzeScenarioPdfImages(uploadedAsset.publicUrl);
-          mergedScenes = mergeScenarioSceneImages(uploadedAsset.scenarioScenes ?? [], imageScenes);
+          mergedScenes = mergeScenarioSceneImages(serverScenes, imageScenes);
+          if (mergedScenes.length > 0) scenarioParseError = null;
         } catch (analysisError) {
           console.error("[scenario:pdf-analysis]", { filename: file.name, error: analysisError });
-          analysisWarning = getSafeScenarioAnalysisWarning(analysisError);
-          analysisWarnings.push(`${file.name}: ${analysisWarning}`);
+          if (serverScenes.length > 0) {
+            imageSegmentWarnings.push(
+              `${file.name}: 씬 번호는 인식했지만 씬 이미지 구간을 만들지 못했습니다. 원본 PDF로 확인할 수 있습니다.`
+            );
+            // Browser PDF rendering is an optional presentation enhancement.
+            // Never replace a valid server parse state with its warning.
+            scenarioParseError = null;
+          } else {
+            const analysisWarning = getSafeScenarioAnalysisWarning(
+              analysisError,
+              uploadedAsset.scenarioParseError
+            );
+            sceneDetectionWarnings.push(`${file.name}: ${analysisWarning}`);
+            scenarioParseError = analysisWarning;
+          }
         }
         if (!isMountedRef.current) return;
         if (isMountedRef.current) {
@@ -290,7 +308,7 @@ export default function ProjectScenarioPage() {
         }
         await updateProjectReferenceAsset(projectId, uploadedAsset.id, {
           scenarioScenes: mergedScenes,
-          scenarioParseError: analysisWarning || null
+          scenarioParseError
         });
       }
       const finalFile = files[files.length - 1];
@@ -300,29 +318,41 @@ export default function ProjectScenarioPage() {
       if (!isMountedRef.current) return;
       if (reloaded && uploadedId) setSelectedId(uploadedId);
       setViewMode("scenes");
-      const completionMessage = !reloaded
-        ? "PDF 처리는 완료되었지만 목록을 새로고침하지 못했습니다."
-        : analysisWarnings.length > 0
-          ? "PDF 업로드는 완료되었습니다. 씬 구성을 확인해주세요."
-          : "PDF 업로드와 씬 이미지 분석이 완료되었습니다.";
-      setStatusMessage(completionMessage);
       if (!reloaded) {
-        setErrorMessage("업로드한 시나리오 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요.");
-      } else if (analysisWarnings.length > 0) {
-        setErrorMessage(analysisWarnings.join(" · "));
+        setStatusMessage("");
+        setErrorMessage(
+          "PDF 업로드는 완료되었지만 시나리오 목록을 다시 불러오지 못했습니다. 새로고침 후 확인해 주세요."
+        );
+      } else if (sceneDetectionWarnings.length > 0) {
+        setStatusMessage("");
+        setErrorMessage(
+          `PDF 업로드는 완료되었지만 씬 자동 분리를 완료하지 못했습니다. ${sceneDetectionWarnings.join(" · ")}`
+        );
+      } else if (imageSegmentWarnings.length > 0) {
+        setErrorMessage("");
+        setStatusMessage(
+          `PDF 업로드와 씬 자동 분리는 완료되었습니다. ${imageSegmentWarnings.join(" · ")}`
+        );
+      } else {
+        setErrorMessage("");
+        setStatusMessage("PDF 업로드와 씬 이미지 분석이 완료되었습니다.");
       }
+      const hasAnalysisWarnings = sceneDetectionWarnings.length > 0
+        || imageSegmentWarnings.length > 0;
       setUploadProgress({
         ...createUploadProgress(
-          reloaded && analysisWarnings.length === 0 ? "success" : "warning",
+          reloaded && !hasAnalysisWarnings ? "success" : "warning",
           finalFile,
           files.length - 1,
           files.length
         ),
         detail: !reloaded
           ? "업로드는 끝났지만 목록을 다시 불러오지 못했습니다."
-          : analysisWarnings.length > 0
-            ? "업로드는 끝났지만 씬 구성을 확인해야 합니다."
-            : undefined
+          : sceneDetectionWarnings.length > 0
+            ? "업로드는 끝났지만 씬 번호를 자동 인식하지 못했습니다."
+            : imageSegmentWarnings.length > 0
+              ? "씬 자동 분리는 완료되었지만 씬 이미지 구간을 만들지 못했습니다."
+              : undefined
       });
       uploadSuccessTimerRef.current = window.setTimeout(() => {
         if (isMountedRef.current) setUploadProgress(null);
@@ -342,10 +372,11 @@ export default function ProjectScenarioPage() {
       }
       if (isMountedRef.current) {
         setUploadProgress(null);
-        setStatusMessage(uploadedIds.length > 0
-          ? `${uploadedIds.length}개 PDF는 업로드되었지만 나머지 처리를 완료하지 못했습니다.`
-          : "");
-        setErrorMessage(getSafeScenarioUploadError(error));
+        setStatusMessage("");
+        const uploadError = getSafeScenarioUploadError(error);
+        setErrorMessage(uploadedIds.length > 0
+          ? `${uploadedIds.length}개 PDF는 업로드되었지만 나머지 처리를 완료하지 못했습니다. ${uploadError}`
+          : uploadError);
       }
     } finally {
       uploadInFlightRef.current = false;
@@ -902,7 +933,7 @@ export default function ProjectScenarioPage() {
         </p>
       ) : null}
       {statusMessage ? (
-        <p role="status" className="border-l-2 border-field-divider bg-field-soft px-2.5 py-1.5 text-xs font-bold text-field-subtle">
+        <p role="status" className="min-w-0 break-words border-l-2 border-field-divider bg-field-soft px-2.5 py-1.5 text-xs font-bold text-field-subtle [overflow-wrap:anywhere]">
           {statusMessage}
         </p>
       ) : null}
@@ -1168,7 +1199,9 @@ class ScenarioUploadValidationError extends Error {
   }
 }
 
-function getSafeScenarioAnalysisWarning(error: unknown) {
+function getSafeScenarioAnalysisWarning(error: unknown, serverParseError: string | null = null) {
+  const canonicalError = serverParseError?.trim();
+  if (canonicalError) return canonicalError;
   if (error instanceof Error && error.message === SCENARIO_MARKER_NOT_FOUND_MESSAGE) {
     return SCENARIO_MARKER_NOT_FOUND_MESSAGE;
   }

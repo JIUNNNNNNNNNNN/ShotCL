@@ -1,9 +1,13 @@
 const SCENE_NUMBER_PATTERN =
-  /^\s*(?:S\s*#?\s*|SCENE\s*#?\s*|씬\s*#?\s*|#\s*)?0*(\d{1,4})(?:\s*-\s*(\d{1,4}))?(?!\s*-\s*\d)(?=\s|[.():\-–—)\]}]|$)/i;
+  /^\s*(?:S\s*#?\s*|SCENE\s*#?\s*|씬\s*#?\s*|#\s*)?0*(\d{1,4})(?:\s*-\s*(\d{1,4}))?(?!\s*-\s*[\p{L}\p{N}])(?=\s|[.():\-–—)\]}]|$)/iu;
 
 /** 다양한 씬 번호 표기를 숫자 또는 숫자-숫자 문자열로 통일합니다. */
 export function normalizeSceneNumber(value: unknown): string {
-  const text = String(value ?? "").trim();
+  const text = String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/(\d)\s*-\s*(?=\d)/g, "$1-")
+    .trim();
   if (!text || isDateOrTimeLine(text)) return "";
   const match = text.match(SCENE_NUMBER_PATTERN);
   if (!match) return "";

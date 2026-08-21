@@ -334,7 +334,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const uploadedPath = `projects/${projectId}/archive/${assetType}/${storageFolder}/${Date.now()}-${randomUUID()}-${safeFilename}`;
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const scenarioExtraction = assetType === "scenario"
-      ? (await import("@/lib/server/scenarioPdf")).extractScenarioScenesFromPdf(fileBuffer)
+      ? await (await import("@/lib/server/scenarioPdf")).extractScenarioScenesFromPdf(fileBuffer)
       : null;
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
@@ -1150,7 +1150,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           .from(STORAGE_BUCKET)
           .download(String(existing.storage_path ?? ""));
         if (downloadError || !storedFile) throw downloadError ?? new Error("PDF 파일을 내려받지 못했습니다.");
-        const extraction = (await import("@/lib/server/scenarioPdf"))
+        const extraction = await (await import("@/lib/server/scenarioPdf"))
           .extractScenarioScenesFromPdf(Buffer.from(await storedFile.arrayBuffer()));
         updatePayload.scenario_scenes = extraction.scenes;
         updatePayload.scenario_parse_error = extraction.error;

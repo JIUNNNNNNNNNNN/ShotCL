@@ -1,9 +1,19 @@
 "use client";
 
 import {
+  findLikelyPdfPaginationMarkerIndices,
   inspectScenarioSceneMarker,
-  SCENARIO_MARKER_NOT_FOUND_MESSAGE
+  isExactBareScenarioMarker,
+  SCENARIO_MARKER_NOT_FOUND_MESSAGE,
+  type ScenarioPdfMarkerEdge
 } from "@/lib/scenarioSceneMarker";
+import {
+  groupScenarioPdfTextItemsIntoLines,
+  isScenarioPdfAnalysisRangeExceeded,
+  joinScenarioPdfTextItems,
+  SCENARIO_PDF_ANALYSIS_RANGE_MESSAGE,
+  type ScenarioPositionedText
+} from "@/lib/scenarioPdfTextLayout";
 import type {
   ProjectScenarioImageSegment,
   ProjectScenarioScene
@@ -16,13 +26,7 @@ type PdfTextItem = {
   height: number;
 };
 
-export type ScenarioPositionedText = {
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
+export type { ScenarioPositionedText } from "@/lib/scenarioPdfTextLayout";
 
 export type ScenarioMarkerPosition = {
   sceneNo: string;
@@ -31,14 +35,18 @@ export type ScenarioMarkerPosition = {
   lineIndex: number;
   y: number;
   pageHeight: number;
+  x: number;
+  height: number;
+  isBare: boolean;
+  edge: ScenarioPdfMarkerEdge;
 };
 
 type MarkerDebugEntry = {
   pageIndex: number;
   lineIndex: number;
   source: "line" | "cluster" | "item";
-  rawLine: string;
-  cleanedLine: string;
+  rawLength: number;
+  cleanedLength: number;
   normalizedSceneNo: string;
   y: number;
   accepted: boolean;
@@ -66,77 +74,92 @@ export async function loadScenarioPdfDocument(url: string) {
 
 export async function analyzeScenarioPdfImages(url: string): Promise<ProjectScenarioScene[]> {
   const pdfjs = await loadPdfJs();
-  const document = await pdfjs.getDocument({ url }).promise;
+  const loadingTask = pdfjs.getDocument({ url });
+  const document = await loadingTask.promise;
   const markers: ScenarioMarkerPosition[] = [];
   const debugEntries: MarkerDebugEntry[] = [];
   const pageDebug: Array<{ pageIndex: number; textItemCount: number; lineCount: number }> = [];
-  const firstMarkerNumbers = new Set<string>();
   const pageHeights: number[] = [];
   let lineOffset = 0;
+  let totalTextItems = 0;
+  let totalTextCharacters = 0;
 
   try {
+    if (isScenarioPdfAnalysisRangeExceeded({ pageCount: document.numPages })) {
+      throw new Error(SCENARIO_PDF_ANALYSIS_RANGE_MESSAGE);
+    }
     for (let pageIndex = 0; pageIndex < document.numPages; pageIndex += 1) {
       const page = await document.getPage(pageIndex + 1);
-      const viewport = page.getViewport({ scale: 1 });
-      pageHeights[pageIndex] = viewport.height;
-      const textContent = await page.getTextContent();
-      const positionedItems = textContent.items.flatMap((item) => {
-          if (!isPdfTextItem(item) || !item.str.trim()) return [];
-          const transform = pdfjs.Util.transform(viewport.transform, item.transform);
-          const height = Math.max(item.height || 0, Math.abs(transform[3]) || 0, 1);
-          return [{
-            text: item.str,
-            x: transform[4],
-            y: clamp(transform[5] - height, 0, viewport.height),
-            width: Math.max(item.width, 0),
-            height
-          }];
-        });
-      const pageAnalysis = detectScenarioMarkersOnPage(
-        positionedItems,
-        pageIndex,
-        viewport.height,
-        lineOffset
-      );
-      pageDebug.push({
-        pageIndex,
-        textItemCount: pageAnalysis.itemCount,
-        lineCount: pageAnalysis.lineCount
-      });
-      debugEntries.push(...pageAnalysis.debugEntries);
-      lineOffset += pageAnalysis.lineCount;
-
-      pageAnalysis.markers.forEach((marker) => {
-        if (firstMarkerNumbers.has(marker.sceneNo)) {
-          debugEntries.push({
-            pageIndex: marker.pageIndex,
-            lineIndex: marker.lineIndex,
-            source: "line",
-            rawLine: marker.title,
-            cleanedLine: marker.title,
-            normalizedSceneNo: marker.sceneNo,
-            y: marker.y,
-            accepted: false,
-            rejectReason: "duplicate_scene_number"
-          });
-          return;
+      try {
+        const viewport = page.getViewport({ scale: 1 });
+        pageHeights[pageIndex] = viewport.height;
+        const positionedItems: ScenarioPositionedText[] = [];
+        const reader = page.streamTextContent().getReader();
+        let completed = false;
+        try {
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              completed = true;
+              break;
+            }
+            for (const item of chunk.value.items) {
+              if (!isPdfTextItem(item) || !item.str.trim()) continue;
+              totalTextItems += 1;
+              totalTextCharacters += item.str.length;
+              if (isScenarioPdfAnalysisRangeExceeded({
+                textItemCount: totalTextItems,
+                textCharacterCount: totalTextCharacters
+              })) {
+                throw new Error(SCENARIO_PDF_ANALYSIS_RANGE_MESSAGE);
+              }
+              const transform = pdfjs.Util.transform(viewport.transform, item.transform);
+              const height = Math.max(item.height || 0, Math.abs(transform[3]) || 0, 1);
+              positionedItems.push({
+                text: item.str,
+                x: transform[4],
+                y: clamp(transform[5] - height, 0, viewport.height),
+                width: Math.max(item.width, 0),
+                height
+              });
+            }
+          }
+        } finally {
+          if (!completed) await reader.cancel().catch(() => undefined);
+          reader.releaseLock();
         }
-        firstMarkerNumbers.add(marker.sceneNo);
-        markers.push(marker);
-      });
-      page.cleanup();
+        const pageAnalysis = detectScenarioMarkersOnPage(
+          positionedItems,
+          pageIndex,
+          viewport.height,
+          lineOffset
+        );
+        pageDebug.push({
+          pageIndex,
+          textItemCount: pageAnalysis.itemCount,
+          lineCount: pageAnalysis.lineCount
+        });
+        debugEntries.push(...pageAnalysis.debugEntries);
+        lineOffset += pageAnalysis.lineCount;
+
+        markers.push(...pageAnalysis.markers);
+      } finally {
+        page.cleanup();
+      }
     }
 
-    if (markers.length === 0) {
+    const selection = selectCanonicalScenarioMarkers(markers);
+    selection.rejected.forEach(({ marker, reason }) => {
+      debugEntries.push(markerDebugEntry(marker, reason));
+    });
+    const acceptedMarkers = selection.markers;
+
+    if (acceptedMarkers.length === 0) {
       throw new Error(SCENARIO_MARKER_NOT_FOUND_MESSAGE);
     }
 
-    markers.sort((left, right) =>
-      left.pageIndex - right.pageIndex || left.y - right.y || left.lineIndex - right.lineIndex
-    );
-
-    const scenes = markers.slice(0, 2_000).map((marker, index) => {
-      const next = markers[index + 1] ?? null;
+    const scenes = acceptedMarkers.slice(0, 2_000).map((marker, index) => {
+      const next = acceptedMarkers[index + 1] ?? null;
       const imageSegments = buildImageSegments(marker, next, pageHeights, document.numPages);
       return {
         id: createSceneId(index),
@@ -148,10 +171,11 @@ export async function analyzeScenarioPdfImages(url: string): Promise<ProjectScen
         imageSegments
       };
     });
-    logScenarioAnalysis(document.numPages, pageDebug, debugEntries, markers, scenes);
+    logScenarioAnalysis(document.numPages, pageDebug, debugEntries, acceptedMarkers, scenes);
     return scenes;
   } finally {
     await document.cleanup();
+    await loadingTask.destroy();
   }
 }
 
@@ -165,7 +189,7 @@ export function detectScenarioMarkersOnPage(
   pageHeight: number,
   lineOffset = 0
 ): PageMarkerAnalysis {
-  const lines = groupTextItemsIntoLines(items);
+  const lines = groupScenarioPdfTextItemsIntoLines(items);
   const markers: ScenarioMarkerPosition[] = [];
   const debugEntries: MarkerDebugEntry[] = [];
   const acceptedPositions = new Set<string>();
@@ -174,7 +198,9 @@ export function detectScenarioMarkersOnPage(
     const lineIndex = lineOffset + pageLineIndex;
     const candidates = buildLineCandidates(line.items);
     candidates.forEach((candidate) => {
-      const inspection = inspectScenarioSceneMarker(candidate.text);
+      const inspection = inspectScenarioSceneMarker(candidate.text, {
+        allowBare: candidate.allowBare
+      });
       if (!inspection.isCandidate) return;
       const normalizedSceneNo = inspection.marker?.sceneNo ?? "";
       const positionKey = normalizedSceneNo
@@ -186,8 +212,8 @@ export function detectScenarioMarkersOnPage(
         pageIndex,
         lineIndex,
         source: candidate.source,
-        rawLine: inspection.rawLine,
-        cleanedLine: inspection.cleanedLine,
+        rawLength: inspection.rawLine.length,
+        cleanedLength: inspection.cleanedLine.length,
         normalizedSceneNo,
         y: candidate.y,
         accepted,
@@ -203,7 +229,11 @@ export function detectScenarioMarkersOnPage(
         pageIndex,
         lineIndex,
         y: candidate.y,
-        pageHeight
+        pageHeight,
+        x: candidate.x,
+        height: candidate.height,
+        isBare: inspection.marker.isBare,
+        edge: markerEdge(candidate.y, pageHeight)
       });
     });
   });
@@ -215,6 +245,54 @@ export function detectScenarioMarkersOnPage(
     itemCount: items.length,
     lineCount: lines.length
   };
+}
+
+export function selectCanonicalScenarioMarkers(markers: ScenarioMarkerPosition[]) {
+  const ordered = [...markers].sort((left, right) =>
+    left.pageIndex - right.pageIndex || left.y - right.y || left.lineIndex - right.lineIndex
+  );
+  const paginationIndices = findLikelyPdfPaginationMarkerIndices(
+    ordered.map((marker) => ({
+      pageNumber: marker.pageIndex + 1,
+      edge: marker.edge,
+      marker: {
+        sceneNo: marker.sceneNo,
+        originalLine: marker.title,
+        isBare: marker.isBare
+      }
+    }))
+  );
+  const firstMarkerNumbers = new Set<string>();
+  const contextualMarkers = ordered.filter(
+    (marker, markerIndex) => !paginationIndices.has(markerIndex)
+      && !isExactBareScenarioMarker(toScenarioSceneMarker(marker))
+  );
+  const accepted: ScenarioMarkerPosition[] = [];
+  const rejected: Array<{
+    marker: ScenarioMarkerPosition;
+    reason: "pdf_pagination" | "ambiguous_bare_number" | "duplicate_scene_number";
+  }> = [];
+  ordered.forEach((marker, markerIndex) => {
+    if (paginationIndices.has(markerIndex)) {
+      rejected.push({ marker, reason: "pdf_pagination" });
+      return;
+    }
+    if (
+      contextualMarkers.length > 0
+      && isExactBareScenarioMarker(toScenarioSceneMarker(marker))
+      && !isAlignedWithContextualMarker(marker, contextualMarkers)
+    ) {
+      rejected.push({ marker, reason: "ambiguous_bare_number" });
+      return;
+    }
+    if (firstMarkerNumbers.has(marker.sceneNo)) {
+      rejected.push({ marker, reason: "duplicate_scene_number" });
+      return;
+    }
+    firstMarkerNumbers.add(marker.sceneNo);
+    accepted.push(marker);
+  });
+  return { markers: accepted, rejected };
 }
 
 async function loadPdfJs() {
@@ -240,61 +318,40 @@ function isPdfTextItem(value: unknown): value is PdfTextItem {
     && typeof item.height === "number";
 }
 
-function groupTextItemsIntoLines(items: ScenarioPositionedText[]) {
-  const sorted = [...items].sort((left, right) => left.y - right.y || left.x - right.x);
-  const lines: Array<{ y: number; items: ScenarioPositionedText[] }> = [];
-
-  sorted.forEach((item) => {
-    const tolerance = Math.max(2, Math.min(5, item.height * 0.3));
-    let line: { y: number; items: ScenarioPositionedText[] } | undefined;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const candidate = lines[index];
-      const distance = Math.abs(candidate.y - item.y);
-      if (item.y - candidate.y > 8) break;
-      if (distance <= tolerance && distance < closestDistance) {
-        line = candidate;
-        closestDistance = distance;
-      }
-    }
-    if (line) {
-      line.items.push(item);
-      line.y = line.items.reduce((sum, current) => sum + current.y, 0) / line.items.length;
-    } else {
-      lines.push({ y: item.y, items: [item] });
-    }
-  });
-
-  return lines
-    .sort((left, right) => left.y - right.y)
-    .map((line) => ({
-      y: Math.min(...line.items.map((item) => item.y)),
-      items: [...line.items].sort((left, right) => left.x - right.x)
-    }));
-}
-
 function buildLineCandidates(items: ScenarioPositionedText[]) {
   const candidates: Array<{
     source: "line" | "cluster" | "item";
     text: string;
     y: number;
+    allowBare: boolean;
+    x: number;
+    height: number;
   }> = [];
   const seen = new Set<string>();
-  const add = (source: "line" | "cluster" | "item", row: ScenarioPositionedText[]) => {
+  const add = (
+    source: "line" | "cluster" | "item",
+    row: ScenarioPositionedText[],
+    allowBare: boolean
+  ) => {
     if (row.length === 0) return;
-    const text = joinTextItems(row);
+    const text = joinScenarioPdfTextItems(row);
     const key = `${text}:${Math.round(Math.min(...row.map((item) => item.y)) * 2)}`;
     if (!text || seen.has(key)) return;
     seen.add(key);
     candidates.push({
       source,
       text,
-      y: Math.min(...row.map((item) => item.y))
+      y: Math.min(...row.map((item) => item.y)),
+      allowBare,
+      x: Math.min(...row.map((item) => item.x)),
+      height: Math.max(...row.map((item) => item.height))
     });
   };
 
-  add("line", items);
-  splitIntoHorizontalClusters(items).forEach((cluster) => add("cluster", cluster));
+  add("line", items, true);
+  splitIntoHorizontalClusters(items).forEach((cluster, clusterIndex) => (
+    add("cluster", cluster, clusterIndex === 0)
+  ));
   items.forEach((item, startIndex) => {
     if (!mayStartSceneMarker(item.text)) return;
     for (
@@ -302,10 +359,10 @@ function buildLineCandidates(items: ScenarioPositionedText[]) {
       endIndex <= Math.min(items.length, startIndex + 6);
       endIndex += 1
     ) {
-      add("cluster", items.slice(startIndex, endIndex));
+      add("cluster", items.slice(startIndex, endIndex), startIndex === 0);
     }
   });
-  items.forEach((item) => add("item", [item]));
+  items.forEach((item) => add("item", [item], items.length === 1));
   return candidates;
 }
 
@@ -315,7 +372,7 @@ function mayStartSceneMarker(value: string) {
     .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
     .replace(/^\s*(?:[•·▪◦●○▶▷※*]+\s*|[-–—]+\s*)/, "")
     .trim();
-  return /^(?:S|SCENE|씬|#)/i.test(text);
+  return /^(?:S|SCENE|씬|#|\d)/i.test(text);
 }
 
 function splitIntoHorizontalClusters(items: ScenarioPositionedText[]) {
@@ -336,19 +393,46 @@ function splitIntoHorizontalClusters(items: ScenarioPositionedText[]) {
   return clusters;
 }
 
-function joinTextItems(items: ScenarioPositionedText[]) {
-  let rightEdge = 0;
-  let text = "";
-  items.forEach((item, index) => {
-    const averageCharacterWidth = item.text.length > 0
-      ? item.width / item.text.length
-      : item.height * 0.5;
-    const gap = item.x - rightEdge;
-    if (index > 0 && gap > Math.max(1.5, averageCharacterWidth * 0.35)) text += " ";
-    text += item.text;
-    rightEdge = Math.max(rightEdge, item.x + item.width);
+function markerEdge(y: number, pageHeight: number): ScenarioPdfMarkerEdge {
+  const ratio = pageHeight > 0 ? y / pageHeight : 0.5;
+  if (ratio <= 0.08) return "header";
+  if (ratio >= 0.92) return "footer";
+  return "body";
+}
+
+function toScenarioSceneMarker(marker: ScenarioMarkerPosition) {
+  return {
+    sceneNo: marker.sceneNo,
+    originalLine: marker.title,
+    isBare: marker.isBare
+  };
+}
+
+function isAlignedWithContextualMarker(
+  marker: ScenarioMarkerPosition,
+  contextualMarkers: ScenarioMarkerPosition[]
+) {
+  return contextualMarkers.some((anchor) => {
+    const horizontalTolerance = Math.max(12, anchor.height * 1.5);
+    const heightRatio = marker.height / Math.max(anchor.height, 1);
+    return Math.abs(marker.x - anchor.x) <= horizontalTolerance
+      && heightRatio >= 0.65
+      && heightRatio <= 1.55;
   });
-  return text.trim();
+}
+
+function markerDebugEntry(marker: ScenarioMarkerPosition, rejectReason: string): MarkerDebugEntry {
+  return {
+    pageIndex: marker.pageIndex,
+    lineIndex: marker.lineIndex,
+    source: "line",
+    rawLength: marker.title.length,
+    cleanedLength: marker.title.length,
+    normalizedSceneNo: marker.sceneNo,
+    y: marker.y,
+    accepted: false,
+    rejectReason
+  };
 }
 
 export function buildImageSegments(
@@ -396,7 +480,6 @@ function logScenarioAnalysis(
     sceneNo: marker.sceneNo,
     pageIndex: marker.pageIndex,
     lineIndex: marker.lineIndex,
-    rawLine: marker.title,
     y: marker.y
   })));
   console.info("[scenario-pdf] scene blocks");

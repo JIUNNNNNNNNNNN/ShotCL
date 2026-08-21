@@ -34,6 +34,26 @@ async function loadMergeScenarioSceneImages() {
   return (await import(moduleUrl)).mergeScenarioSceneImages;
 }
 
+async function loadSafeScenarioAnalysisWarning() {
+  const source = sourceBetween(
+    pageSource,
+    "function getSafeScenarioAnalysisWarning(",
+    "function getSafeScenarioUploadError("
+  );
+  const transpiled = ts.transpileModule(`
+    const SCENARIO_MARKER_NOT_FOUND_MESSAGE = "marker-not-found";
+    ${source}
+    export { getSafeScenarioAnalysisWarning };
+  `, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022
+    }
+  }).outputText;
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(transpiled).toString("base64")}`;
+  return (await import(moduleUrl)).getSafeScenarioAnalysisWarning;
+}
+
 test("Scenario registers auto classification in the existing viewport-safe page action menu", () => {
   assert.match(actionsSource, /scenarioClassifySceneList:\s*\{[\s\S]*label: "씬리스트 자동 분류"[\s\S]*group: "document"/u);
   assert.match(actionsSource, /scenario:[\s\S]*actionIds: \[[\s\S]*"scenarioClassifySceneList"/u);
@@ -78,6 +98,7 @@ test("the one overflow trigger remains reachable on desktop, iPad, and phone", (
   );
   assert.match(globalCss, /--ui-control-height:\s*44px/u);
   assert.match(globalCss, /\.project-page-actions__trigger \{[\s\S]*width:\s*var\(--ui-control-height\)[\s\S]*height:\s*var\(--ui-control-height\)/u);
+  assert.match(pageSource, /<p role="status" className="[^"]*min-w-0[^"]*break-words[^"]*\[overflow-wrap:anywhere\]"/u);
 });
 
 test("classification sends only the selected asset id and rejects duplicate clicks", () => {
@@ -130,13 +151,51 @@ test("upload keeps browser split order and enriches matches without losing clien
   );
 
   assert.match(upload, /const imageScenes = await analyzeScenarioPdfImages\(uploadedAsset\.publicUrl\)/u);
-  assert.match(upload, /mergeScenarioSceneImages\(uploadedAsset\.scenarioScenes \?\? \[\], imageScenes\)/u);
+  assert.match(upload, /mergeScenarioSceneImages\(serverScenes, imageScenes\)/u);
   assert.match(upload, /scenarioScenes: mergedScenes/u);
+  assert.match(upload, /const serverScenes = uploadedAsset\.scenarioScenes \?\? \[\]/u);
+  assert.match(upload, /scenarioParseError = serverScenes\.length > 0[\s\S]*uploadedAsset\.scenarioParseError/u);
+  assert.match(upload, /if \(serverScenes\.length > 0\) \{[\s\S]*imageSegmentWarnings\.push[\s\S]*scenarioParseError = null/u);
+  assert.match(upload, /getSafeScenarioAnalysisWarning\([\s\S]*uploadedAsset\.scenarioParseError[\s\S]*scenarioParseError = analysisWarning/u);
+  assert.match(upload, /scenarioParseError\n\s*\}\);/u);
   assert.match(merge, /if \(imageScenes\.length === 0\) return canonicalScenes\.map\(cloneScenarioScene\)/u);
   assert.match(merge, /return imageScenes\.map\(\(imageScene\) =>/u);
   assert.match(merge, /if \(!canonicalScene\) return cloneScenarioScene\(imageScene\)/u);
   assert.match(merge, /\.\.\.imageScene,[\s\S]*\.\.\.canonicalScene,[\s\S]*pageStart: imageScene\.pageStart/u);
   assert.doesNotMatch(merge, /canonicalScenes\.filter|sort\(|Number\(|parseInt/u);
+});
+
+test("upload warnings use one coherent persistent feedback channel", () => {
+  const upload = sourceBetween(pageSource, "async function handleUpload", "function deleteAsset");
+  const warningHelper = sourceBetween(
+    pageSource,
+    "function getSafeScenarioAnalysisWarning(",
+    "function getSafeScenarioUploadError("
+  );
+
+  assert.match(upload, /sceneDetectionWarnings\.length > 0[\s\S]*setStatusMessage\(""\)[\s\S]*setErrorMessage\([\s\S]*PDF 업로드는 완료되었지만 씬 자동 분리를 완료하지 못했습니다/u);
+  assert.match(upload, /imageSegmentWarnings\.length > 0[\s\S]*setErrorMessage\(""\)[\s\S]*setStatusMessage\([\s\S]*PDF 업로드와 씬 자동 분리는 완료되었습니다/u);
+  assert.doesNotMatch(upload, /PDF 업로드는 완료되었습니다\. 씬 구성을 확인해주세요/u);
+  assert.match(warningHelper, /const canonicalError = serverParseError\?\.trim\(\)[\s\S]*if \(canonicalError\) return canonicalError/u);
+  assert.match(upload, /setStatusMessage\(""\);[\s\S]*const uploadError = getSafeScenarioUploadError\(error\)[\s\S]*setErrorMessage/u);
+});
+
+test("upload warning keeps the canonical server cause before browser image-analysis errors", async () => {
+  const getSafeScenarioAnalysisWarning = await loadSafeScenarioAnalysisWarning();
+  const noText = "PDF에서 텍스트를 읽지 못했습니다.";
+
+  assert.equal(
+    getSafeScenarioAnalysisWarning(new Error("marker-not-found"), noText),
+    noText
+  );
+  assert.equal(
+    getSafeScenarioAnalysisWarning(new Error("marker-not-found"), null),
+    "marker-not-found"
+  );
+  assert.equal(
+    getSafeScenarioAnalysisWarning(new Error("pdf.js worker failed"), null),
+    "씬 분석을 완료하지 못했습니다. 파일을 확인한 뒤 다시 시도해 주세요."
+  );
 });
 
 test("upload merge behavior retains client-only markers, server text, and the current image order", async () => {
