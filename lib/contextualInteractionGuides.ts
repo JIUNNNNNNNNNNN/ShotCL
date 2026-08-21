@@ -458,14 +458,15 @@ export const INTERACTION_GUIDES: Record<
     variants: {
       fine: {
         title: "씬 순서 이동",
-        description: "Scene 숫자를 잡아 끌면 씬 순서를 바꿀 수 있습니다.",
-        demo: "drag"
+        description: "씬번호·내용·메모 등 일반 셀 영역을 약 0.7초 동안 가만히 누른 뒤 끌면 순서를 바꿀 수 있습니다.",
+        demo: "drag",
+        durationMs: 700
       },
       coarse: {
         title: "씬 순서 이동",
-        description: "편집 표에서 Scene 숫자를 약 0.48초 동안 누른 뒤 끌면 씬 순서를 바꿀 수 있습니다.",
+        description: "씬번호·내용·메모 등 일반 셀 영역을 약 0.7초 동안 가만히 누른 뒤 끌면 순서를 바꿀 수 있습니다.",
         demo: "drag",
-        durationMs: 480
+        durationMs: 700
       }
     }
   },

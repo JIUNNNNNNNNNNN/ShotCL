@@ -23,80 +23,156 @@ function sourceBetween(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test("scene reorder pointer activation belongs only to the dedicated handle", () => {
+test("Scene List has no reorder header, grip, handle, or empty 40px column", () => {
+  for (const source of [tableSource, reorderSource, pageSource]) {
+    assert.doesNotMatch(source, /GripVertical|showReorderHandle|SceneReorderHandleProps/u);
+    assert.doesNotMatch(source, /data-scene-reorder-handle|sceneReorderHandleWidth/u);
+  }
+  assert.doesNotMatch(tableSource, /w-\[40px\]|씬 순서 변경/u);
+  assert.match(tableSource, /const sceneTableBaseWidth = 1087/u);
+  assert.match(tableSource, /<colgroup>\s*<col className="w-\[70px\]"/u);
+});
+
+test("the row owns one stationary 700ms hold for mouse, pen, and touch", () => {
+  const pointerDown = sourceBetween(
+    reorderSource,
+    "function handlePointerDown",
+    "return (\n    <tbody"
+  );
   const rowProps = sourceBetween(
     reorderSource,
     "const trProps: SceneReorderRowProps",
-    "const dragHandleProps: SceneReorderHandleProps"
+    "return (\n          <Fragment"
   );
-  const handleProps = sourceBetween(
+
+  assert.match(reorderSource, /const sceneReorderHoldMs = 700/u);
+  assert.match(pointerDown, /pending\.timer = window\.setTimeout\(\(\) => armDrag\(pending\), sceneReorderHoldMs\)/u);
+  assert.doesNotMatch(pointerDown, /pointerType\s*===\s*["']touch["']/u);
+  assert.match(pointerDown, /!event\.isPrimary/u);
+  assert.match(rowProps, /onPointerDown:\s*\(event\) => handlePointerDown\(event, item\.id\)/u);
+  assert.match(tableSource, /<tr\s+\{\.\.\.trProps\}\s+ref=\{combinedRowRef\}/u);
+});
+
+test("pre-hold movement cancels without capture or preventing native edit and scroll", () => {
+  const pointerDown = sourceBetween(
     reorderSource,
-    "const dragHandleProps: SceneReorderHandleProps",
-    "return ("
+    "function handlePointerDown",
+    "const handleMove"
   );
+  const pointerMove = sourceBetween(
+    reorderSource,
+    "const handleMove",
+    "const handlePointerUp"
+  );
+  const armDrag = sourceBetween(reorderSource, "function armDrag", "function updateDrag");
 
-  assert.doesNotMatch(rowProps, /onPointerDown/u);
-  assert.match(handleProps, /onPointerDown:\s*\(event\)\s*=>\s*handlePointerDown\(event, item\.id\)/u);
-  assert.match(handleProps, /disabled,\s*\n/u);
-  assert.doesNotMatch(handleProps, /disabled:\s*disabled \|\| committingRef/u);
-  assert.match(handleProps, /"data-scene-reorder-handle":\s*""/u);
-  assert.match(tableSource, /<tr\s+\{\.\.\.trProps\}/u);
-  assert.match(tableSource, /<button\s+\{\.\.\.dragHandleProps\}/u);
+  assert.match(reorderSource, /const preHoldMovementTolerancePx = 8/u);
+  assert.match(pointerMove, /distance > preHoldMovementTolerancePx/u);
+  assert.match(pointerMove, /completePointerInteraction\(true\)/u);
+  assert.doesNotMatch(pointerDown, /preventDefault|setPointerCapture/u);
+  assert.doesNotMatch(pointerMove.slice(0, pointerMove.indexOf("if (dragRef.current)")), /preventDefault/u);
+  assert.match(armDrag, /setPointerCapture\(pending\.pointerId\)/u);
 });
 
-test("pointer capture begins after drag activation, not on handle pointerdown", () => {
-  const beginDrag = sourceBetween(reorderSource, "function beginDrag", "function updateDrag");
-  const pointerDown = sourceBetween(reorderSource, "function handlePointerDown", "return (\n    <tbody");
+test("hold arms first, movement starts drag, and hold-only release never commits", () => {
+  const armDrag = sourceBetween(reorderSource, "function armDrag", "function updateDrag");
+  const updateDrag = sourceBetween(reorderSource, "function updateDrag", "function clearPending");
+  const finishDrag = sourceBetween(reorderSource, "function finishDrag", "function releasePointerCapture");
 
-  assert.match(beginDrag, /setPointerCapture\(pending\.pointerId\)/u);
-  assert.doesNotMatch(pointerDown, /setPointerCapture/u);
-  assert.match(pointerDown, /if \(distance > 4\) beginDrag\(pending\)/u);
-  assert.match(pointerDown, /mobileLongPressMs/u);
-  assert.match(pointerDown, /if \(distance > 10\)/u);
+  assert.match(armDrag, /phase:\s*"armed"/u);
+  assert.match(updateDrag, /phase:\s*"dragging"/u);
+  assert.match(reorderSource, /const activeDragMovementThresholdPx = 3/u);
+  assert.match(finishDrag, /current\.phase !== "dragging"/u);
+  assert.match(finishDrag, /onReorderRef\.current\(nextItems\)/u);
+  assert.match(finishDrag, /commit\(nextItems, previousItems\)/u);
 });
 
-test("scene number is a one-click text editor and never a reorder handle", () => {
-  const handleCell = sourceBetween(
-    tableSource,
-    "{showReorderHandle ? (\n        <td className=\"relative h-10",
-    "ref={sceneNumberGuideAnchorRef}"
-  );
+test("short clicks edit immediately while active editors keep native text interaction", () => {
   const sceneNumberCell = sourceBetween(
     tableSource,
     "ref={sceneNumberGuideAnchorRef}",
     "{mergeCell(\"location\""
   );
 
-  assert.match(handleCell, /w-10/u);
-  assert.match(handleCell, /tabIndex=\{-1\}/u);
-  assert.match(handleCell, /cursor-grab/u);
-  assert.match(handleCell, /active:cursor-grabbing/u);
-  assert.match(handleCell, /aria-label=\{`\$\{item\.sceneNo \|\| index \+ 1\} 씬 순서 변경`\}/u);
+  assert.match(sceneNumberCell, /onClick=\{\(\) => \{[\s\S]*?onEdit\("sceneNo"\)/u);
+  assert.match(sceneNumberCell, /<SceneListTextEditor[\s\S]*?autoFocus/u);
   assert.match(sceneNumberCell, /cursor-text/u);
-  assert.match(sceneNumberCell, /select-text/u);
-  assert.match(sceneNumberCell, /onEdit\("sceneNo"\)/u);
-  assert.match(sceneNumberCell, /autoFocus/u);
-  assert.doesNotMatch(sceneNumberCell, /dragHandleProps|data-scene-reorder-handle|cursor-grab/u);
+  assert.doesNotMatch(sceneNumberCell, /type="number"|doubleClick|onDoubleClick/u);
+  assert.match(reorderSource, /"input"[\s\S]*?"textarea"[\s\S]*?"select"[\s\S]*?"\[contenteditable='true'\]"/u);
+  assert.doesNotMatch(reorderSource, /pointer-events-none|pointerEvents:\s*"none"/u);
 });
 
-test("handle is a compact conditional column and phone stays on the read-only renderer", () => {
-  assert.match(tableSource, /const sceneReorderHandleWidth = 40/u);
-  assert.match(tableSource, /\(showReorderHandle \? sceneReorderHandleWidth : 0\)/u);
-  assert.match(tableSource, /showReorderHandle \? <col className="w-\[40px\]" \/> : null/u);
-  assert.match(tableSource, /<col className="w-\[70px\]" \/>/u);
-  assert.match(pageSource, /canEdit=\{canEdit && !isSaving\}[\s\S]*?showReorderHandle=\{canEdit\}/u);
-  assert.match(pageSource, /viewportMode === "portrait"[\s\S]*?<SceneListPortraitReadOnly/u);
-  assert.match(pageSource, /:\s*\([\s\S]*?<SceneListNativeTable/u);
+test("Safari context menus are suppressed only during the same row's pending or armed hold", () => {
+  const rowProps = sourceBetween(
+    reorderSource,
+    "const trProps: SceneReorderRowProps",
+    "return (\n          <Fragment"
+  );
+  const contextMenuCapture = sourceBetween(
+    rowProps,
+    "onContextMenuCapture: (event) => {",
+    "onPointerDown: (event)"
+  );
+
+  assert.match(contextMenuCapture, /pending\?\.itemId === item\.id && !active/u);
+  assert.match(contextMenuCapture, /active\?\.itemId === item\.id[\s\S]*?active\.phase === "armed"/u);
+  assert.match(contextMenuCapture, /if \(!isThisRowsPendingHold && !isThisRowsArmedHold\) return/u);
+  assert.match(contextMenuCapture, /event\.preventDefault\(\)[\s\S]*?event\.stopPropagation\(\)/u);
+  assert.match(tableSource, /<tr\s+\{\.\.\.trProps\}\s+ref=\{combinedRowRef\}/u);
+  assert.match(tableSource, /onContextMenu=\{onSceneContextMenu\}/u);
 });
 
-test("reorder keeps the existing latest autosave flush and one drop commit", () => {
+test("merge selection and actor long-press cannot race the row hold", () => {
+  const mergeCell = sourceBetween(
+    tableSource,
+    "data-scene-merge-scene-id={item.id}",
+    "onContextMenu={(event) => onMergeContextMenu"
+  );
+  const actorPointer = sourceBetween(
+    tableSource,
+    "onPointerDown={(event) => {\n                          // Actor long-press",
+    "title={state.mode === \"text\""
+  );
+  const sceneNumber = sourceBetween(
+    tableSource,
+    "ref={sceneNumberGuideAnchorRef}",
+    "{mergeCell(\"location\""
+  );
+  const ordinaryTextCell = sourceBetween(
+    tableSource,
+    "function EditableTextCell",
+    "function SceneListTextEditor"
+  );
+
+  assert.match(mergeCell, /event\.stopPropagation\(\)[\s\S]*?onBeginSelection/u);
+  assert.match(actorPointer, /event\.stopPropagation\(\)/u);
+  assert.doesNotMatch(sceneNumber, /onPointerDown|stopPropagation/u);
+  assert.doesNotMatch(ordinaryTextCell, /onPointerDown|stopPropagation/u);
+});
+
+test("only an armed or dragging row shows grabbing feedback", () => {
+  assert.doesNotMatch(tableSource, /cursor-grab(?:\s|"|')/u);
+  assert.doesNotMatch(reorderSource, /cursor:\s*["']grab["']/u);
+  assert.match(reorderSource, /isActive[\s\S]*?\[&_\*\]:!cursor-grabbing/u);
+  assert.match(reorderSource, /"data-scene-reorder-state": isArmed[\s\S]*?"armed"[\s\S]*?"dragging"/u);
+  assert.match(reorderSource, /"aria-grabbed": Boolean\(isActive\)/u);
+});
+
+test("reorder preserves latest drafts, scene numbers, and one drop commit", () => {
+  const reorderLocal = sourceBetween(pageSource, "const reorderLocal", "const commitReorder");
   const commitReorder = sourceBetween(pageSource, "const commitReorder", "const save = useCallback");
-  const pointerDown = sourceBetween(reorderSource, "function handlePointerDown", "return (\n    <tbody");
-  const finishDrag = sourceBetween(reorderSource, "function finishDrag", "function releasePointerCapture");
+  const pointerMove = sourceBetween(reorderSource, "const handleMove", "const handlePointerUp");
 
+  assert.match(reorderLocal, /\{ \.\.\.item, sortOrder: index \+ 1 \}/u);
+  assert.doesNotMatch(reorderLocal, /sceneNo\s*:/u);
   assert.match(commitReorder, /sceneAutosave\.flushKeys\(persistedIds\.map\(sceneItemAutosaveKey\)\)/u);
   assert.match(commitReorder, /reorderProjectSceneItems\(/u);
-  assert.doesNotMatch(pointerDown, /onCommitRef|onReorderRef|fetch\(|router\.refresh/u);
-  assert.match(finishDrag, /onReorderRef\.current\(nextItems\)/u);
-  assert.match(finishDrag, /commit\(nextItems, previousItems\)/u);
+  assert.doesNotMatch(pointerMove, /onCommitRef|onReorderRef|fetch\(|router\.refresh/u);
+  assert.doesNotMatch(commitReorder, /router\.refresh/u);
+});
+
+test("phone remains read-only while editor-sized viewports mount the native table", () => {
+  assert.match(pageSource, /viewportMode === "portrait"[\s\S]*?<SceneListPortraitReadOnly/u);
+  assert.match(pageSource, /:\s*\([\s\S]*?<SceneListNativeTable/u);
+  assert.doesNotMatch(pageSource, /showReorderHandle/u);
 });

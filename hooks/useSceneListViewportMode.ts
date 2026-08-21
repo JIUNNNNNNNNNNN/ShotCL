@@ -4,17 +4,30 @@ import { useSyncExternalStore } from "react";
 
 export type SceneListViewportMode = "portrait" | "editor";
 
-export const SCENE_LIST_EDITOR_MIN_WIDTH_PX = 1100;
+export const SCENE_LIST_EDITOR_MIN_WIDTH_PX = 700;
+export const SCENE_LIST_EDITOR_MIN_HEIGHT_PX = 600;
+export const SCENE_LIST_DESKTOP_MIN_WIDTH_PX = 1100;
 /**
- * The editor needs about 1100px of center workspace, not merely a wide outer
- * viewport. Persistent shells reserve a compact left rail, so they require a
- * wider outer viewport; low-height desktop windows use the full-width drawer
- * shell and can switch at the editor's natural minimum.
+ * Tablets use the horizontally scrollable editor once both dimensions provide
+ * a stable touch workspace. Wide desktop windows remain editable at shorter
+ * heights, while phone portrait and landscape sizes keep the read-only cards.
  */
 export const SCENE_LIST_EDITOR_MEDIA_QUERY = [
-  `(min-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX}px) and (max-height: 699px)`,
-  "(min-width: 1400px) and (min-height: 700px)"
+  `(min-width: ${SCENE_LIST_DESKTOP_MIN_WIDTH_PX}px)`,
+  `(min-width: ${SCENE_LIST_EDITOR_MIN_WIDTH_PX}px) and (min-height: ${SCENE_LIST_EDITOR_MIN_HEIGHT_PX}px)`
 ].join(", ");
+
+export function resolveSceneListViewportModeForSize(
+  width: number,
+  height: number
+): SceneListViewportMode {
+  const editor = width >= SCENE_LIST_DESKTOP_MIN_WIDTH_PX
+    || (
+      width >= SCENE_LIST_EDITOR_MIN_WIDTH_PX
+      && height >= SCENE_LIST_EDITOR_MIN_HEIGHT_PX
+    );
+  return editor ? "editor" : "portrait";
+}
 
 const subscribeToPortraitMode = (onStoreChange: () => void) => {
   const mediaQuery = window.matchMedia(SCENE_LIST_EDITOR_MEDIA_QUERY);

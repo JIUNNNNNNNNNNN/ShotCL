@@ -15,6 +15,7 @@ import type { ProjectSceneItem } from "@/lib/types";
 type DragState = {
   itemId: string;
   pointerId: number;
+  phase: "armed" | "dragging";
   startY: number;
   currentY: number;
   targetId: string;
@@ -24,10 +25,9 @@ type DragState = {
 type PendingDrag = {
   itemId: string;
   pointerId: number;
-  pointerType: string;
   startX: number;
   startY: number;
-  captureTarget: HTMLButtonElement;
+  captureTarget: HTMLTableRowElement;
   timer: number | null;
 };
 
@@ -45,28 +45,33 @@ export type SceneReorderCommitResult =
 
 export type SceneReorderRowProps = {
   ref: RefCallback<HTMLTableRowElement>;
+  onPointerDown: (event: ReactPointerEvent<HTMLTableRowElement>) => void;
   onClickCapture: (event: React.MouseEvent<HTMLTableRowElement>) => void;
+  onContextMenuCapture: (event: React.MouseEvent<HTMLTableRowElement>) => void;
   className: string;
   style: CSSProperties;
-  "data-scene-reorder-state": "idle" | "dragging" | "drop-target";
-};
-
-export type SceneReorderHandleProps = {
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  disabled: boolean;
   "aria-grabbed": boolean;
-  "data-scene-reorder-handle": "";
+  "data-scene-reorder-state": "idle" | "armed" | "dragging" | "drop-target";
 };
 
 export type SceneReorderRenderState = {
   trProps: SceneReorderRowProps;
-  dragHandleProps: SceneReorderHandleProps;
+  isArmed: boolean;
   isDragging: boolean;
   isDropTarget: boolean;
   insertAfter: boolean;
 };
 
-const mobileLongPressMs = 480;
+const sceneReorderHoldMs = 700;
+const preHoldMovementTolerancePx = 8;
+const activeDragMovementThresholdPx = 3;
+const reorderIgnoredTargetSelector = [
+  "input",
+  "textarea",
+  "select",
+  "[contenteditable='true']",
+  "[data-scene-reorder-ignore]"
+].join(",");
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -154,6 +159,7 @@ export function SceneReorderList({
   const rowDropMetricsRef = useRef<RowDropMetric[]>([]);
   const pendingRef = useRef<PendingDrag | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const dragAnimationFrameRef = useRef<number | null>(null);
   const removePointerListenersRef = useRef<(() => void) | null>(null);
   const committingRef = useRef(false);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -172,9 +178,16 @@ export function SceneReorderList({
   useEffect(
     () => () => {
       const pending = pendingRef.current;
-      if (pending?.timer) window.clearTimeout(pending.timer);
+      if (pending?.timer !== null && pending?.timer !== undefined) {
+        window.clearTimeout(pending.timer);
+      }
+      if (pending) releasePointerCapture(pending);
       removePointerListenersRef.current?.();
       removePointerListenersRef.current = null;
+      if (dragAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragAnimationFrameRef.current);
+        dragAnimationFrameRef.current = null;
+      }
       pendingRef.current = null;
       dragRef.current = null;
       rowDropMetricsRef.current = [];
@@ -184,7 +197,7 @@ export function SceneReorderList({
     []
   );
 
-  function beginDrag(pending: PendingDrag) {
+  function armDrag(pending: PendingDrag) {
     if (
       pendingRef.current !== pending
       || disabledRef.current
@@ -193,6 +206,7 @@ export function SceneReorderList({
       if (pendingRef.current === pending) clearPending();
       return;
     }
+    pending.timer = null;
     try {
       pending.captureTarget.setPointerCapture(pending.pointerId);
     } catch {
@@ -207,6 +221,7 @@ export function SceneReorderList({
     const next: DragState = {
       itemId: pending.itemId,
       pointerId: pending.pointerId,
+      phase: "armed",
       startY: pending.startY,
       currentY: pending.startY,
       targetId: pending.itemId,
@@ -227,19 +242,36 @@ export function SceneReorderList({
     const targetId = target?.itemId ?? current.itemId;
     const insertAfter = target ? pageY >= target.centerY : false;
 
-    const next = { ...current, currentY: clientY, targetId, insertAfter };
+    const next: DragState = {
+      ...current,
+      phase: "dragging",
+      currentY: clientY,
+      targetId,
+      insertAfter
+    };
     dragRef.current = next;
-    setDrag(next);
+    if (dragAnimationFrameRef.current === null) {
+      dragAnimationFrameRef.current = window.requestAnimationFrame(() => {
+        dragAnimationFrameRef.current = null;
+        setDrag(dragRef.current);
+      });
+    }
   }
 
   function clearPending() {
     const pending = pendingRef.current;
-    if (pending?.timer) window.clearTimeout(pending.timer);
+    if (pending?.timer !== null && pending?.timer !== undefined) {
+      window.clearTimeout(pending.timer);
+    }
     pendingRef.current = null;
   }
 
   function resetDragVisuals() {
     clearPending();
+    if (dragAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(dragAnimationFrameRef.current);
+      dragAnimationFrameRef.current = null;
+    }
     dragRef.current = null;
     rowDropMetricsRef.current = [];
     setDrag(null);
@@ -251,7 +283,7 @@ export function SceneReorderList({
     const current = dragRef.current;
     const previousItems = itemsRef.current;
     resetDragVisuals();
-    if (!current) return;
+    if (!current || current.phase !== "dragging") return;
 
     const nextItems = reorderedItems(
       previousItems,
@@ -303,15 +335,17 @@ export function SceneReorderList({
   }
 
   function handlePointerDown(
-    event: ReactPointerEvent<HTMLButtonElement>,
+    event: ReactPointerEvent<HTMLTableRowElement>,
     itemId: string
   ) {
     if (
       disabledRef.current ||
       committingRef.current ||
       event.button !== 0 ||
+      !event.isPrimary ||
       pendingRef.current ||
-      dragRef.current
+      dragRef.current ||
+      isReorderIgnoredTarget(event.target)
     ) {
       return;
     }
@@ -319,17 +353,12 @@ export function SceneReorderList({
     const pending: PendingDrag = {
       itemId,
       pointerId: event.pointerId,
-      pointerType: event.pointerType,
       startX: event.clientX,
       startY: event.clientY,
       captureTarget: event.currentTarget,
       timer: null
     };
     pendingRef.current = pending;
-
-    if (event.pointerType === "touch") {
-      pending.timer = window.setTimeout(() => beginDrag(pending), mobileLongPressMs);
-    }
 
     const removePointerListeners = () => {
       window.removeEventListener("pointermove", handleMove);
@@ -360,17 +389,21 @@ export function SceneReorderList({
       );
 
       if (!dragRef.current) {
-        if (pending.pointerType === "touch") {
-          // A normal swipe before the long-press threshold is not a reorder.
-          if (distance > 10) {
-            completePointerInteraction(true);
-          }
-          return;
+        // Native click, text-selection and touch scrolling retain ownership
+        // unless the pointer remains stationary through the full hold.
+        if (distance > preHoldMovementTolerancePx) {
+          completePointerInteraction(true);
         }
-        if (distance > 4) beginDrag(pending);
+        return;
       }
 
       if (dragRef.current) {
+        if (
+          dragRef.current.phase === "armed"
+          && distance < activeDragMovementThresholdPx
+        ) {
+          return;
+        }
         moveEvent.preventDefault();
         updateDrag(moveEvent.clientY, moveEvent.pageY);
       }
@@ -395,15 +428,18 @@ export function SceneReorderList({
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerCancel);
     window.addEventListener("touchmove", preventActiveTouchScroll, { passive: false });
+    pending.timer = window.setTimeout(() => armDrag(pending), sceneReorderHoldMs);
   }
 
   return (
-    <tbody
-      className={`${className ?? ""} [&_[data-scene-reorder-handle]]:touch-pan-y`}
-    >
+    <tbody className={className}>
       {items.map((item, index) => {
-        const isDragging = drag?.itemId === item.id;
-        const isDropTarget = drag?.targetId === item.id && !isDragging;
+        const isActive = drag?.itemId === item.id;
+        const isArmed = Boolean(isActive && drag?.phase === "armed");
+        const isDragging = Boolean(isActive && drag?.phase === "dragging");
+        const isDropTarget = Boolean(
+          drag?.phase === "dragging" && drag.targetId === item.id && !isActive
+        );
         const insertAfter = Boolean(isDropTarget && drag?.insertAfter);
         const indicatorClass = isDropTarget
           ? insertAfter
@@ -421,33 +457,50 @@ export function SceneReorderList({
               event.stopPropagation();
             }
           },
-          className: `relative ${indicatorClass}`,
+          onContextMenuCapture: (event) => {
+            const pending = pendingRef.current;
+            const active = dragRef.current;
+            const isThisRowsPendingHold = pending?.itemId === item.id && !active;
+            const isThisRowsArmedHold =
+              pending?.itemId === item.id
+              && active?.itemId === item.id
+              && active.phase === "armed";
+            if (!isThisRowsPendingHold && !isThisRowsArmedHold) return;
+            // Safari may synthesize contextmenu before the stationary hold arms.
+            // Suppress only this row's primary hold lifecycle; ordinary right-click
+            // still reaches the Scene Number delete menu when no hold is pending.
+            event.preventDefault();
+            event.stopPropagation();
+          },
+          onPointerDown: (event) => handlePointerDown(event, item.id),
+          className: `relative ${indicatorClass} ${
+            isActive
+              ? "[&_*]:!cursor-grabbing [&>td]:brightness-[0.98] [&>td]:shadow-[inset_0_0_0_1px_#9bb91c]"
+              : ""
+          }`,
           style: {
             transform: isDragging
               ? `translateY(${((drag?.currentY ?? 0) - (drag?.startY ?? 0)) / safeFitScale}px)`
               : undefined,
-            opacity: isDragging ? 0.82 : 1,
-            zIndex: isDragging ? 20 : undefined,
-            touchAction: isDragging ? "none" : undefined
+            opacity: isActive ? 0.82 : 1,
+            zIndex: isActive ? 20 : undefined,
+            touchAction: isActive ? "none" : undefined,
+            cursor: isActive ? "grabbing" : undefined
           },
-          "data-scene-reorder-state": isDragging
+          "aria-grabbed": Boolean(isActive),
+          "data-scene-reorder-state": isArmed
+            ? "armed"
+            : isDragging
             ? "dragging"
             : isDropTarget
               ? "drop-target"
               : "idle"
         };
-        const dragHandleProps: SceneReorderHandleProps = {
-          onPointerDown: (event) => handlePointerDown(event, item.id),
-          disabled,
-          "aria-grabbed": isDragging,
-          "data-scene-reorder-handle": ""
-        };
-
         return (
           <Fragment key={item.id}>
             {renderRow(item, index, {
               trProps,
-              dragHandleProps,
+              isArmed,
               isDragging,
               isDropTarget,
               insertAfter
@@ -457,6 +510,10 @@ export function SceneReorderList({
       })}
     </tbody>
   );
+}
+
+function isReorderIgnoredTarget(target: EventTarget | null) {
+  return target instanceof Element && Boolean(target.closest(reorderIgnoredTargetSelector));
 }
 
 function findClosestRowDropMetric(metrics: RowDropMetric[], clientY: number) {

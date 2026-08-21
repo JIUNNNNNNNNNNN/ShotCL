@@ -561,7 +561,14 @@ test("gesture variants retain the audited long-press thresholds and immediate un
   assert.equal(duration("daily-plan.interaction-row-actions", "coarse"), 575);
   assert.equal(duration("staff.interaction-member-reorder", "fine"), 575);
   assert.equal(duration("scene-list.interaction-merge-range", "coarse"), 520);
-  assert.equal(duration("scene-list.interaction-scene-reorder", "coarse"), 480);
+  assert.equal(duration("scene-list.interaction-scene-reorder", "fine"), 700);
+  assert.equal(duration("scene-list.interaction-scene-reorder", "coarse"), 700);
+  const sceneReorder = getInteractionGuideVariant(
+    INTERACTION_GUIDES["scene-list.interaction-scene-reorder"],
+    "coarse"
+  );
+  assert.match(sceneReorder?.description ?? "", /씬번호·내용·메모.*0\.7초/u);
+  assert.doesNotMatch(sceneReorder?.description ?? "", /Scene 숫자를/u);
   assert.equal(duration("scene-list.interaction-actor-note", "coarse"), 540);
   assert.equal(duration("archive.interaction-touch-selection", "coarse"), 550);
   assert.equal(duration("archive.interaction-diagram-person-move", "fine"), undefined);

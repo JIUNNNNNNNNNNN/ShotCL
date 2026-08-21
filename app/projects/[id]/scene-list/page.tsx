@@ -1178,7 +1178,6 @@ export default function ProjectSceneListPage() {
                 actorRoles={actorRoles}
                 cellMerges={cellMerges}
                 canEdit={canEdit && !isSaving}
-                showReorderHandle={canEdit}
                 hasPendingMutation={isMergePersisting || isClearPersisting}
                 onUpdate={updateItem}
                 onReorderLocal={reorderLocal}

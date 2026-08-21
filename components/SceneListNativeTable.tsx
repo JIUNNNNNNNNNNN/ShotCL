@@ -11,10 +11,8 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { createPortal } from "react-dom";
-import { GripVertical } from "lucide-react";
 import {
   SceneReorderList,
-  type SceneReorderHandleProps,
   type SceneReorderRowProps
 } from "@/components/SceneReorderList";
 import { useContextualGuideAnchor } from "@/components/guides/ContextualGuideProvider";
@@ -97,7 +95,6 @@ const mergeColumnField: Record<ProjectSceneMergeColumn, keyof ProjectSceneItem> 
 const tableInputClass =
   "h-full min-h-9 w-full min-w-0 border-0 bg-transparent px-1.5 py-1 text-center text-[12px] font-semibold leading-5 text-[#151515] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111]";
 const sceneTableBaseWidth = 1087;
-const sceneReorderHandleWidth = 40;
 const sceneActorColumnWidth = 72;
 
 export function SceneListNativeTable({
@@ -105,7 +102,6 @@ export function SceneListNativeTable({
   actorRoles,
   cellMerges,
   canEdit,
-  showReorderHandle,
   hasPendingMutation,
   onUpdate,
   onReorderLocal,
@@ -120,7 +116,6 @@ export function SceneListNativeTable({
   actorRoles: string[];
   cellMerges: ProjectSceneCellMerge[];
   canEdit: boolean;
-  showReorderHandle: boolean;
   hasPendingMutation: boolean;
   onUpdate: (id: string, patch: Partial<ProjectSceneItem>) => void;
   onReorderLocal: (items: ProjectSceneItem[]) => void;
@@ -133,7 +128,6 @@ export function SceneListNativeTable({
 }) {
   const tableRef = useRef<HTMLTableElement | null>(null);
   const tableNaturalWidth = sceneTableBaseWidth
-    + (showReorderHandle ? sceneReorderHandleWidth : 0)
     + actorRoles.length * sceneActorColumnWidth;
   const orderedSceneIds = useStableSceneIds(items);
   const mergeLayout = useMemo(
@@ -473,12 +467,11 @@ export function SceneListNativeTable({
             className="table-fixed border-separate border-spacing-0 text-[12px] text-[#151515]"
             style={{ width: `${tableNaturalWidth}px`, minWidth: `${tableNaturalWidth}px` }}
           >
-            <SceneTableColGroup actorRoles={actorRoles} showReorderHandle={showReorderHandle} />
+            <SceneTableColGroup actorRoles={actorRoles} />
             <thead className="sticky top-0 z-[60] bg-[#eeeeee] text-[11px] font-black leading-4">
               <SceneTableHeaderRow
                 actorRoles={actorRoles}
                 actorStyles={actorStyles}
-                showReorderHandle={showReorderHandle}
               />
             </thead>
 
@@ -501,11 +494,10 @@ export function SceneListNativeTable({
                 return { ok: true };
               }}
               onCommitError={onError}
-              renderRow={(item, index, { trProps, dragHandleProps }) => (
+              renderRow={(item, index, { trProps }) => (
                 <SceneNativeRow
                   key={item.id}
                   trProps={trProps}
-                  dragHandleProps={dragHandleProps}
                   item={item}
                   index={index}
                   actorRoles={actorRoles}
@@ -514,7 +506,6 @@ export function SceneListNativeTable({
                   mergeLayout={mergeLayout}
                   resolvedSelection={resolvedSelection}
                   canEdit={canEdit}
-                  showReorderHandle={showReorderHandle}
                   hasMultipleScenes={items.length >= 2}
                   hasPendingMutation={hasPendingMutation}
                   editingCell={editingCell}
@@ -663,7 +654,6 @@ export function SceneListNativeTable({
 
 type SceneNativeRowProps = {
   trProps: SceneReorderRowProps;
-  dragHandleProps: SceneReorderHandleProps;
   item: ProjectSceneItem;
   index: number;
   actorRoles: string[];
@@ -672,7 +662,6 @@ type SceneNativeRowProps = {
   mergeLayout: ReturnType<typeof buildSceneListMergeLayout>;
   resolvedSelection: SceneListResolvedCellRange | null;
   canEdit: boolean;
-  showReorderHandle: boolean;
   hasMultipleScenes: boolean;
   hasPendingMutation: boolean;
   editingCell: { sceneId: string; column: SceneEditableColumn } | null;
@@ -691,7 +680,6 @@ type SceneNativeRowProps = {
 
 const SceneNativeRow = memo(function SceneNativeRow({
   trProps,
-  dragHandleProps,
   item,
   index,
   actorRoles,
@@ -700,7 +688,6 @@ const SceneNativeRow = memo(function SceneNativeRow({
   mergeLayout,
   resolvedSelection,
   canEdit,
-  showReorderHandle,
   hasMultipleScenes,
   hasPendingMutation,
   editingCell,
@@ -725,7 +712,7 @@ const SceneNativeRow = memo(function SceneNativeRow({
   const sceneNumberGuideAnchorRef = useContextualGuideAnchor<HTMLTableCellElement>(
     canEdit && index === 0 ? "scene-list.scene-number" : null
   );
-  const sceneReorderGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
+  const sceneReorderGuideAnchorRef = useContextualGuideAnchor<HTMLTableRowElement>(
     canEdit && hasMultipleScenes && index === 0 ? "scene-list.scene-reorder" : null
   );
   const actorCellGuideAnchorRef = useContextualGuideAnchor<HTMLButtonElement>(
@@ -735,6 +722,10 @@ const SceneNativeRow = memo(function SceneNativeRow({
     mergeCellGuideAnchorRef(element);
     mergeRangeGuideAnchorRef(element);
   }, [mergeCellGuideAnchorRef, mergeRangeGuideAnchorRef]);
+  const combinedRowRef = useCallback((element: HTMLTableRowElement | null) => {
+    trProps.ref(element);
+    sceneReorderGuideAnchorRef(element);
+  }, [sceneReorderGuideAnchorRef, trProps.ref]);
   const isEditing = (column: SceneEditableColumn) => (
     editingCell?.sceneId === item.id && editingCell.column === column
   );
@@ -795,7 +786,12 @@ const SceneNativeRow = memo(function SceneNativeRow({
           borderRadius: selectionRadius,
           boxShadow: selectionShadows
         }}
-        onPointerDown={(event) => onBeginSelection(event, cell)}
+        onPointerDown={(event) => {
+          // Cell-range selection owns this pointer lifecycle. It must never
+          // race the row's delayed reorder hold.
+          event.stopPropagation();
+          onBeginSelection(event, cell);
+        }}
         onContextMenu={(event) => onMergeContextMenu(event, cell)}
         onClick={() => {
           if (!suppressClickRef.current && canEdit) onEdit(columnKey);
@@ -818,24 +814,10 @@ const SceneNativeRow = memo(function SceneNativeRow({
   return (
     <tr
       {...trProps}
+      ref={combinedRowRef}
       data-scene-item-id={item.id}
       className={`${trProps.className ?? ""} bg-white hover:bg-[#f7f7f7]`}
     >
-      {showReorderHandle ? (
-        <td className="relative h-10 border-b border-r border-[#d6d6d6] bg-white p-0 text-center align-middle">
-          <button
-            {...dragHandleProps}
-            ref={sceneReorderGuideAnchorRef}
-            type="button"
-            tabIndex={-1}
-            className="inline-flex min-h-10 w-10 touch-pan-y items-center justify-center text-[#666] cursor-grab active:cursor-grabbing hover:bg-[#eeeeee] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#111111] disabled:cursor-default disabled:opacity-40"
-            aria-label={`${item.sceneNo || index + 1} 씬 순서 변경`}
-            title="씬 순서 변경"
-          >
-            <GripVertical className="h-4 w-4" aria-hidden />
-          </button>
-        </td>
-      ) : null}
       <td
         ref={sceneNumberGuideAnchorRef}
         className="relative h-10 cursor-text border-b border-r border-[#d6d6d6] bg-white p-0 text-center align-middle"
@@ -937,6 +919,9 @@ const SceneNativeRow = memo(function SceneNativeRow({
                           onActorTextEdit(role);
                         }}
                         onPointerDown={(event) => {
+                          // Actor long-press/context editing owns this pointer;
+                          // never let the row reorder timer run in parallel.
+                          event.stopPropagation();
                           if (event.pointerType !== "touch" || !canEdit) return;
                           actorPointerCleanupRef.current?.();
                           const pointerId = event.pointerId;
@@ -1042,7 +1027,6 @@ function areSceneNativeRowPropsEqual(
     || previous.actorRoles !== next.actorRoles
     || previous.actorStyles !== next.actorStyles
     || previous.canEdit !== next.canEdit
-    || previous.showReorderHandle !== next.showReorderHandle
     || previous.hasMultipleScenes !== next.hasMultipleScenes
     || previous.hasPendingMutation !== next.hasPendingMutation
     || previous.locationStyle.background !== next.locationStyle.background
@@ -1077,8 +1061,7 @@ function areSceneNativeRowPropsEqual(
   return (
     previous.trProps.className === next.trProps.className
     && previous.trProps["data-scene-reorder-state"] === next.trProps["data-scene-reorder-state"]
-    && previous.dragHandleProps.disabled === next.dragHandleProps.disabled
-    && previous.dragHandleProps["aria-grabbed"] === next.dragHandleProps["aria-grabbed"]
+    && previous.trProps["aria-grabbed"] === next.trProps["aria-grabbed"]
     && previousStyle?.transform === nextStyle?.transform
     && previousStyle?.opacity === nextStyle?.opacity
     && previousStyle?.zIndex === nextStyle?.zIndex
@@ -1360,15 +1343,12 @@ function SceneTableHeader({
 }
 
 function SceneTableColGroup({
-  actorRoles,
-  showReorderHandle
+  actorRoles
 }: {
   actorRoles: string[];
-  showReorderHandle: boolean;
 }) {
   return (
     <colgroup>
-      {showReorderHandle ? <col className="w-[40px]" /> : null}
       <col className="w-[70px]" />
       <col className="w-[105px]" />
       <col className="w-[128px]" />
@@ -1385,24 +1365,13 @@ function SceneTableColGroup({
 
 function SceneTableHeaderRow({
   actorRoles,
-  actorStyles,
-  showReorderHandle
+  actorStyles
 }: {
   actorRoles: string[];
   actorStyles: Array<ReturnType<typeof getActorStyle>>;
-  showReorderHandle: boolean;
 }) {
   return (
     <tr>
-      {showReorderHandle ? (
-        <th
-          scope="col"
-          aria-label="씬 순서 변경"
-          className="h-11 border-b border-r border-[#bebebe] bg-[#eeeeee] p-0 text-center align-middle"
-        >
-          <GripVertical className="mx-auto h-4 w-4 text-[#666]" aria-hidden />
-        </th>
-      ) : null}
       {[
         ["Scene", "씬"],
         ["Location", "대장소"],
